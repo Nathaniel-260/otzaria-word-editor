@@ -149,7 +149,8 @@ jobs:
       # מתפרסם לחנות רק כששלושת הסודות מוגדרים במאגר. בלעדיהם השלב מדולג
       # בשקט וה-Release עדיין נוצר, כך שאפשר להתקין ידנית מהקובץ.
       - name: Publish update to otzaria.org
-        if: ${{ secrets.OTZARIA_USER != '' && secrets.OTZARIA_PASSWORD != '' && secrets.OTZARIA_PLUGIN_ID != '' }}
+        # הקשר secrets אינו זמין ב-if של שלב; env כן, והוא מוגדר למטה.
+        if: ${{ env.OTZARIA_USER != '' && env.OTZARIA_PASSWORD != '' && env.OTZARIA_PLUGIN_ID != '' }}
         shell: pwsh
         env:
           OTZARIA_BASE_URL: ${{ vars.OTZARIA_BASE_URL }}
