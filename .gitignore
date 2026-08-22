@@ -1,2 +1,5 @@
+.build-stage/
+*.otzplugin
+!*v[0-9]*.otzplugin
 .DS_Store
 Thumbs.db
