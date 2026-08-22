@@ -1530,17 +1530,35 @@ function schedSave(){
   clearTimeout(autoSave);
   autoSave=setTimeout(()=>{if(document.querySelector('.fn-ref'))_renumberFootnotes();saveDoc();},2500);
 }
-async function saveDoc(){
+/// [manual] — נלחץ "שמור" ידנית, ואז מוצג אישור. השמירה האוטומטית שקטה.
+async function saveDoc(manual){
   _saveCurrentDocState();
-  await stSet('wdocs',docs.map(d=>({title:d.title,content:d.content,fn:d.fn,en:d.en})));
-  await stSet('wdocIdx',docIdx);
-  await stSet('wmacros',macros);
-  await stSet('warchive',archive);
-  await stSet('wcomments',{list:comments,count:cmCount});
-  await stSet('wstickies',{list:stickies,ctr:_stickyIdCtr});
-  await stSet('wclips',{list:clips,ctr:_clipIdCtr});
-  document.getElementById('sbs').textContent='✓ שמור';
+  const r=await Promise.all([
+    stSet('wdocs',docs.map(d=>({title:d.title,content:d.content,fn:d.fn,en:d.en}))),
+    stSet('wdocIdx',docIdx),
+    stSet('wmacros',macros),
+    stSet('warchive',archive),
+    stSet('wcomments',{list:comments,count:cmCount}),
+    stSet('wstickies',{list:stickies,ctr:_stickyIdCtr}),
+    stSet('wclips',{list:clips,ctr:_clipIdCtr}),
+  ]);
+  // עד כה הסטטוס נקבע '✓ שמור' בלי לבדוק אם השמירה הצליחה, וכשלון היה שקט
+  // לחלוטין — המשתמש המשיך לכתוב בהנחה שהכל נשמר, וגילה רק בפתיחה הבאה.
+  const failed=r.filter(x=>!x.ok);
+  if(!failed.length){
+    document.getElementById('sbs').textContent='✓ שמור';
+    _saveWarned=false;
+    if(manual)notify('נשמר בתוך התוסף — ייפתח כאן גם אחרי סגירת אוצריא');
+    return true;
+  }
+  document.getElementById('sbs').textContent='⚠ השמירה נכשלה';
+  if(!_saveWarned){
+    _saveWarned=true;
+    notify('השמירה נכשלה: '+(failed[0].err||'שגיאה לא ידועה')+'. ייצא את המסמך כדי לא לאבד אותו.');
+  }
+  return false;
 }
+let _saveWarned=false;
 async function loadAll(){
   const saved=await stGet('wdocs');
   const savedIdx=await stGet('wdocIdx')||0;
@@ -1564,12 +1582,33 @@ async function loadAll(){
   await loadUserDefaults();
   _applyDefaultsToPage(document.querySelector('.page'));
 }
+/// שומרת ערך, ומחזירה {ok, err}.
+///
+/// שני תיקונים מול הגרסה הקודמת:
+/// 1. `Otzaria.call` שנפתר עם `success:false` (למשל הרשאת אחסון שלא אושרה)
+///    נחשב כהצלחה, והפונקציה חזרה מיד — הערך לא נשמר בשום מקום והמשתמש
+///    לא ידע. עכשיו נבדק `success` בפועל.
+/// 2. הגיבוי ל-localStorage נכתב רק כשהאחסון של אוצריא זרק חריגה. עכשיו
+///    הוא נכתב תמיד, כך שגם אם האחסון הראשי נכשל בשקט יש מאיפה לשחזר.
 async function stSet(k,v){
-  try{await Otzaria.call('storage.set',{key:k,value:v});return;}catch(e){}
-  try{localStorage.setItem('_otzw_'+k,JSON.stringify(v));}catch(e){}
+  let ok=false,err='';
+  try{
+    const r=await Otzaria.call('storage.set',{key:k,value:v});
+    if(r&&r.success===false)err=r.error?.message||r.error?.code||'אחסון אוצריא דחה את השמירה';
+    else ok=true;
+  }catch(e){err=e?.message||String(e);}
+  try{localStorage.setItem('_otzw_'+k,JSON.stringify(v));ok=true;}
+  catch(e){if(!err)err=e?.message||'אחסון הדפדפן מלא';}
+  return {ok,err};
 }
+/// קוראת ערך. אם האחסון הראשי ריק או נכשל — נופלת לגיבוי המקומי.
+/// קודם לכן `data:null` (מפתח שלא קיים, למשל אחרי שמירה שנכשלה בשקט)
+/// הוחזר כמות שהוא, והגיבוי המקומי לא נבדק כלל.
 async function stGet(k){
-  try{const r=await Otzaria.call('storage.get',{key:k});if(r?.success&&r?.data!==undefined)return r.data;}catch(e){}
+  try{
+    const r=await Otzaria.call('storage.get',{key:k});
+    if(r?.success!==false&&r?.data!==undefined&&r?.data!==null)return r.data;
+  }catch(e){}
   try{const v=localStorage.getItem('_otzw_'+k);return v?JSON.parse(v):null;}catch(e){return null;}
 }
 
@@ -2345,7 +2384,7 @@ document.addEventListener('keydown',e=>{
 function onKey(e){
   const ctrl=e.ctrlKey||e.metaKey;
   if(ctrl)switch(e.key.toLowerCase()){
-    case 's':e.preventDefault();saveDoc();break;
+    case 's':e.preventDefault();saveDoc(true);break;
     case 'b':e.preventDefault();fmt('bold');break;
     case 'i':e.preventDefault();fmt('italic');break;
     case 'u':e.preventDefault();fmt('underline');break;

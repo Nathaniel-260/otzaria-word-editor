@@ -363,7 +363,7 @@ body.dark-mode .doc-tab{color:var(--color-dark-text-dim);}
 <!-- TITLE BAR -->
 <div id="tb">
   <span class="tbl">W</span>
-  <button class="tbb" onclick="saveDoc()" title="שמור Ctrl+S"><svg viewBox="0 0 24 24"><path d="M17 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7l-4-4zm-5 16a3 3 0 1 1 0-6 3 3 0 0 1 0 6zm3-10H5V5h10v4z"/></svg></button>
+  <button class="tbb" onclick="saveDoc(true)" title="שמור Ctrl+S"><svg viewBox="0 0 24 24"><path d="M17 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7l-4-4zm-5 16a3 3 0 1 1 0-6 3 3 0 0 1 0 6zm3-10H5V5h10v4z"/></svg></button>
   <button class="tbb" onclick="doUndo()" title="בטל Ctrl+Z"><svg viewBox="0 0 24 24"><path d="M12.5 8c-2.65 0-5.05 1-6.9 2.6L2 7v9h9l-3.62-3.62A7 7 0 0 1 19 16l2-2a9 9 0 0 0-8.5-6z"/></svg></button>
   <button class="tbb" onclick="doRedo()" title="חזור Ctrl+Y"><svg viewBox="0 0 24 24"><path d="M18.4 10.6A9 9 0 0 0 5 16l2 2a7 7 0 0 1 11.62-2.62L15 18h9V9l-5.6 1.6z"/></svg></button>
   <div class="tb-mid">
@@ -411,7 +411,7 @@ body.dark-mode .doc-tab{color:var(--color-dark-text-dim);}
   <div class="rg">
     <div class="rgb"><div class="rv">
       <button class="rb sm" onclick="saveDocAs()"><svg viewBox="0 0 24 24"><path d="M17 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7l-4-4zm-5 16a3 3 0 1 1 0-6 3 3 0 0 1 0 6zm3-10H5V5h10v4z"/></svg> שמור בשם...</button>
-      <button class="rb sm" onclick="saveDoc()"><svg viewBox="0 0 24 24"><path d="M17 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7l-4-4zm-5 16a3 3 0 1 1 0-6 3 3 0 0 1 0 6zm3-10H5V5h10v4z"/></svg> שמור Ctrl+S</button>
+      <button class="rb sm" onclick="saveDoc(true)"><svg viewBox="0 0 24 24"><path d="M17 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7l-4-4zm-5 16a3 3 0 1 1 0-6 3 3 0 0 1 0 6zm3-10H5V5h10v4z"/></svg> שמור Ctrl+S</button>
     </div></div>
     <div class="rgt">שמירה</div>
   </div>
