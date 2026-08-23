@@ -12,10 +12,56 @@ beforeEach(() => {
   delete window.__SUPERDOC_WORKER_SOURCES__;
   // jsdom אינו מממש createObjectURL.
   URL.createObjectURL = vi.fn((blob: Blob) => `blob:mock/${blob.size}`);
+  URL.revokeObjectURL = vi.fn();
 });
 
 afterEach(() => {
   resetEngineWorkerUrlsCache();
+});
+
+describe('טעינה קלאסית של ה-worker', () => {
+  class FakeWorker {
+    static calls: Array<{ url: string; options?: WorkerOptions }> = [];
+    constructor(url: string | URL, options?: WorkerOptions) {
+      FakeWorker.calls.push({ url: String(url), options });
+    }
+  }
+
+  beforeEach(() => {
+    FakeWorker.calls.length = 0;
+    (window as unknown as { Worker: unknown }).Worker = FakeWorker;
+  });
+
+  it('מסיר type: module מ-URL שאנחנו בנינו', () => {
+    window.__SUPERDOC_WORKER_SOURCES__ = { document: 'a' };
+    const urls = engineWorkerUrls()!;
+
+    new window.Worker(urls.document!, { type: 'module', name: 'superdoc-v2-edit' });
+
+    expect(FakeWorker.calls).toEqual([
+      { url: urls.document, options: { name: 'superdoc-v2-edit' } },
+    ]);
+  });
+
+  it('אינו נוגע ב-URL שאינו שלנו', () => {
+    window.__SUPERDOC_WORKER_SOURCES__ = { document: 'a' };
+    engineWorkerUrls();
+
+    new window.Worker('https://example.test/w.js', { type: 'module' });
+
+    expect(FakeWorker.calls).toEqual([
+      { url: 'https://example.test/w.js', options: { type: 'module' } },
+    ]);
+  });
+
+  it('אינו נוגע בבנייה שאין בה type: module', () => {
+    window.__SUPERDOC_WORKER_SOURCES__ = { document: 'a' };
+    const urls = engineWorkerUrls()!;
+
+    new window.Worker(urls.document!, { name: 'x' });
+
+    expect(FakeWorker.calls).toEqual([{ url: urls.document, options: { name: 'x' } }]);
+  });
 });
 
 describe('engineWorkerUrls', () => {
