@@ -187,6 +187,9 @@ async function main(): Promise<void> {
     return;
   }
 
+  // מסמך ריק בעליית הלשונית מרים את כל המנוע ושני workers גם אם המשתמש לא
+  // יפתח קובץ. מתאים ל-spike; בשלב ה-Ribbon יש להחליף במסך פתיחה שמקים את
+  // המנוע רק כשבאמת צריך.
   const generation = beginOpen();
   try {
     await openDocument(generation);

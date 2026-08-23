@@ -1113,23 +1113,23 @@ document.queryCommandState(...)
 
 
 
-אפילו Format Painter שלו בנוי ידנית באמצעות `queryCommandState()` ואחר כך `execCommand()` עבור bold/italic/underline וכו'. 
+אפילו Format Painter שלו בנוי ידנית באמצעות `queryCommandState()` ואחר כך `execCommand()` עבור bold/italic/underline וכו'.
 
-כל ה־Ribbon המרשים יחסית שאתה רואה — **נכתב ידנית ב־HTML/CSS/JS**. יש שם Title Bar, לשוניות קובץ/בית/הוספה/פריסה/הפניות/תצוגה/עיצוב/סקירה, Ribbon groups, חלונית ניווט, status bar, comments, track changes וכו'.  
+כל ה־Ribbon המרשים יחסית שאתה רואה — **נכתב ידנית ב־HTML/CSS/JS**. יש שם Title Bar, לשוניות קובץ/בית/הוספה/פריסה/הפניות/תצוגה/עיצוב/סקירה, Ribbon groups, חלונית ניווט, status bar, comments, track changes וכו'.
 
 ### ומהן שתי הספריות שכן נמצאות שם?
 
 רק:
 
-**JSZip 3.10.1** — לפתיחה/טיפול במבנה ZIP של DOCX. 
+**JSZip 3.10.1** — לפתיחה/טיפול במבנה ZIP של DOCX.
 
 ו־**Mammoth** — כ־fallback להמרת DOCX ל־HTML.
 
-אבל אפילו Mammoth אינו המנגנון הראשי בגרסה ששלחת. המחבר כבר כתב importer משלו: הוא פותח את ה־DOCX באמצעות JSZip, קורא ידנית את `word/document.xml`, את `styles.xml`, `numbering.xml`, relationships ותמונות וממיר אותם ל־HTML. 
+אבל אפילו Mammoth אינו המנגנון הראשי בגרסה ששלחת. המחבר כבר כתב importer משלו: הוא פותח את ה־DOCX באמצעות JSZip, קורא ידנית את `word/document.xml`, את `styles.xml`, `numbering.xml`, relationships ותמונות וממיר אותם ל־HTML.
 
-רק אם ה־parser העצמאי נכשל הוא נופל ל־Mammoth. 
+רק אם ה־parser העצמאי נכשל הוא נופל ל־Mammoth.
 
-גם הייצוא הפוך נכתב כמעט כולו ידנית: הוא בונה בעצמו `document.xml`, `styles.xml`, `settings.xml`, relationships ו־`[Content_Types].xml`, ואז יוצר DOCX. 
+גם הייצוא הפוך נכתב כמעט כולו ידנית: הוא בונה בעצמו `document.xml`, `styles.xml`, `settings.xml`, relationships ו־`[Content_Types].xml`, ואז יוצר DOCX.
 
 כלומר המבנה הוא:
 
@@ -1152,7 +1152,7 @@ parser עצמי      שנכתב ידנית
 
 זה גם מסביר למה **ה־UI דווקא נראה לא רע**, בעוד שעומק התאימות ל־Word לעולם יהיה מוגבל יחסית. הוא בעצם בנה מיני־Word בעצמו.
 
-ה־manifest אכן מגדיר אותו כ־"עורך מסמכים בסגנון Word", גרסה 1.3.5, ולא מצביע על שום framework/editor חיצוני. 
+ה־manifest אכן מגדיר אותו כ־"עורך מסמכים בסגנון Word", גרסה 1.3.5, ולא מצביע על שום framework/editor חיצוני.
 
 ---
 
