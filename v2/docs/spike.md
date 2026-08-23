@@ -203,8 +203,33 @@ Windows (§5). גודל ה־`.otzplugin` **כן** נמדד (4.32MB, ראו הט�
 cd v2
 npm ci
 npm run verify        # typecheck + tests + build + check:dist
-npm run dev           # שרת פיתוח; באוצריא: פאנל תוספים → טעינה מ-localhost
+npm run dev           # שרת פיתוח על http://localhost:5173
 ```
+
+### לבדוק בדפדפן, בלי אוצריא
+
+`npm run dev` ואז לפתוח את `http://localhost:5173`. ה-stub שב-`host/dev-stub.ts`
+מדמה את ה-Host: בורר קבצים אמיתי, מסלול הכתיבה המלא (begin → PUT → commit),
+`storage` על localStorage, ודיאלוגי אישור. „שמור בשם” **מוריד** את ה-DOCX, כך
+שאפשר לפתוח את התוצר ב-Word ולבדוק round-trip.
+
+מה שה-stub אינו מדמה: כתיבה אטומית לדיסק, הרשאות, וה-WebView. ורענון הדף מאבד
+את ה-blob של הקובץ שנבחר — כלומר הוא מריץ בדיוק את המסלול של „הקובץ הוזז”.
+
+### לבדוק באוצריא אמיתית על macOS
+
+ה-origin שם הוא http (שרת הפיתוח), ולכן ה-workers עובדים והמנוע נטען. זה בודק
+את התוסף מול ה-Host האמיתי — כולל API הכתיבה — ולא מחליף את שער Windows:
+WKWebView הוא WebKit, ו-WebView2 הוא Chromium.
+
+```bash
+# אוצריא מהענף שמכיל את API הכתיבה
+cd /path/to/otzaria && git checkout docs/plugin-sdk-type-accuracy
+flutter build macos --debug
+open build/macos/Build/Products/Debug/אוצריא.app
+```
+
+באוצריא: פאנל התוספים → „טעינה מ-localhost” → `http://localhost:5173`.
 
 `npm run check:dist` הוא השער האוטומטי: אין `<script type="module">`, כל נכס
 שה־HTML מפנה אליו קיים מקומית, ה־workers נטענים לפני `app.js`, כל קובץ JS עובר
