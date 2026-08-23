@@ -70,7 +70,24 @@ async function main(): Promise<void> {
   let commands: CommandAdapter | null = null;
   let title = 'מסמך חדש';
 
-  async function openDocument(file?: UserFile): Promise<void> {
+  /**
+   * הקמת מנוע היא אסינכרונית וארוכה (מאות מילישניות עד שניות), ולכן פתיחה
+   * שנייה שמתחילה באמצע הראשונה משאירה מופע SuperDoc שלם — ושני workers —
+   * בלי שאף אחד יפרק אותו. ה-generation הוא מי שקובע מי המסמך הנוכחי: מי
+   * שהתיישב אחרי שהוחלף מפרק את עצמו.
+   */
+  let openGeneration = 0;
+
+  function beginOpen(): number {
+    openBtn.disabled = true;
+    return ++openGeneration;
+  }
+
+  function endOpen(generation: number): void {
+    if (generation === openGeneration) openBtn.disabled = false;
+  }
+
+  async function openDocument(generation: number, file?: UserFile): Promise<void> {
     session?.destroy();
     session = null;
     commands = null;
@@ -80,30 +97,41 @@ async function main(): Promise<void> {
     const startedAt = performance.now();
     status(file ? `פותח את ${file.name}…` : 'פותח מסמך ריק…');
 
+    let editor: EditorSession;
     try {
-      const editor = await createEditor({
+      editor = await createEditor({
         container: editorHost,
         source: file?.url,
         onError: (error) => console.error('[otzaria-word] המנוע דיווח על שגיאה', error),
       });
-      session = editor;
-      commands = createCommandAdapter(editor.ui);
-
-      title = file ? file.name.replace(/\.docx$/i, '') : 'מסמך חדש';
-      status(`${title} — נטען ב-${Math.round(performance.now() - startedAt)} מילישניות`);
-
-      for (const button of [exportBtn, boldBtn, rtlBtn]) button.disabled = false;
-
-      // המצב מגיע מהמנוע ולא מחישוב DOM, וה-subscription מתבטל עם הפירוק.
-      editor.onDispose(
-        commands.observe('bold', (state) => {
-          boldBtn.setAttribute('aria-pressed', String(state.active));
-          boldBtn.disabled = !state.enabled;
-        }),
-      );
     } catch (error) {
-      status(error instanceof Error ? error.message : 'טעינת המסמך נכשלה', true);
+      // פתיחה שהוחלפה לא כותבת על ההודעה של הפתיחה שהחליפה אותה.
+      if (generation === openGeneration) {
+        status(error instanceof Error ? error.message : 'טעינת המסמך נכשלה', true);
+      }
+      return;
     }
+
+    if (generation !== openGeneration) {
+      editor.destroy();
+      return;
+    }
+
+    session = editor;
+    commands = createCommandAdapter(editor.ui);
+
+    title = file ? file.name.replace(/\.docx$/i, '') : 'מסמך חדש';
+    status(`${title} — נטען ב-${Math.round(performance.now() - startedAt)} מילישניות`);
+
+    for (const button of [exportBtn, boldBtn, rtlBtn]) button.disabled = false;
+
+    // המצב מגיע מהמנוע ולא מחישוב DOM, וה-subscription מתבטל עם הפירוק.
+    editor.onDispose(
+      commands.observe('bold', (state) => {
+        boldBtn.setAttribute('aria-pressed', String(state.active));
+        boldBtn.disabled = !state.enabled;
+      }),
+    );
   }
 
   /** מריצה פקודה ומדווחת כשל בעברית. */
@@ -119,11 +147,17 @@ async function main(): Promise<void> {
 
   openBtn.addEventListener('click', () => {
     void (async () => {
+      const generation = beginOpen();
       try {
         const file = await pickDocxFile();
-        if (file) await openDocument(file);
+        // ביטול הבורר אינו כשל ואינו נוגע במסמך הפתוח.
+        if (file && generation === openGeneration) await openDocument(generation, file);
       } catch (error) {
-        status(error instanceof Error ? error.message : 'בחירת הקובץ נכשלה', true);
+        if (generation === openGeneration) {
+          status(error instanceof Error ? error.message : 'בחירת הקובץ נכשלה', true);
+        }
+      } finally {
+        endOpen(generation);
       }
     })();
   });
@@ -153,7 +187,12 @@ async function main(): Promise<void> {
     return;
   }
 
-  await openDocument();
+  const generation = beginOpen();
+  try {
+    await openDocument(generation);
+  } finally {
+    endOpen(generation);
+  }
 }
 
 void main();
