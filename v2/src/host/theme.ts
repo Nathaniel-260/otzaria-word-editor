@@ -72,14 +72,14 @@ export function applyTheme(theme: ThemePayload): void {
   }
 
   // הגופנים של אוצריא מוזרקים כ-@font-face לפני plugin.boot — אין לארוז אותם.
-  // מה שכן ארוז הוא 'Segoe UI' (styles/fonts.ts), והוא יושב **אחרי** בחירת
-  // המשתמש: הבחירה שלו קודמת, ורק אם היא גופן מערכת שאוצריא אינה מזריקה נופלים
-  // לגופן הארוז ולא ל-fallback הדקורטיבי של macOS. serif ו-David בסוף השרשרת.
+  // מה שכן ארוז הוא 'Selawik' (styles/fonts.ts), והוא יושב **אחרי** בחירת
+  // המשתמש: הבחירה שלו קודמת. אין בו עברית, ולכן הוא תופס בפועל רק טקסט לטיני
+  // בממשק; 'David' ו-serif נשארים בסוף השרשרת בשביל העברית.
   const typography = theme.typography;
   if (typography?.fontFamily) {
     root.style.setProperty(
       '--font-main',
-      `'${typography.fontFamily}', 'Segoe UI', 'David', serif`,
+      `'${typography.fontFamily}', 'Selawik', 'David', serif`,
     );
   }
   if (typeof typography?.fontSize === 'number' && typography.fontSize > 0) {

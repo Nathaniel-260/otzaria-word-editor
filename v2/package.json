@@ -12,7 +12,8 @@
     "test:watch": "vitest",
     "check:dist": "node scripts/check-dist.mjs",
     "check:boot": "node scripts/boot-check.mjs",
-    "verify": "npm run typecheck && npm run test && npm run build && npm run check:dist && npm run check:boot",
+    "check:fonts": "node scripts/font-check.mjs",
+    "verify": "npm run typecheck && npm run test && npm run build && npm run check:dist && npm run check:boot && npm run check:fonts",
     "preview": "vite preview"
   },
   "dependencies": {

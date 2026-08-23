@@ -132,8 +132,10 @@ for (const rel of ENGINE_BEARING_FILES) {
  * ריצה — דווקא כדי לא לעבור דרך פותר הנכסים של Vite — ולכן שינוי שם קובץ או
  * נתיב אינו מפיל את הבנייה. הרשימה כאן חוזרת על עצמה בכוונה: שער צריך להצהיר
  * את הציפייה בעצמו, אחרת הוא מאמת את הקוד מול הקוד.
+ *
+ * רישיון ה-OFL מחייב שנוסח הרישיון יופץ עם הגופן, ולכן גם הוא נבדק.
  */
-const FONT_FILES = ['segoeui.ttf', 'seguisb.ttf', 'segoeuib.ttf', 'segoeuii.ttf'];
+const FONT_FILES = ['selawk.ttf', 'selawksb.ttf', 'selawkb.ttf'];
 const appJsPath = join(DIST, 'assets/app.js');
 const appJs = existsSync(appJsPath) ? readFileSync(appJsPath, 'utf8') : '';
 
@@ -142,6 +144,10 @@ for (const file of FONT_FILES) {
   if (appJs && !appJs.includes(`./fonts/${file}`)) {
     errors.push(`assets/app.js אינו מפנה ל-./fonts/${file} — ההצהרה והנכס יצאו מסינכרון`);
   }
+}
+
+if (!existsSync(join(DIST, 'third-party/SELAWIK-LICENSE.txt'))) {
+  errors.push('חסר third-party/SELAWIK-LICENSE.txt — ה-OFL מחייב להפיץ את הרישיון עם הגופן');
 }
 
 // שערי הבדיקה כותבים דפי HTML זמניים לתוך dist (scripts/font-check.html

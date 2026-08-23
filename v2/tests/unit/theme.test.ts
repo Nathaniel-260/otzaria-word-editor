@@ -62,13 +62,14 @@ describe('applyTheme', () => {
   });
 
   it('בחירת המשתמש קודמת לגופן הארוז, והארוז קודם ל-fallback', () => {
-    // הסדר הוא ההתנהגות: אם 'Segoe UI' יעלה לפני בחירת המשתמש, הבחירה שלו
-    // בהגדרות אוצריא תפסיק להשפיע על הממשק.
+    // הסדר הוא ההתנהגות: אם 'Selawik' יעלה לפני בחירת המשתמש, הבחירה שלו
+    // בהגדרות אוצריא תפסיק להשפיע על הממשק. ו-'David' חייב להישאר אחרון, כי
+    // ב-Selawik אין עברית והוא זה שיתפוס אותה.
     applyTheme(FULL);
 
     const chain = cssVar('--font-main');
-    expect(chain.indexOf('FrankRuhlCLM')).toBeLessThan(chain.indexOf('Segoe UI'));
-    expect(chain.indexOf('Segoe UI')).toBeLessThan(chain.indexOf('David'));
+    expect(chain.indexOf('FrankRuhlCLM')).toBeLessThan(chain.indexOf('Selawik'));
+    expect(chain.indexOf('Selawik')).toBeLessThan(chain.indexOf('David'));
   });
 
   it('גוזר את גוני ה-subtle מהצבעים', () => {

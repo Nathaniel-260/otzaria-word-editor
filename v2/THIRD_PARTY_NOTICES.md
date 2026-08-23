@@ -40,42 +40,42 @@
 - אין להשתמש במנוע כדי לפתח מוצר מתחרה או מימוש חלופי.
 - אין להעלות את חבילת המנוע למערכות AI של צד שלישי.
 
-## Segoe UI 5.71 — גופן קנייני של Microsoft ⚠️
+## Selawik 1.01 — SIL OFL 1.1
 
-נארז תחת `fonts/` (4 קבצים, 3.3MB) ומוצהר כ־`@font-face` ב־`src/styles/fonts.ts`.
-הסיבה הטכנית: מסמכי DOCX שנכתבו ב־Word קוראים לגופנים של Word, ו־`Segoe UI`
-אינו קיים ב־macOS ובלינוקס — בלעדיו העימוד שהמשתמש רואה אינו העימוד שיראה
-ב־Word. מדריך העיצוב של ה־SDK אומר שאין צורך לארוז גופנים, אבל מה שאוצריא
-מזריקה הוא גופן הקריאה שנבחר בהגדרות בלבד, לא גופני מסמכים.
+נארז תחת `fonts/` (3 קבצים, 129KB) ומוצהר כ־`@font-face` ב־`src/styles/fonts.ts`.
 
-מה שנמדד בקבצים עצמם (`name` ו־`OS/2`):
+- מקור: <https://github.com/microsoft/Selawik> (release 1.01)
+- רישיון: SIL Open Font License 1.1 (`third-party/SELAWIK-LICENSE.txt`)
+- Copyright © 2015 Microsoft Corporation, with Reserved Font Name **Selawik**
+- `fsType = 0` — Installable Embedding, בלי הגבלת הטמעה או הפצה
 
-- Copyright © 2025 Microsoft Corporation. All Rights Reserved.
-  לוגיקת ה־OpenType לעברית: © 2003 & 2007 Ralph Hancock & John Hudson.
-- Segoe הוא סימן מסחרי של Microsoft.
-- נוסח הרישיון בקובץ: *"Microsoft supplied font. You may use this font to
-  create, display, and print content as permitted by the license terms or terms
-  of use, of the Microsoft…"* — כלומר השימוש נגזר מרישיון של מוצר Microsoft
-  ואינו רישיון עצמאי.
-- `fsType = 8` (Editable embedding) — מתיר **הטמעה במסמך**, ואינו רישיון להפצה
-  של קובץ הגופן בתוך חבילת תוכנה.
-- כיסוי: לפנים הרגילה, ל־Semibold ול־Bold יש עברית מלאה עם ניקוד (88 מתווים
-  בבלוק העברי). לפנים הנטויה (`segoeuii.ttf`) **אין עברית כלל**.
+למה הוא נארז: מסמכי DOCX שנכתבו ב־Word קוראים לגופנים של Word, ו־`Segoe UI` אינו
+קיים ב־macOS ובלינוקס. Selawik הוא הגופן ש־Microsoft שחררה בעצמה כתחליף
+**מטרית־תואם** ל־Segoe UI, בדיוק בשביל השימוש הזה. מדריך העיצוב של ה־SDK אומר
+שאין צורך לארוז גופנים, אבל מה שאוצריא מזריקה הוא גופן הקריאה שנבחר בהגדרות
+בלבד, לא גופני מסמכים.
 
-⚠️ **סטטוס רישוי — פתוח.** בשונה משאר מה שבמסמך הזה, אין כאן היתר הפצה: Segoe UI
-מורשה עם Windows/Office, והפצתו בתוך `.otzplugin` ציבורי אינה מכוסה. לפני פרסום
-לחנות יש לבחור אחד מאלה:
+חובות מעשיות שהקוד מחויב להן:
 
-1. להסיר את הגופן ולהסתמך על גופני המערכת (המסמך ייראה שונה מ־Word ב־macOS
-   ולינוקס);
-2. להחליף בגופן חופשי מטרית־תואם — [Selawik](https://github.com/microsoft/Selawik)
-   הוא התחליף ש־Microsoft עצמה שחררה ל־Segoe UI תחת SIL OFL, אך **אין בו
-   עברית**, ולכן הוא פותר רק את הטקסט הלטיני;
-3. לקבל אישור מ־Microsoft.
+- **סעיף 2 ב־OFL:** נוסח הרישיון מופץ עם הגופן. `third-party/SELAWIK-LICENSE.txt`
+  נארז לתוך החבילה, ו־`npm run check:dist` מאמת שהוא שם.
+- **Reserved Font Name:** אין לשנות את קובצי הגופן ולהמשיך לקרוא להם „Selawik”.
+  הקבצים נארזים כפי שהם, בלי subsetting ובלי המרה.
+- הגופן מוצהר בשני שמות: `Selawik` (שמו) ו־`Segoe UI` (שם התאמה, כדי שמסמך
+  יקבל את המטריקות הנכונות). „Segoe UI” הוא סימן מסחרי של Microsoft ומופיע
+  כשם התאמה בלבד — אותה החלפה שעושים fontconfig ו־LibreOffice. הגופן עצמו
+  אינו מוצג בשום מקום כ־Segoe UI כלפי המשתמש.
 
-הקוד תומך בשלוש האפשרויות: `SEGOE_UI_FACES` ב־`src/styles/fonts.ts` היא הרשימה
-היחידה, ו־`FONT_FILES` ב־`scripts/check-dist.mjs` הוא השער שמאמת שההצהרה
-והקבצים אינם יוצאים מסינכרון.
+מה שנמדד בקבצים ומגדיר את הגבול של הפתרון:
+
+- **אין עברית.** 348 מתווים, אפס בבלוק העברי. Selawik פותר את הטקסט הלטיני ואת
+  המטריקות; טקסט עברי — כלומר כמעט כל מה שייכתב בתוסף הזה — נופל ל־`David`
+  ולגופן המערכת, כמו לפני האריזה.
+- **אין פנים נטויה** בריליס. הדפדפן מטה את הרגילה סינתטית.
+
+> גרסה קודמת של התוסף ארזה את **Segoe UI** עצמו (3.3MB, © Microsoft,
+> `fsType = 8`). לא היה לזה היתר הפצה, והוא הוחלף. הקבצים ההם נוקו גם
+> מהיסטוריית ה־git.
 
 ## רכיבי MIT שנארזים
 

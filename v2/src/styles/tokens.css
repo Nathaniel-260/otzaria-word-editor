@@ -21,10 +21,10 @@
   --color-primary-subtle: rgba(21, 101, 192, 0.12);
   --color-secondary-subtle: rgba(103, 80, 164, 0.12);
 
-  /* 'Segoe UI' מגיע ארוז עם התוסף (styles/fonts.ts) ולכן קיים בכל מערכת
-     הפעלה; הוא יושב אחרי גופן אוצריא ולפני 'David', כרשת ביטחון למצב שבו
-     המשתמש בחר גופן מערכת שאוצריא אינה מזריקה. */
-  --font-main: 'FrankRuhlCLM', 'Segoe UI', 'David', serif;
+  /* 'Selawik' מגיע ארוז עם התוסף (styles/fonts.ts) ולכן קיים בכל מערכת הפעלה,
+     אבל אין בו עברית — הוא תופס רק את הטקסט הלטיני. לכן הוא יושב אחרי גופן
+     אוצריא ולפני 'David', שהוא ה-fallback העברי. */
+  --font-main: 'FrankRuhlCLM', 'Selawik', 'David', serif;
   --font-size-base: 18px;
   --line-height: 1.5;
 

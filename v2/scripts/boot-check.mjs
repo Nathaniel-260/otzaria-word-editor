@@ -21,13 +21,9 @@
 import { readFileSync, writeFileSync, existsSync, rmSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { spawn } from 'node:child_process';
-import { tmpdir } from 'node:os';
+import { openPage, requireChrome, sleep } from './cdp.mjs';
 
 const DIST = join(dirname(fileURLToPath(import.meta.url)), '..', 'dist');
-const CHROME =
-  process.env.CHROME ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const PORT = Number(process.env.CDP_PORT ?? 9333);
 /** מכסה את BOOT_TIMEOUT_MS (15 שניות) בתוספת עלייה של המנוע. */
 const OBSERVE_MS = 28_000;
 
@@ -35,12 +31,7 @@ if (!existsSync(join(DIST, 'index.html'))) {
   console.error('dist/index.html אינו קיים — הריצו npm run build תחילה');
   process.exit(1);
 }
-if (!existsSync(CHROME)) {
-  console.error(`לא נמצא דפדפן ב-${CHROME}. הגדירו CHROME=<נתיב>`);
-  process.exit(1);
-}
-
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+requireChrome();
 
 /**
  * Host-דמה. `answersRpc` קובע אם `app.getInfo`/`app.getTheme` עונים — כלומר אם
@@ -110,36 +101,6 @@ const CASES = [
   },
 ];
 
-/** לקוח CDP מינימלי מעל ה-WebSocket המובנה של Node. */
-async function connect(url) {
-  const socket = new WebSocket(url);
-  await new Promise((resolve, reject) => {
-    socket.addEventListener('open', resolve, { once: true });
-    socket.addEventListener('error', () => reject(new Error('CDP: החיבור נכשל')), { once: true });
-  });
-
-  let nextId = 0;
-  const pending = new Map();
-  socket.addEventListener('message', (event) => {
-    const message = JSON.parse(event.data);
-    const settle = pending.get(message.id);
-    if (!settle) return;
-    pending.delete(message.id);
-    settle(message);
-  });
-
-  return {
-    send(method, params) {
-      const id = ++nextId;
-      return new Promise((resolve) => {
-        pending.set(id, resolve);
-        socket.send(JSON.stringify({ id, method, params }));
-      });
-    },
-    close: () => socket.close(),
-  };
-}
-
 /**
  * מצב התוסף.
  *
@@ -149,18 +110,16 @@ async function connect(url) {
  * ראשונה של השער נכשלה בדיוק על זה.
  */
 async function probe(cdp) {
-  const result = await cdp.send('Runtime.evaluate', {
-    expression: `(function () {
+  return (
+    (await cdp.evaluate(`(function () {
       var open = document.getElementById('open');
       var status = document.getElementById('status');
       return {
         booted: !!open && open.disabled === false,
         status: status ? status.textContent : null
       };
-    })()`,
-    returnByValue: true,
-  });
-  return result.result?.result?.value ?? { booted: false, status: null };
+    })()`)) ?? { booted: false, status: null }
+  );
 }
 
 function classify({ booted, status }) {
@@ -170,76 +129,34 @@ function classify({ booted, status }) {
   return 'unknown';
 }
 
-/** פרופיל דפדפן לכל מצב בנפרד: דפדפן שנהרג ממשיך לכתוב לתיקייה שלו לרגע. */
-const profileFor = (index) => join(tmpdir(), `otzaria-word-boot-check-${index}`);
-
-/** ניקוי לא מפיל את השער — הוא לא מה שנבדק כאן. */
-function discard(path) {
-  try {
-    rmSync(path, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
-  } catch {
-    /* תיקיית פרופיל שנשארה ב-tmp אינה סיבה להכשיל בדיקה */
-  }
-}
-
 let failures = 0;
 
 for (const [index, testCase] of CASES.entries()) {
   const path = join(DIST, 'boot-check-tmp.html');
-  const profile = profileFor(index);
   writeFileSync(path, testCase.body);
-  discard(profile);
-
-  const chrome = spawn(
-    CHROME,
-    [
-      '--headless',
-      '--disable-gpu',
-      '--no-sandbox',
-      `--remote-debugging-port=${PORT}`,
-      `--user-data-dir=${profile}`,
-      `file://${path}`,
-    ],
-    { stdio: 'ignore' },
-  );
 
   let outcome = 'unknown';
   let status = null;
+  let page;
   try {
-    // המתנה לפתיחת ה-endpoint של CDP.
-    let targets = null;
-    for (let i = 0; i < 60 && !targets; i++) {
-      try {
-        const response = await fetch(`http://127.0.0.1:${PORT}/json/list`);
-        const list = await response.json();
-        targets = list.filter((t) => t.type === 'page' && t.url.startsWith('file://'));
-        if (!targets.length) targets = null;
-      } catch {
-        await sleep(250);
-      }
-    }
-    if (!targets) throw new Error('CDP לא נפתח');
-
-    const cdp = await connect(targets[0].webSocketDebuggerUrl);
+    page = await openPage(`file://${path}`, { label: `boot-${index}` });
     const deadline = Date.now() + OBSERVE_MS;
     while (Date.now() < deadline) {
-      const reading = await probe(cdp);
+      const reading = await probe(page.cdp);
       status = reading.status;
       outcome = classify(reading);
       // 'waiting' ו-'unknown' הם מצבי ביניים; ממתינים להכרעה.
       if (outcome === 'booted' || outcome === 'timeout') break;
       await sleep(200);
     }
-    cdp.close();
   } catch (error) {
     console.error(`${testCase.name}: ${error.message}`);
     failures++;
     continue;
   } finally {
-    chrome.kill('SIGKILL');
+    page?.close();
     rmSync(path, { force: true });
   }
-  discard(profile);
 
   const verdict = outcome === testCase.expect ? '✓' : '✗';
   console.log(`${verdict} ${testCase.name}: ${outcome} (צפוי ${testCase.expect}) — "${(status ?? '').slice(0, 80)}"`);
