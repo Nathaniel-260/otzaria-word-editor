@@ -1,0 +1,32 @@
+{
+  "name": "otzaria-word-editor-v2",
+  "private": true,
+  "version": "2.0.0",
+  "description": "עורך Word לאוצריא על מנוע SuperDoc v2",
+  "license": "AGPL-3.0-only",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "vue-tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "check:dist": "node scripts/check-dist.mjs",
+    "verify": "npm run typecheck && npm run test && npm run build && npm run check:dist",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "superdoc": "2.8.0",
+    "vue": "^3.5.13"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.2.1",
+    "jsdom": "^26.1.0",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.7",
+    "vitest": "^3.2.4",
+    "vue-tsc": "^2.2.0"
+  },
+  "allowScripts": {
+    "esbuild@0.25.12": true
+  }
+}
