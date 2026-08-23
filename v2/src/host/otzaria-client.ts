@@ -114,18 +114,19 @@ export function notifyError(message: string): void {
 
 /**
  * שאלת אישור. `ui.showConfirm` הוא דו-כפתורי, ולכן בחירה משלושה מצבים נבנית
- * משתי שאלות (ראו askUnsavedChanges ב-main.ts). כשל בדיאלוג נחשב „לא”: עדיף
- * לא לעשות פעולה הרסנית מאשר לעשות אותה בלי שהמשתמש אישר.
+ * משתי שאלות (ראו `decideDocumentSwitch`). כשל בדיאלוג נחשב „לא”: עדיף לא
+ * לעשות פעולה הרסנית מאשר לעשות אותה בלי שהמשתמש אישר.
+ *
+ * `subtitle` אינו כאן בכוונה — `showConfirm` בצד אוצריא מעביר `title`
+ * ו-`content` בלבד, והוא קיים רק ב-`showWarning`.
  */
 export async function confirm(options: {
   title: string;
   content: string;
-  subtitle?: string;
 }): Promise<boolean> {
   const res = await tryCall<{ confirmed?: boolean }>('ui.showConfirm', {
     title: options.title,
     content: options.content,
-    ...(options.subtitle ? { subtitle: options.subtitle } : {}),
   });
   return res?.confirmed === true;
 }

@@ -498,6 +498,202 @@ describe('מעבר מסמך בזמן שמירה', () => {
     expect(h.coordinator.snapshot).toMatchObject({ state: 'idle', lastError: null });
   });
 
+  it('סבב מוחלף אינו כותב את הבייטים שלו לקובץ של המסמך החדש', async () => {
+    // הבאג שהיה כאן: ה-commit קרא את היעד בזמן ה-commit, ולכן אחרי מעבר מסמך
+    // הוא קיבל את היעד של החדש — והבייטים של הישן דרסו את הקובץ שלו.
+    const h = harness();
+    h.coordinator.adoptTarget({ token: 'token-A', name: 'א.docx' });
+    h.coordinator.markDirty();
+    let release!: () => void;
+    h.onUpload(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+
+    const savingA = h.coordinator.saveNow();
+    await flush();
+    h.coordinator.reset({ token: 'token-B', name: 'ב.docx' });
+    release();
+
+    await expect(savingA).resolves.toEqual({ status: 'stale' });
+    // ה-commit לא נקרא בכלל — לא ליעד של ב' וגם לא ליעד של א'.
+    expect(h.commits).toEqual([]);
+  });
+
+  it('היעד מצולם בתחילת הסבב, ואינו נקרא מחדש ב-commit', async () => {
+    // adoptTarget משנה את היעד בלי מעבר מסמך, ולכן ה-epoch אינו מגן כאן.
+    // סבב שקורא את היעד בזמן ה-commit היה כותב לקובץ שהוחלף מתחתיו.
+    const h = harness();
+    h.coordinator.adoptTarget({ token: 'token-A', name: 'א.docx' });
+    h.coordinator.markDirty();
+    let release!: () => void;
+    h.onUpload(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+
+    const saving = h.coordinator.saveNow();
+    await flush();
+    h.coordinator.adoptTarget({ token: 'token-X', name: 'אחר.docx' });
+    release();
+    await saving;
+
+    expect(h.commits[0].targetToken).toBe('token-A');
+  });
+
+  it('עריכה שנרשמה אחרי מעבר מסמך אינה מריצה סבב על המסמך החדש', async () => {
+    const h = harness();
+    h.coordinator.adoptTarget({ token: 'token-A', name: 'א.docx' });
+    h.coordinator.markDirty();
+    let release!: () => void;
+    h.onUpload(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+
+    const savingA = h.coordinator.saveNow();
+    await flush();
+    h.coordinator.reset({ token: 'token-B', name: 'ב.docx' });
+    // ב' מלוכלך: בלי ההגנה בתנאי הלופ, הסבב של א' היה ממשיך לסבב נוסף,
+    // מייצא את ב' ומעלה אותו — כתיבה עיוורת של מסמך אחד תוך סבב של אחר.
+    h.coordinator.markDirty();
+    h.onUpload(async () => {});
+    release();
+
+    await expect(savingA).resolves.toEqual({ status: 'stale' });
+    expect(h.exportCount()).toBe(1);
+    expect(h.uploads).toHaveLength(1);
+  });
+
+  it('כשל ייצוא בסבב מוחלף אינו מסמן שגיאה על המסמך החדש', async () => {
+    const h = harness();
+    h.coordinator.markDirty();
+    let reject!: (error: Error) => void;
+    h.onExport(
+      () =>
+        new Promise<Blob>((_, rej) => {
+          reject = rej;
+        }),
+    );
+
+    const savingA = h.coordinator.saveNow();
+    await flush();
+    h.coordinator.reset({ token: 'token-B', name: 'ב.docx' });
+    reject(new Error('המנוע קרס'));
+
+    await expect(savingA).resolves.toEqual({ status: 'stale' });
+    expect(h.coordinator.snapshot).toMatchObject({ state: 'idle', lastError: null });
+  });
+
+  it('כשל commit בסבב מוחלף אינו מסמן שגיאה על המסמך החדש', async () => {
+    const h = harness();
+    h.coordinator.adoptTarget({ token: 'token-A', name: 'א.docx' });
+    h.coordinator.markDirty();
+    let reject!: (error: Error) => void;
+    // ה-commit נחסם, וה-reset קורה אחרי שהוא כבר התחיל.
+    h.onCommit(
+      () =>
+        new Promise<SaveCommitOutput>((_, rej) => {
+          reject = rej;
+        }),
+    );
+
+    const savingA = h.coordinator.saveNow();
+    await flush();
+    h.coordinator.reset({ token: 'token-B', name: 'ב.docx' });
+    reject(new Error('error.permission_denied'));
+
+    await expect(savingA).resolves.toEqual({ status: 'stale' });
+    expect(h.coordinator.snapshot).toMatchObject({
+      state: 'idle',
+      lastError: null,
+      targetToken: 'token-B',
+    });
+  });
+
+  it('הלופ אינו מריץ סבב נוסף אחרי מעבר מסמך', async () => {
+    const h = harness();
+    h.coordinator.adoptTarget({ token: 'token-A', name: 'א.docx' });
+    h.coordinator.markDirty();
+    let release!: () => void;
+    h.onUpload(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+
+    const savingA = h.coordinator.saveNow();
+    await flush();
+    // עריכה נוספת של א', שבלי ה-epoch הייתה מפעילה סבב שני…
+    h.coordinator.markDirty();
+    h.coordinator.reset({ token: 'token-B', name: 'ב.docx' });
+    h.onUpload(async () => {});
+    release();
+    await savingA;
+
+    // …ולכן היה מייצא את ב' וכותב אותו ליעד של א'.
+    expect(h.exportCount()).toBe(1);
+    expect(h.commits).toEqual([]);
+  });
+
+  it('„שמור” על המסמך החדש אינו מצטרף לסבב של הקודם', async () => {
+    const h = harness();
+    h.coordinator.adoptTarget({ token: 'token-A', name: 'א.docx' });
+    h.coordinator.markDirty();
+    let release!: () => void;
+    h.onUpload(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+
+    const savingA = h.coordinator.saveNow();
+    await flush();
+    h.coordinator.reset({ token: 'token-B', name: 'ב.docx' });
+    h.coordinator.markDirty();
+    h.onUpload(async () => {});
+
+    // אותה קריאה שקודם הייתה מחזירה את ה-promise של א' (ולכן `stale`, כלומר
+    // „לחצתי שמור וכלום לא קרה”).
+    const savingB = h.coordinator.saveNow();
+    expect(savingB).not.toBe(savingA);
+    release();
+
+    await expect(savingB).resolves.toMatchObject({ status: 'saved' });
+    expect(h.commits[h.commits.length - 1].targetToken).toBe('token-B');
+    expect(h.coordinator.snapshot.isDirty).toBe(false);
+  });
+
+  it('dispose בזמן סבב מונע אימוץ יעד ופרסום מצב', async () => {
+    const h = harness();
+    h.coordinator.markDirty();
+    let release!: () => void;
+    h.onUpload(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+
+    const saving = h.coordinator.saveNow();
+    await flush();
+    h.coordinator.dispose();
+    const statesAfterDispose = h.states.length;
+    release();
+
+    await expect(saving).resolves.toEqual({ status: 'stale' });
+    expect(h.coordinator.snapshot.targetToken).toBeNull();
+    expect(h.states).toHaveLength(statesAfterDispose);
+  });
+
   it('isSaving מדווח נכון, כדי שהמעטפת תחסום מעבר מסמך', async () => {
     const h = harness();
     h.coordinator.markDirty();

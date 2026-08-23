@@ -24,6 +24,7 @@ import { downloadBlob } from './host/download';
 import { createEditor } from './engine/create-editor';
 import { createEditorSwap } from './sessions/editor-swap';
 import { createSaveCoordinator, type SaveSnapshot } from './sessions/save-coordinator';
+import { decideDocumentSwitch, saveShortcut } from './sessions/open-flow';
 import { createCommandAdapter, type CommandAdapter } from './engine/command-adapter';
 import { docxFileName, exportDocx } from './engine/export';
 
@@ -143,31 +144,6 @@ async function main(): Promise<void> {
     }),
   );
 
-  /**
-   * מה לעשות עם מסמך שלא נשמר לפני שמחליפים אותו.
-   *
-   * `ui.showConfirm` הוא דו-כפתורי, ולכן שלושת המצבים נבנים משתי שאלות. זה
-   * מסורבל, אבל האלטרנטיבה היא לאבד עבודה: פתיחה מוצלחת מפרקת את המסמך הקודם.
-   */
-  async function askUnsavedChanges(): Promise<'save' | 'discard' | 'cancel'> {
-    if (!save.snapshot.isDirty) return 'discard';
-
-    if (
-      await confirm({
-        title: 'המסמך לא נשמר',
-        content: `לשמור את ${title} לפני פתיחת מסמך אחר?`,
-      })
-    ) {
-      return 'save';
-    }
-    return (await confirm({
-      title: 'לפתוח בלי לשמור?',
-      content: `השינויים ב${title} יימחקו ואין דרך לשחזר אותם.`,
-    }))
-      ? 'discard'
-      : 'cancel';
-  }
-
   /** `true` אם המסמך נפתח. `false` על כשל או על החלפה. */
   async function openDocument(file?: UserFile): Promise<boolean> {
     openBtn.disabled = true;
@@ -238,30 +214,43 @@ async function main(): Promise<void> {
     button.addEventListener('mousedown', (event) => event.preventDefault());
   }
 
+  /** ההחלטות עצמן ב-sessions/open-flow.ts, כדי שיהיו נבדקות. */
+  function decideSwitch(): ReturnType<typeof decideDocumentSwitch> {
+    return decideDocumentSwitch({
+      isDirty: () => save.snapshot.isDirty,
+      isSaving: () => save.snapshot.isSaving,
+      confirm,
+      documentName: () => title,
+    });
+  }
+
   openBtn.addEventListener('click', () => {
     void (async () => {
-      // מעבר מסמך בזמן שמירה היה מאפשר לסבב של המסמך הקודם להסתיים אחרי
-      // ההחלפה. הקואורדינטור זורק תוצאה כזאת, אבל אין סיבה להגיע לשם.
-      if (save.snapshot.isSaving) {
-        status('השמירה עוד רצה — רגע אחד');
-        return;
-      }
-
       openBtn.disabled = true;
       try {
         const file = await pickDocxFile();
         // ביטול הבורר אינו כשל ואינו נוגע במסמך הפתוח.
         if (!file) return;
 
-        const decision = await askUnsavedChanges();
-        if (decision === 'cancel') return;
-        if (decision === 'save') {
+        // ההחלטה נלקחת אחרי הבורר: אין לשאול על שמירה מי שרק פתח דיאלוג
+        // וביטל אותו.
+        const decision = await decideSwitch();
+        if (decision.action === 'cancel') {
+          status(
+            decision.reason === 'saving'
+              ? 'השמירה עוד רצה — רגע אחד'
+              : 'הפתיחה בוטלה, והמסמך נשאר פתוח',
+          );
+          return;
+        }
+
+        if (decision.action === 'save-first') {
           const outcome = await save.saveNow({ suggestedName: title });
           // שמירה שלא הצליחה — כולל ביטול „שמור בשם” — עוצרת את הפתיחה. אחרת
           // המשתמש ביקש לשמור, לא הצליח, והמסמך נמחק בכל זאת.
           if (outcome.status !== 'saved') {
             if (outcome.status === 'failed') status(outcome.message, true);
-            else status('הפתיחה בוטלה — המסמך לא נשמר');
+            else status('הפתיחה נעצרה — המסמך לא נשמר');
             return;
           }
         }
@@ -314,12 +303,11 @@ async function main(): Promise<void> {
   // Ctrl/Cmd+S. preventDefault תמיד, גם בלי מסמך: אחרת ה-WebView פותח את
   // דיאלוג השמירה של הדף.
   window.addEventListener('keydown', (event) => {
-    if (event.key.toLowerCase() !== 's' || !(event.ctrlKey || event.metaKey)) return;
+    const shortcut = saveShortcut(event, save.snapshot.isSaving);
+    if (!shortcut.isSaveKey) return;
     event.preventDefault();
-    // בזמן שמירה saveNow מצטרף לסבב שרץ, ולכן Ctrl+Shift+S היה נראה כאילו
-    // פתח „שמור בשם” בעוד שבפועל הוא סתם המתין לשמירה הרגילה. עדיף להתעלם.
-    if (save.snapshot.isSaving) return;
-    void runSave(event.shiftKey);
+    if (!shortcut.handled) return;
+    void runSave(shortcut.saveAs);
   });
 
   try {

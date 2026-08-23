@@ -13,10 +13,14 @@
  *    למה שיוצא בפועל, והמסמך נשאר dirty ומריץ סבב נוסף.
  * 2. **אין שתי שמירות במקביל.** שתיהן היו מייצאות, מעלות ועושות commit לאותו
  *    יעד, וסדר הסיום אינו מובטח — כלומר גרסה ישנה יכולה לדרוס חדשה.
- * 3. **סבב שייך למסמך שפתח אותו.** `reset` (מעבר מסמך) מעלה epoch, וסבב
- *    שמסתיים עם epoch ישן מחזיר `stale` ואינו נוגע בשום מצב. בלי זה: שמירה של
- *    מסמך א' שמסתיימת אחרי שנפתח ב' הייתה מאמצת מחדש את ה-token של א' —
- *    והשמירה הבאה של ב' הייתה נכתבת לקובץ של א'.
+ * 3. **סבב שייך למסמך שפתח אותו.** `reset` (מעבר מסמך) מעלה epoch, וסבב עם
+ *    epoch ישן נעצר לפני ה-commit ומחזיר `stale`. שני דברים תלויים בזה, וכל
+ *    אחד מהם לבד הוא אובדן נתונים:
+ *    - **הכתיבה לדיסק.** ה-commit קורא את היעד; אחרי מעבר מסמך היעד הוא של
+ *      המסמך החדש, כלומר הבייטים של הישן היו נכתבים לקובץ של החדש ודורסים
+ *      אותו. לכן היעד מצולם בתחילת הסבב, ובנוסף הסבב נעצר לפני ה-commit.
+ *    - **המצב.** בלי זה סבב של א' שמסתיים היה מאמץ מחדש את ה-token של א',
+ *      והשמירה הבאה של ב' הייתה נכתבת לקובץ של א'.
  */
 
 export type SaveState = 'idle' | 'exporting' | 'uploading' | 'committing' | 'error';
@@ -98,6 +102,8 @@ export function createSaveCoordinator(deps: SaveCoordinatorDeps): SaveCoordinato
   let lastError: string | null = null;
 
   let inFlight: Promise<SaveOutcome> | null = null;
+  /** ה-epoch שאליו שייך הסבב שרץ. */
+  let inFlightEpoch = -1;
   let autosaveTimer: ReturnType<typeof setTimeout> | undefined;
   let disposed = false;
   /** מזהה המסמך הנוכחי. כל reset מעלה אותו. */
@@ -115,6 +121,8 @@ export function createSaveCoordinator(deps: SaveCoordinatorDeps): SaveCoordinato
   }
 
   function publish(): void {
+    // אחרי dispose אין למי לדווח, וסבב שנשאר באוויר לא יעדכן ממשק שכבר פורק.
+    if (disposed) return;
     deps.onStateChange?.(snapshot());
   }
 
@@ -144,6 +152,9 @@ export function createSaveCoordinator(deps: SaveCoordinatorDeps): SaveCoordinato
   ): Promise<SaveOutcome> {
     // מצולם לפני הייצוא: מה שהמשתמש יקליד מכאן והלאה אינו בקובץ הזה.
     const exportedRevision = dirtyRevision;
+    // וגם היעד מצולם. קריאה שלו בזמן ה-commit הייתה נותנת את היעד של המסמך
+    // שנפתח בינתיים — כלומר הבייטים של המסמך הזה היו נכתבים לקובץ של האחר.
+    const target = targetToken;
     lastError = null;
 
     /**
@@ -173,13 +184,19 @@ export function createSaveCoordinator(deps: SaveCoordinatorDeps): SaveCoordinato
       return fail(error, 'העלאת המסמך נכשלה');
     }
 
+    // הבדיקה כאן, לפני ה-commit, היא הנקודה הקריטית: ה-commit הוא הפעולה
+    // ההרסנית — הוא כותב לדיסק. אחרי מעבר מסמך אין לו למי לכתוב: היעד של
+    // המסמך הזה אינו רלוונטי יותר, והבייטים האלה בטח לא שייכים לקובץ של המסמך
+    // שנפתח. הייצוא וההעלאה שכבר נעשו הם בזבוז, לא נזק.
+    if (mine !== epoch) return { status: 'stale' };
+
     let result: SaveCommitOutput;
     try {
       stage('committing');
       result = await deps.commit({
         writeToken: ticket.writeToken,
         // בלי יעד — או כשביקשו „שמור בשם” במפורש — ה-commit פותח דיאלוג.
-        ...(forceSaveAs || !targetToken ? {} : { targetToken }),
+        ...(forceSaveAs || !target ? {} : { targetToken: target }),
         ...(suggestedName ? { suggestedName } : {}),
       });
     } catch (error) {
@@ -187,8 +204,8 @@ export function createSaveCoordinator(deps: SaveCoordinatorDeps): SaveCoordinato
       return fail(error, 'שמירת המסמך נכשלה');
     }
 
-    // הסבב שייך למסמך שהוחלף בינתיים. הבייטים כבר על הדיסק — לא נורא, הם של
-    // המסמך ההוא — אבל אסור לגעת במצב של המסמך שפתוח עכשיו.
+    // ה-commit הסתיים אחרי שהמסמך הוחלף. הכתיבה עצמה לגיטימית — היא נעשתה
+    // ליעד שצולם — אבל אסור לגעת במצב של המסמך שפתוח עכשיו.
     if (mine !== epoch) return { status: 'stale' };
 
     if (result.cancelled) {
@@ -217,12 +234,11 @@ export function createSaveCoordinator(deps: SaveCoordinatorDeps): SaveCoordinato
 
     // שינוי שקרה בזמן הסבב אינו בקובץ. סבב נוסף — הפעם ליעד שכבר קיים, ולכן
     // בלי דיאלוג.
-    while (
-      outcome.status === 'saved' &&
-      mine === epoch &&
-      dirtyRevision !== savedRevision &&
-      !disposed
-    ) {
+    //
+    // אין כאן בדיקת epoch, בכוונה: הלופ ממשיך רק על `saved`, ו-`saved` אפשרי
+    // רק כשה-epoch תאם (הסבב נעצר לפני ה-commit אחרת). בדיקה נוספת כאן הייתה
+    // קוד שאין דרך להגיע אליו, ולכן גם אין דרך לבדוק אותו.
+    while (outcome.status === 'saved' && dirtyRevision !== savedRevision && !disposed) {
       outcome = await runOnce(mine, false, suggestedName);
     }
 
@@ -235,9 +251,24 @@ export function createSaveCoordinator(deps: SaveCoordinatorDeps): SaveCoordinato
     if (disposed) return Promise.resolve({ status: 'clean' });
     cancelAutosave();
 
-    // שמירה שרצה — מצטרפים אליה. הלופ שלה כבר יטפל בשינוי שנעשה בינתיים, וכך
-    // אין שני סבבים שכותבים לאותו יעד בסדר סיום שאינו מובטח.
-    if (inFlight) return inFlight;
+    // שמירה שרצה **על אותו מסמך** — מצטרפים אליה. הלופ שלה כבר יטפל בשינוי
+    // שנעשה בינתיים, וכך אין שני סבבים שכותבים לאותו יעד בסדר סיום שאינו
+    // מובטח.
+    if (inFlight && inFlightEpoch === epoch) return inFlight;
+
+    // סבב שרץ ושייך למסמך קודם: אין להצטרף אליו — התוצאה שלו תהיה `stale`,
+    // והמשתמש היה מקבל „לחצתי שמור וכלום לא קרה”. ממתינים לו וממשיכים.
+    const previous = inFlight;
+    if (previous) {
+      const mineAfterWait = epoch;
+      const chained = previous
+        .catch(() => undefined)
+        .then(() => runChain(mineAfterWait, options));
+      inFlight = chained;
+      inFlightEpoch = epoch;
+      publish();
+      return chained;
+    }
 
     const isClean = dirtyRevision === savedRevision;
     // „שמור בשם” על מסמך נקי הוא בקשה לגיטימית להעתק, והוא מייצא בלי לשנות
@@ -246,16 +277,29 @@ export function createSaveCoordinator(deps: SaveCoordinatorDeps): SaveCoordinato
       return Promise.resolve({ status: 'clean' });
     }
 
-    const mine = epoch;
-    const run = saveLoop(mine, options.forceSaveAs ?? false, options.suggestedName).finally(
-      () => {
-        inFlight = null;
-        publish();
-      },
-    );
+    const run = runChain(epoch, options);
     inFlight = run;
+    inFlightEpoch = epoch;
     publish();
     return run;
+  }
+
+  /**
+   * מריץ סבב ומשחרר את ה-single-flight בסופו. מופרד כדי ששרשור אחרי סבב של
+   * מסמך קודם יעבור באותו מסלול בדיוק.
+   */
+  function runChain(
+    mine: number,
+    options: { forceSaveAs?: boolean; suggestedName?: string },
+  ): Promise<SaveOutcome> {
+    return saveLoop(mine, options.forceSaveAs ?? false, options.suggestedName).finally(() => {
+      // אם בינתיים נרשם סבב חדש יותר, לא לדרוך עליו.
+      if (inFlightEpoch === mine) {
+        inFlight = null;
+        inFlightEpoch = -1;
+      }
+      publish();
+    });
   }
 
   return {
@@ -300,6 +344,9 @@ export function createSaveCoordinator(deps: SaveCoordinatorDeps): SaveCoordinato
 
     dispose() {
       disposed = true;
+      // כמו מעבר מסמך: כל סבב שבאוויר הופך ל-stale, ולכן לא יעשה commit ולא
+      // יאמץ יעד אחרי הפירוק.
+      epoch += 1;
       cancelAutosave();
     },
   };
