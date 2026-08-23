@@ -90,6 +90,12 @@ export default defineConfig({
   // ולכן ההודעות נאספות לסוף הקובץ. check-dist.mjs מאמת שהן שם.
   esbuild: { legalComments: 'eof' },
 
+  // בשרת הפיתוח אין הטמעת workers, והמנוע בונה את ה-URL שלהם יחסית למודול
+  // שלו. אם ה-dep optimizer של Vite אורז את המנוע מחדש ל-node_modules/.vite/deps,
+  // ה-URL היחסי מצביע לשם — ושם אין קובץ worker, כלומר המסמך לא נפתח בפיתוח.
+  // החרגה מה-optimizer משאירה את המנוע במקומו, ואת ה-URL נפתר.
+  optimizeDeps: { exclude: ['@superdoc/docx-engine'] },
+
   build: {
     target: 'es2020',
     assetsDir: 'assets',
