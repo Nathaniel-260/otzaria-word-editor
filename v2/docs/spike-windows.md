@@ -29,12 +29,12 @@ worker, וזה הדבר הראשון לבדוק.
 
 ## הצ'קליסט
 
-### 1. אריזה
+### 1. אריזה — נעשה על macOS
 
-- [ ] `cd v2 && npm ci && npm run verify` — typecheck, בדיקות, build ו־check:dist.
-- [ ] `otzaria pack-plugin v2/dist --output otzaria-word-editor-v2.otzplugin --force`.
-- [ ] הוולידטור עובר: manifest, הרשאות, גרסאות API, וולידציית עיצוב.
-- [ ] גודל ה־`.otzplugin` בפועל נרשם כאן (הערכה מ־ZIP של `dist/`: 4.31MB).
+- [x] `cd v2 && npm ci && npm run verify` — typecheck, בדיקות, build ו־check:dist.
+- [x] אריזה: `exit 0`, 8 קבצים, **4.32MB**.
+- [x] הוולידטור עובר, כולל `✓ העיצוב תואם לתיעוד (DESIGN_GUIDE)`.
+- [ ] לחזור על האריזה על Windows (אותו CLI, כדי לשלול הפרשי נתיבים/הרשאות).
 
 ### 2. התוסף הארוז — השער עצמו
 

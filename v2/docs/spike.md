@@ -120,6 +120,7 @@
 | `dist/third-party/` | 68KB |
 | סה"כ `dist/` | 15.16MB |
 | ZIP של `dist/` | 4.31MB |
+| `.otzplugin` בפועל | **4.32MB, 8 קבצים** |
 | boot עד `onReady`, מסמך ריק, `file://` | 485ms |
 | boot עד `onReady`, מסמך ריק, `http://` | 470–477ms (שתי הרצות) |
 | `superdoc.export()` על מסמך ריק | ~200ms, מחזיר Blob |
@@ -142,9 +143,14 @@ review-index 0.31MB.
   `access: 'readwrite'`), אבל התוסף עדיין מייצא דרך `<a download>`. המימוש
   ב-v2 הוא שלב 2 בתכנית, ורק אחרי שגרסת אוצריא שמכילה את ה-API תהיה זמינה
   לבדיקה — ואז יש לעדכן גם את `minAppVersion`.
-- [ ] אריזה עם `otzaria pack-plugin` וקבלת הוולידטור. לא ניתן להריץ על המכונה
-  הזאת: `dart run tool/plugins/package_plugin.dart` קורס בקומפילציה של חבילת
-  אוצריא (`_FfiUseSiteTransformer`, באג של ה־SDK המותקן) — לא קשור לתוסף.
+- [x] אריזה עם `otzaria pack-plugin` וקבלת הוולידטור — **עבר**. `dart run
+  tool/plugins/package_plugin.dart` קורס בקומפילציה של חבילת אוצריא
+  (`_FfiUseSiteTransformer`, באג של ה־SDK המותקן, לא קשור לתוסף), ולכן ה־CLI
+  הורץ דרך `flutter test` שמקמפל באותו pipeline שעובד. התוצאה: `exit 0`,
+  8 קבצים, 4.32MB, `✓ העיצוב תואם לתיעוד (DESIGN_GUIDE)`, בלי אזהרות הרשאה
+  או גרסה. הערה: ולידציית העיצוב סורקת קובצי `*.css` ובלוקי `<style>`, וה־CSS
+  שלנו מוטמע ב־`app.js` — כלומר מה שעבר הוא בדיקות ה־HTML (`dir="rtl"`,
+  `lang="he"`) והמניפסט, לא כללי ה־CSS.
 - [ ] הכול על Windows / WebView2 — ראו [spike-windows.md](spike-windows.md).
 - [ ] פתיחת DOCX עברי אמיתי, ניקוד וטעמים, ומסמך של 50 עמודים.
 - [ ] ייצוא ופתיחה ב־Microsoft Word.
