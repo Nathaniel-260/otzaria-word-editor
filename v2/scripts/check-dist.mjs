@@ -57,6 +57,14 @@ else if (appAt !== -1 && workersAt > appAt) {
 // אוטומטית: מחרוזת בבאנדל אינה בקשה. הן נרשמות כדי שייבדקו ידנית בשער A.
 const CDN_HINTS = ['cdn.jsdelivr.net', 'unpkg.com', 'cdnjs.cloudflare.com', 'fonts.googleapis.com'];
 
+/**
+ * סעיף 3.1(c) ברישיון מנוע ה-DOCX אוסר להסיר או להסתיר הודעות רישוי. המינימיזציה
+ * מוחקת הערות כברירת מחדל, ולכן זו בדיקה חוסמת ולא אזהרה: הקובץ שמכיל את המנוע
+ * חייב לשאת את הבאנר שלו.
+ */
+const ENGINE_LICENSE_MARK = 'DOCX Engine Proprietary License Agreement';
+const ENGINE_BEARING_FILES = ['assets/app.js', 'assets/engine-workers.js'];
+
 const files = [];
 function walk(dir, prefix = '') {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -87,6 +95,20 @@ for (const rel of files) {
   const text = readFileSync(full, 'utf8');
   for (const hint of CDN_HINTS) {
     if (text.includes(hint)) warnings.push(`${rel} מכיל את המחרוזת ${hint}`);
+  }
+}
+
+for (const rel of ENGINE_BEARING_FILES) {
+  const full = join(DIST, rel);
+  if (!existsSync(full)) {
+    errors.push(`${rel} חסר ב-dist`);
+    continue;
+  }
+  if (!readFileSync(full, 'utf8').includes(ENGINE_LICENSE_MARK)) {
+    errors.push(
+      `${rel} אינו נושא את באנר הרישוי של מנוע ה-DOCX — ` +
+        "בדקו את esbuild.legalComments ב-vite.config.ts",
+    );
   }
 }
 

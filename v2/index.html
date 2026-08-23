@@ -7,8 +7,9 @@
   </head>
   <body>
     <div id="app"></div>
-    <!-- type="module" נדרש לשרת הפיתוח של Vite ומוסר אוטומטית ב-build
-         (WebView2 אינו תומך במודולים מ-file://) — ראו classicScript ב-vite.config.ts -->
+    <!-- תגית המודול נדרשת לשרת הפיתוח של Vite, וה-build הופך אותה לסקריפט
+         קלאסי (WebView2 אינו תומך במודולים מ-file://) — ראו classicScript
+         ב-vite.config.ts -->
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

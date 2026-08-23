@@ -81,6 +81,12 @@ export default defineConfig({
   base: './',
   plugins: [vue(), classicScript(), inlineEngineWorkers()],
   worker: { format: 'iife' },
+
+  // ברירת המחדל של Vite ב-build היא legalComments: 'none', והיא מוחקת את באנר
+  // הרישוי של מנוע ה-DOCX. סעיף 3.1(c) ברישיון המנוע אוסר להסיר הודעות רישוי,
+  // ולכן ההודעות נאספות לסוף הקובץ. check-dist.mjs מאמת שהן שם.
+  esbuild: { legalComments: 'eof' },
+
   build: {
     target: 'es2020',
     assetsDir: 'assets',
