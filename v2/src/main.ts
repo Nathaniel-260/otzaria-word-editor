@@ -9,7 +9,7 @@
  */
 import './styles/tokens.css';
 import './styles/shell.css';
-import { notifyError, onThemeChanged, waitForBoot } from './host/otzaria-client';
+import { confirm, notifyError, onThemeChanged, waitForBoot } from './host/otzaria-client';
 import { applyTheme } from './host/theme';
 import {
   beginBinaryWrite,
@@ -141,6 +141,31 @@ async function main(): Promise<void> {
     }),
   );
 
+  /**
+   * מה לעשות עם מסמך שלא נשמר לפני שמחליפים אותו.
+   *
+   * `ui.showConfirm` הוא דו-כפתורי, ולכן שלושת המצבים נבנים משתי שאלות. זה
+   * מסורבל, אבל האלטרנטיבה היא לאבד עבודה: פתיחה מוצלחת מפרקת את המסמך הקודם.
+   */
+  async function askUnsavedChanges(): Promise<'save' | 'discard' | 'cancel'> {
+    if (!save.snapshot.isDirty) return 'discard';
+
+    if (
+      await confirm({
+        title: 'המסמך לא נשמר',
+        content: `לשמור את ${title} לפני פתיחת מסמך אחר?`,
+      })
+    ) {
+      return 'save';
+    }
+    return (await confirm({
+      title: 'לפתוח בלי לשמור?',
+      content: `השינויים ב${title} יימחקו ואין דרך לשחזר אותם.`,
+    }))
+      ? 'discard'
+      : 'cancel';
+  }
+
   async function openDocument(file?: UserFile): Promise<void> {
     openBtn.disabled = true;
     const startedAt = performance.now();
@@ -197,11 +222,33 @@ async function main(): Promise<void> {
 
   openBtn.addEventListener('click', () => {
     void (async () => {
+      // מעבר מסמך בזמן שמירה היה מאפשר לסבב של המסמך הקודם להסתיים אחרי
+      // ההחלפה. הקואורדינטור זורק תוצאה כזאת, אבל אין סיבה להגיע לשם.
+      if (save.snapshot.isSaving) {
+        status('השמירה עוד רצה — רגע אחד');
+        return;
+      }
+
       openBtn.disabled = true;
       try {
         const file = await pickDocxFile();
         // ביטול הבורר אינו כשל ואינו נוגע במסמך הפתוח.
-        if (file) await openDocument(file);
+        if (!file) return;
+
+        const decision = await askUnsavedChanges();
+        if (decision === 'cancel') return;
+        if (decision === 'save') {
+          const outcome = await save.saveNow({ suggestedName: title });
+          // שמירה שלא הצליחה — כולל ביטול „שמור בשם” — עוצרת את הפתיחה. אחרת
+          // המשתמש ביקש לשמור, לא הצליח, והמסמך נמחק בכל זאת.
+          if (outcome.status !== 'saved') {
+            if (outcome.status === 'failed') status(outcome.message, true);
+            else status('הפתיחה בוטלה — המסמך לא נשמר');
+            return;
+          }
+        }
+
+        await openDocument(file);
       } catch (error) {
         status(error instanceof Error ? error.message : 'בחירת הקובץ נכשלה', true);
       } finally {
@@ -226,7 +273,7 @@ async function main(): Promise<void> {
   boldBtn.addEventListener('click', () => void run('bold'));
   rtlBtn.addEventListener('click', () => void run('direction-rtl'));
 
-  /** מציג את תוצאת השמירה. „בוטל” אינו שגיאה ואינו מודיע למשתמש. */
+  /** מציג את תוצאת השמירה. „בוטל” ו„הוחלף” אינם שגיאה ואינם מודיעים למשתמש. */
   async function runSave(forceSaveAs: boolean): Promise<void> {
     if (!swap.current) return;
     const outcome = await save.saveNow({ forceSaveAs, suggestedName: title });
@@ -249,6 +296,9 @@ async function main(): Promise<void> {
   window.addEventListener('keydown', (event) => {
     if (event.key.toLowerCase() !== 's' || !(event.ctrlKey || event.metaKey)) return;
     event.preventDefault();
+    // בזמן שמירה saveNow מצטרף לסבב שרץ, ולכן Ctrl+Shift+S היה נראה כאילו
+    // פתח „שמור בשם” בעוד שבפועל הוא סתם המתין לשמירה הרגילה. עדיף להתעלם.
+    if (save.snapshot.isSaving) return;
     void runSave(event.shiftKey);
   });
 

@@ -372,13 +372,12 @@ describe('מצב', () => {
 
     await h.coordinator.saveNow();
 
-    expect(h.states.map((s) => s.state)).toEqual([
-      'idle', // markDirty
-      'exporting',
-      'uploading',
-      'committing',
-      'idle',
-    ]);
+    // מכווצים חזרות רצופות: כל publish נוסף (למשל סימון isSaving) אינו שלב.
+    const stages = h.states
+      .map((s) => s.state)
+      .filter((value, index, all) => value !== all[index - 1]);
+
+    expect(stages).toEqual(['idle', 'exporting', 'uploading', 'committing', 'idle']);
   });
 
   it('reset מנקה dirty, שגיאה ויעד', async () => {
@@ -395,6 +394,7 @@ describe('מצב', () => {
       targetToken: 'other',
       name: 'b.docx',
       lastError: null,
+      isSaving: false,
     });
   });
 
@@ -423,3 +423,129 @@ describe('מצב', () => {
     expect(h.uploads).toEqual([{ url: 'u', size: 10 }]);
   });
 });
+describe('מעבר מסמך בזמן שמירה', () => {
+  it('סבב של המסמך הקודם אינו מאמץ מחדש את היעד שלו', async () => {
+    const h = harness();
+    h.coordinator.markDirty();
+    let release!: () => void;
+    h.onUpload(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+
+    // א' נשמר…
+    const savingA = h.coordinator.saveNow();
+    await flush();
+    // …ובאמצע נפתח ב'.
+    h.coordinator.reset({ token: 'token-B', name: 'ב.docx' });
+    release();
+
+    // התוצאה של א' נזרקת: היא לא נוגעת ביעד, במצב ולא ב-dirty של ב'.
+    await expect(savingA).resolves.toEqual({ status: 'stale' });
+    expect(h.coordinator.snapshot).toMatchObject({
+      targetToken: 'token-B',
+      name: 'ב.docx',
+      isDirty: false,
+      state: 'idle',
+    });
+  });
+
+  it('השמירה הבאה של המסמך החדש כותבת ליעד שלו, לא לקודם', async () => {
+    const h = harness();
+    h.coordinator.markDirty();
+    let release!: () => void;
+    h.onUpload(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+
+    const savingA = h.coordinator.saveNow();
+    await flush();
+    h.coordinator.reset({ token: 'token-B', name: 'ב.docx' });
+    h.onUpload(async () => {});
+    release();
+    await savingA;
+
+    h.coordinator.markDirty();
+    await h.coordinator.saveNow();
+
+    // זו הרגרסיה שהבדיקה הזאת מקבעת: בלי ה-epoch, ה-commit של א' היה מאמץ
+    // מחדש את token-A, וכאן היינו רואים אותו כיעד.
+    expect(h.commits[h.commits.length - 1].targetToken).toBe('token-B');
+  });
+
+  it('כשל של סבב שהוחלף אינו מסמן שגיאה על המסמך החדש', async () => {
+    const h = harness();
+    h.coordinator.markDirty();
+    let reject!: (error: Error) => void;
+    h.onUpload(
+      () =>
+        new Promise<void>((_, rej) => {
+          reject = rej;
+        }),
+    );
+
+    const savingA = h.coordinator.saveNow();
+    await flush();
+    h.coordinator.reset({ token: 'token-B', name: 'ב.docx' });
+    reject(new Error('נפל'));
+
+    await expect(savingA).resolves.toEqual({ status: 'stale' });
+    expect(h.coordinator.snapshot).toMatchObject({ state: 'idle', lastError: null });
+  });
+
+  it('isSaving מדווח נכון, כדי שהמעטפת תחסום מעבר מסמך', async () => {
+    const h = harness();
+    h.coordinator.markDirty();
+    let release!: () => void;
+    h.onUpload(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+
+    expect(h.coordinator.snapshot.isSaving).toBe(false);
+    const saving = h.coordinator.saveNow();
+    expect(h.coordinator.snapshot.isSaving).toBe(true);
+
+    await flush();
+    release();
+    await saving;
+
+    expect(h.coordinator.snapshot.isSaving).toBe(false);
+  });
+});
+
+describe('„שמור בשם” על מסמך נקי', () => {
+  it('ביטול משאיר את המסמך נקי ואת היעד כפי שהיה', async () => {
+    const h = harness();
+    h.coordinator.adoptTarget({ token: 'tok', name: 'a.docx' });
+    h.onCommit(async () => ({ cancelled: true }));
+
+    const outcome = await h.coordinator.saveNow({ forceSaveAs: true });
+
+    expect(outcome).toEqual({ status: 'cancelled' });
+    // הרגרסיה: קודם הגדלנו revision כדי לכפות ייצוא, וההגדלה שרדה את הביטול
+    // וסימנה מסמך שמור כלא-שמור.
+    expect(h.coordinator.snapshot).toMatchObject({
+      isDirty: false,
+      targetToken: 'tok',
+      state: 'idle',
+    });
+  });
+
+  it('הצלחה אינה משאירה את המסמך מלוכלך', async () => {
+    const h = harness();
+    h.coordinator.adoptTarget({ token: 'tok', name: 'a.docx' });
+
+    await h.coordinator.saveNow({ forceSaveAs: true });
+
+    expect(h.coordinator.snapshot.isDirty).toBe(false);
+  });
+});
+

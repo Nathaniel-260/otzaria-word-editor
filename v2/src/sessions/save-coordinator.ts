@@ -13,6 +13,10 @@
  *    למה שיוצא בפועל, והמסמך נשאר dirty ומריץ סבב נוסף.
  * 2. **אין שתי שמירות במקביל.** שתיהן היו מייצאות, מעלות ועושות commit לאותו
  *    יעד, וסדר הסיום אינו מובטח — כלומר גרסה ישנה יכולה לדרוס חדשה.
+ * 3. **סבב שייך למסמך שפתח אותו.** `reset` (מעבר מסמך) מעלה epoch, וסבב
+ *    שמסתיים עם epoch ישן מחזיר `stale` ואינו נוגע בשום מצב. בלי זה: שמירה של
+ *    מסמך א' שמסתיימת אחרי שנפתח ב' הייתה מאמצת מחדש את ה-token של א' —
+ *    והשמירה הבאה של ב' הייתה נכתבת לקובץ של א'.
  */
 
 export type SaveState = 'idle' | 'exporting' | 'uploading' | 'committing' | 'error';
@@ -24,6 +28,11 @@ export type SaveOutcome =
   | { status: 'clean' }
   /** המשתמש סגר את „שמור בשם”. המסמך נשאר כפי שהיה. */
   | { status: 'cancelled' }
+  /**
+   * הסבב הסתיים אחרי שהמסמך שהוא שייך אליו הוחלף. התוצאה נזרקת ואינה נוגעת
+   * במצב — ראו [createSaveCoordinator].
+   */
+  | { status: 'stale' }
   /** כשל. המסמך נשאר מלוכלך. */
   | { status: 'failed'; message: string };
 
@@ -61,6 +70,8 @@ export interface SaveSnapshot {
   targetToken: string | null;
   name: string | null;
   lastError: string | null;
+  /** שמירה בתהליך. מעבר מסמך בזמן הזה אסור. */
+  isSaving: boolean;
 }
 
 /** debounce של autosave. ערך התכנית (§9.3). */
@@ -89,6 +100,8 @@ export function createSaveCoordinator(deps: SaveCoordinatorDeps): SaveCoordinato
   let inFlight: Promise<SaveOutcome> | null = null;
   let autosaveTimer: ReturnType<typeof setTimeout> | undefined;
   let disposed = false;
+  /** מזהה המסמך הנוכחי. כל reset מעלה אותו. */
+  let epoch = 0;
 
   function snapshot(): SaveSnapshot {
     return {
@@ -97,6 +110,7 @@ export function createSaveCoordinator(deps: SaveCoordinatorDeps): SaveCoordinato
       targetToken,
       name,
       lastError,
+      isSaving: inFlight !== null,
     };
   }
 
@@ -123,31 +137,45 @@ export function createSaveCoordinator(deps: SaveCoordinatorDeps): SaveCoordinato
   }
 
   /** סבב שמירה אחד: ייצוא → העלאה → commit. */
-  async function runOnce(forceSaveAs: boolean, suggestedName?: string): Promise<SaveOutcome> {
+  async function runOnce(
+    mine: number,
+    forceSaveAs: boolean,
+    suggestedName?: string,
+  ): Promise<SaveOutcome> {
     // מצולם לפני הייצוא: מה שהמשתמש יקליד מכאן והלאה אינו בקובץ הזה.
     const exportedRevision = dirtyRevision;
     lastError = null;
 
+    /**
+     * מצב מתפרסם רק כל עוד הסבב שייך למסמך הפתוח. אחרת „שומר…” של המסמך
+     * הקודם היה נדבק לחדש, ואחרי שהסבב הישן ייגמר המצב היה נשאר תקוע.
+     */
+    const stage = (next: SaveState): void => {
+      if (mine === epoch) setState(next);
+    };
+
     let blob: Blob;
     try {
-      setState('exporting');
+      stage('exporting');
       blob = await deps.exportDocument();
     } catch (error) {
+      if (mine !== epoch) return { status: 'stale' };
       return fail(error, 'ייצוא המסמך נכשל');
     }
 
     let ticket: SaveTicket;
     try {
-      setState('uploading');
+      stage('uploading');
       ticket = await deps.beginWrite(blob.size);
       await deps.upload(ticket.uploadUrl, blob);
     } catch (error) {
+      if (mine !== epoch) return { status: 'stale' };
       return fail(error, 'העלאת המסמך נכשלה');
     }
 
     let result: SaveCommitOutput;
     try {
-      setState('committing');
+      stage('committing');
       result = await deps.commit({
         writeToken: ticket.writeToken,
         // בלי יעד — או כשביקשו „שמור בשם” במפורש — ה-commit פותח דיאלוג.
@@ -155,12 +183,17 @@ export function createSaveCoordinator(deps: SaveCoordinatorDeps): SaveCoordinato
         ...(suggestedName ? { suggestedName } : {}),
       });
     } catch (error) {
+      if (mine !== epoch) return { status: 'stale' };
       return fail(error, 'שמירת המסמך נכשלה');
     }
 
+    // הסבב שייך למסמך שהוחלף בינתיים. הבייטים כבר על הדיסק — לא נורא, הם של
+    // המסמך ההוא — אבל אסור לגעת במצב של המסמך שפתוח עכשיו.
+    if (mine !== epoch) return { status: 'stale' };
+
     if (result.cancelled) {
       // ביטול אינו כשל ואינו מסמן שגיאה — אבל גם אינו שמירה, ולכן dirty נשאר.
-      setState('idle');
+      stage('idle');
       return { status: 'cancelled' };
     }
     if (!result.token) {
@@ -171,17 +204,26 @@ export function createSaveCoordinator(deps: SaveCoordinatorDeps): SaveCoordinato
     name = result.name ?? name;
     // רק המהדורה שיוצאה נחשבת שמורה.
     if (exportedRevision > savedRevision) savedRevision = exportedRevision;
-    setState('idle');
+    stage('idle');
     return { status: 'saved', token: result.token, name: name ?? '' };
   }
 
-  async function saveLoop(forceSaveAs: boolean, suggestedName?: string): Promise<SaveOutcome> {
-    let outcome = await runOnce(forceSaveAs, suggestedName);
+  async function saveLoop(
+    mine: number,
+    forceSaveAs: boolean,
+    suggestedName?: string,
+  ): Promise<SaveOutcome> {
+    let outcome = await runOnce(mine, forceSaveAs, suggestedName);
 
     // שינוי שקרה בזמן הסבב אינו בקובץ. סבב נוסף — הפעם ליעד שכבר קיים, ולכן
     // בלי דיאלוג.
-    while (outcome.status === 'saved' && dirtyRevision !== savedRevision && !disposed) {
-      outcome = await runOnce(false, suggestedName);
+    while (
+      outcome.status === 'saved' &&
+      mine === epoch &&
+      dirtyRevision !== savedRevision &&
+      !disposed
+    ) {
+      outcome = await runOnce(mine, false, suggestedName);
     }
 
     return outcome;
@@ -198,17 +240,21 @@ export function createSaveCoordinator(deps: SaveCoordinatorDeps): SaveCoordinato
     if (inFlight) return inFlight;
 
     const isClean = dirtyRevision === savedRevision;
+    // „שמור בשם” על מסמך נקי הוא בקשה לגיטימית להעתק, והוא מייצא בלי לשנות
+    // revision: הגדלה מלאכותית שרדה ביטול של הדיאלוג וסימנה מסמך נקי כמלוכלך.
     if (isClean && !options.forceSaveAs) {
       return Promise.resolve({ status: 'clean' });
     }
-    // „שמור בשם” על מסמך נקי הוא בקשה לגיטימית להעתק, ולכן מסמנים אותו
-    // כמלוכלך כדי שהסבב יוציא בפועל.
-    if (isClean) dirtyRevision += 1;
 
-    const run = saveLoop(options.forceSaveAs ?? false, options.suggestedName).finally(() => {
-      inFlight = null;
-    });
+    const mine = epoch;
+    const run = saveLoop(mine, options.forceSaveAs ?? false, options.suggestedName).finally(
+      () => {
+        inFlight = null;
+        publish();
+      },
+    );
     inFlight = run;
+    publish();
     return run;
   }
 
@@ -239,6 +285,8 @@ export function createSaveCoordinator(deps: SaveCoordinatorDeps): SaveCoordinato
 
     reset(target) {
       cancelAutosave();
+      // כל סבב שבאוויר שייך למסמך הקודם, ומכאן והלאה התוצאה שלו נזרקת.
+      epoch += 1;
       dirtyRevision = 0;
       savedRevision = 0;
       state = 'idle';

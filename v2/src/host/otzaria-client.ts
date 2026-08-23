@@ -111,3 +111,21 @@ export function notify(message: string): void {
 export function notifyError(message: string): void {
   void tryCall('ui.showError', { message });
 }
+
+/**
+ * שאלת אישור. `ui.showConfirm` הוא דו-כפתורי, ולכן בחירה משלושה מצבים נבנית
+ * משתי שאלות (ראו askUnsavedChanges ב-main.ts). כשל בדיאלוג נחשב „לא”: עדיף
+ * לא לעשות פעולה הרסנית מאשר לעשות אותה בלי שהמשתמש אישר.
+ */
+export async function confirm(options: {
+  title: string;
+  content: string;
+  subtitle?: string;
+}): Promise<boolean> {
+  const res = await tryCall<{ confirmed?: boolean }>('ui.showConfirm', {
+    title: options.title,
+    content: options.content,
+    ...(options.subtitle ? { subtitle: options.subtitle } : {}),
+  });
+  return res?.confirmed === true;
+}
