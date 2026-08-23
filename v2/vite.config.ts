@@ -27,10 +27,13 @@ const WORKER_ROLES: Array<{ match: string; role: 'document' | 'reviewIndex' | 'd
 ];
 
 /**
- * Workers מקובץ נפרד נחסמים כשהדף נטען מ-file:// (המקור הוא null).
- * SuperDoc תומך בהחלפתם רשמית דרך `config.workerUrls`, ולכן במקום להסתמך על
- * ה-URL המובנה אנחנו מטמיעים את קוד ה-worker באריזה כמחרוזת, ובזמן ריצה
- * בונים ממנו blob: URL — פרוטוקול שה-SDK של אוצריא מתיר במפורש.
+ * ה-workers של המנוע מוטמעים באריזה כמחרוזות, ובזמן ריצה נבנה מהן blob: URL
+ * שנמסר ל-`config.workerUrls`.
+ *
+ * ההטמעה אינה אופציונלית: ה-build הוא IIFE, ובו `import.meta.url` אינו מצביע
+ * לקובץ ה-JS — ולכן ה-URL היחסי שהמנוע בונה בעצמו ל-worker אינו נפתר, גם
+ * מ-origin תקין (נמדד: אריזה בלי הטמעה נכשלת ב-module-load-failed גם ב-http).
+ * המדידות המלאות, כולל למה blob ולא data:, ב-docs/spike.md §שער A.
  */
 function inlineEngineWorkers(): Plugin {
   return {
