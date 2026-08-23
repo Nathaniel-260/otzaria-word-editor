@@ -15,9 +15,11 @@ import {
   beginBinaryWrite,
   commitUserFileWrite,
   pickDocxFile,
+  resolveFileUrl,
   uploadBytes,
   type UserFile,
 } from './host/files';
+import { forgetLastDocument, loadLastDocument, saveLastDocument } from './host/settings';
 import { downloadBlob } from './host/download';
 import { createEditor } from './engine/create-editor';
 import { createEditorSwap } from './sessions/editor-swap';
@@ -166,7 +168,8 @@ async function main(): Promise<void> {
       : 'cancel';
   }
 
-  async function openDocument(file?: UserFile): Promise<void> {
+  /** `true` אם המסמך נפתח. `false` על כשל או על החלפה. */
+  async function openDocument(file?: UserFile): Promise<boolean> {
     openBtn.disabled = true;
     const startedAt = performance.now();
     status(file ? `פותח את ${file.name}…` : 'פותח מסמך ריק…');
@@ -174,7 +177,7 @@ async function main(): Promise<void> {
     const outcome = await swap.open(file?.url);
     openBtn.disabled = swap.isOpening;
 
-    if (outcome.status === 'superseded') return;
+    if (outcome.status === 'superseded') return false;
 
     if (outcome.status === 'failed') {
       // הודעות המנוע באנגלית ולא חסומות מלמעלה, ולכן הן נכנסות אחרי משפט
@@ -182,19 +185,33 @@ async function main(): Promise<void> {
       // המסמך שהיה פעיל נשאר פעיל, ולכן גם הפקדים שלו נשארים כפי שהיו.
       const kept = swap.current ? ` ${title} נשאר פתוח.` : '';
       status(`פתיחת המסמך נכשלה: ${outcome.error.message}.${kept}`, true);
-      return;
+      return false;
     }
 
     const editor = outcome.session;
     commands = createCommandAdapter(editor.ui);
     title = file ? file.name.replace(/\.docx$/i, '') : 'מסמך חדש';
     status(`${title} — נטען ב-${Math.round(performance.now() - startedAt)} מילישניות`);
+    if (file && file.access !== 'readwrite') {
+      status(`${title} — פתוח לקריאה; „שמור” יבקש מקום חדש`);
+    }
 
     // מסמך חדש מתחיל נקי. token לקריאה בלבד אינו יעד כתיבה, ולכן „שמור”
     // הראשון שלו יפתח „שמור בשם” — וזה בדיוק מה שה-SDK אוכף.
     save.reset(
       file && file.access === 'readwrite' ? { token: file.token, name: file.name } : null,
     );
+
+    // מה שנשמר הוא ה-token, לא ה-URL: ה-URL תקף לריצה אחת בלבד.
+    if (file) {
+      void saveLastDocument({
+        token: file.token,
+        name: file.name,
+        writable: file.access === 'readwrite',
+      });
+    } else {
+      void forgetLastDocument();
+    }
 
     for (const button of [exportBtn, saveBtn, saveAsBtn, boldBtn, rtlBtn]) {
       button.disabled = false;
@@ -207,6 +224,7 @@ async function main(): Promise<void> {
         boldBtn.disabled = !state.enabled;
       }),
     );
+    return true;
   }
 
   /** מריצה פקודה ומדווחת כשל בעברית. */
@@ -284,6 +302,8 @@ async function main(): Promise<void> {
     }
     if (outcome.status === 'saved') {
       title = outcome.name.replace(/\.docx$/i, '') || title;
+      // „שמור בשם” מחזיר token חדש; זה מה שצריך להיפתח בהפעלה הבאה.
+      void saveLastDocument({ token: outcome.token, name: outcome.name, writable: true });
       status(`${title} נשמר`);
     }
   }
@@ -318,7 +338,40 @@ async function main(): Promise<void> {
   // מסמך ריק בעליית הלשונית מרים את כל המנוע ושני workers גם אם המשתמש לא
   // יפתח קובץ. מתאים ל-spike; בשלב ה-Ribbon יש להחליף במסך פתיחה שמקים את
   // המנוע רק כשבאמת צריך.
-  await openDocument();
+  // המסמך האחרון, ואם הוא לא נפתח — מסמך ריק. תוסף שנפתח בלי שום מסמך, רק
+  // כי קובץ מהפעם הקודמת נפגם, אינו שמיש.
+  const last = await resolveLastDocument();
+  if (!last) {
+    await openDocument();
+    return;
+  }
+  if (!(await openDocument(last))) {
+    void forgetLastDocument();
+    await openDocument();
+    // בלי isError: הכשל עצמו כבר הודיע למשתמש, ושתי הודעות שגיאה על אותו
+    // אירוע הן רעש. זו ההשלמה — מה קרה בסוף.
+    status('המסמך האחרון לא נפתח — נפתח מסמך חדש');
+  }
+}
+
+/**
+ * המסמך שהיה פתוח בהפעלה הקודמת.
+ *
+ * ה-token נשמר ב-storage וה-URL נבנה מחדש כאן, כי הפורט של שרת ה-loopback
+ * מתחלף בכל הפעלה. קובץ שהוזז או נמחק מחזיר null — זה לא כשל, וזה גם לא
+ * לולאת שגיאה: ה-grant נשכח ונפתח מסמך ריק.
+ */
+async function resolveLastDocument(): Promise<UserFile | undefined> {
+  const last = await loadLastDocument();
+  if (!last) return undefined;
+
+  const file = await resolveFileUrl(last.token);
+  if (!file) {
+    void forgetLastDocument();
+    return undefined;
+  }
+  // ה-access אינו חוזר מ-resolveFileUrl; מה שנשמר הוא מה שהיה בפתיחה.
+  return { ...file, name: file.name || last.name, access: last.writable ? 'readwrite' : 'read' };
 }
 
 void main();
