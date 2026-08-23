@@ -45,9 +45,12 @@ git push origin v1.3.6
 
 התוסף מופץ תחת [GNU Affero General Public License v3.0](LICENSE).
 
-הבחירה ב‑AGPL נובעת מהעורך החדש שנבנה בענף `feat/superdoc-v2-editor`: הוא מבוסס על
+הבחירה ב‑AGPL נובעת מהעורך החדש שנבנה בענף `feat/word-editor-v2`: הוא מבוסס על
 [SuperDoc](https://www.superdoc.dev/), שמופץ תחת AGPL‑3.0, ולכן גם התוסף חייב להיות AGPL.
 
-הערה חשובה: מנוע ה‑DOCX של SuperDoc (`@superdoc/docx-engine`) הוא **רכיב קנייני בנפרד**,
-שאינו קוד פתוח ואינו מכוסה ברישיון הזה. הרישיון שלו אוסר הפצה מחדש, ולכן אריזה שכוללת
-אותו דורשת אישור מ‑Harbour Enterprises לפני פרסום. פירוט ב‑[docs/superdoc-v2-plan.md](docs/superdoc-v2-plan.md) §2.
+הערה חשובה: מנוע ה‑DOCX של SuperDoc (`@superdoc/docx-engine`) הוא **רכיב קנייני בנפרד**
+שאינו קוד פתוח ואינו מכוסה ברישיון הזה. מפתחי SuperDoc אישרו במפורש
+([issue #3927](https://github.com/superdoc/docx-editor/issues/3927#issuecomment-5383145303))
+שתוסף קוד פתוח תחת AGPLv3 רשאי לארוז ולהפיץ את המנוע וה‑Workers שלו בתוך חבילה אופליין —
+בתנאי שהמקור מפורסם וזהה למופץ, שמייבאים `superdoc` בלבד ולא את המנוע ישירות, ושכל הודעות
+הרישוי נשמרות. פירוט ב‑[docs/word-plugin-implementation-plan.md](docs/word-plugin-implementation-plan.md) §2.
