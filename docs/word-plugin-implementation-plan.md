@@ -250,8 +250,9 @@ v2/
 
 מטרה: להוכיח שהמנוע וה־workers פועלים מתוסף ארוז לפני בניית Ribbon.
 
-> **בוצע.** התוצאות המלאות: [`v2/docs/spike.md`](../v2/docs/spike.md). 0.1 ו־0.2
-> עברו; 0.4 נמדד; ב־0.3 נותרה ההרצה על Windows, ואין בו חוסם.
+> **בוצע חלקית.** התוצאות המלאות: [`v2/docs/spike.md`](../v2/docs/spike.md).
+> 0.1 ו־0.2 עברו, ו־0.4 נמדד ב־Chrome/macOS. **0.3 — שער A — לא עבר:** אין בו
+> חוסם ידוע, אבל הוא לא הורץ על תוסף ארוז ב־Windows/WebView2.
 
 ### 0.1 תיקון חוזה SuperDoc
 
@@ -878,7 +879,8 @@ interface DocumentSession {
 ## 19. סדר ה־PRs המומלץ
 
 1. ~~`spike: use borrowed superdoc.ui and add contract tests`~~ — בוצע.
-2. ~~`spike: load engine workers as classic workers`~~ — בוצע; שער A נפתח.
+2. ~~`spike: load engine workers as classic workers`~~ — בוצע; החוסם הוסר,
+   השער עצמו לא הורץ.
 3. `spike: run gate A on packaged Windows and record limits` — נותר להריץ.
 4. במאגר אוצריא: `sdk: add streamed atomic user-file writes`
 5. במאגר אוצריא: `sdk: add quota-bound private binary drafts`

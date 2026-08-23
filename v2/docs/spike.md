@@ -18,6 +18,9 @@
 זו אינדיקציה חזקה ולא הוכחה, ולפי התכנית השער עובר רק כשהתוסף **הארוז** פועל
 ב־Windows. אין להתחיל Ribbon, שמירה או את PR הכתיבה ב־SDK לפני שהוא נסגר.
 
+> הבהרת מונח: „אריזה” במסמך הזה היא פלט `npm run build` — `v2/dist` — ולא
+> קובץ `.otzplugin` מותקן. `.otzplugin` נזכר במפורש בשמו.
+
 > **תיקון לגרסה קודמת של המסמך הזה.** קודם נכתב כאן שמ־`file://` אין צורה
 > שעובדת, ושנדרש שינוי בצד אוצריא. זה היה שגוי, ובביקורת נתפס: המסקנה נשענה
 > על ההנחה שקוד ה־worker חייב להיטען כ־module. הוא לא — ראו §3.
@@ -37,6 +40,7 @@
 | Workers כ־blob URLs | `src/engine/workers.ts` |
 | registry הפקודות ובדיקת יכולות | `src/engine/capabilities.ts` |
 | הרצת פקודות ותרגום כשל לעברית | `src/engine/command-adapter.ts` |
+| החלפת מסמך אטומית | `src/sessions/editor-swap.ts` |
 | ייצוא DOCX | `src/engine/export.ts` |
 | מעטפת השלב | `src/main.ts` |
 | שער אוטומטי על ה־dist | `scripts/check-dist.mjs` |
@@ -157,8 +161,9 @@ review-index 0.31MB.
   בייצוא/תצוגת PDF בלי להגדיר worker מקומי. `check:dist` מדפיס את האזהרה הזאת.
 - **`SuperDocUIState` אינו כולל `search` ו־`tables`:** גישה אליהם רק דרך
   ה־handles, לא דרך `ui.select`.
-- **ה־union של `OtzariaMethod` חסר את כל `fs.*`** (וגם `ui.pickFolder`,
+- **ה־union של `OtzariaMethod` היה חסר את כל `fs.*`** (וגם `ui.pickFolder`,
   `library.getTree`, `library.resolveCategoryPaths`) אף שהוולידטור מכיר אותם.
+  ההעתק ב־`src/types/` כאן כבר מעודכן.
   לדיוק: זה **לא** גרם לכשל typecheck בקוד שלנו — `OtzariaGlobal.call` מקבל
   `OtzariaMethod | string`, ולכן קריאה במחרוזת עוברת. מה שנפגע הוא מי שמקליד
   את המזהה כ־`OtzariaMethod` או בונה ממנו מפתחות. השלמת ה־union (ענף
