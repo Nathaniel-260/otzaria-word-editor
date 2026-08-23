@@ -548,30 +548,41 @@ interface DocumentSession {
 
 אין bytes בתוך האובייקט המתמיד. בזמן ריצה בלבד מותר לשמור Blob זמני.
 
+> מומש ב־`v2/src/sessions/save-coordinator.ts` ובמעטפת. מה שנשאר פתוח מסומן
+> להלן, ובדיקות ידניות ב־`v2/docs/spike-windows.md`.
+
 ### 9.2 פתיחה
 
-- [ ] „פתח” קורא
-  `fs.pickUserFile({ extensions: ['docx'], access: 'readwrite' })`.
-- [ ] cancellation אינו שגיאה ואינו מפרק את המסמך הנוכחי.
-- [ ] URL מוחזר נמסר ישירות ל־`Config.document`.
-- [ ] token/name נשמרים רק לאחר `onReady` מוצלח.
+- [x] „פתח” קורא
+  `fs.pickUserFile({ extensions: ['docx'], access: 'readwrite' })`. בלי הרשאת
+  כתיבה נופלים ל־`read` — מסמך שנפתח ואינו נשמר עדיף על מסמך שלא נפתח.
+- [x] cancellation אינו שגיאה ואינו מפרק את המסמך הנוכחי.
+- [x] URL מוחזר נמסר ישירות ל־`Config.document`.
+- [x] token/name נשמרים רק לאחר `onReady` מוצלח (ההחלפה עצמה אטומית —
+  `sessions/editor-swap.ts`).
 - [ ] בעלייה חוזרת קוראים `fs.resolveFileUrl`; אם הקובץ הוזז/נמחק, מציגים
-  הודעה עם „בחר מחדש” ולא לולאת שגיאה.
-- [ ] פתיחה חדשה כאשר יש dirty document דורשת Save / Discard / Cancel.
+  הודעה עם „בחר מחדש” ולא לולאת שגיאה. **טרם מומש** — דורש שמירת ה־token
+  ב־`storage`.
+- [x] פתיחה חדשה כאשר יש dirty document דורשת Save / Discard / Cancel.
+  `ui.showConfirm` דו־כפתורי, ולכן שלושת המצבים נבנים משתי שאלות.
 
 ### 9.3 SaveCoordinator
 
-- [ ] `onEditorUpdate` מעלה `dirtyRevision`.
-- [ ] Ctrl/Cmd+S קורא `saveNow()`.
-- [ ] אין שתי שמירות במקביל. שינוי בזמן שמירה מסמן `saveAgain` ומריץ סבב נוסף.
-- [ ] כל סבב מצלם revision, קורא `superdoc.export({ exportType: ['docx'],
-  triggerDownload: false })`, מעלה דרך loopback ועושה commit.
-- [ ] רק אחרי commit מוצלח: `savedRevision = exportedRevision`.
-- [ ] אם writable token חסר, commit פותח Save As. ביטול משאיר dirty.
-- [ ] שגיאת export/upload/commit משאירה dirty ומציגה retry; אין הודעת „נשמר”.
-- [ ] autosave מתחיל רק אחרי שלמסמך יש writable token, עם debounce של 2.5 שניות.
-- [ ] ב־before close/switch משתמשים ב־Save / Discard / Cancel; אין להסתמך על
-  `beforeunload` של WebView.
+- [x] `onEditorUpdate` מעלה `dirtyRevision`.
+- [x] Ctrl/Cmd+S קורא `saveNow()`; Ctrl/Cmd+Shift+S הוא „שמור בשם”, ושניהם
+  מתעלמים בזמן שמירה (אחרת הם מצטרפים לסבב שרץ ומאבדים את המשמעות).
+- [x] אין שתי שמירות במקביל. שינוי בזמן שמירה מריץ סבב נוסף.
+- [x] כל סבב מצלם revision, מייצא, מעלה דרך loopback ועושה commit.
+- [x] רק אחרי commit מוצלח: `savedRevision = exportedRevision`.
+- [x] אם writable token חסר, commit פותח Save As. ביטול משאיר dirty.
+- [x] שגיאת export/upload/commit משאירה dirty; אין הודעת „נשמר”.
+- [x] autosave מתחיל רק אחרי שלמסמך יש writable token, עם debounce של 2.5 שניות.
+- [x] ב־before close/switch משתמשים ב־Save / Discard / Cancel; אין הסתמכות על
+  `beforeunload`.
+- [x] **סבב שייך למסמך שפתח אותו.** `reset` מעלה epoch, וסבב שמסתיים אחרי מעבר
+  מסמך מוחזר כ־`stale`: אינו מאמץ יעד, אינו מזיז `savedRevision` ואינו מפרסם
+  מצב. בלי זה שמירה של א' שהסתיימה אחרי פתיחת ב' הייתה מפנה את autosave של ב'
+  לקובץ של א'.
 
 למסמך חדש שלא נבחר לו יעד אין autosave לדיסק ב־MVP. לאחר מימוש
 `commitPluginFileWrite`, שומרים snapshot פרטי משוחזר ומוחקים אותו רק אחרי Save
