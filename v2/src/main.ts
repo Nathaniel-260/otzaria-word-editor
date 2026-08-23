@@ -29,7 +29,7 @@ function domReady(): Promise<void> {
 const SHELL = `
   <header class="topbar"><span class="topbar__title">וורד לאוצריא</span></header>
   <div class="toolbar">
-    <button id="open" type="button">פתיחת קובץ Word</button>
+    <button id="open" type="button" disabled>פתיחת קובץ Word</button>
     <button id="export" type="button" disabled>ייצוא ל-Word</button>
     <button id="bold" type="button" disabled aria-pressed="false">מודגש</button>
     <button id="rtl" type="button" disabled>כיוון מימין לשמאל</button>
@@ -161,6 +161,9 @@ async function main(): Promise<void> {
     const info = await boot;
     applyTheme(info.theme);
     onThemeChanged(applyTheme);
+    // הכפתור נפתח רק כאן: לחיצה לפני ה-boot הייתה יכולה להתחיל פתיחה שהמסמך
+    // הריק של האתחול יחליף — כלומר בחירת המשתמש נעלמת בשקט.
+    openBtn.disabled = false;
     status(`אוצריא ${info.app.version} · ${info.app.platform} — בחר קובץ Word כדי להתחיל`);
   } catch (error) {
     status(error instanceof Error ? error.message : 'אוצריא לא אתחלה את התוסף', true);

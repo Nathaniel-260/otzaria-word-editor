@@ -12,6 +12,7 @@ interface FakeConfig {
   ui: false;
   telemetry: { enabled: boolean };
   workerUrls?: unknown;
+  modules?: unknown;
   onReady: (params: { superdoc: FakeSuperDoc }) => void;
   onException: (payload: unknown) => void;
 }
@@ -78,6 +79,49 @@ describe('createEditor', () => {
     expect(instance.config.selector).toBe(container);
     expect(instance.config.ui).toBe(false);
     expect(instance.config.telemetry).toEqual({ enabled: false });
+  });
+
+  it('מכבה את דיאלוג הסיסמה המובנה', () => {
+    // הוא surface של modules ולכן פועל גם כש-ui: false, ובמצב הזה הוא בולע
+    // את הכשל של DOCX מוצפן — הפתיחה לא מסתיימת לא בהצלחה ולא בכשל.
+    const { instance } = mount();
+
+    expect(instance.config.modules).toEqual({ surfaces: { passwordPrompt: false } });
+  });
+
+  it('פתיחה שאינה מסתיימת נכשלת בזמן קצוב ומפרקת את המנוע', async () => {
+    vi.useFakeTimers();
+    try {
+      const container = document.createElement('div');
+      const pending = createEditor({ container, timeoutMs: 1000 });
+      const instance = lastInstance()!;
+      const assertion = expect(pending).rejects.toThrow('לא הסתיימה בזמן סביר');
+
+      await vi.advanceTimersByTimeAsync(1000);
+      await assertion;
+
+      expect(instance.destroy).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('פתיחה שהצליחה מבטלת את השעון', async () => {
+    vi.useFakeTimers();
+    try {
+      const container = document.createElement('div');
+      const promise = createEditor({ container, timeoutMs: 1000 });
+      const instance = lastInstance()!;
+      instance.config.onReady({ superdoc: instance });
+      const session = await promise;
+
+      await vi.advanceTimersByTimeAsync(5000);
+
+      expect(session.superdoc).toBe(instance);
+      expect(instance.destroy).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('בפירוק קורא רק ל-destroy של המנוע', async () => {

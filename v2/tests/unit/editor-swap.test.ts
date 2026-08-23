@@ -192,4 +192,51 @@ describe('createEditorSwap', () => {
     expect(swap.current).toBeNull();
     expect(hosts(container)).toHaveLength(0);
   });
+
+  it('כשל בפירוק הישן אינו מפיל את ההחלפה', async () => {
+    const { container, opens, swap } = setup();
+    const first = fakeSession('a');
+    const firstOpen = swap.open();
+    opens[0].deferred.resolve(first);
+    await firstOpen;
+    first.destroy.mockImplementation(() => {
+      throw new Error('destroy קרס');
+    });
+
+    const second = fakeSession('b');
+    const secondOpen = swap.open();
+    opens[1].deferred.resolve(second);
+
+    // ההחלפה מצליחה, ה-swap מצביע על החדש, וה-host הישן מוסר בכל זאת.
+    await expect(secondOpen).resolves.toEqual({ status: 'opened', session: second });
+    expect(swap.current).toBe(second);
+    expect(hosts(container)).toHaveLength(1);
+    expect(hosts(container)[0].classList.contains(PENDING_CLASS)).toBe(false);
+  });
+
+  it('destroy פעמיים אינו זורק ואינו מפרק פעמיים', async () => {
+    const { container, opens, swap } = setup();
+    const first = fakeSession('a');
+    const open = swap.open();
+    opens[0].deferred.resolve(first);
+    await open;
+
+    swap.destroy();
+    swap.destroy();
+
+    expect(first.destroy).toHaveBeenCalledTimes(1);
+    expect(hosts(container)).toHaveLength(0);
+  });
+
+  it('destroy מסיר את ה-host של פתיחה שלא הסתיימה', () => {
+    const { container, swap } = setup();
+
+    void swap.open();
+    expect(hosts(container)).toHaveLength(1);
+
+    swap.destroy();
+
+    // הפתיחה עוד באוויר, אבל ה-host שלה אינו נשאר על המסך.
+    expect(hosts(container)).toHaveLength(0);
+  });
 });

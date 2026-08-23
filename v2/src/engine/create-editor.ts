@@ -34,7 +34,20 @@ export interface CreateEditorOptions {
   source?: string | File | Blob;
   /** נקרא על כל exception של המנוע, גם אחרי שהמסמך נטען. */
   onError?: (error: Error, payload: SuperDocExceptionPayload) => void;
+  /** מעל הזמן הזה הפתיחה נכשלת. ראו OPEN_TIMEOUT_MS. */
+  timeoutMs?: number;
 }
+
+/**
+ * גבול הזמן לפתיחת מסמך.
+ *
+ * לא הגנה מפני איטיות אלא מפני שקט: `onReady` ו-`onException` הם שני המסלולים
+ * היחידים שמסיימים את ההבטחה, ומסלול במנוע שלא יורה אף אחד מהם מקפיא את
+ * הממשק בלי שום סימן. קרה בפועל עם דיאלוג הסיסמה המובנה. הערך נדיב ביחס
+ * ל-boot שנמדד (485ms ארוז, 4.3 שניות בפיתוח) ומול workerStartupTimeoutMs
+ * של המנוע (30 שניות).
+ */
+export const OPEN_TIMEOUT_MS = 120_000;
 
 /**
  * ההודעה שמגיעה מ-exception של SuperDoc. ה-union מגיע מארבעה מקומות שונים
@@ -53,11 +66,12 @@ export function exceptionToError(payload: SuperDocExceptionPayload): Error {
 }
 
 export function createEditor(options: CreateEditorOptions): Promise<EditorSession> {
-  const { container, source, onError } = options;
+  const { container, source, onError, timeoutMs = OPEN_TIMEOUT_MS } = options;
 
   return new Promise((resolve, reject) => {
     let instance: SuperDoc | undefined;
     let settled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     /** כשל שהגיע לפני שהבנאי חזר, ולכן לא היה מה לפרק באותו רגע. */
     let pendingTeardown = false;
 
@@ -89,6 +103,14 @@ export function createEditor(options: CreateEditorOptions): Promise<EditorSessio
       // התוסף עובד אופליין וללא הרשאת רשת; טלמטריה תיצור קריאות שייחסמו.
       telemetry: { enabled: false },
 
+      // דיאלוג הסיסמה המובנה של המנוע פועל גם כש-ui: false — הוא surface של
+      // modules ולא של ui — והוא "לוקח אחריות" על DOCX מוצפן: הוא מטפל
+      // ב-DOCX_PASSWORD_REQUIRED בעצמו ואינו פולט exception. התוצאה הייתה
+      // הבטחה שאינה מסתיימת: דיאלוג באנגלית מעל הממשק שלנו, וביטול שלו משאיר
+      // את הפתיחה תלויה לנצח. מכובה — כך שהכשל מגיע כ-exception ומטופל.
+      // דיאלוג סיסמה בעברית הוא פיצ'ר לשלב מאוחר, לא תופעת לוואי.
+      modules: { surfaces: { passwordPrompt: false } },
+
       // ב-file:// חייבים workers מ-blob: . undefined משאיר את ברירת המחדל
       // של SuperDoc, שנכונה בפיתוח מ-localhost.
       workerUrls: engineWorkerUrls(),
@@ -98,6 +120,7 @@ export function createEditor(options: CreateEditorOptions): Promise<EditorSessio
       onReady: ({ superdoc: ready }) => {
         if (settled) return;
         settled = true;
+        clearTimeout(timer);
         resolve({
           superdoc: ready,
           ui: ready.ui,
@@ -117,6 +140,7 @@ export function createEditor(options: CreateEditorOptions): Promise<EditorSessio
         onError?.(error, payload);
         if (settled) return;
         settled = true;
+        clearTimeout(timer);
         // כשל לפני onReady משאיר מופע חצי-בנוי עם workers פתוחים. אם ה-exception
         // נורה מתוך הבנאי עצמו — והטיפוסים מתעדים מסלול כזה, שבו הריצה "mounts
         // only enough state to report that error" — instance עדיין undefined,
@@ -129,5 +153,13 @@ export function createEditor(options: CreateEditorOptions): Promise<EditorSessio
 
     instance = superdoc;
     if (pendingTeardown) destroy(superdoc);
+
+    if (settled) return;
+    timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      destroy(superdoc);
+      reject(new Error('פתיחת המסמך לא הסתיימה בזמן סביר'));
+    }, timeoutMs);
   });
 }

@@ -44,6 +44,8 @@ export function createEditorSwap(container: HTMLElement, openEditor: OpenEditor)
   let currentHost: HTMLElement | null = null;
   let generation = 0;
   let pending = 0;
+  /** hosts של פתיחות שעוד לא הסתיימו, כדי ש-destroy יוכל לנקות גם אותם. */
+  const openingHosts = new Set<HTMLElement>();
 
   function createHost(): HTMLElement {
     const host = document.createElement('div');
@@ -53,7 +55,14 @@ export function createEditorSwap(container: HTMLElement, openEditor: OpenEditor)
   }
 
   function discard(session: EditorSession | null, host: HTMLElement | null): void {
-    session?.destroy();
+    try {
+      session?.destroy();
+    } catch (error) {
+      // פירוק המנוע הוא שרשרת ארוכה (unmount של Vue, surfaces, controller).
+      // זריקה שם אינה יכולה להשאיר את ה-swap במצב לא-עקבי או להפוך open
+      // לדחייה שאינה בחוזה שלו.
+      console.error('[otzaria-word] כשל בפירוק מסמך', error);
+    }
     host?.remove();
   }
 
@@ -69,12 +78,14 @@ export function createEditorSwap(container: HTMLElement, openEditor: OpenEditor)
     async open(source) {
       const mine = ++generation;
       const host = createHost();
+      openingHosts.add(host);
       pending += 1;
 
       let session: EditorSession;
       try {
         session = await openEditor(host, source);
       } catch (error) {
+        openingHosts.delete(host);
         host.remove();
         pending -= 1;
         if (mine !== generation) return { status: 'superseded' };
@@ -83,6 +94,7 @@ export function createEditorSwap(container: HTMLElement, openEditor: OpenEditor)
           error: error instanceof Error ? error : new Error(String(error)),
         };
       }
+      openingHosts.delete(host);
       pending -= 1;
 
       // בקשה חדשה יותר כבר בדרך, או שכבר הוחלף: המועמד הזה מפרק את עצמו ואינו
@@ -92,19 +104,29 @@ export function createEditorSwap(container: HTMLElement, openEditor: OpenEditor)
         return { status: 'superseded' };
       }
 
-      discard(current, currentHost);
+      // ההשמה לפני הפירוק: כשל בפירוק הישן לא יכול להשאיר את ה-swap מצביע
+      // על session הרוס ואת החדש בלי בעלים.
+      const previous = current;
+      const previousHost = currentHost;
       current = session;
       currentHost = host;
       host.classList.remove(PENDING_CLASS);
+      discard(previous, previousHost);
       return { status: 'opened', session };
     },
 
     destroy() {
-      // כל פתיחה שבדרך תיראה את עצמה כמוחלפת ותפרק את עצמה.
+      // כל פתיחה שבדרך תיראה את עצמה כמוחלפת ותפרק את עצמה. ה-host שלה מוסר
+      // כאן, כי הוא משתנה מקומי ב-open ואינו נגיש מבחוץ; פתיחה שלא תסתיים
+      // לעולם לא תשאיר אותו על המסך.
       generation += 1;
-      discard(current, currentHost);
+      for (const host of openingHosts) host.remove();
+      openingHosts.clear();
+      const previous = current;
+      const previousHost = currentHost;
       current = null;
       currentHost = null;
+      discard(previous, previousHost);
     },
   };
 }
