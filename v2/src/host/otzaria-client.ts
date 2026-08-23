@@ -58,11 +58,14 @@ export function on<K extends keyof OtzariaEventMap>(
 /**
  * ה-latch של plugin.boot.
  *
- * האירוע נורה פעם אחת, ואוצריא אינה שומרת את ה-payload ואינה משחזרת אותו:
- * `Otzaria.on` הוא `window.addEventListener` נקי, ואין `getBootInfo`. מי
- * שנרשם אחרי הירייה — למשל אחרי `await` — לא יקבל אותו לעולם. לכן ההרשמה
- * נעשית כאן, בזמן טעינת המודול, לפני כל await בתוסף, וישירות על window: כך
- * היא עובדת גם לפני שאובייקט ה-SDK הוזרק.
+ * האירוע נורה פעם אחת. אוצריא אינה שומרת את ה-payload ואין `getBootInfo`, ו-
+ * `on` של ה-SDK האמיתי הוא `window.addEventListener` בלי replay — כלומר מי
+ * שנרשם אחרי הירייה, למשל אחרי `await`, לא יקבל אותו לעולם. זה הכשל שההרשמה
+ * כאן, בזמן טעינת המודול, מונעת.
+ *
+ * (אוצריא כן מזריקה stub לפני ה-SDK, שה-`on` שלו מתור רישומים ומשחזר אותם
+ * לפני שיגור ה-boot — ולכן `Otzaria.on` בזמן טעינת המודול היה עובד גם כן.
+ * ההרשמה ישירות על window אינה תלויה בהתנהגות הזאת, וזה כל היתרון שלה.)
  */
 const bootPayload = new Promise<BootPayload>((resolve) => {
   window.addEventListener(
