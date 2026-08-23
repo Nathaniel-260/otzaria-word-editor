@@ -6,7 +6,7 @@
  * מ-file:// — והכול מקומי, בלי רשת. הבדיקה נכשלת על הפרה של אלה, ומדפיסה
  * גדלים כעדות לשער B.
  */
-import { readFileSync, existsSync, statSync, readdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, statSync, readdirSync, rmSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
@@ -109,6 +109,63 @@ for (const rel of ENGINE_BEARING_FILES) {
       `${rel} אינו נושא את באנר הרישוי של מנוע ה-DOCX — ` +
         "בדקו את esbuild.legalComments ב-vite.config.ts",
     );
+  }
+}
+
+/**
+ * קוד ה-workers יושב בתוך מחרוזות JSON, ולכן `node --check` על הקובץ העוטף
+ * אינו נוגע בו כלל — הוא בודק שורת השמה אחת. אלה 4.9MB שנטענים בפועל
+ * כ-workers קלאסיים, וכשל שלהם פירושו תוסף שלא פותח מסמכים; לכן הם נפרסים
+ * ונבדקים בנפרד, ומול אותן חתימות ESM שה-build אוכף.
+ */
+const ESM_SIGNATURES = [
+  /^\s*import\s+[\w{*'"]/m,
+  /^\s*export\s+(?:default|const|let|var|function|class|\{)/m,
+  /\bimport\.meta\b/,
+  /^\s*import\s*\(/m,
+];
+
+const workersFile = join(DIST, 'assets/engine-workers.js');
+if (existsSync(workersFile)) {
+  const wrapper = readFileSync(workersFile, 'utf8');
+  const json = wrapper.match(/^window\.__SUPERDOC_WORKER_SOURCES__ = ([\s\S]*);\s*$/);
+
+  if (!json) {
+    errors.push('assets/engine-workers.js אינו בצורה המצופה — לא ניתן לבדוק את קוד ה-workers');
+  } else {
+    let sources;
+    try {
+      sources = JSON.parse(json[1]);
+    } catch (error) {
+      errors.push(`קוד ה-workers אינו JSON תקין: ${error.message}`);
+    }
+
+    const roles = sources ? Object.keys(sources) : [];
+    for (const role of ['document', 'reviewIndex']) {
+      if (!roles.includes(role)) errors.push(`חסר קוד worker לתפקיד ${role}`);
+    }
+
+    for (const [role, code] of Object.entries(sources ?? {})) {
+      const tmp = join(DIST, `.worker-check-${role}.js`);
+      writeFileSync(tmp, code);
+      try {
+        execFileSync(process.execPath, ['--check', tmp], { stdio: 'pipe' });
+      } catch {
+        errors.push(`קוד ה-worker "${role}" אינו סקריפט קלאסי תקין (node --check נכשל)`);
+      } finally {
+        rmSync(tmp, { force: true });
+      }
+
+      const esm = ESM_SIGNATURES.filter((pattern) => pattern.test(code));
+      if (esm.length) {
+        errors.push(
+          `קוד ה-worker "${role}" מכיל תחביר ESM ולכן לא ייטען כ-worker קלאסי, ` +
+            'וב-file:// אין חלופה',
+        );
+      }
+
+      console.log(`  worker ${role}: ${(code.length / 1024 / 1024).toFixed(2)} MB, קלאסי`);
+    }
   }
 }
 
