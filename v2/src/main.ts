@@ -13,7 +13,8 @@ import { notifyError, onThemeChanged, waitForBoot } from './host/otzaria-client'
 import { applyTheme } from './host/theme';
 import { pickDocxFile, type UserFile } from './host/files';
 import { downloadBlob } from './host/download';
-import { createEditor, type EditorSession } from './engine/create-editor';
+import { createEditor } from './engine/create-editor';
+import { createEditorSwap } from './sessions/editor-swap';
 import { createCommandAdapter, type CommandAdapter } from './engine/command-adapter';
 import { docxFileName, exportDocx } from './engine/export';
 
@@ -33,7 +34,7 @@ const SHELL = `
     <button id="bold" type="button" disabled aria-pressed="false">מודגש</button>
     <button id="rtl" type="button" disabled>כיוון מימין לשמאל</button>
   </div>
-  <main id="editor" class="editor-host"></main>
+  <main id="editor" class="editor-stack"></main>
   <footer id="status" class="status" role="status">ממתין לטעינת אוצריא…</footer>
 `;
 
@@ -54,7 +55,7 @@ async function main(): Promise<void> {
   app.innerHTML = SHELL;
 
   const statusEl = app.querySelector<HTMLElement>('#status')!;
-  const editorHost = app.querySelector<HTMLElement>('#editor')!;
+  const editorStack = app.querySelector<HTMLElement>('#editor')!;
   const openBtn = app.querySelector<HTMLButtonElement>('#open')!;
   const exportBtn = app.querySelector<HTMLButtonElement>('#export')!;
   const boldBtn = app.querySelector<HTMLButtonElement>('#bold')!;
@@ -66,60 +67,40 @@ async function main(): Promise<void> {
     if (isError) notifyError(text);
   }
 
-  let session: EditorSession | null = null;
   let commands: CommandAdapter | null = null;
   let title = 'מסמך חדש';
 
-  /**
-   * הקמת מנוע היא אסינכרונית וארוכה (מאות מילישניות עד שניות), ולכן פתיחה
-   * שנייה שמתחילה באמצע הראשונה משאירה מופע SuperDoc שלם — ושני workers —
-   * בלי שאף אחד יפרק אותו. ה-generation הוא מי שקובע מי המסמך הנוכחי: מי
-   * שהתיישב אחרי שהוחלף מפרק את עצמו.
-   */
-  let openGeneration = 0;
+  // ההחלפה עצמה — טעינה ל-host נפרד והחלפה רק אחרי onReady — יושבת ב-
+  // sessions/editor-swap.ts, כדי שהיא תהיה נבדקת ולא תלויה במעטפת הזאת.
+  const swap = createEditorSwap(editorStack, (host, source) =>
+    createEditor({
+      container: host,
+      source,
+      onError: (error) => console.error('[otzaria-word] המנוע דיווח על שגיאה', error),
+    }),
+  );
 
-  function beginOpen(): number {
+  async function openDocument(file?: UserFile): Promise<void> {
     openBtn.disabled = true;
-    return ++openGeneration;
-  }
-
-  function endOpen(generation: number): void {
-    if (generation === openGeneration) openBtn.disabled = false;
-  }
-
-  async function openDocument(generation: number, file?: UserFile): Promise<void> {
-    session?.destroy();
-    session = null;
-    commands = null;
-    editorHost.replaceChildren();
-    for (const button of [exportBtn, boldBtn, rtlBtn]) button.disabled = true;
-
     const startedAt = performance.now();
     status(file ? `פותח את ${file.name}…` : 'פותח מסמך ריק…');
 
-    let editor: EditorSession;
-    try {
-      editor = await createEditor({
-        container: editorHost,
-        source: file?.url,
-        onError: (error) => console.error('[otzaria-word] המנוע דיווח על שגיאה', error),
-      });
-    } catch (error) {
-      // פתיחה שהוחלפה לא כותבת על ההודעה של הפתיחה שהחליפה אותה.
-      if (generation === openGeneration) {
-        status(error instanceof Error ? error.message : 'טעינת המסמך נכשלה', true);
-      }
+    const outcome = await swap.open(file?.url);
+    openBtn.disabled = swap.isOpening;
+
+    if (outcome.status === 'superseded') return;
+
+    if (outcome.status === 'failed') {
+      // הודעות המנוע באנגלית ולא חסומות מלמעלה, ולכן הן נכנסות אחרי משפט
+      // בעברית שאומר מה קרה — ולא במקומו.
+      // המסמך שהיה פעיל נשאר פעיל, ולכן גם הפקדים שלו נשארים כפי שהיו.
+      const kept = swap.current ? ` ${title} נשאר פתוח.` : '';
+      status(`פתיחת המסמך נכשלה: ${outcome.error.message}.${kept}`, true);
       return;
     }
 
-    if (generation !== openGeneration) {
-      editor.destroy();
-      return;
-    }
-
-    session = editor;
+    const editor = outcome.session;
     commands = createCommandAdapter(editor.ui);
-
     title = file ? file.name.replace(/\.docx$/i, '') : 'מסמך חדש';
     status(`${title} — נטען ב-${Math.round(performance.now() - startedAt)} מילישניות`);
 
@@ -147,26 +128,25 @@ async function main(): Promise<void> {
 
   openBtn.addEventListener('click', () => {
     void (async () => {
-      const generation = beginOpen();
+      openBtn.disabled = true;
       try {
         const file = await pickDocxFile();
         // ביטול הבורר אינו כשל ואינו נוגע במסמך הפתוח.
-        if (file && generation === openGeneration) await openDocument(generation, file);
+        if (file) await openDocument(file);
       } catch (error) {
-        if (generation === openGeneration) {
-          status(error instanceof Error ? error.message : 'בחירת הקובץ נכשלה', true);
-        }
+        status(error instanceof Error ? error.message : 'בחירת הקובץ נכשלה', true);
       } finally {
-        endOpen(generation);
+        if (!swap.isOpening) openBtn.disabled = false;
       }
     })();
   });
 
   exportBtn.addEventListener('click', () => {
     void (async () => {
-      if (!session) return;
+      const active = swap.current;
+      if (!active) return;
       try {
-        downloadBlob(await exportDocx(session.superdoc), docxFileName(title));
+        downloadBlob(await exportDocx(active.superdoc), docxFileName(title));
         status(`${title} יוצא ל-Word`);
       } catch (error) {
         status(error instanceof Error ? error.message : 'הייצוא נכשל', true);
@@ -190,12 +170,7 @@ async function main(): Promise<void> {
   // מסמך ריק בעליית הלשונית מרים את כל המנוע ושני workers גם אם המשתמש לא
   // יפתח קובץ. מתאים ל-spike; בשלב ה-Ribbon יש להחליף במסך פתיחה שמקים את
   // המנוע רק כשבאמת צריך.
-  const generation = beginOpen();
-  try {
-    await openDocument(generation);
-  } finally {
-    endOpen(generation);
-  }
+  await openDocument();
 }
 
 void main();

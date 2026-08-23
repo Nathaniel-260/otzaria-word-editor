@@ -88,11 +88,25 @@ button:disabled {
 }
 
 /* אזור המסמך. flex ולא חישוב גבהים — פס או שורת מצב שישתנו לא ישברו אותו. */
-.editor-host {
+.editor-stack {
+  position: relative;
   flex: 1 1 auto;
   min-height: 0;
-  overflow: auto;
   background: var(--color-surface-container-highest);
+}
+
+/* כל מסמך מקבל host משלו, וכולם באותו מקום: מסמך שנטען יושב מעל הפעיל עד
+   שהוא מוכן. ראו sessions/editor-swap.ts. */
+.editor-stack__host {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+}
+
+/* visibility ולא display: ל-host שנטען חייב להיות box אמיתי, אחרת המנוע מודד
+   עימוד באלמנט בגודל אפס. */
+.editor-stack__host--pending {
+  visibility: hidden;
 }
 
 .status {
