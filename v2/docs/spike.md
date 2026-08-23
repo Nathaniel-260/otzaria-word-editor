@@ -136,6 +136,12 @@ review-index 0.31MB.
 
 ## 5. מה עוד לא נעשה
 
+- [ ] „שמור” אמיתי. API הכתיבה נוסף ל-SDK של אוצריא בענף
+  `docs/plugin-sdk-type-accuracy` (`fs.beginBinaryWrite` +
+  `fs.commitUserFileWrite`, הרשאת `fs.user_files.write`, `pickUserFile` עם
+  `access: 'readwrite'`), אבל התוסף עדיין מייצא דרך `<a download>`. המימוש
+  ב-v2 הוא שלב 2 בתכנית, ורק אחרי שגרסת אוצריא שמכילה את ה-API תהיה זמינה
+  לבדיקה — ואז יש לעדכן גם את `minAppVersion`.
 - [ ] אריזה עם `otzaria pack-plugin` וקבלת הוולידטור. לא ניתן להריץ על המכונה
   הזאת: `dart run tool/plugins/package_plugin.dart` קורס בקומפילציה של חבילת
   אוצריא (`_FfiUseSiteTransformer`, באג של ה־SDK המותקן) — לא קשור לתוסף.
