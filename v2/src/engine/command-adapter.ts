@@ -116,12 +116,11 @@ export function createCommandAdapter(ui: BorrowedSuperDocUI): CommandAdapter {
       }
 
       if (isReceipt(result) && result.success === false) {
-        const code = result.failure.code;
-        return {
-          ok: false,
-          message: FAILURE_TEXT[code] ?? `הפעולה נכשלה (${code})`,
-          reason: code,
-        };
+        const { code, message } = result.failure;
+        // אין תרגום? מציגים את ההסבר של המנוע ואת הקוד. ההסבר באנגלית, אבל הוא
+        // אומר משהו — ובלעדיו נשארת רק הודעה גנרית שאי אפשר לעשות איתה כלום.
+        const fallback = message ? `הפעולה נכשלה: ${message} (${code})` : `הפעולה נכשלה (${code})`;
+        return { ok: false, message: FAILURE_TEXT[code] ?? fallback, reason: code };
       }
 
       return { ok: true };

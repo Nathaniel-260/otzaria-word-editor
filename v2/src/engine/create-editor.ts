@@ -58,6 +58,8 @@ export function createEditor(options: CreateEditorOptions): Promise<EditorSessio
   return new Promise((resolve, reject) => {
     let instance: SuperDoc | undefined;
     let settled = false;
+    /** כשל שהגיע לפני שהבנאי חזר, ולכן לא היה מה לפרק באותו רגע. */
+    let pendingTeardown = false;
 
     const disposers: Array<() => void> = [];
     let destroyed = false;
@@ -116,12 +118,16 @@ export function createEditor(options: CreateEditorOptions): Promise<EditorSessio
         if (settled) return;
         settled = true;
         // כשל לפני onReady משאיר מופע חצי-בנוי עם workers פתוחים. אם ה-exception
-        // נורה בתוך הבנאי עצמו, instance עדיין undefined ואין מה לפרק.
+        // נורה מתוך הבנאי עצמו — והטיפוסים מתעדים מסלול כזה, שבו הריצה "mounts
+        // only enough state to report that error" — instance עדיין undefined,
+        // ולכן הפירוק נדחה לרגע שאחרי הבנאי.
         if (instance) destroy(instance);
+        else pendingTeardown = true;
         reject(error);
       },
     });
 
     instance = superdoc;
+    if (pendingTeardown) destroy(superdoc);
   });
 }

@@ -116,16 +116,31 @@ describe('createCommandAdapter', () => {
     });
   });
 
-  it('קוד כשל שאין לו תרגום מוצג עם הקוד', async () => {
+  it('קוד כשל שאין לו תרגום מוצג עם ההסבר של המנוע ועם הקוד', async () => {
     const { ui } = fakeUi({
       link: {
-        result: { success: false, failure: { code: 'PLAN_CONFLICT_OVERLAP' } } as never,
+        result: {
+          success: false,
+          failure: { code: 'PLAN_CONFLICT_OVERLAP', message: 'overlapping plan steps' },
+        } as never,
       },
     });
 
     const outcome = await createCommandAdapter(ui).run('link');
 
-    expect(outcome.ok === false && outcome.message).toContain('PLAN_CONFLICT_OVERLAP');
+    expect(outcome.ok === false && outcome.message).toBe(
+      'הפעולה נכשלה: overlapping plan steps (PLAN_CONFLICT_OVERLAP)',
+    );
+  });
+
+  it('קוד כשל בלי הסבר מוצג עם הקוד לבדו', async () => {
+    const { ui } = fakeUi({
+      link: { result: { success: false, failure: { code: 'PLAN_CONFLICT_OVERLAP' } } as never },
+    });
+
+    const outcome = await createCommandAdapter(ui).run('link');
+
+    expect(outcome.ok === false && outcome.message).toBe('הפעולה נכשלה (PLAN_CONFLICT_OVERLAP)');
   });
 
   it('זריקה מן המנוע נתפסת ומוחזרת כהודעה', async () => {
