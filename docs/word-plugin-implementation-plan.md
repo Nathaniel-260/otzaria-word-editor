@@ -21,7 +21,7 @@
 
 1. לפתוח מסמך DOCX דרך בורר הקבצים של אוצריא, או ליצור מסמך ריק.
 2. לערוך עברית, אנגלית וטקסט מעורב בעימוד עמודים.
-3. להשתמש בלשונית „בית”, חיפוש/החלפה, זום ושורת מצב.
+3. להשתמש בלשונית „בית”, חיפוש (ללא החלפה — ראו §11), זום ושורת מצב.
 4. לבצע „שמור” ו„שמור בשם” דרך API בטוח של אוצריא.
 5. לסגור ולפתוח מחדש בלי לאבד מסמך שמור או לדרוס קובץ חלקי.
 6. לייצא DOCX שנפתח שוב ב־Microsoft Word וב־SuperDoc.
@@ -36,8 +36,8 @@
 
 | אבן דרך | תכולה | אופן הפצה |
 |---|---|---|
-| 2.0 experimental | שער Windows, מסמך יחיד, פתיחה/שמירה בטוחה, „בית”, חיפוש/החלפה, זום/שורת מצב ו„שלח לוורד” | מזהה התוסף החדש `com.otzaria_word_editor.superdoc`, לצד 1.3.6 |
-| 2.1 authoring | הוספה, פריסה, סקירה, הערות, הגהה מקומית וחיפוש באוצריא | עדיין לצד התוסף הישן; אוספים תאימות ו־round-trip |
+| 2.0 experimental | שער Windows, מסמך יחיד, פתיחה/שמירה בטוחה, „בית”, חיפוש, זום/שורת מצב ו„שלח לוורד” | מזהה התוסף החדש `com.otzaria_word_editor.superdoc`, לצד 1.3.6 |
+| 2.1 authoring | הוספה, פריסה, סקירה, הערות, הגהה מקומית, חיפוש באוצריא, והחלפה אם ה־capability gate שלה נפתח | עדיין לצד התוסף הישן; אוספים תאימות ו־round-trip |
 | 2.2 replacement candidate | ריבוי מסמכים, drafts, ארכיון, תבניות והפיצ'רים המתקדמים שאושרו | מועמד להחלפת 1.3.6 רק אחרי מטריצת התאימות המלאה |
 
 מספרי הגרסאות הם אבני דרך בתוסף, לא תחליף ל־`minAppVersion` של אוצריא.
@@ -296,8 +296,9 @@ v2/
 
 ### 0.3 בדיקת Windows ארוזה — שער A
 
-**מצב: אין חוסם; לא הורץ על Windows.** התיעוד:
-[`v2/docs/spike-windows.md`](../v2/docs/spike-windows.md).
+**מצב: השער לא עבר. אין חוסם ידוע; לא הורץ על Windows.** כל המדידות להלן הן
+ב־Google Chrome headless על macOS, על `dist` מוגשת ישירות — לא בתוסף ארוז ולא
+ב־WebView2. התיעוד: [`v2/docs/spike-windows.md`](../v2/docs/spike-windows.md).
 
 מנוע ה־DOCX יוצר את ה־worker שלו כ־`new Worker(url, { type: 'module' })` בכל
 מקומות הקריאה. השילובים נמדדו על האריזה האמיתית ב־Chromium:
@@ -622,7 +623,18 @@ interface DocumentSession {
 
 ## 11. שלב 4 — חיפוש, תצוגה, שורת מצב ונגישות
 
-- [ ] חיפוש והחלפה דרך `superdoc.ui.search`, לא `window.find` ולא סריקת DOM.
+- [ ] חיפוש דרך `superdoc.ui.search`, לא `window.find` ולא סריקת DOM.
+- [ ] **החלפה היא capability gate, לא תכולה של 2.0.** מה שנמדד ב־2.8.0 על מסמך
+  חי: `search.available` הוא `true` ו־`canReplace` הוא `true`, אבל `replace`
+  ו־`replaceAll` החזירו `{ ok: false, reason: 'operation-unavailable' }`.
+  המדידה נעשתה על מסמך ריק ובלי התאמה פעילה, ולכן היא **אינה** מפרידה בין
+  „החלפה לא מומשה” ל„אין מה להחליף”. במקביל, אוצר ה־reasons של החבילה מתעד
+  `replace-unsupported` עם ההסבר ש־replace ו־replace-all נכשלים סגור „until
+  replace ships”. בשתי הקריאות אין להבטיח החלפה.
+  לפני מימוש יש להריץ: מסמך עם טקסט, `search(query)` שמחזיר `total > 0`,
+  ואז `replace`. אם התוצאה עדיין כושלת — הפקד אינו מוצג, או מוצג disabled עם
+  הודעה „אינו זמין בגרסה זו”, ולא מסתיר את הכשל.
+- [ ] בכל מקרה: אם `canReplace` הוא `false` — אין להציג את הפקד.
 - [ ] Zoom, fit width וערך zoom דרך `superdoc.ui.zoom`/פקודות ציבוריות.
 - [ ] מספר עמודים מ־`onPaginationUpdate`; עמוד פעיל רק אם קיים מקור ציבורי אמין.
 - [ ] ספירת מילים/תווים דרך Document API (`getText` או info), עם debounce ולא בכל
@@ -634,7 +646,8 @@ interface DocumentSession {
 - [ ] בדיקת keyboard-only, screen-reader labels, contrast ו־200% zoom פנימי.
 
 קבלה: אין focus trap; Escape סוגר surface עליון; כל control מקבל שם נגיש; חיפוש
-והחלפה עובדים בעברית, כולל טקסט עם ניקוד.
+עובד בעברית, כולל טקסט עם ניקוד. החלפה אינה תנאי קבלה — ראו ה־capability gate
+שלמעלה.
 
 ---
 
@@ -891,7 +904,7 @@ interface DocumentSession {
 - [ ] שער workers בתוסף Windows ארוז עבר.
 - [ ] כתיבה אטומית דרך SDK עברה בדיקות כשל ואבטחה.
 - [ ] מסמך יחיד: new/open/save/save-as/reopen ללא אובדן נתונים.
-- [ ] Home, search/replace, zoom/status ו־RTL עובדים דרך API ציבורי בלבד.
+- [ ] Home, חיפוש (ללא החלפה), zoom/status ו־RTL עובדים דרך API ציבורי בלבד.
 - [ ] „שלח לוורד” עובד דקלרטיבית מהקורא.
 - [ ] אין רשת, telemetry, CDN, module script או import ישיר למנוע.
 - [ ] אין שימוש ב־DOM הפנימי של SuperDoc או במנוע הישן.

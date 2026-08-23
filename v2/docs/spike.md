@@ -8,11 +8,15 @@
 
 ---
 
-## תוצאה בשורה אחת
+## תוצאה בשורה אחת — נבדק ב־Chrome/macOS; Windows/WebView2 ממתין
 
 המנוע עובד מן האריזה גם מ־`file://`, אחרי שה־workers נטענים כ־workers קלאסיים:
-`onReady` תוך 485ms, עריכה, ייצוא DOCX, אפס שגיאות. מה שנשאר לשער A הוא ההרצה
-האמיתית על Windows/WebView2 עם `otzaria pack-plugin`.
+`onReady` תוך 485ms, עריכה, ייצוא DOCX, אפס שגיאות.
+
+**שער A לא עבר.** כל המדידות כאן הן ב־Google Chrome headless על macOS, על
+תיקיית `dist` מוגשת ישירות — לא בתוסף ארוז, לא ב־WebView2 ולא בתוך אוצריא.
+זו אינדיקציה חזקה ולא הוכחה, ולפי התכנית השער עובר רק כשהתוסף **הארוז** פועל
+ב־Windows. אין להתחיל Ribbon, שמירה או את PR הכתיבה ב־SDK לפני שהוא נסגר.
 
 > **תיקון לגרסה קודמת של המסמך הזה.** קודם נכתב כאן שמ־`file://` אין צורה
 > שעובדת, ושנדרש שינוי בצד אוצריא. זה היה שגוי, ובביקורת נתפס: המסקנה נשענה
@@ -140,19 +144,27 @@ review-index 0.31MB.
 
 ## 6. דברים שנמדדו והם רלוונטיים לשלבים הבאים
 
-- **חיפוש והחלפה:** `superdoc.ui.search` קיים ומכיל `replace`/`replaceAll`, אבל
-  אוצר ה־reasons מכיל `replace-unsupported` עם הסבר מפורש: החלפה אינה חלק
-  מהגזרה הראשונה של חיפוש ב־v2 והיא נכשלת סגור. שלב 4 בתכנית צריך להניח חיפוש
-  בלבד, ולבדוק אם החלפה נתמכת בגרסה שתהיה בזמן המימוש.
+- **החלפה אינה מובטחת.** נמדד על מסמך חי מ־`file://`: `search.available` הוא
+  `true`, `canReplace` הוא `true`, ו־`open()` מחזיר `{ ok: true }` — אבל
+  `replace('b')` ו־`replaceAll('b')` החזירו
+  `{ ok: false, reason: 'operation-unavailable' }`. המסמך היה ריק ולא הייתה
+  התאמה פעילה, ולכן המדידה אינה מפרידה בין „לא מומש” ל„אין מה להחליף”.
+  במקביל, אוצר ה־reasons של החבילה מתעד `replace-unsupported` כ„until replace
+  ships”. בשתי הקריאות: 2.0 היא חיפוש בלבד, והחלפה היא capability gate
+  (תכנית §11) שנבדק על מסמך עם טקסט והתאמה פעילה לפני שמבטיחים אותו.
 - **`pdf.workerSrc` נופל ל־CDN:** המחרוזת `cdnjs.cloudflare.com/…/pdf.worker`
   קיימת בבאנדל (בונה URL, לא מבצע בקשה) ומגיעה מ־`modules.pdf`. אין לגעת
   בייצוא/תצוגת PDF בלי להגדיר worker מקומי. `check:dist` מדפיס את האזהרה הזאת.
 - **`SuperDocUIState` אינו כולל `search` ו־`tables`:** גישה אליהם רק דרך
   ה־handles, לא דרך `ui.select`.
-- **טיפוסי ה־SDK של אוצריא חסרו את כל `fs.*`** ב־union של `OtzariaMethod`, כך
-  ש־`Otzaria.call('fs.pickUserFile', …)` נכשל ב־typecheck אף שה־API עובד. תוקן
-  במאגר אוצריא (ענף `docs/plugin-sdk-type-accuracy`) והועתק לכאן. העטיפה שלנו
-  ממשיכה לקבל `method: string` כי היא גנרית.
+- **ה־union של `OtzariaMethod` חסר את כל `fs.*`** (וגם `ui.pickFolder`,
+  `library.getTree`, `library.resolveCategoryPaths`) אף שהוולידטור מכיר אותם.
+  לדיוק: זה **לא** גרם לכשל typecheck בקוד שלנו — `OtzariaGlobal.call` מקבל
+  `OtzariaMethod | string`, ולכן קריאה במחרוזת עוברת. מה שנפגע הוא מי שמקליד
+  את המזהה כ־`OtzariaMethod` או בונה ממנו מפתחות. השלמת ה־union (ענף
+  `docs/plugin-sdk-type-accuracy` באוצריא) היא השלמת תיעוד לצרכנים הטיפוסיים.
+  אכיפת טיפוסים אמיתית — overloads לכל מתודה עם payload ותוצאה, וטסטי טיפוסים —
+  היא החלטת SDK נפרדת ועלולה לשבור תאימות; אין לגלוש אליה כאן.
 - **`app.runMode` אינו נשלח ב־boot של דף גלוי** (רק ברקע), ו־`buildNumber` לא
   נשלח כלל; לעומת זאת `language` ו־`devMode` נשלחים. הטיפוס תוקן במאגר אוצריא
   לתאר את המצב בפועל.
