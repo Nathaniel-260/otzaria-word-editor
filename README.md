@@ -43,4 +43,11 @@ git push origin v1.3.6
 
 ## רישיון
 
-התוסף מופץ לשימוש חופשי.
+התוסף מופץ תחת [GNU Affero General Public License v3.0](LICENSE).
+
+הבחירה ב‑AGPL נובעת מהעורך החדש שנבנה בענף `feat/superdoc-v2-editor`: הוא מבוסס על
+[SuperDoc](https://www.superdoc.dev/), שמופץ תחת AGPL‑3.0, ולכן גם התוסף חייב להיות AGPL.
+
+הערה חשובה: מנוע ה‑DOCX של SuperDoc (`@superdoc/docx-engine`) הוא **רכיב קנייני בנפרד**,
+שאינו קוד פתוח ואינו מכוסה ברישיון הזה. הרישיון שלו אוסר הפצה מחדש, ולכן אריזה שכוללת
+אותו דורשת אישור מ‑Harbour Enterprises לפני פרסום. פירוט ב‑[docs/superdoc-v2-plan.md](docs/superdoc-v2-plan.md) §2.
