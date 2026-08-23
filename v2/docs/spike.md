@@ -149,10 +149,13 @@ review-index 0.31MB.
   בייצוא/תצוגת PDF בלי להגדיר worker מקומי. `check:dist` מדפיס את האזהרה הזאת.
 - **`SuperDocUIState` אינו כולל `search` ו־`tables`:** גישה אליהם רק דרך
   ה־handles, לא דרך `ui.select`.
-- **טיפוסי ה־SDK של אוצריא חסרים את כל `fs.*`** ב־union של `OtzariaMethod`.
-  לכן העטיפה שלנו מקבלת `method: string`; אין לצמצם אותה ל־union.
+- **טיפוסי ה־SDK של אוצריא חסרו את כל `fs.*`** ב־union של `OtzariaMethod`, כך
+  ש־`Otzaria.call('fs.pickUserFile', …)` נכשל ב־typecheck אף שה־API עובד. תוקן
+  במאגר אוצריא (ענף `docs/plugin-sdk-type-accuracy`) והועתק לכאן. העטיפה שלנו
+  ממשיכה לקבל `method: string` כי היא גנרית.
 - **`app.runMode` אינו נשלח ב־boot של דף גלוי** (רק ברקע), ו־`buildNumber` לא
-  נשלח כלל, אף שהם בטיפוס.
+  נשלח כלל; לעומת זאת `language` ו־`devMode` נשלחים. הטיפוס תוקן במאגר אוצריא
+  לתאר את המצב בפועל.
 
 ## 7. איך מריצים
 
