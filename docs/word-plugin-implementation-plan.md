@@ -560,9 +560,9 @@ interface DocumentSession {
 - [x] URL מוחזר נמסר ישירות ל־`Config.document`.
 - [x] token/name נשמרים רק לאחר `onReady` מוצלח (ההחלפה עצמה אטומית —
   `sessions/editor-swap.ts`).
-- [ ] בעלייה חוזרת קוראים `fs.resolveFileUrl`; אם הקובץ הוזז/נמחק, מציגים
-  הודעה עם „בחר מחדש” ולא לולאת שגיאה. **טרם מומש** — דורש שמירת ה־token
-  ב־`storage`.
+- [x] בעלייה חוזרת קוראים `fs.resolveFileUrl` עם ה־token ששמור ב־`storage`.
+  קובץ שהוזז/נמחק, או שנפתר ולא נפתח (פגום), נשכח ונפתח מסמך ריק עם הודעה —
+  לא לולאת שגיאה ולא תוסף בלי מסמך.
 - [x] פתיחה חדשה כאשר יש dirty document דורשת Save / Discard / Cancel.
   `ui.showConfirm` דו־כפתורי, ולכן שלושת המצבים נבנים משתי שאלות.
 
