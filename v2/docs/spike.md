@@ -125,9 +125,10 @@
 | `dist/assets/engine-workers.js` | 4.90MB |
 | `dist/index.html` + `manifest.json` | ~1KB |
 | `dist/third-party/` | 68KB |
-| סה"כ `dist/` | 15.16MB |
-| ZIP של `dist/` | 4.31MB |
-| `.otzplugin` בפועל | **4.32MB, 8 קבצים** |
+| `dist/fonts/` (Segoe UI, 4 פנים) | 3.25MB |
+| סה"כ `dist/` | 18.42MB |
+| ZIP של `dist/` | 6.15MB (12 קבצים) |
+| `.otzplugin` בפועל, לפני הוספת הגופן | **4.32MB, 8 קבצים** |
 | boot עד `onReady`, מסמך ריק, `file://` | 485ms |
 | boot עד `onReady`, מסמך ריק, `http://` | 470–477ms (שתי הרצות) |
 | `superdoc.export()` על מסמך ריק | ~200ms, מחזיר Blob |
@@ -137,6 +138,9 @@
 worker השיתופיות (5.53MB באריזה) מושמט: התוסף אופליין וללא הרשאת רשת ולכן הוא
 לעולם לא נטען. שני הנשארים, כפי ש־`check:dist` מדפיס אותם: המסמך 4.45MB,
 review-index 0.31MB.
+
+הגופן הארוז הוא 3.25MB לא־דחוסים ו־1.84MB בתוך ה־ZIP. ה־`.otzplugin` עצמו לא
+נארז מחדש אחרי הוספתו; המספר הצפוי הוא ~6.16MB ב־12 קבצים, לפי ה־ZIP.
 
 מה שלא נמדד: peak memory ומסמך של 50 עמודים — שניהם דורשים את הריצה על
 Windows (§5). גודל ה־`.otzplugin` **כן** נמדד (4.32MB, ראו הטבלה). כל המדידות
@@ -179,6 +183,24 @@ Windows (§5). גודל ה־`.otzplugin` **כן** נמדד (4.32MB, ראו הט�
   במקביל, אוצר ה־reasons של החבילה מתעד `replace-unsupported` כ„until replace
   ships”. בשתי הקריאות: 2.0 היא חיפוש בלבד, והחלפה היא capability gate
   (תכנית §11) שנבדק על מסמך עם טקסט והתאמה פעילה לפני שמבטיחים אותו.
+- **הגופן הארוז נטען מ־`file://`.** `@font-face` עם `url('./fonts/segoeui.ttf')`
+  מוזרק בזמן ריצה (`src/styles/fonts.ts`), ולא דרך קובץ CSS: `url()` שעובר את
+  פותר הנכסים של Vite נשען ב־build IIFE על `import.meta.url` שאינו קיים, וקובץ
+  CSS נפרד היה נסרק בוולידציית העיצוב ונפסל על `font-family` שאינו
+  `var(--font-*)` — היא אינה מחריגה `@font-face`.
+  נמדד על ה־build הארוז מ־`file://`: `document.fonts.size === 4`,
+  ו־`document.fonts.load()` החזיר פנים אחת לכל אחד מארבעת המשקלים.
+  **`document.fonts.check()` אינו עדות** — הוא החזיר `true` גם בדף בקרה בלי שום
+  `@font-face`, על מכונה שאין בה Segoe UI. מה שמפריד הוא מדידת רוחב על canvas:
+  `'Segoe UI', serif` נתן 215.57px מול 185.35px ל־serif, ובדף הבקרה שני
+  המספרים היו זהים (185.35px) — כלומר הגליפים אכן מגיעים מהקובץ הארוז.
+  השער עצמו הוא [../scripts/font-check.html](../scripts/font-check.html) —
+  הוא טוען את ה־`app.js` הארוז, ולכן בודק את ההצהרה של הקוד ולא העתק שלה:
+  ```bash
+  npm run build && cp scripts/font-check.html dist/
+  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless \
+    --virtual-time-budget=15000 --dump-dom "file://$PWD/dist/font-check.html"
+  ```
 - **`pdf.workerSrc` נופל ל־CDN:** המחרוזת `cdnjs.cloudflare.com/…/pdf.worker`
   קיימת בבאנדל (בונה URL, לא מבצע בקשה) ומגיעה מ־`modules.pdf`. אין לגעת
   בייצוא/תצוגת PDF בלי להגדיר worker מקומי. `check:dist` מדפיס את האזהרה הזאת.

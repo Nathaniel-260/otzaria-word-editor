@@ -113,6 +113,29 @@ for (const rel of ENGINE_BEARING_FILES) {
 }
 
 /**
+ * הגופן הארוז (src/styles/fonts.ts). ה-@font-face נבנה כמחרוזת ומוזרק בזמן
+ * ריצה — דווקא כדי לא לעבור דרך פותר הנכסים של Vite — ולכן שינוי שם קובץ או
+ * נתיב אינו מפיל את הבנייה. הרשימה כאן חוזרת על עצמה בכוונה: שער צריך להצהיר
+ * את הציפייה בעצמו, אחרת הוא מאמת את הקוד מול הקוד.
+ */
+const FONT_FILES = ['segoeui.ttf', 'seguisb.ttf', 'segoeuib.ttf', 'segoeuii.ttf'];
+const appJsPath = join(DIST, 'assets/app.js');
+const appJs = existsSync(appJsPath) ? readFileSync(appJsPath, 'utf8') : '';
+
+for (const file of FONT_FILES) {
+  if (!existsSync(join(DIST, 'fonts', file))) errors.push(`חסר גופן ב-dist: fonts/${file}`);
+  if (appJs && !appJs.includes(`./fonts/${file}`)) {
+    errors.push(`assets/app.js אינו מפנה ל-./fonts/${file} — ההצהרה והנכס יצאו מסינכרון`);
+  }
+}
+
+// שער הגופן מורץ בהעתקה ידנית ל-dist (ראו scripts/font-check.html). העתק שנשכח
+// שם נארז לתוך התוסף.
+if (existsSync(join(DIST, 'font-check.html'))) {
+  errors.push('dist/font-check.html הוא דף בדיקה שנשכח — יש למחוק אותו לפני אריזה');
+}
+
+/**
  * קוד ה-workers יושב בתוך מחרוזות JSON, ולכן `node --check` על הקובץ העוטף
  * אינו נוגע בו כלל — הוא בודק שורת השמה אחת. אלה 4.9MB שנטענים בפועל
  * כ-workers קלאסיים, וכשל שלהם פירושו תוסף שלא פותח מסמכים; לכן הם נפרסים

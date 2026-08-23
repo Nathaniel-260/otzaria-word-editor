@@ -61,6 +61,16 @@ describe('applyTheme', () => {
     expect(cssVar('--line-height')).toBe('1.7');
   });
 
+  it('בחירת המשתמש קודמת לגופן הארוז, והארוז קודם ל-fallback', () => {
+    // הסדר הוא ההתנהגות: אם 'Segoe UI' יעלה לפני בחירת המשתמש, הבחירה שלו
+    // בהגדרות אוצריא תפסיק להשפיע על הממשק.
+    applyTheme(FULL);
+
+    const chain = cssVar('--font-main');
+    expect(chain.indexOf('FrankRuhlCLM')).toBeLessThan(chain.indexOf('Segoe UI'));
+    expect(chain.indexOf('Segoe UI')).toBeLessThan(chain.indexOf('David'));
+  });
+
   it('גוזר את גוני ה-subtle מהצבעים', () => {
     applyTheme(FULL);
 

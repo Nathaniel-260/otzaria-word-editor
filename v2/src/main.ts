@@ -9,6 +9,7 @@
  */
 import './styles/tokens.css';
 import './styles/shell.css';
+import { installBundledFonts } from './styles/fonts';
 import { confirm, notifyError, onThemeChanged, waitForBoot } from './host/otzaria-client';
 import { applyTheme } from './host/theme';
 import {
@@ -52,6 +53,10 @@ const SHELL = `
 `;
 
 async function main(): Promise<void> {
+  // לפני כל השאר: ה-@font-face של הגופן הארוז. מסמך שנפתח לפני שהגופן הוצהר
+  // נמדד בגופן אחר ואז מתעמד מחדש.
+  installBundledFonts();
+
   if (import.meta.env.DEV) {
     const { installDevStub } = await import('./host/dev-stub');
     installDevStub();
