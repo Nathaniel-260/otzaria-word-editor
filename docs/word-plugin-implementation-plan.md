@@ -250,63 +250,157 @@ v2/
 
 מטרה: להוכיח שהמנוע וה־workers פועלים מתוסף ארוז לפני בניית Ribbon.
 
+> **בוצע.** התוצאות המלאות: [`v2/docs/spike.md`](../v2/docs/spike.md). שערים
+> 0.1 ו־0.2 עברו; 0.3 (שער A) נחסם בצד המארח — ראו §0.3 ו־§7.0 להלן.
+
 ### 0.1 תיקון חוזה SuperDoc
 
-- [ ] להסיר `createSuperDocUI` ואת הטיפוס הבעלים `SuperDocUI` מ־
+- [x] להסיר `createSuperDocUI` ואת הטיפוס הבעלים `SuperDocUI` מ־
   `v2/src/engine/create-editor.ts`.
-- [ ] ב־`onReady`, להשתמש במופע המוכן וב־`readySuperDoc.ui`.
-- [ ] לשנות את `EditorSession.ui` לטיפוס המושאל הציבורי המתאים.
-- [ ] `destroy()` מבטל subscriptions של התוסף וקורא רק `superdoc.destroy()`.
-- [ ] להוסיף test שמוודא שלא נקראת פונקציית יצירת UI נוספת.
+- [x] ב־`onReady`, להשתמש במופע המוכן וב־`readySuperDoc.ui`.
+      החתימה בפועל: `onReady?: (params: SuperDocReadyPayload) => void`, כלומר
+      `({ superdoc }) => superdoc.ui`.
+- [x] לשנות את `EditorSession.ui` לטיפוס המושאל הציבורי המתאים —
+      `BorrowedSuperDocUI`, שהוא `Omit<SuperDocUI, 'destroy'>`.
+- [x] `destroy()` מבטל subscriptions של התוסף וקורא רק `superdoc.destroy()`.
+- [x] להוסיף test שמוודא שלא נקראת פונקציית יצירת UI נוספת. נוספה גם בדיקת
+      גבולות על המקור: אין import למנוע, אין נתיב פנימי, אין `execCommand`.
 
 קבלה: `npm run typecheck`, unit tests ו־build עוברים; Bold ו־RTL ממשיכים לעבוד.
 
+**נמצא ותוקן מעבר לרשום כאן:** ההרשמה ל־`plugin.boot` הייתה אחרי `await`.
+האירוע נורה פעם אחת, אוצריא אינה שומרת את ה־payload ואין `getBootInfo` — כלומר
+מסך שנשאר תלוי. ה־latch עבר לזמן טעינת המודול. בנוסף: `minAppVersion` היה
+`0.9.97`, גבוה מגרסת אוצריא בפועל (0.9.96), מה שהיה מונע התקנה.
+
 ### 0.2 בדיקת חוזה פקודות
 
-- [ ] ליצור `tests/contract/superdoc-commands.test.ts`.
-- [ ] לרשום רק command IDs שהממשק באמת משתמש בהם.
-- [ ] לכל מזהה לבדוק `ui.commands.has(id)` לאחר `onReady`.
-- [ ] פקודה חסרה גורמת לכשל test, לא לכפתור מת בשקט.
-- [ ] `table-fix` אינו נכנס לרשימה.
+- [x] ליצור `tests/contract/superdoc-commands.test.ts`.
+- [x] לרשום רק command IDs שהממשק באמת משתמש בהם — 47 מזהים ב־
+      `v2/src/engine/capabilities.ts`, מחולקים לפי תחום.
+- [x] לכל מזהה לבדוק `ui.commands.has(id)`. **תיקון לתכנית:** `has` לבדו אינו
+      מספיק — הוא מחזיר `true` גם ל־`table-fix`. ההבחנה היא `state.source`:
+      `'unsupported'` מול `'builtin'`. וזה גם מייתר את ההמתנה ל־`onReady`:
+      לפני שהמנוע מוכן `supported` הוא `false` לכל פקודה, אבל `source` נכון —
+      ולכן הבדיקה רצה על controller שנבנה מעל host מבני ריק, בלי דפדפן ובלי
+      מנוע DOCX.
+- [x] פקודה חסרה גורמת לכשל test, לא לכפתור מת בשקט.
+- [x] `table-fix` אינו נכנס לרשימה, והבדיקה מקבעת שהמנוע אכן מסמן אותו
+      unsupported — כך שגרסה שתתמוך בו תתריע.
 
 קבלה: ה־registry וה־UI נבנים מאותה רשימה; אין רשימה נוספת במסמך או בקומפוננטה.
 
+הערה לשלב הבנייה: `BUILT_IN_COMMAND_IDS` הציבורי מכיל 16 מזהים (לא 14 כפי
+שכתוב ב־JSDoc שלו), `COMMAND_CATALOG` אינו export ציבורי כלל, והגילוי הציבורי
+היחיד הוא `ui.commands.ids` ו־`has`.
+
 ### 0.3 בדיקת Windows ארוזה — שער A
 
-- [ ] לבנות `v2/dist` ולארוז בעזרת `otzaria pack-plugin`.
-- [ ] להתקין ב־Windows בגרסת אוצריא התואמת ל־manifest.
-- [ ] לפתוח מסמך עברי קטן ומסמך של 50 עמודים.
-- [ ] לבדוק ש־document worker ו־review-index worker נטענים מ־`blob:` ללא רשת.
-- [ ] לערוך מילה, להפעיל Bold ו־RTL, לייצא Blob ולפתוח אותו ב־Word.
-- [ ] לבצע את אותה בדיקה פעם אחת מ־localhost כדי להפריד כשל מנוע מכשל `file://`.
-- [ ] לרשום ב־`v2/docs/spike-windows.md`: גרסאות, חומרה, זמנים, גודל ZIP,
-  console errors וצילומי מסך.
+**מצב: חסום בצד המארח. לא בגלל חוסר בדיקה, אלא כי במצב הנוכחי הוא אינו יכול
+לעבור.** התיעוד המלא: [`v2/docs/spike-windows.md`](../v2/docs/spike-windows.md).
 
-שער A עובר רק אם התוסף **הארוז** פועל. בדיקה מ־localhost לבדה אינה מספיקה.
+מנוע ה־DOCX יוצר את ה־worker שלו כ־`new Worker(url, { type: 'module' })`. ארבעת
+השילובים נמדדו על האריזה האמיתית ב־Chromium:
+
+| origin של הדף | צורת ה־worker | תוצאה |
+|---|---|---|
+| `http://127.0.0.1` | blob: מקוד מוטמע | **עובד**, `onReady` תוך 470ms |
+| `http://127.0.0.1` | ה־URL היחסי של המנוע | נכשל: `module-load-failed` |
+| `file://` | blob: | נכשל: `module-load-failed` |
+| `file://` | data: | נכשל — עובד עקרונית, חסום בגודל |
+
+שתי מסקנות:
+
+1. `workerUrls` הוא חובה ולא אופטימיזציה: ה־build הוא IIFE, ובו
+   `import.meta.url` אינו מצביע לקובץ ה־JS, ולכן ה־URL שהמנוע בונה לבד אינו
+   נפתר גם מ־origin תקין.
+2. מ־`file://` אין צורה שעובדת. ה־origin opaque; module worker מ־blob נכשל,
+   ומ־data עובד אך ה־URL חסום סביב 2MB (נמדד: 1.4MB עובר, 2.7MB נכשל) בעוד
+   ה־worker של המסמך הוא 4.67MB.
+
+אוצריא טוענת תוסף ארוז `file://<installPath>/<entrypoint>`, בלי virtual-host
+mapping. שרת ה־loopback הקיים מגיש קובץ בודד שהמשתמש בחר (`/f/<token>`) וטבלת
+ה־mime שלו אינה מכירה `.js`. לכן שער A דורש קודם את §7.0.
+
+**מה כן ניתן להריץ עכשיו:** במצב „טעינה מ־localhost” של אוצריא הדף נטען מ־origin
+תקין, והמנוע עובד. שלבים 1–8 אינם חסומים; מה שחסום הוא **הפצה**. הצ'קליסט
+לשתי ההרצות — הזמינה עכשיו ושל השער עצמו — נמצא ב־`v2/docs/spike-windows.md`.
 
 ### 0.4 גודל וביצועים — שער B
 
-לרשום:
+נמדד על macOS ב־Chromium (מלא: `v2/docs/spike.md` §4):
 
-- גודל `app.js`, קובץ workers, `dist/` ו־`.otzplugin`.
-- זמן boot עד `onReady` במסמך ריק.
-- זמן פתיחת 50 עמודים.
-- peak memory בקירוב ב־Windows.
-- הוכחה שאין בקשת HTTP חיצונית.
+| מה | ערך |
+|---|---|
+| `dist/assets/app.js` | 10.20MB (3.13MB gzip) |
+| `dist/assets/engine-workers.js` | 4.90MB |
+| סה"כ `dist/` | 15.16MB |
+| ZIP של `dist/` | 4.31MB |
+| boot עד `onReady`, מסמך ריק | 470–477ms |
+| `superdoc.export()` על מסמך ריק | ~200ms, מחזיר Blob |
+
+worker השיתופיות (5.53MB) מושמט מהאריזה; המסמך 4.67MB ו־review-index 0.33MB.
+
+עוד לא נמדד, ודורש Windows: זמן פתיחת 50 עמודים, peak memory, גודל
+`.otzplugin` בפועל, ומגבלת החנות כמספר. אריזה עם `otzaria pack-plugin` לא הורצה
+מקומית — `dart run tool/plugins/package_plugin.dart` קורס בקומפילציה של חבילת
+אוצריא על המכונה שנבדקה (באג SDK, לא קשור לתוסף).
 
 קריטריון ראשוני: האריזה מתקבלת על ידי validator והחנות; boot קר אינו נתקע; אין
 קריסה במסמך 50 עמודים. אם קיימת מגבלת חנות, היא נכתבת כמספר מדויק ולא כ־TODO.
 
 ---
 
-## 7. שלב Host — כתיבת DOCX בטוחה ב־SDK של אוצריא
+## 7. שלב Host — שינויים נדרשים ב־SDK של אוצריא
+
+שני שינויים, ב־PR-ים נפרדים במאגר אוצריא. §7.0 חוסם **הפצה** של התוסף; §7.1
+ואילך חוסמים **שמירה**. שניהם אינם חוסמים פיתוח: הוא נעשה בטעינה מ־localhost.
+
+### 7.0 הגשת התוסף מ־origin loopback — חוסם את שער A
+
+הבעיה נמדדה ב־§0.3: מנוע ה־DOCX יוצר module worker, וב־`file://` (origin
+opaque) הוא אינו נטען בשום צורה. מ־`http://127.0.0.1` אותה אריזה עובדת. כלומר
+זהו תנאי מוקדם לכל הפצה של תוסף שמריץ Web Workers — לא רק שלנו.
+
+מה קיים היום: `plugin_tab_page.dart` טוען `WebUri.uri(Uri.file(...))`, ואין
+virtual-host mapping. שרת ה־loopback הקיים
+(`lib/plugins/services/plugin_file_server.dart`) מאזין על `127.0.0.1` בפורט
+אקראי ומגיש **קובץ בודד** שהמשתמש בחר, בנתיב `/f/<token>`; ה־URL אינו נוגע
+בדיסק, וטבלת ה־mime שלו אינה מכירה `.js`, `.css` או `.wasm`.
+
+מה נדרש (הצעה, לא החלטה של מאגר אוצריא):
+
+- [ ] grant מסוג **תיקייה** לצד grant הקובץ הקיים, למשל `/p/<dirToken>/<relpath>`.
+- [ ] הגנת path traversal על ה־relpath. זו ההנחה שנשברת: היום „ה־URL אינו נוגע
+  בדיסק”.
+- [ ] הרחבת `_contentTypeForPath` ל־`.js`, `.mjs`, `.css`, `.wasm`, `.woff2`,
+  `.map`. בלי זה module scripts ו־workers אינם נטענים כלל.
+- [ ] טעינת ה־entrypoint מ־URL זה ב־`plugin_tab_page.dart` וב־
+  `plugin_background_host.dart`, כולל מסלולי reload ובדיקות ה־error screen
+  שמניחות `scheme == 'file'`.
+- [ ] `shouldOverrideUrlLoading` ו־`shouldInterceptRequest` — הענפים שמתירים
+  `file://` בתוך תיקיית ההתקנה צריכים מקביל ל־origin החדש.
+- [ ] רישום וביטול ה־grant במחזור החיים של התוסף (הפעלה, השהיה, הסרה).
+- [ ] בחינה מחדש של `Access-Control-Allow-Origin: '*'` בשרת, ושל COOP/COEP אם
+  יידרש `SharedArrayBuffer` בעתיד.
+- [ ] תיעוד: ה־SDK מצהיר היום ש־„ה־origin הוא `null` כי הדף נטען מ־`file://`”
+  (`API_REFERENCE.md`), ושהמסלול היחיד הוא `file://` (`README.md`). שני אלה
+  משתנים.
+- [ ] תופעת לוואי לבדיקה: כל `fetch` של תוסף יישא `Origin: http://127.0.0.1:PORT`
+  במקום `null`, מה שמשנה התנהגות CORS מול שרתים קיימים.
+
+לאחר המיזוג: `minAppVersion` של התוסף מתעדכן לגרסה הראשונה שכוללת את השינוי,
+ושער A מורץ מחדש לפי `v2/docs/spike-windows.md`.
+
+### 7.1 כתיבת DOCX בטוחה — חוסם „שמור”
 
 זהו תנאי מוקדם ל„שמור”, autosave וארכיון. ה־SDK הנוכחי יודע לתת URL לקריאה אך
-אין בו כתיבת bytes. אסור להעביר DOCX כ־base64 ב־JSON-RPC.
+אין בו כתיבת bytes, ואין הרשאה `fs.user_files.write` — היא אינה קיימת בקוד
+אוצריא. אסור להעביר DOCX כ־base64 ב־JSON-RPC.
 
 השינוי נעשה במאגר אוצריא, ב־PR נפרד, תוך תאימות לאחור.
 
-### 7.1 חוזה API מוצע
+### 7.2 חוזה API מוצע
 
 להוסיף הרשאה רגישה חדשה: `fs.user_files.write`.
 
@@ -375,7 +469,7 @@ Otzaria.call('fs.revokePluginFile', { token })
   `plugin-file` דורש `plugin.storage.write`. resolve/revoke של private draft
   דורשים בהתאמה `plugin.storage.read`/`plugin.storage.write`.
 
-### 7.2 כללי אבטחה ושרידות
+### 7.3 כללי אבטחה ושרידות
 
 - [ ] שרת ה־loopback מאזין רק ל־`127.0.0.1` ובפורט אקראי.
 - [ ] `writeToken` הוא 256-bit אקראי, משויך ל־pluginId, חד־פעמי ופג תוך 2 דקות.
@@ -392,7 +486,7 @@ Otzaria.call('fs.revokePluginFile', { token })
 - [ ] `revokeFile` מבטל גם grant כתיבה ו־sessions הקשורים אליו.
 - [ ] אחסון פרטי מקבל quota נפרד (התחלה: 250MB לתוסף), LRU וניקוי בהסרה.
 
-### 7.3 קבצים לעדכון במאגר אוצריא
+### 7.4 קבצים לעדכון במאגר אוצריא
 
 - `lib/plugins/services/plugin_file_server.dart` — PUT sessions, מגבלות ו־cleanup,
   או service חדש שמופרד מן ה־GET server.
@@ -405,7 +499,7 @@ Otzaria.call('fs.revokePluginFile', { token })
   `otzaria_plugin.d.ts` — תיעוד ודוגמה מלאה.
 - tests של file server, adapter, handler, permissions ו־validator.
 
-### 7.4 בדיקות Host שחייבות לעבור
+### 7.5 בדיקות Host שחייבות לעבור
 
 - [ ] `pickUserFile` ללא `access` נשאר read-only; בקשת `readwrite` ללא הרשאת
   הכתיבה נכשלת; עם שתי ההרשאות היא מחזירה grant מתאים.
@@ -802,29 +896,35 @@ interface DocumentSession {
 
 ## 19. סדר ה־PRs המומלץ
 
-1. `spike: use borrowed superdoc.ui and add contract tests`
-2. `spike: document packaged Windows result and package limits`
-3. במאגר אוצריא: `sdk: add streamed atomic user-file writes`
-4. במאגר אוצריא: `sdk: add quota-bound private binary drafts`
-5. `v2: typed host client, lifecycle and Otzaria theme shell`
-6. `v2: single-document sessions and safe save coordinator`
-7. `v2: shared ribbon controls and Home tab`
-8. `v2: search, zoom, status and accessibility`
-9. `v2: Insert features, one capability per commit`
-10. `v2: Layout features, one capability per commit`
-11. `v2: Review and local Torah proofing`
-12. `v2: declarative reader integration and library search`
-13. `v2: multi-document drafts, archive and templates`
-14. `v2: compatibility suite, packaging and release cutover`
+1. ~~`spike: use borrowed superdoc.ui and add contract tests`~~ — בוצע.
+2. ~~`spike: document packaged Windows result and package limits`~~ — בוצע;
+   שער A נחסם ותועד.
+3. במאגר אוצריא: `plugins: serve plugin directory over loopback origin` —
+   §7.0. **חוסם הפצה של התוסף כולו**, ולכן קודם לכל השאר במאגר אוצריא.
+4. במאגר אוצריא: `sdk: add streamed atomic user-file writes`
+5. במאגר אוצריא: `sdk: add quota-bound private binary drafts`
+6. `v2: typed host client, lifecycle and Otzaria theme shell`
+7. `v2: single-document sessions and safe save coordinator`
+8. `v2: shared ribbon controls and Home tab`
+9. `v2: search, zoom, status and accessibility`
+10. `v2: Insert features, one capability per commit`
+11. `v2: Layout features, one capability per commit`
+12. `v2: Review and local Torah proofing`
+13. `v2: declarative reader integration and library search`
+14. `v2: multi-document drafts, archive and templates`
+15. `v2: compatibility suite, packaging and release cutover`
 
-אין להתחיל PR 5 לפני ש־PR 3 נמצא לפחות בגרסת אוצריא מקומית ניתנת לבדיקה. PR 4
-חוסם drafts וריבוי מסמכים, אך אינו חוסם MVP של מסמך שמור יחיד.
+PR 3 חוסם כל הפצה, אך **אינו חוסם פיתוח**: כל שאר ה־PR-ים נבנים ונבדקים בטעינה
+מ־localhost, שם ה־origin תקין והמנוע עובד. אין להתחיל PR 7 לפני ש־PR 4 נמצא
+לפחות בגרסת אוצריא מקומית ניתנת לבדיקה. PR 5 חוסם drafts וריבוי מסמכים, אך
+אינו חוסם MVP של מסמך שמור יחיד. לפני שחרור לחנות חייבים גם PR 3 וגם שער A
+ירוק.
 
 ---
 
 ## 20. Definition of Done לגרסה 2.0 experimental
 
-- [ ] שער workers בתוסף Windows ארוז עבר.
+- [ ] שער workers בתוסף Windows ארוז עבר — תלוי ב־§7.0 (הגשה מ־origin).
 - [ ] כתיבה אטומית דרך SDK עברה בדיקות כשל ואבטחה.
 - [ ] מסמך יחיד: new/open/save/save-as/reopen ללא אובדן נתונים.
 - [ ] Home, search/replace, zoom/status ו־RTL עובדים דרך API ציבורי בלבד.
