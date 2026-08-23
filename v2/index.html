@@ -4,6 +4,31 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>וורד לאוצריא</title>
+    <script>
+      /* ה-latch של plugin.boot. חייב לרוץ כאן, ב-head, לפני כל שאר קוד התוסף.
+
+         אוצריא משגרת את plugin.boot כאירוע window חד-פעמי ואינה משחזרת אותו:
+         מי שנרשם אחרי הירייה לא יקבל אותו לעולם, וההשלכה היא תוסף שנתקע על
+         „אוצריא לא סיימה לאתחל”. ההרשמה בזמן טעינת המודול אינה מספיקה — הבאנדל
+         שלנו הוא 10MB, ובפיתוח הוא גרף מודולים שנטען ברשת, ולכן הוא עשוי
+         להיטען אחרי שהאירוע כבר נורה. הסקריפט הזה רץ בזמן פריסת ה-HTML, כלומר
+         לפני כל אפשרות כזאת.
+
+         השם __otzariaBoot משותף עם src/host/otzaria-client.ts, ו-
+         tests/unit/otzaria-client.test.ts מקבע את הזהות הזאת. */
+      (function () {
+        var latch = { payload: null, at: null };
+        window.__otzariaBoot = latch;
+        window.addEventListener(
+          'plugin.boot',
+          function (event) {
+            latch.payload = event.detail;
+            latch.at = Math.round(performance.now());
+          },
+          { once: true },
+        );
+      })();
+    </script>
   </head>
   <body>
     <div id="app"></div>

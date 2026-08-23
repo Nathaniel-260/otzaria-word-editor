@@ -71,10 +71,13 @@ function inlineEngineWorkers(): Plugin {
     },
 
     transformIndexHtml(html) {
-      // חייב להיטען לפני app.js — נצרך בזמן הקמת המנוע.
+      // חייב להיטען לפני app.js — נצרך בזמן הקמת המנוע. ההזרקה היא לפני
+      // הסקריפט הראשון שיש לו src, ולא לפני ה-`<script` הראשון: ה-latch של
+      // plugin.boot הוא סקריפט inline ב-head, וחייב להישאר ראשון — 5MB של
+      // worker שנטענים לפניו הם עיכוב שאין בו צורך.
       return html.replace(
-        /<script/,
-        '<script src="./assets/engine-workers.js"></script>\n    <script',
+        /<script([^>]*\bsrc=)/,
+        '<script src="./assets/engine-workers.js"></script>\n    <script$1',
       );
     },
   };

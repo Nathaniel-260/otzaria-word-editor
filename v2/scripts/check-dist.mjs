@@ -53,6 +53,21 @@ else if (appAt !== -1 && workersAt > appAt) {
   errors.push('engine-workers.js נטען אחרי app.js — המנוע יקום בלי ה-workers');
 }
 
+/**
+ * ה-latch של plugin.boot חייב להיות הסקריפט הראשון בדף. אוצריא משגרת את
+ * האירוע פעם אחת ואינה משחזרת אותו, וכל סקריפט שקודם ל-latch הוא חלון שבו
+ * הוא יכול ללכת לאיבוד — וזה בדיוק הכשל שנצפה: „אוצריא לא סיימה לאתחל”
+ * בטעינה ראשונה, ותוסף שעולה רק אחרי רענון.
+ */
+const latchAt = html.indexOf('__otzariaBoot');
+if (latchAt === -1) {
+  errors.push('ה-latch של plugin.boot אינו ב-dist/index.html — התוסף ייתקע על אתחול');
+} else if (workersAt !== -1 && latchAt > workersAt) {
+  errors.push('ה-latch של plugin.boot בא אחרי engine-workers.js — 5MB לפני ההרשמה לאירוע');
+} else if (appAt !== -1 && latchAt > appAt) {
+  errors.push('ה-latch של plugin.boot בא אחרי app.js');
+}
+
 // CDN-ים שמנועי צד-שלישי נוטים ליפול אליהם כברירת מחדל. אינם נכשלים
 // אוטומטית: מחרוזת בבאנדל אינה בקשה. הן נרשמות כדי שייבדקו ידנית בשער A.
 const CDN_HINTS = ['cdn.jsdelivr.net', 'unpkg.com', 'cdnjs.cloudflare.com', 'fonts.googleapis.com'];
@@ -129,10 +144,13 @@ for (const file of FONT_FILES) {
   }
 }
 
-// שער הגופן מורץ בהעתקה ידנית ל-dist (ראו scripts/font-check.html). העתק שנשכח
-// שם נארז לתוך התוסף.
-if (existsSync(join(DIST, 'font-check.html'))) {
-  errors.push('dist/font-check.html הוא דף בדיקה שנשכח — יש למחוק אותו לפני אריזה');
+// שערי הבדיקה כותבים דפי HTML זמניים לתוך dist (scripts/font-check.html
+// מועתק לשם ביד, scripts/boot-check.mjs כותב ומוחק). דף שנשאר שם אחרי קריסה
+// נארז לתוך התוסף, ולכן כל HTML שאינו index.html הוא שגיאה.
+for (const rel of files) {
+  if (rel.endsWith('.html') && rel !== 'index.html') {
+    errors.push(`dist/${rel} אינו חלק מהתוסף — דף בדיקה שנשכח; יש למחוק לפני אריזה`);
+  }
 }
 
 /**

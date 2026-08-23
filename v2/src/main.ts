@@ -10,7 +10,7 @@
 import './styles/tokens.css';
 import './styles/shell.css';
 import { installBundledFonts } from './styles/fonts';
-import { confirm, notifyError, onThemeChanged, waitForBoot } from './host/otzaria-client';
+import { confirm, notifyError, onThemeChanged, resolveBoot } from './host/otzaria-client';
 import { applyTheme } from './host/theme';
 import {
   abortBinaryWrite,
@@ -62,9 +62,10 @@ async function main(): Promise<void> {
     installDevStub();
   }
 
-  // ה-latch של plugin.boot נרשם בייבוא של host/otzaria-client, לפני ה-await
-  // הזה — האירוע נורה פעם אחת ואינו משוחזר.
-  const boot = waitForBoot();
+  // ה-latch של plugin.boot יושב ב-<head> של index.html ורץ לפני הבאנדל הזה,
+  // מפני שהאירוע נורה פעם אחת ואינו משוחזר. resolveBoot נופלת משם לשחזור
+  // ב-RPC אם האירוע בכל זאת אבד — ראו host/otzaria-client.ts.
+  const boot = resolveBoot();
 
   await domReady();
 
@@ -324,6 +325,11 @@ async function main(): Promise<void> {
     // הכפתור נפתח רק כאן: לחיצה לפני ה-boot הייתה יכולה להתחיל פתיחה שהמסמך
     // הריק של האתחול יחליף — כלומר בחירת המשתמש נעלמת בשקט.
     openBtn.disabled = false;
+    if (info.source === 'recovered') {
+      // לא שגיאה — התוסף עלה. נרשם כדי שמסלול שאמור להיות נדיר לא יהפוך
+      // לשקוף, ושתהיה עדות אם הוא קורה תמיד.
+      console.warn('[otzaria-word] plugin.boot אבד; מצב האתחול שוחזר ב-RPC');
+    }
     status(`אוצריא ${info.app.version} · ${info.app.platform} — בחר קובץ Word כדי להתחיל`);
   } catch (error) {
     status(error instanceof Error ? error.message : 'אוצריא לא אתחלה את התוסף', true);

@@ -56,18 +56,40 @@ export function on<K extends keyof OtzariaEventMap>(
 }
 
 /**
+ * השם שה-latch ב-index.html כותב אליו. מוגדר כאן וב-index.html, ו-
+ * tests/unit/otzaria-client.test.ts קורא את ה-HTML ומקבע שהשניים זהים.
+ */
+export const BOOT_LATCH_KEY = '__otzariaBoot';
+
+interface BootLatch {
+  payload: BootPayload | null;
+  /** `performance.now()` בזמן הירייה — כדי שאפשר יהיה למדוד את הפער. */
+  at: number | null;
+}
+
+function readLatch(): BootLatch | undefined {
+  return (window as unknown as Record<string, BootLatch | undefined>)[BOOT_LATCH_KEY];
+}
+
+/**
  * ה-latch של plugin.boot.
  *
  * האירוע נורה פעם אחת. אוצריא אינה שומרת את ה-payload ואין `getBootInfo`, ו-
  * `on` של ה-SDK האמיתי הוא `window.addEventListener` בלי replay — כלומר מי
- * שנרשם אחרי הירייה, למשל אחרי `await`, לא יקבל אותו לעולם. זה הכשל שההרשמה
- * כאן, בזמן טעינת המודול, מונעת.
+ * שנרשם אחרי הירייה לא יקבל אותו לעולם.
  *
- * (אוצריא כן מזריקה stub לפני ה-SDK, שה-`on` שלו מתור רישומים ומשחזר אותם
- * לפני שיגור ה-boot — ולכן `Otzaria.on` בזמן טעינת המודול היה עובד גם כן.
- * ההרשמה ישירות על window אינה תלויה בהתנהגות הזאת, וזה כל היתרון שלה.)
+ * ההרשמה כאן, בזמן טעינת המודול, אינה מספיקה: הבאנדל הוא 10MB, ובפיתוח הוא
+ * גרף מודולים שנטען ברשת, ולכן הוא עלול להיטען אחרי שהאירוע נורה. לכן ה-latch
+ * האמיתי הוא סקריפט inline ב-`<head>` של index.html, שרץ בזמן פריסת ה-HTML.
+ * מה שנקרא כאן הוא מה שהוא שמר. ההרשמה שלמטה נשארת לשני מצבים: ה-latch לא רץ
+ * (בדיקות), או שהאירוע טרם נורה.
  */
 const bootPayload = new Promise<BootPayload>((resolve) => {
+  const latched = readLatch()?.payload;
+  if (latched) {
+    resolve(latched);
+    return;
+  }
   window.addEventListener(
     'plugin.boot',
     (event) => resolve((event as CustomEvent<BootPayload>).detail),
@@ -77,6 +99,12 @@ const bootPayload = new Promise<BootPayload>((resolve) => {
 
 /** ברירת מחדל לשעון-שומר של ה-boot. ה-Host מקומי; המתנה ארוכה היא כשל. */
 export const BOOT_TIMEOUT_MS = 15_000;
+
+/** כמה להמתין לאירוע לפני שמנסים לשחזר את ה-payload בקריאות RPC. */
+export const BOOT_GRACE_MS = 2_500;
+
+/** כל כמה זמן לחזור ולנסות את השחזור, כל עוד ה-SDK עדיין לא ענה. */
+export const BOOT_POLL_MS = 1_000;
 
 /**
  * ממתינה ל-plugin.boot. כל קריאה ל-Host API חייבת לרוץ אחריה — קריאה
@@ -97,6 +125,128 @@ export function waitForBoot(timeoutMs = BOOT_TIMEOUT_MS): Promise<BootPayload> {
       );
     }),
   ]);
+}
+
+/** מה שהתוסף באמת צריך מה-boot, ומאיפה זה הגיע. */
+export interface BootInfo {
+  theme: ThemePayload;
+  app: BootPayload['app'];
+  /** `'recovered'` פירושו שהאירוע לא הגיע וה-payload נבנה מקריאות RPC. */
+  source: 'event' | 'recovered';
+}
+
+/**
+ * בונה את ה-boot מקריאות RPC, בשביל המצב שבו האירוע אבד.
+ *
+ * `app.getInfo` ו-`app.getTheme` דורשים את ההרשאה `app.info.read`, שהיא הרשאת
+ * בסיס — מוענקת לכל תוסף אוטומטית, בלי הצהרה במניפסט ובלי לשאול את המשתמש.
+ * כלומר המסלול הזה אינו עולה שום הרשאה חדשה.
+ *
+ * הקריאות נכשלות כל עוד ה-SDK האמיתי לא הוזרק (ה-stub של אוצריא דוחה הכול עם
+ * „not ready yet”), וזה בדיוק הסימן שממתינים לו: הצלחה כאן פירושה ש-`_boot`
+ * כבר רץ — ולכן שהאירוע נורה ואבד, ואין טעם להמתין לו עוד.
+ */
+export async function recoverBoot(): Promise<BootInfo> {
+  const [app, theme] = await Promise.all([
+    call<BootPayload['app']>('app.getInfo'),
+    call<ThemePayload>('app.getTheme'),
+  ]);
+  if (!app || !theme) throw new Error('אוצריא החזירה מידע אתחול חסר');
+  return { app, theme, source: 'recovered' };
+}
+
+/**
+ * מה שהמעטפת קוראת לו: או האירוע, או שחזור.
+ *
+ * הסדר הוא העיקר. קודם ממתינים לאירוע — הוא המסלול התקין, והוא מגיע תוך
+ * מילישניות. רק אחרי `graceMs` מתחיל השחזור, כדי לא להעמיס קריאות RPC על
+ * מסלול שעובד. השחזור חוזר ומנסה כל `pollMs`, כי כשל שלו פירושו „ה-SDK עוד לא
+ * כאן” ולא „אין טעם”. האירוע גובר בכל רגע, גם אם הגיע באיחור.
+ */
+export function resolveBoot(
+  options: { graceMs?: number; pollMs?: number; timeoutMs?: number } = {},
+): Promise<BootInfo> {
+  const {
+    graceMs = BOOT_GRACE_MS,
+    pollMs = BOOT_POLL_MS,
+    timeoutMs = BOOT_TIMEOUT_MS,
+  } = options;
+  const startedAt = Date.now();
+
+  return new Promise<BootInfo>((resolve, reject) => {
+    let settled = false;
+    /** הודעת הכשל האחרונה מהשחזור — היא שמפרידה בין ההשערות באבחון. */
+    let lastRpcError = 'טרם נוסה';
+    const timers: Array<ReturnType<typeof setTimeout>> = [];
+
+    /** תמיד גם מנקה את הטיימרים: סבב polling שנשאר חי דולף קריאות RPC. */
+    function finish(action: () => void): void {
+      if (settled) return;
+      settled = true;
+      for (const timer of timers) clearTimeout(timer);
+      action();
+    }
+
+    void bootPayload.then((payload) => {
+      finish(() => resolve({ theme: payload.theme, app: payload.app, source: 'event' }));
+    });
+
+    timers.push(
+      setTimeout(() => {
+        finish(() => {
+          // האבחון נכתב ל-console מפני שאוצריא מעבירה console של תוסף ללוג
+          // שלה. בלי זה, כשל אתחול אצל משתמש הוא הודעה בעברית בלי שום נתון,
+          // ואי אפשר להפריד בין „האירוע אבד” ל„הגשר מת”.
+          console.error('[otzaria-word] כשל אתחול', describeBootState(startedAt, lastRpcError));
+          reject(
+            new Error('אוצריא לא סיימה לאתחל את התוסף. נסו לטעון את הלשונית מחדש.'),
+          );
+        });
+      }, timeoutMs),
+    );
+
+    function attempt(): void {
+      if (settled) return;
+      void recoverBoot().then(
+        (info) => finish(() => resolve(info)),
+        (error: unknown) => {
+          lastRpcError = error instanceof Error ? error.message : String(error);
+          if (!settled) timers.push(setTimeout(attempt, pollMs));
+        },
+      );
+    }
+
+    timers.push(setTimeout(attempt, graceMs));
+  });
+}
+
+/**
+ * תמונת מצב לאבחון כשל אתחול. כל שדה כאן מפריד בין הסברים:
+ * `latchRan: false` — הסקריפט ב-`<head>` לא רץ (אריזה שבורה).
+ * `latchCaught: true` והגענו לכאן — באג אצלנו, ה-payload היה ולא נקרא.
+ * `sdkBooted: false` + `lastRpcError: '…not ready yet'` — `_boot` לא רץ ב-context
+ *   הזה כלל. זה צד אוצריא: ה-JS context שהתוסף רץ בו אינו זה שקיבל את ה-boot
+ *   (נצפה ב-macOS כשה-platform view נבנה מחדש), ו-reload הוא מה שמרפא.
+ * `bridgeAlive: false` — ערוץ ה-JS↔Dart מת; אין למי לדבר.
+ */
+function describeBootState(startedAt: number, lastRpcError: string): Record<string, unknown> {
+  const latch = readLatch();
+  // `_booted` אינו בטיפוס הציבורי — אוצריא מציבה אותו ב-_boot בלבד, ולכן הוא
+  // הסימן המדויק ביותר לשאלה „האם ה-SDK האמיתי הוזרק ל-context הזה”.
+  const sdk = (window as Partial<Window>).Otzaria as (OtzariaGlobal & { _booted?: boolean }) | undefined;
+  const bridge = (window as unknown as { flutter_inappwebview?: { callHandler?: unknown } })
+    .flutter_inappwebview;
+
+  return {
+    waitedMs: Date.now() - startedAt,
+    latchRan: latch !== undefined,
+    latchCaught: latch?.payload != null,
+    latchAt: latch?.at ?? null,
+    sdkPresent: sdk !== undefined,
+    sdkBooted: sdk?._booted === true,
+    bridgeAlive: typeof bridge?.callHandler === 'function',
+    lastRpcError,
+  };
 }
 
 export function onThemeChanged(callback: (theme: ThemePayload) => void): () => void {

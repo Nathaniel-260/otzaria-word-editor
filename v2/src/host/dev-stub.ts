@@ -147,6 +147,15 @@ async function handle(method: string, payload: Record<string, unknown> = {}): Pr
       return { cancelled: false, token, name, size: blob.size };
     }
 
+    // מה שמאפשר ל-resolveBoot לשחזר את מצב האתחול כשהאירוע אבד. אוצריא מעניקה
+    // את app.info.read כהרשאת בסיס, ולכן זה עובד גם שם בלי הצהרה במניפסט.
+    case 'app.getInfo':
+      return BOOT.app;
+    case 'app.getTheme':
+      return BOOT.theme;
+    case 'app.getGrantedPermissions':
+      return BOOT.permissions;
+
     case 'storage.get': {
       const raw = window.localStorage.getItem(storagePrefix + String(payload.key));
       return raw === null ? null : JSON.parse(raw);
