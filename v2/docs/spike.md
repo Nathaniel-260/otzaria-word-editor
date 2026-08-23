@@ -145,12 +145,14 @@ Windows (§5). גודל ה־`.otzplugin` **כן** נמדד (4.32MB, ראו הט�
 
 ## 5. מה עוד לא נעשה
 
-- [ ] „שמור” אמיתי. API הכתיבה נוסף ל-SDK של אוצריא בענף
-  `docs/plugin-sdk-type-accuracy` (`fs.beginBinaryWrite` +
-  `fs.commitUserFileWrite`, הרשאת `fs.user_files.write`, `pickUserFile` עם
-  `access: 'readwrite'`), אבל התוסף עדיין מייצא דרך `<a download>`. המימוש
-  ב-v2 הוא שלב 2 בתכנית, ורק אחרי שגרסת אוצריא שמכילה את ה-API תהיה זמינה
-  לבדיקה — ואז יש לעדכן גם את `minAppVersion`.
+- [x] „שמור” ו„שמור בשם” מול API הכתיבה — מומשו
+  (`src/sessions/save-coordinator.ts`) ואומתו מקצה לקצה מ־`file://` עם stub של
+  ה-Host: ייצוא, `beginBinaryWrite`, PUT, `commit`. `<a download>` נשאר
+  כ„ייצוא” נפרד.
+- [ ] „שמור” מול אוצריא אמיתית. ה-API קיים רק בענף
+  `docs/plugin-sdk-type-accuracy` של אוצריא; `minAppVersion` הועלה ל־0.9.97
+  לפי ההנחה שזו הגרסה שתכיל אותו, **ויש לאמת את המספר כשהיא תשוחרר**. עד אז
+  התוסף אינו מותקן על גרסה יציבה.
 - [x] אריזה עם `otzaria pack-plugin` וקבלת הוולידטור — **עבר**. `dart run
   tool/plugins/package_plugin.dart` קורס בקומפילציה של חבילת אוצריא
   (`_FfiUseSiteTransformer`, באג של ה־SDK המותקן, לא קשור לתוסף), ולכן ה־CLI
