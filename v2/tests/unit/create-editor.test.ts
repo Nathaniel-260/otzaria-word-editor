@@ -13,6 +13,7 @@ interface FakeConfig {
   telemetry: { enabled: boolean };
   workerUrls?: unknown;
   modules?: unknown;
+  onEditorUpdate?: () => void;
   onReady: (params: { superdoc: FakeSuperDoc }) => void;
   onException: (payload: unknown) => void;
 }
@@ -79,6 +80,18 @@ describe('createEditor', () => {
     expect(instance.config.selector).toBe(container);
     expect(instance.config.ui).toBe(false);
     expect(instance.config.telemetry).toEqual({ enabled: false });
+  });
+
+  it('מחבר את onEditorUpdate כשנמסר, ולא כשלא', () => {
+    // זה מה שמסמן את המסמך כלא-שמור. בלי החיבור הזה „שמור” לא ידע שיש מה לשמור.
+    const onUpdate = vi.fn();
+    createEditor({ container: document.createElement('div'), onUpdate });
+    const withHook = lastInstance()!;
+    withHook.config.onEditorUpdate?.();
+    expect(onUpdate).toHaveBeenCalledTimes(1);
+
+    createEditor({ container: document.createElement('div') });
+    expect(lastInstance()!.config.onEditorUpdate).toBeUndefined();
   });
 
   it('מכבה את דיאלוג הסיסמה המובנה', () => {

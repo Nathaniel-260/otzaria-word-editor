@@ -34,6 +34,8 @@ export interface CreateEditorOptions {
   source?: string | File | Blob;
   /** נקרא על כל exception של המנוע, גם אחרי שהמסמך נטען. */
   onError?: (error: Error, payload: SuperDocExceptionPayload) => void;
+  /** נקרא על כל שינוי במסמך. זה מה שמסמן אותו כלא-שמור. */
+  onUpdate?: () => void;
   /** מעל הזמן הזה הפתיחה נכשלת. ראו OPEN_TIMEOUT_MS. */
   timeoutMs?: number;
 }
@@ -66,7 +68,7 @@ export function exceptionToError(payload: SuperDocExceptionPayload): Error {
 }
 
 export function createEditor(options: CreateEditorOptions): Promise<EditorSession> {
-  const { container, source, onError, timeoutMs = OPEN_TIMEOUT_MS } = options;
+  const { container, source, onError, onUpdate, timeoutMs = OPEN_TIMEOUT_MS } = options;
 
   return new Promise((resolve, reject) => {
     let instance: SuperDoc | undefined;
@@ -114,6 +116,9 @@ export function createEditor(options: CreateEditorOptions): Promise<EditorSessio
       // ב-file:// חייבים workers מ-blob: . undefined משאיר את ברירת המחדל
       // של SuperDoc, שנכונה בפיתוח מ-localhost.
       workerUrls: engineWorkerUrls(),
+
+      // כל שינוי במסמך. ה-session מסמן ממנו dirty; אין קריאה ל-DOM.
+      onEditorUpdate: onUpdate ? () => onUpdate() : undefined,
 
       // ה-payload נושא את המופע המוכן. משתמשים בו, ולא ב-closure, כדי לא
       // להישען על סדר ההשמה של הבנאי.
