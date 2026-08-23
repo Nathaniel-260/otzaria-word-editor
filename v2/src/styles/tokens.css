@@ -1,0 +1,46 @@
+/* הטוקנים של הממשק.
+   השמות הם אלה שמדריך העיצוב של ה-SDK מחייב, וכולם נדרסים בזמן ריצה מערכת
+   הנושא של אוצריא (host/theme.ts). הערכים כאן הם ברירת מחדל לפיתוח בדפדפן
+   ולרגע שלפני plugin.boot — הגדרת custom property אינה נחשבת "צבע מקודד"
+   בוולידציית העיצוב, שימוש בו הוא. */
+:root {
+  --color-primary: #1565c0;
+  --color-on-primary: #ffffff;
+  --color-secondary: #6750a4;
+  --color-on-secondary: #ffffff;
+  --color-secondary-container: #e8def8;
+  --color-on-secondary-container: #1d192b;
+  --color-surface: #f8f9fa;
+  --color-on-surface: #1a1a2e;
+  --color-on-surface-variant: #49454f;
+  --color-surface-container-high: #ece6f0;
+  --color-surface-container-highest: #e0e0e0;
+  --color-error: #b00020;
+  --color-on-error: #ffffff;
+  --color-outline: #cbd5e1;
+  --color-primary-subtle: rgba(21, 101, 192, 0.12);
+  --color-secondary-subtle: rgba(103, 80, 164, 0.12);
+
+  --font-main: 'FrankRuhlCLM', 'David', serif;
+  --font-size-base: 18px;
+  --line-height: 1.5;
+
+  /* גודל טקסט הממשק נגזר מגודל הגופן שהמשתמש בחר, אבל חסום: --font-size-base
+     הוא גודל גופן *הספר* ויכול להגיע ל-36px, וסרגל כלים בגודל כזה אינו שמיש. */
+  --font-size-ui: clamp(13px, calc(var(--font-size-base) * 0.8), 20px);
+
+  /* מדריך העיצוב קובע את הסקאלה הזאת; אין להשתמש ב-border-radius אחר. */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-pill: 999px;
+
+  /* הפס העליון הוא החריג היחיד ליחידות יחסיות — ראו DESIGN_GUIDE.md. */
+  --topbar-height: 56px;
+}
+
+@media (max-width: 600px) {
+  :root {
+    --topbar-height: 44px;
+  }
+}
