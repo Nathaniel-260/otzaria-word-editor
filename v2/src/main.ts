@@ -12,6 +12,7 @@ import './styles/shell.css';
 import { confirm, notifyError, onThemeChanged, waitForBoot } from './host/otzaria-client';
 import { applyTheme } from './host/theme';
 import {
+  abortBinaryWrite,
   beginBinaryWrite,
   commitUserFileWrite,
   pickDocxFile,
@@ -99,6 +100,7 @@ async function main(): Promise<void> {
     },
     beginWrite: (size) => beginBinaryWrite(size),
     upload: uploadBytes,
+    abort: abortBinaryWrite,
     commit: (input) =>
       commitUserFileWrite({
         writeToken: input.writeToken,

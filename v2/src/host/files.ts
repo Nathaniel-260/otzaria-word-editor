@@ -7,7 +7,7 @@
  * לאן הבייטים נכתבים. ה-url תקף לריצה אחת בלבד — הפורט משתנה בכל הפעלה —
  * ולכן ה-token הוא מה שנשמר, ובעלייה חוזרת קוראים `fs.resolveFileUrl`.
  */
-import { call } from './otzaria-client';
+import { call, tryCall } from './otzaria-client';
 import { DOCX_MIME } from '../engine/export';
 
 export interface UserFile {
@@ -106,6 +106,19 @@ export async function uploadBytes(uploadUrl: string, blob: Blob): Promise<void> 
   });
   if (!response.ok) {
     throw new Error(`העלאת המסמך נכשלה (${response.status})`);
+  }
+}
+
+/**
+ * מבטל העלאה שלא תגיע ל-commit — למשל שמירה שהמסמך שלה הוחלף באמצע. בלי זה
+ * הקובץ הזמני והסלוט במכסה נתפסים עד שה-token פג (שתי דקות).
+ *
+ * לא זורק: זהו ניקוי, ואם הוא נכשל אין למשתמש מה לעשות עם זה.
+ */
+export async function abortBinaryWrite(writeToken: string): Promise<void> {
+  const ok = await tryCall<boolean>('fs.abortBinaryWrite', { writeToken });
+  if (ok !== true) {
+    console.warn('[otzaria-word] ביטול ההעלאה לא הושלם', writeToken);
   }
 }
 

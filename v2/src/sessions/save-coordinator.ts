@@ -63,6 +63,11 @@ export interface SaveCoordinatorDeps {
   beginWrite: (expectedSize: number) => Promise<SaveTicket>;
   upload: (uploadUrl: string, blob: Blob) => Promise<void>;
   commit: (input: SaveCommitInput) => Promise<SaveCommitOutput>;
+  /**
+   * משחרר העלאה שלא תגיע ל-commit. חייב להיות: בלעדיו כל סבב שנעצר אחרי
+   * ההעלאה משאיר קובץ זמני וסלוט במכסה תפוסים עד שה-token פג.
+   */
+  abort: (writeToken: string) => Promise<void>;
   /** נקרא על כל שינוי מצב, כדי שהממשק יציג dirty/שומר/שגיאה. */
   onStateChange?: (snapshot: SaveSnapshot) => void;
 }
@@ -138,6 +143,19 @@ export function createSaveCoordinator(deps: SaveCoordinatorDeps): SaveCoordinato
     }
   }
 
+  /**
+   * משחרר העלאה שלא תגיע ל-commit. ניקוי, ולכן כשל שלו אינו הופך לכשל שמירה —
+   * הגרוע ביותר שיקרה הוא שהיא תפוג מעצמה תוך שתי דקות.
+   */
+  async function release(ticket: SaveTicket | undefined): Promise<void> {
+    if (!ticket) return;
+    try {
+      await deps.abort(ticket.writeToken);
+    } catch (error) {
+      console.warn('[otzaria-word] שחרור ההעלאה נכשל', error);
+    }
+  }
+
   function fail(error: unknown, fallback: string): SaveOutcome {
     lastError = error instanceof Error && error.message ? error.message : fallback;
     setState('error');
@@ -174,12 +192,14 @@ export function createSaveCoordinator(deps: SaveCoordinatorDeps): SaveCoordinato
       return fail(error, 'ייצוא המסמך נכשל');
     }
 
-    let ticket: SaveTicket;
+    let ticket: SaveTicket | undefined;
     try {
       stage('uploading');
       ticket = await deps.beginWrite(blob.size);
       await deps.upload(ticket.uploadUrl, blob);
     } catch (error) {
+      // ההעלאה נפתחה ולא תגיע ל-commit — לשחרר אותה עכשיו ולא לחכות לפקיעה.
+      await release(ticket);
       if (mine !== epoch) return { status: 'stale' };
       return fail(error, 'העלאת המסמך נכשלה');
     }
@@ -188,7 +208,10 @@ export function createSaveCoordinator(deps: SaveCoordinatorDeps): SaveCoordinato
     // ההרסנית — הוא כותב לדיסק. אחרי מעבר מסמך אין לו למי לכתוב: היעד של
     // המסמך הזה אינו רלוונטי יותר, והבייטים האלה בטח לא שייכים לקובץ של המסמך
     // שנפתח. הייצוא וההעלאה שכבר נעשו הם בזבוז, לא נזק.
-    if (mine !== epoch) return { status: 'stale' };
+    if (mine !== epoch) {
+      await release(ticket);
+      return { status: 'stale' };
+    }
 
     let result: SaveCommitOutput;
     try {

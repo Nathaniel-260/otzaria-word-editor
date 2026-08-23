@@ -16,6 +16,8 @@ import {
 interface Harness {
   coordinator: SaveCoordinator;
   commits: SaveCommitInput[];
+  /** ה-writeTokens ששוחררו דרך fs.abortBinaryWrite. */
+  aborts: string[];
   uploads: Array<{ url: string; size: number }>;
   states: SaveSnapshot[];
   exportCount: () => number;
@@ -24,10 +26,12 @@ interface Harness {
   onCommit: (fn: (input: SaveCommitInput) => Promise<SaveCommitOutput>) => void;
   onUpload: (fn: (url: string, blob: Blob) => Promise<void>) => void;
   onBeginWrite: (fn: (size: number) => Promise<{ writeToken: string; uploadUrl: string }>) => void;
+  onAbort: (fn: (writeToken: string) => Promise<void>) => void;
 }
 
 function harness(): Harness {
   const commits: SaveCommitInput[] = [];
+  const aborts: string[] = [];
   const uploads: Array<{ url: string; size: number }> = [];
   const states: SaveSnapshot[] = [];
   let exports = 0;
@@ -40,6 +44,7 @@ function harness(): Harness {
     name: 'חידושים.docx',
   });
   let uploadImpl: (url: string, blob: Blob) => Promise<void> = async () => {};
+  let abortImpl: (writeToken: string) => Promise<void> = async () => {};
   let beginImpl: (size: number) => Promise<{ writeToken: string; uploadUrl: string }> = async () => {
     ticket += 1;
     return { writeToken: `w${ticket}`, uploadUrl: `http://127.0.0.1/w/w${ticket}` };
@@ -59,12 +64,17 @@ function harness(): Harness {
       commits.push({ ...input });
       return commitImpl(input);
     },
+    abort: async (writeToken) => {
+      aborts.push(writeToken);
+      await abortImpl(writeToken);
+    },
     onStateChange: (snapshot) => states.push(snapshot),
   });
 
   return {
     coordinator,
     commits,
+    aborts,
     uploads,
     states,
     exportCount: () => exports,
@@ -79,6 +89,9 @@ function harness(): Harness {
     },
     onBeginWrite: (fn) => {
       beginImpl = fn;
+    },
+    onAbort: (fn) => {
+      abortImpl = fn;
     },
   };
 }
@@ -183,6 +196,49 @@ describe('כשלים', () => {
     expect(outcome.status).toBe('failed');
     expect(h.commits).toEqual([]);
     expect(h.coordinator.snapshot).toMatchObject({ isDirty: true, state: 'error' });
+  });
+
+  it('כשל העלאה משחרר את ההעלאה', async () => {
+    const h = harness();
+    h.coordinator.markDirty();
+    h.onUpload(() => Promise.reject(new Error('413')));
+
+    await h.coordinator.saveNow();
+
+    // הכשל אינו סיבה להשאיר את הסלוט תפוס עד הפקיעה.
+    expect(h.aborts).toEqual(['w1']);
+  });
+
+  it('כשל ייצוא אינו מנסה לשחרר העלאה שלא נפתחה', async () => {
+    const h = harness();
+    h.coordinator.markDirty();
+    h.onExport(() => Promise.reject(new Error('המנוע קרס')));
+
+    await h.coordinator.saveNow();
+
+    expect(h.aborts).toEqual([]);
+  });
+
+  it('שמירה מוצלחת אינה משחררת — ה-commit צרך את ההעלאה', async () => {
+    const h = harness();
+    h.coordinator.markDirty();
+
+    await h.coordinator.saveNow();
+
+    expect(h.aborts).toEqual([]);
+  });
+
+  it('כשל בשחרור אינו הופך לכשל שמירה', async () => {
+    const h = harness();
+    h.coordinator.markDirty();
+    h.onUpload(() => Promise.reject(new Error('413')));
+    h.onAbort(() => Promise.reject(new Error('גם הביטול נפל')));
+
+    const outcome = await h.coordinator.saveNow();
+
+    // הכשל שמדווח הוא של ההעלאה, לא של הניקוי.
+    expect(outcome.status).toBe('failed');
+    expect(outcome.status === 'failed' && outcome.message).toContain('413');
   });
 
   it('כשל commit משאיר מלוכלך ואינו מאמץ יעד', async () => {
@@ -569,6 +625,30 @@ describe('מעבר מסמך בזמן שמירה', () => {
     await expect(savingA).resolves.toEqual({ status: 'stale' });
     expect(h.exportCount()).toBe(1);
     expect(h.uploads).toHaveLength(1);
+  });
+
+  it('סבב מוחלף משחרר את ההעלאה שלו מיד', async () => {
+    // בלי זה הקובץ הזמני והסלוט במכסה נתפסים עד שה-token פג — שתי שמירות
+    // כאלה וההתוסף אינו יכול לשמור בכלל.
+    const h = harness();
+    h.coordinator.adoptTarget({ token: 'token-A', name: 'א.docx' });
+    h.coordinator.markDirty();
+    let release!: () => void;
+    h.onUpload(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+
+    const savingA = h.coordinator.saveNow();
+    await flush();
+    h.coordinator.reset({ token: 'token-B', name: 'ב.docx' });
+    release();
+
+    await expect(savingA).resolves.toEqual({ status: 'stale' });
+    expect(h.aborts).toEqual(['w1']);
+    expect(h.commits).toEqual([]);
   });
 
   it('כשל ייצוא בסבב מוחלף אינו מסמן שגיאה על המסמך החדש', async () => {

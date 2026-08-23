@@ -576,6 +576,8 @@ interface DocumentSession {
 - [x] רק אחרי commit מוצלח: `savedRevision = exportedRevision`.
 - [x] אם writable token חסר, commit פותח Save As. ביטול משאיר dirty.
 - [x] שגיאת export/upload/commit משאירה dirty; אין הודעת „נשמר”.
+- [x] סבב שנעצר אחרי ההעלאה משחרר אותה מיד דרך `fs.abortBinaryWrite`, ואינו
+  משאיר קובץ זמני וסלוט במכסה תפוסים עד שה־token פג.
 - [x] autosave מתחיל רק אחרי שלמסמך יש writable token, עם debounce של 2.5 שניות.
 - [x] ב־before close/switch משתמשים ב־Save / Discard / Cancel; אין הסתמכות על
   `beforeunload`.
