@@ -5,12 +5,18 @@
       title="עמודים"
       :launcher="false"
     >
+      <!--
+        התווית אינה „מעבר עמוד”: המימוש הוא `w:pageBreakBefore`, שמזיז את כל
+        הפסקה לעמוד הבא ואינו מפצל אותה בסמן כמו Word. ההסבר המלא, כולל
+        החלופות שנדחו, ב-engine/page-break.ts.
+      -->
       <RibbonButton
         icon="pageBreak"
-        label="מעבר עמוד"
+        label="התחל בעמוד חדש"
         variant="large"
-        tooltip="הוספת מעבר עמוד במסמך"
-        @click="insertPageBreak"
+        :tooltip="pageBreakTooltip"
+        :disabled="!pageBreak.available"
+        @click="onStartOnNewPage"
       />
     </RibbonGroup>
 
@@ -105,15 +111,22 @@
  * (`readLinkPayloadTarget` נבדק לפני הבחירה החיה, ו-
  * `linkPayloadHasExplicitTarget` מכריז על הפקודה כמוכנה בלעדיה).
  *
+ * ## מעבר העמוד, ומה הוא באמת
+ *
+ * אין ב-2.8.0 API ציבורי למעבר עמוד בסמן (`<w:br w:type="page"/>`). מה שכן יש
+ * הוא `w:pageBreakBefore` על פסקה, וזה מה שהפקד עושה — ולכן התווית היא „התחל
+ * בעמוד חדש”. ההנמקה המלאה, כולל שתי החלופות שנדחו ומה שנמצא בצינור הקלט
+ * הפנימי של המנוע, ב-engine/page-break.ts.
+ *
  * ## המצב הקודם
  *
  * שלושת הפקדים כאן לא עשו כלום: `imageCmd.run()` ו-`linkCmd.run()` נקראו **בלי
  * payload**, וכל אחת מהן נכשלת סגור במנוע (`create.image` דורש `src`,
- * `executeLinkCommand` דורש `href`), ו-`insertPageBreak` הייתה פונקציה ריקה.
- * אף אחד מהם לא היה מנוטרל ואף אחד לא דיווח כשל — כלומר שלושה כפתורים שנראים
- * עובדים.
+ * `executeLinkCommand` דורש `href`), ו-`insertPageBreak` הייתה פונקציה ריקה
+ * שהציגה `Ctrl+Enter` כקיצור שלה. אף אחד מהם לא היה מנוטרל ואף אחד לא דיווח
+ * כשל — כלומר שלושה כפתורים שנראים עובדים.
  */
-import { computed, inject, ref, shallowRef } from 'vue';
+import { computed, inject, ref, shallowRef, watch } from 'vue';
 import type { SuperDoc } from 'superdoc';
 import RibbonGroup from '../common/RibbonGroup.vue';
 import RibbonButton from '../common/RibbonButton.vue';
@@ -127,6 +140,11 @@ import {
   readDocSelection,
   type DocSelectionSnapshot,
 } from '../../../engine/doc-selection';
+import {
+  readPageBreakSupport,
+  startParagraphOnNewPage,
+  type PageBreakSupport,
+} from '../../../engine/page-break';
 import { LINK_HREF_HINT, imagePayload, linkPayload } from '../../../engine/payloads';
 import { pickImageFile, readImageAsDataUrl } from '../../../host/files';
 
@@ -253,8 +271,42 @@ function onSubmitLink(link: { href: string; text: string }): void {
   void linkCmd.run(payload);
 }
 
-function insertPageBreak(): void {
-  // מעבר עמוד דרך קיצור מקלדת Ctrl+Enter
+/* ------------------------------------------------------------------ */
+/* התחלה בעמוד חדש                                                     */
+/* ------------------------------------------------------------------ */
+
+/** עד שהיכולת נקראה — מנוטרל. „אולי כן” הוא בדיוק הכפתור המת. */
+const pageBreak = shallowRef<PageBreakSupport>({ available: false, explanation: 'המסמך עדיין נטען' });
+
+/**
+ * מונה דורות: קריאת היכולת א-סינכרונית, ומסמך שנפתח אחרי מסמך אחר עשוי להשיב
+ * לפניו. בלי המונה התשובה של המסמך הקודם הייתה דורסת את זו של הנוכחי.
+ */
+let pageBreakGeneration = 0;
+
+watch(
+  superdoc,
+  async (host) => {
+    const mine = ++pageBreakGeneration;
+    pageBreak.value = { available: false, explanation: 'המסמך עדיין נטען' };
+    const support = await readPageBreakSupport(host);
+    if (mine === pageBreakGeneration) pageBreak.value = support;
+  },
+  { immediate: true }
+);
+
+/**
+ * ה-tooltip אומר בדיוק מה יקרה, ולא מבטיח את ההתנהגות של Word. פקד מנוטרל
+ * מסביר **למה** הוא מנוטרל.
+ */
+const pageBreakTooltip = computed(() =>
+  pageBreak.value.available
+    ? 'הפסקה שבה הסמן תתחיל בראש עמוד חדש'
+    : pageBreak.value.explanation
+);
+
+async function onStartOnNewPage(): Promise<void> {
+  report(await startParagraphOnNewPage(superdoc.value), 'page-break-before');
 }
 </script>
 
