@@ -48,7 +48,12 @@ export const REASON_TEXT: Record<SuperDocUIReason, string> = {
  * עשרות קודים פנימיים; מתורגמים רק אלה שיש למשתמש מה לעשות איתם. כל השאר
  * מוצגים עם הקוד עצמו, כדי שאפשר יהיה לדווח עליהם — ולא נעלמים.
  */
-const FAILURE_TEXT: Record<string, string> = {
+/**
+ * מיוצאת כדי ש-engine/document-api.ts יציג את אותו נוסח: המשתמש פוגש את אותו
+ * כשל בשני מסלולים — פקודה מנותבת ו-Document API ישיר — וקול שני לאותו כשל
+ * הוא באג בממשק.
+ */
+export const FAILURE_TEXT: Record<string, string> = {
   DOCUMENT_READONLY: 'המסמך פתוח לקריאה בלבד',
   NO_SELECTION: 'יש למקם את הסמן במסמך',
   PARTIAL_LINK_EDIT: 'הקישור עודכן אך הטקסט המוצג לא הוחלף',

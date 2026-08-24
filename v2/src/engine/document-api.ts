@@ -18,6 +18,7 @@
  */
 import type { InjectionKey, Ref } from 'vue';
 import type { SuperDoc } from 'superdoc';
+import { FAILURE_TEXT } from './command-adapter';
 
 /**
  * המופע הפעיל, או `null` כשאין מסמך פתוח. `shallowRef` בצד המספק: המופע הוא
@@ -41,23 +42,14 @@ export interface DocReceipt {
 /**
  * קודי כשל של ה-Document API בעברית.
  *
- * הנוסח זהה לזה שב-`FAILURE_TEXT` שבתוך engine/command-adapter.ts — בכוונה:
- * המשתמש רואה אותו כשל בשני מסלולים (פקודה מנותבת מול Document API ישיר),
- * וקול שני לאותו כשל הוא באג בממשק. הטבלה שם פרטית ואינה מיוצאת, ולכן היא
- * שוכפלה לכאן; המיזוג לטבלה אחת מדווח כמשימת המשך.
+ * הבסיס הוא `FAILURE_TEXT` של command-adapter.ts ולא העתק שלו: המשתמש פוגש את
+ * אותו כשל בשני מסלולים (פקודה מנותבת מול Document API ישיר), וקול שני לאותו
+ * כשל הוא באג בממשק.
  */
 const RECEIPT_FAILURE_TEXT: Record<string, string> = {
-  DOCUMENT_READONLY: 'המסמך פתוח לקריאה בלבד',
-  NO_SELECTION: 'יש למקם את הסמן במסמך',
-  PERMISSION_DENIED: 'אין הרשאה לבצע את הפעולה',
-  CAPABILITY_UNAVAILABLE: 'הפעולה אינה זמינה במסמך הזה',
-  CAPABILITY_UNSUPPORTED: 'הפעולה אינה נתמכת בגרסה הזאת של המנוע',
-  INVALID_TARGET: 'לא ניתן לבצע את הפעולה במקום הזה במסמך',
-  TARGET_NOT_FOUND: 'היעד של הפעולה לא נמצא במסמך',
-  LOCK_VIOLATION: 'החלק הזה במסמך מוגן מפני שינוי',
-  NO_OP: 'לא היה מה לשנות',
-  // שני אלה אינם ב-command-adapter: פעולות ה-Document API **זורקות** על קלט
-  // פסול במקום להחזיר קבלה, ולכן הן מגיעות לכאן דרך ה-catch של הקורא.
+  ...FAILURE_TEXT,
+  // שני אלה אינם במסלול הפקודות: פעולות ה-Document API **זורקות** על קלט פסול
+  // במקום להחזיר קבלה, ולכן הן מגיעות לכאן דרך ה-catch של הקורא.
   INVALID_INPUT: 'הפעולה קיבלה ערך שאינו חוקי',
   PRECONDITION_FAILED: 'המסמך אינו במצב שמאפשר את הפעולה',
 };

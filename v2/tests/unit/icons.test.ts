@@ -339,11 +339,16 @@ describe('משקל אופטי', () => {
 const SRC = join(process.cwd(), 'src');
 
 function vueFiles(dir = SRC): string[] {
+  return sourceFiles(dir).filter((file) => file.endsWith('.vue'));
+}
+
+/** כל קובצי המקור — גם .ts, כי שם נבחרים אייקונים בזמן ריצה. */
+function sourceFiles(dir = SRC): string[] {
   const files: string[] = [];
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const full = join(dir, entry.name);
-    if (entry.isDirectory()) files.push(...vueFiles(full));
-    else if (entry.name.endsWith('.vue')) files.push(full);
+    if (entry.isDirectory()) files.push(...sourceFiles(full));
+    else if (/\.(vue|ts)$/.test(entry.name)) files.push(full);
   }
   return files;
 }
@@ -356,6 +361,12 @@ function vueFiles(dir = SRC): string[] {
  * - מאפיין שקדם לו `:` הוא binding דינמי (`:name="icon"`), כלומר השם נקבע
  *   בזמן ריצה מ-prop של הרכיב — ואת הערך האמיתי נותן אתר הקריאה, שגם הוא
  *   נסרק כאן.
+ *
+ * מה שסריקת המאפיינים הזאת **אינה** רואה: שם שנבחר בביטוי, כמו
+ * `:name="isCollapsed ? 'chevronDown' : 'chevronUp'"` ב-Ribbon.vue, או שם
+ * שמוחזר מפונקציה ב-.ts (כך נבחרים chevronLeft/chevronRight בגלריית
+ * הסגנונות). בגללה `chevronUp` נראה בטעות כאייקון ללא צרכן ונכנס
+ * ל-PLANNED_ICONS. ראו dynamicIconNames.
  */
 function usedIcons(): Map<string, string[]> {
   const used = new Map<string, string[]>();
@@ -371,8 +382,32 @@ function usedIcons(): Map<string, string[]> {
   return used;
 }
 
+/**
+ * שמות אייקונים שנבחרים בזמן ריצה: מחרוזת מצוטטת בכל קובץ מקור, שמצטלבת עם
+ * שמות ה-ICONS. פחות מדויק מסריקת מאפיינים — מחרוזת שמקרית לה אותו שם תיחשב
+ * שימוש — ולכן היא משמשת רק כדי **להרחיב** את קבוצת „בשימוש”, ולא כדי לאמת
+ * שהשם קיים. עדיף מהחלופה: אייקון שכן מחובר לפקד ונראה כמיותם, ואז נדחף
+ * ל-PLANNED_ICONS וההחרגה גדלה בשקט.
+ */
+function dynamicIconNames(): Set<string> {
+  const known = new Set(NAMES);
+  const found = new Set<string>();
+  // icons.ts עצמו מוחרג: PLANNED_ICONS הוא מחרוזות מצוטטות של שמות אייקונים,
+  // וסריקה שלו הייתה מדווחת שכל אייקון מתוכנן „בשימוש”.
+  const definition = join(SRC, 'ui/icons/icons.ts');
+  for (const file of sourceFiles()) {
+    if (file === definition) continue;
+    const text = readFileSync(file, 'utf8').replace(/<!--[\s\S]*?-->/g, '');
+    for (const m of text.matchAll(/['"`]([A-Za-z][A-Za-z0-9]*)['"`]/g)) {
+      if (known.has(m[1]!)) found.add(m[1]!);
+    }
+  }
+  return found;
+}
+
 describe('אתרי הקריאה לאייקונים', () => {
   const used = usedIcons();
+  const referenced = new Set([...used.keys(), ...dynamicIconNames()]);
 
   it('הסריקה אכן מצאה שימושים (הגנה מפני regex שהפסיק להתאים)', () => {
     expect(used.size).toBeGreaterThan(40);
@@ -390,7 +425,7 @@ describe('אתרי הקריאה לאייקונים', () => {
 
   it('אין אייקון מוגדר שאינו בשימוש, למעט רשימת PLANNED_ICONS', () => {
     const planned = new Set<string>(PLANNED_ICONS);
-    const orphans = NAMES.filter((n) => !used.has(n) && !planned.has(n));
+    const orphans = NAMES.filter((n) => !referenced.has(n) && !planned.has(n));
     expect(orphans).toEqual([]);
   });
 
@@ -398,7 +433,7 @@ describe('אתרי הקריאה לאייקונים', () => {
     // אייקון מתוכנן שכבר חובר לפקד צריך לצאת מהרשימה, אחרת ההחרגה מתרחבת
     // בשקט ומכסה גם אייקונים שנשכחו.
     expect(PLANNED_ICONS.filter((n) => !(n in ICONS))).toEqual([]);
-    expect(PLANNED_ICONS.filter((n) => used.has(n))).toEqual([]);
+    expect(PLANNED_ICONS.filter((n) => referenced.has(n))).toEqual([]);
   });
 
   it('פעולות הקובץ מקבלות אייקונים נפרדים ונכונים', () => {

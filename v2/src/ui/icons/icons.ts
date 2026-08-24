@@ -26,14 +26,7 @@
  */
 
 /** אייקונים שמוגדרים לפני שיש להם צרכן. ראו הערת הפתיחה. */
-export const PLANNED_ICONS = [
-  'lineSpacing',
-  'borders',
-  'shading',
-  'chevronUp',
-  'chevronLeft',
-  'chevronRight',
-] as const;
+export const PLANNED_ICONS = ['lineSpacing', 'borders', 'shading'] as const;
 
 export const ICONS: Record<string, string> = {
   // מותג ואפליקציה
