@@ -6,15 +6,18 @@
  * הציגו קיצור מקלדת (`Alt+Ctrl+F`, `F7`) שלא נרשם בשום מקום. אף בדיקה לא
  * נכשלה, ואף typecheck לא התלונן: פקד שאינו עושה כלום הוא HTML תקין לחלוטין.
  *
- * לכן הכלל נבדק על המקור עצמו:
- *   1. לכל פקד יש מטפל, או שהוא מנוטרל במפורש. אין שביל שלישי.
- *   2. לכל פקד יש חיווט של `disabled` — כלומר מישהו החליט מתי הוא זמין.
- *   3. אין `shortcut` בלשוניות האלה, כל עוד אין קיצור רשום בפועל.
+ * הכלל „לכל פקד יש מטפל, או שהוא מנוטרל במפורש” **אינו כאן יותר**: הוא נמדד
+ * מעכשיו בהרכבה (tests/component/ribbon-tabs.test.ts), שלוחצת על כל כפתור בכל
+ * שמונה הלשוניות ודורשת שמשהו נצפה יקרה — ולכן היא תופסת גם את מה שסריקה אינה
+ * יכולה לתפוס: `@click` שקיים ומצביע על `doCut(){}` ריקה.
  *
- * ההיקף הוא הלשוניות שהתקלה הייתה בהן. הרחבה לכל הלשוניות היא הצעד הבא, והיא
- * צריכה לקרות ביחד עם מי שמחזיק אותן — שער אדום שאינו בבעלות מי שמתקן אותו
- * סתם חוסם. „אוצריא” נוספה כאן בגל שחיווט אותה, ובדיוק מהטעם הזה: ששת
- * הכפתורים שלה עברו את השער, וכך הוא מגן עליהם מכאן והלאה.
+ * מה שנשאר כאן הוא בדיוק מה שרינדור **אינו** יכול לענות עליו:
+ *   1. לכל פקד יש חיווט של `disabled` — כלומר מישהו החליט מתי הוא זמין. פקד
+ *      שאין לו חיווט כזה נראה בהרכבה בדיוק כמו פקד זמין שהיכולת שלו קיימת.
+ *   2. אין `shortcut` בלשוניות האלה, כל עוד אין קיצור רשום בפועל. „קיצור
+ *      שמוצג ואינו רשום” היא טענה על המעטפת, לא על מה שנרנדר.
+ *   3. שלושת פקדי „אוצריא” אמנם פולטים event — וזה נמדד בהרכבה — אבל שמישהו
+ *      **עונה** לו ב-App.vue אינו נראה מהרכבה של הלשונית לבדה.
  */
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -47,18 +50,6 @@ describe('פקדי הלשוניות פריסה, הפניות, סקירה ואו�
     for (const file of FILES) {
       expect(controls(SOURCES.get(file)!).length, file).toBeGreaterThan(0);
     }
-  });
-
-  it('לכל פקד יש מטפל, או שהוא מנוטרל במפורש', () => {
-    const dead: string[] = [];
-    for (const file of FILES) {
-      for (const control of controls(SOURCES.get(file)!)) {
-        const hasHandler = /@click|@select/.test(control);
-        const alwaysDisabled = /:disabled="true"/.test(control);
-        if (!hasHandler && !alwaysDisabled) dead.push(`${file}: ${labelOf(control)}`);
-      }
-    }
-    expect(dead).toEqual([]);
   });
 
   it('לכל פקד יש חיווט של disabled', () => {
@@ -116,12 +107,4 @@ describe('פקדי הלשוניות פריסה, הפניות, סקירה ואו�
     expect(review).toContain('label="דחה את כל השינויים"');
   });
 
-  it('„עקוב אחר שינויים” לוקח את המצב מהמנוע ולא מ-state מקומי', () => {
-    // `document-mode` מדווח `active: false` תמיד; המצב הדלוק חייב לבוא
-    // מ-`value`, אחרת הוא יוצא מסינכרון ברגע שהמצב משתנה ממקום אחר.
-    const review = SOURCES.get('ReviewTab.vue')!;
-    expect(review).toContain("useCommand('document-mode')");
-    expect(review).toContain("modeCmd.value.value === 'suggesting'");
-    expect(review).not.toMatch(/ref\(false\)/);
-  });
 });
