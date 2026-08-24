@@ -215,6 +215,9 @@ async function openDocument(file?: UserFile): Promise<boolean> {
     });
   } else {
     void forgetLastDocument();
+    // מסמך חדש — ברירת מחדל: כיווניות עברית מימין לשמאל ויישור לימין
+    void adapter.run('direction-rtl');
+    void adapter.run('text-align', { alignment: 'right' });
   }
 
   // האזנה למצב Undo/Redo

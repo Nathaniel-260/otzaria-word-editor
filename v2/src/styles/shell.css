@@ -101,6 +101,8 @@ button:disabled {
   position: absolute;
   inset: 0;
   overflow: auto;
+  direction: rtl;
+  text-align: right;
 }
 
 /* visibility ולא display: ל-host שנטען חייב להיות box אמיתי, אחרת המנוע מודד

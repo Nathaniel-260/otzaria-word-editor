@@ -136,7 +136,9 @@ function scrollGallery(direction: 'left' | 'right'): void {
   border-radius: var(--radius-sm);
   padding: 2px;
   height: 68px;
-  max-width: 360px;
+  width: 100%;
+  max-width: 100%;
+  flex: 1 1 auto;
 }
 
 .style-cards-scroll {

@@ -264,6 +264,7 @@
     <!-- קבוצה 4: סגנונות -->
     <RibbonGroup
       title="סגנונות"
+      class="styles-group"
       :launcher="true"
     >
       <StyleGallery
@@ -439,6 +440,7 @@ function doSelectAll(): void {
   align-items: stretch;
   gap: 0;
   height: 100%;
+  width: 100%;
 }
 
 .column-items {
