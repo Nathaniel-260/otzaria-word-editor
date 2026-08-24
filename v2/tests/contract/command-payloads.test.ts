@@ -9,18 +9,26 @@
  * `true` אינו מנוע.
  *
  * הוולידטורים אינם exports ציבוריים — הם פנימיים ל-chunk של החבילה — ולכן הם
- * **נחלצים מהמקור הארוז ומורצים כמו שהם**. זה לא העתקה של הלוגיקה: הקוד שרץ
- * כאן הוא הקוד שהחבילה שולחת. שינוי שלו בגרסה עתידית יפיל את הבדיקה בשתי
- * צורות — או שהחילוץ לא ימצא את הפונקציה, או שההתנהגות תשתנה — ובשניהם זה מה
- * שאנחנו רוצים לדעת.
+ * **נחלצים מהמקור הארוז ומורצים כמו שהם** (tests/support/superdoc-engine.ts).
+ * זה לא העתקה של הלוגיקה: הקוד שרץ כאן הוא הקוד שהחבילה שולחת. שינוי שלו
+ * בגרסה עתידית יפיל את הבדיקה בשתי צורות — או שהחילוץ לא ימצא את הפונקציה, או
+ * שההתנהגות תשתנה — ובשניהם זה מה שאנחנו רוצים לדעת.
  *
  * מה שלא נבדק כאן: מסלול ה-mutation עצמו (`doc.format.*`) והמצב במסמך. אלה
  * דורשים מנוע DOCX חי, ונבדקים באימות בדפדפן. מה שכן נבדק הוא בדיוק השלב
- * שנכשל בשקט — הוולידציה שקודמת ל-mutation.
+ * שנכשל בשקט — הוולידציה שקודמת ל-mutation. מה שקורה **לפני** השלב הזה —
+ * האם לחיצה על הפקד מגיעה לכאן בכלל, ועם איזה payload — נבדק בהרכבה
+ * (tests/component/ribbon-payloads.test.ts).
  */
 import { describe, it, expect } from 'vitest';
-import { readdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import {
+  COMMAND_CATALOG,
+  checkPayload,
+  descriptorSource,
+  engine,
+  type InlineInput,
+  type InlineSpec,
+} from '../support/superdoc-engine';
 import {
   alignmentPayload,
   colorPayload,
@@ -34,102 +42,15 @@ import {
 } from '../../src/engine/payloads';
 
 /* ------------------------------------------------------------------ */
-/* חילוץ הוולידטורים מהחבילה                                            */
+/* הרצת הוולידטורים                                                    */
 /* ------------------------------------------------------------------ */
 
-const CHUNKS_DIR = join(process.cwd(), 'node_modules/superdoc/dist/chunks');
-
-/** שם הקובץ נושא hash שמשתנה בכל build של החבילה, ולכן הוא נמצא ולא נכתב. */
-function readControllerChunk(): string {
-  const file = readdirSync(CHUNKS_DIR).find((name) =>
-    /^create-super-doc-ui-.*\.es\.js$/.test(name),
-  );
-  if (!file) throw new Error('לא נמצא ה-chunk של controller ה-UI ב-superdoc');
-  return readFileSync(join(CHUNKS_DIR, file), 'utf8');
-}
-
-const CHUNK = readControllerChunk();
-
 /**
- * הפונקציות ברמת המודול. הן מעוצבות עם tab, ולכן `}` בתחילת שורה הוא סוף
- * הפונקציה — מה שהופך את החילוץ לחד-משמעי בלי מנתח JS.
+ * החילוץ עצמו יושב ב-tests/support/superdoc-engine.ts, כדי שכפיל האדפטר של
+ * בדיקות הקומפוננטות ישאל את **אותו** מנוע: „האם המנוע היה מקבל את ה-payload
+ * הזה” היא שאלה אחת, ושני נוסחים לה היו מאפשרים לבדיקה אחת לאשר מה שהשנייה
+ * דוחה.
  */
-const TOP_LEVEL_FUNCTIONS = [
-  'normalizeFontSizePayload',
-  'normalizeZoomPayload',
-  'normalizeColorPayload',
-  'normalizeAlignmentPayload',
-  'normalizeLineHeightPayload',
-  'normalizeStyleIdPayload',
-  'unwrapScalar',
-  'buildInlineFormatInput',
-] as const;
-
-type InlineSpec = { key: string; kind: 'toggle' | 'value-string' | 'value-number' | 'clear' };
-type InlineInput = { target: unknown; value?: unknown; inline?: unknown } | null;
-
-interface EngineValidators {
-  normalizeFontSizePayload(payload: unknown): unknown;
-  normalizeZoomPayload(payload: unknown): unknown;
-  normalizeColorPayload(payload: unknown): unknown;
-  normalizeAlignmentPayload(payload: unknown): unknown;
-  normalizeLineHeightPayload(payload: unknown): unknown;
-  normalizeStyleIdPayload(payload: unknown): unknown;
-  unwrapScalar(payload: unknown, keys: string[]): unknown;
-  buildInlineFormatInput(
-    spec: InlineSpec,
-    target: unknown,
-    payload: unknown,
-    active: boolean,
-  ): InlineInput;
-  instanceCommandPayloadIsValid(descriptor: { id: string }, payload: unknown): boolean;
-}
-
-function extractTopLevelFunction(name: string): string {
-  const match = CHUNK.match(new RegExp(String.raw`^function ${name}\([\s\S]*?\n\}`, 'm'));
-  if (!match) {
-    throw new Error(`הפונקציה ${name} לא נמצאה ב-chunk — חוזה ה-payload של superdoc השתנה`);
-  }
-  return match[0];
-}
-
-/**
- * `instanceCommandPayloadIsValid` הוא closure בתוך ה-controller ולא פונקציה
- * ברמת המודול, ולכן הוא נחלץ לפי ההזחה שלו. הוא זה שדוחה `{ zoom: 1 }` — עוד
- * לפני ש-`SuperDoc.setZoom` מתלונן.
- */
-function extractInstanceValidator(): string {
-  const match = CHUNK.match(/^\tconst instanceCommandPayloadIsValid = \([\s\S]*?\n\t\};/m);
-  if (!match) {
-    throw new Error('instanceCommandPayloadIsValid לא נמצא ב-chunk — חוזה הזום של superdoc השתנה');
-  }
-  return match[0].replace(/^\t/, '').replace(/^const /, 'var ');
-}
-
-/**
- * `CLEAR_INLINE_PATCH` הוא הקבוע היחיד שהפונקציות שנחלצו נשענות עליו, והוא
- * נוגע רק ל-`kind: 'clear'` (נקה עיצוב) שאינו נבדק כאן — פקודה בלי payload.
- */
-const engine: EngineValidators = new Function(
-  'CLEAR_INLINE_PATCH',
-  [
-    ...TOP_LEVEL_FUNCTIONS.map((name) => extractTopLevelFunction(name)),
-    extractInstanceValidator(),
-    `return { ${[...TOP_LEVEL_FUNCTIONS, 'instanceCommandPayloadIsValid'].join(', ')} };`,
-  ].join('\n'),
-)({}) as EngineValidators;
-
-/* ------------------------------------------------------------------ */
-/* ה-descriptor של כל פקודה, כפי שהוא בקטלוג של החבילה                  */
-/* ------------------------------------------------------------------ */
-
-/** גוף ה-entry של פקודה בקטלוג. `id` הוא השדה הראשון בכל entry. */
-function descriptorSource(id: string): string {
-  const start = CHUNK.indexOf(`id: "${id}",`);
-  if (start === -1) throw new Error(`הפקודה ${id} אינה בקטלוג של superdoc`);
-  const end = CHUNK.indexOf('\n\t},', start);
-  return CHUNK.slice(start, end === -1 ? undefined : end);
-}
 
 /** מריצה את השרשרת שה-controller מריץ על פקודת inline: נרמול ואז בנייה. */
 function applyInline(spec: InlineSpec, normalize: ((p: unknown) => unknown) | null, payload: unknown): InlineInput {
@@ -160,11 +81,44 @@ function zoomAccepted(payload: unknown): number | null {
 /* ------------------------------------------------------------------ */
 
 describe('החילוץ עצמו', () => {
-  it('כל הוולידטורים נמצאו ורצים', () => {
-    for (const name of TOP_LEVEL_FUNCTIONS) {
+  it('כל הוולידטורים נמצאו, רצים, והקטלוג נטען', () => {
+    // כשל כאן פירושו שמבנה ה-chunk השתנה — ואז אף בדיקה שנשענת עליו אינה
+    // מודדת את מה שהיא חושבת שהיא מודדת, כולל כפיל האדפטר של ההרכבות.
+    for (const name of [
+      'normalizeFontSizePayload',
+      'normalizeZoomPayload',
+      'normalizeColorPayload',
+      'normalizeAlignmentPayload',
+      'normalizeLineHeightPayload',
+      'normalizeStyleIdPayload',
+      'normalizeDocumentModePayload',
+      'unwrapScalar',
+      'buildInlineFormatInput',
+      'buildBlockParagraphInput',
+      'instanceCommandPayloadIsValid',
+    ] as const) {
       expect(typeof engine[name], name).toBe('function');
     }
-    expect(typeof engine.instanceCommandPayloadIsValid).toBe('function');
+    expect(COMMAND_CATALOG.length).toBeGreaterThan(20);
+  });
+
+  it('`checkPayload` מנתב לפי ה-descriptor, ולא לפי טבלה שכתבנו', () => {
+    // הניתוב עצמו הוא מה שכפיל האדפטר נשען עליו: פקודה שהמנוע אינו מכיר
+    // נדחית, ופקודה שהקלט שלה נבנה מהבחירה מוצהרת כ„לא נבדקה” ולא כ„תקינה”.
+    expect(checkPayload('font-size', '16pt')).toMatchObject({
+      accepted: true,
+      route: 'inline:value-number',
+    });
+    expect(checkPayload('text-align', { alignment: 'right' })).toMatchObject({
+      accepted: true,
+      route: 'paragraph:alignment',
+    });
+    expect(checkPayload('zoom', 150)).toMatchObject({ accepted: true, route: 'instance:setZoom' });
+    expect(checkPayload('table-insert', { rows: 2, cols: 3 })).toMatchObject({ checked: false });
+    expect(checkPayload('no-such-command')).toMatchObject({
+      accepted: false,
+      route: 'unknown-command',
+    });
   });
 
   it('ה-descriptor של כל פקודה קושר אותה לוולידטור שנבדק כאן', () => {
