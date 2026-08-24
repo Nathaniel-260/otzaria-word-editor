@@ -16,6 +16,8 @@
  * דיאלוג שנפתח מתוך לשונית אינו יכול להישאר בעץ שלה.
  */
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { DOMWrapper } from '@vue/test-utils';
 import { nextTick } from 'vue';
 import FindReplaceDialog from '../../src/ui/panels/FindReplaceDialog.vue';
@@ -239,18 +241,88 @@ describe('LinkDialog', () => {
 });
 
 describe('AboutDialog', () => {
+  /** vitest רץ מ-v2/, ולכן package.json נמצא ביחס ל-cwd. */
+  const pkg = JSON.parse(readFileSync(join(process.cwd(), 'package.json'), 'utf8')) as {
+    version: string;
+    dependencies: Record<string, string>;
+  };
+
   it('סגור אינו מרונדר', () => {
     const harness = mountUi(AboutDialog, { props: { isOpen: false } });
     expect(harness.wrapper.find('[role="dialog"]').exists()).toBe(false);
   });
 
-  it('פתוח מכריז על עצמו כדיאלוג מודאלי ומציג את גרסת המנוע', async () => {
+  it('פתוח מכריז על עצמו כדיאלוג מודאלי, עם שם נגיש', async () => {
+    // `aria-modal` בלי שם היה חלון שקורא מסך מכריז „דיאלוג” ולא אומר איזה.
     const harness = mountUi(AboutDialog, { props: { isOpen: true } });
     await settle();
 
-    expect(harness.wrapper.find('[role="dialog"]').attributes('aria-modal')).toBe('true');
-    expect(harness.wrapper.text()).toContain('SuperDoc 2.8.0');
-    expect(harness.wrapper.text()).toContain('AGPL-3.0');
+    const dialog = harness.wrapper.find('[role="dialog"]');
+    expect(dialog.attributes('aria-modal')).toBe('true');
+
+    const titleId = dialog.attributes('aria-labelledby');
+    expect(titleId).toBeTruthy();
+    expect(harness.wrapper.find(`#${titleId}`).text()).toBe('וורד לאוצריא');
+    expect(harness.wrapper.find('.about-close-btn').attributes('aria-label')).toBeTruthy();
+  });
+
+  it('הגרסאות המוצגות הן אלה שב-package.json', async () => {
+    // שני מספרים קשיחים בקומפוננטה (ראו ההסבר שם), ולכן הדריפט נתפס כאן:
+    // שדרוג גרסה שישכח את הדיאלוג מפיל את הבדיקה הזאת.
+    const harness = mountUi(AboutDialog, { props: { isOpen: true } });
+    await settle();
+
+    const text = harness.wrapper.text();
+    expect(text).toContain(`גרסה ${pkg.version}`);
+    expect(text).toContain(`SuperDoc ${pkg.dependencies.superdoc}`);
+    expect(text).toContain('AGPL-3.0');
+  });
+
+  it('הפתיחה ממקדת פקד בתוך החלון, והסגירה מחזירה את המיקוד', async () => {
+    // בלי זה המיקוד נשאר על הכפתור שברצועה שמאחורי חלון שהוכרז „מודאלי”.
+    const opener = document.createElement('button');
+    document.body.appendChild(opener);
+    opener.focus();
+
+    const harness = mountUi(AboutDialog, { props: { isOpen: false } });
+    await harness.wrapper.setProps({ isOpen: true });
+    await settle();
+
+    expect(harness.wrapper.find('[role="dialog"]').element.contains(document.activeElement)).toBe(
+      true,
+    );
+
+    await harness.wrapper.setProps({ isOpen: false });
+    await settle();
+
+    expect(document.activeElement).toBe(opener);
+    opener.remove();
+  });
+
+  it('Tab אינו יוצא מהחלון — אחרת ההצהרה `aria-modal` שקרית', async () => {
+    const harness = mountUi(AboutDialog, { props: { isOpen: false } });
+    await harness.wrapper.setProps({ isOpen: true });
+    await settle();
+
+    const dialog = harness.wrapper.find('[role="dialog"]');
+    const buttons = harness.wrapper.findAll('button');
+    const first = buttons[0].element as HTMLElement;
+    const last = buttons[buttons.length - 1].element as HTMLElement;
+
+    last.focus();
+    await dialog.trigger('keydown', { key: 'Tab' });
+    expect(document.activeElement, 'מהאחרון חזרה לראשון').toBe(first);
+
+    await dialog.trigger('keydown', { key: 'Tab', shiftKey: true });
+    expect(document.activeElement, 'ומהראשון אחורה לאחרון').toBe(last);
+  });
+
+  it('Escape סוגר גם מתוך החלון עצמו', async () => {
+    const harness = mountUi(AboutDialog, { props: { isOpen: true } });
+    await settle();
+
+    await harness.wrapper.find('[role="dialog"]').trigger('keydown.esc');
+    expect(harness.wrapper.emitted('close')).toHaveLength(1);
   });
 
   it('שני כפתורי הסגירה והלחיצה על הרקע סוגרים', async () => {

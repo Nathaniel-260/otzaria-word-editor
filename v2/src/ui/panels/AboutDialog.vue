@@ -5,9 +5,14 @@
     @click.self="$emit('close')"
   >
     <div
+      ref="dialogRef"
       class="about-dialog"
       role="dialog"
       aria-modal="true"
+      :aria-labelledby="TITLE_ID"
+      tabindex="-1"
+      @keydown.esc.stop="$emit('close')"
+      @keydown.tab="onTab"
     >
       <div class="about-header">
         <div class="about-header-title">
@@ -16,11 +21,13 @@
             :size="24"
             class="about-icon"
           />
-          <span>וורד לאוצריא</span>
+          <span :id="TITLE_ID">וורד לאוצריא</span>
         </div>
         <button
           type="button"
           class="about-close-btn"
+          title="סגור (Esc)"
+          aria-label="סגור את חלון האודות"
           @click="$emit('close')"
         >
           ✕
@@ -29,7 +36,7 @@
 
       <div class="about-body">
         <p class="about-version">
-          גרסה 2.0.0 (SuperDoc v2)
+          גרסה {{ APP_VERSION }} (SuperDoc v2)
         </p>
         <p class="about-desc">
           עורך מסמכי Word (.docx) מתקדם, מעוצב ומותאם במיוחד עבור אפליקציית אוצריא.
@@ -38,7 +45,7 @@
         <div class="about-details">
           <div class="detail-row">
             <span class="detail-key">מנוע מסמכים:</span>
-            <span class="detail-val">SuperDoc 2.8.0</span>
+            <span class="detail-val">SuperDoc {{ ENGINE_VERSION }}</span>
           </div>
           <div class="detail-row">
             <span class="detail-key">תמיכה מלאה:</span>
@@ -53,6 +60,7 @@
 
       <div class="about-footer">
         <button
+          ref="primaryRef"
           type="button"
           class="about-btn"
           @click="$emit('close')"
@@ -65,15 +73,105 @@
 </template>
 
 <script setup lang="ts">
+/**
+ * חלון „אודות”.
+ *
+ * **מה שהיה שבור:** הוא הכריז `role="dialog" aria-modal="true"` והתנהג כמו
+ * שכבה מצוירת — בלי שם נגיש, בלי מיקוד ראשוני, ובלי מלכודת מיקוד. כלומר
+ * ההצהרה „מודאלי” אמרה לקורא מסך שאין מה לקרוא מחוץ לחלון, בזמן ש-Tab הוציא
+ * את המשתמש ישר לרצועה שמאחוריו. `FindReplaceDialog` ו-`LinkDialog` הם
+ * התקדים במאגר, ושניהם עושים את שלושת הדברים.
+ *
+ * Escape מטופל גם גלובלית (`App.vue`), וההאזנה כאן היא בכל זאת נכונה מאותו
+ * טעם ששני הדיאלוגים האחרים עושים אותה: הקומפוננטה שמכריזה על עצמה כמודאל
+ * אחראית להתנהגות שלה, ולא נשענת על מי שהרכיב אותה. `.stop` כדי שהאירוע לא
+ * יגיע פעמיים לאותה סגירה.
+ *
+ * **הגרסאות:** שני מספרים שקודם היו כתובים בתוך הטקסט. הם עדיין קשיחים — אין
+ * ל-`import` של package.json מסלול נקי כאן (`resolveJsonModule` ב-tsconfig
+ * ו-`define` ב-vite.config.ts הם שינויי תשתית שנוגעים בשערי הבנייה, ואינם
+ * שווים את זה בשביל שני מספרים) — אבל הם קבועים בשם, ומקור האמת מתועד:
+ * `version` ו-`dependencies.superdoc` ב-v2/package.json. הדריפט עצמו נתפס
+ * בבדיקה: tests/component/dialogs.test.ts משווה את המוצג לקבצי החבילה, ולכן
+ * שדרוג גרסה שישכח את הדיאלוג ייפול אדום.
+ */
+import { nextTick, ref, watch } from 'vue';
 import SvgIcon from '../icons/SvgIcon.vue';
 
-defineProps<{
-  isOpen?: boolean;
-}>();
+/** ראו ההסבר למעלה: מקור האמת הוא v2/package.json. */
+const APP_VERSION = '2.0.0';
+const ENGINE_VERSION = '2.8.0';
+
+/** מקשר את החלון לכותרת שלו — השם הנגיש שחסר לו. */
+const TITLE_ID = 'about-dialog-title';
+
+const props = withDefaults(defineProps<{ isOpen?: boolean }>(), { isOpen: false });
 
 defineEmits<{
   (e: 'close'): void;
 }>();
+
+const dialogRef = ref<HTMLElement | null>(null);
+const primaryRef = ref<HTMLButtonElement | null>(null);
+
+/** לאן המיקוד חוזר בסגירה — בלעדיו הוא נופל ל-`body` ו-Tab מתחיל מהתחלה. */
+let focusOnClose: HTMLElement | null = null;
+
+watch(
+  () => props.isOpen,
+  (open) => {
+    if (open) {
+      focusOnClose = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      // אחרי הרינדור: לפניו אין למה למקד.
+      void nextTick(() => {
+        (primaryRef.value ?? dialogRef.value)?.focus();
+      });
+      return;
+    }
+
+    const target = focusOnClose;
+    focusOnClose = null;
+    // רק אם הוא עוד במסמך: הרצועה היא „mount on active”, ולשונית שהתחלפה
+    // בזמן שהחלון היה פתוח לקחה איתה את הכפתור שנלחץ.
+    if (target && document.contains(target)) target.focus();
+  },
+);
+
+/** הפקדים שאפשר למקד בתוך החלון, בסדר ה-DOM. */
+function focusables(): HTMLElement[] {
+  const root = dialogRef.value;
+  if (!root) return [];
+  const selector = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+  return [...root.querySelectorAll<HTMLElement>(selector)].filter(
+    (element) => !element.hasAttribute('disabled'),
+  );
+}
+
+/**
+ * מלכודת המיקוד: Tab מהאחרון חוזר לראשון, ו-Shift+Tab מהראשון קופץ לאחרון.
+ *
+ * מדוע נדרש בכלל: `aria-modal="true"` הוא הצהרה שכל מה שמחוץ לחלון אינו זמין,
+ * וקורא מסך מסתיר אותו בהתאם. בלי המלכודת המיקוד יוצא אל תוכן שהוכרז כלא
+ * קיים — כלומר הצהרה שקרית, ולא רק אי-נוחות.
+ */
+function onTab(event: KeyboardEvent): void {
+  const items = focusables();
+  if (items.length === 0) return;
+
+  const first = items[0];
+  const last = items[items.length - 1];
+  const active = document.activeElement;
+
+  if (event.shiftKey && (active === first || active === dialogRef.value)) {
+    event.preventDefault();
+    last.focus();
+    return;
+  }
+  if (!event.shiftKey && active === last) {
+    event.preventDefault();
+    first.focus();
+  }
+}
 </script>
 
 <style scoped>
