@@ -9,8 +9,9 @@
         icon="paste"
         label="הדבק"
         variant="large"
-        tooltip="הדבק תוכן מלוח הגזירים"
+        :tooltip="pasteTooltip"
         shortcut="Ctrl+V"
+        :disabled="!canPaste"
         @click="doPaste"
       />
       <div class="column-items">
@@ -351,7 +352,7 @@ import { useFontOptions } from '../../../composables/useFontOptions';
 import { COMMAND_REPORTER, type CommandReporter } from '../../../composables/keys';
 import { ACTIVE_SUPERDOC } from '../../../engine/document-api';
 import { readDocCapabilities, type DocCapabilityReport } from '../../../engine/doc-capabilities';
-import { copySelection, cutSelection } from '../../../engine/clipboard';
+import { copySelection, cutSelection, pasteFromClipboard } from '../../../engine/clipboard';
 import {
   DEFAULT_FONT_SIZE_PT,
   DEFAULT_LINE_HEIGHT,
@@ -607,7 +608,11 @@ const canCut = computed(
   () => canCopy.value && (capabilities.value?.can('canDeleteSelection') ?? false),
 );
 
-function tooltipFor(enabled: boolean, question: 'canCopySelection' | 'canDeleteSelection', text: string): string {
+const canPaste = computed(() => capabilities.value?.can('canPasteContent') ?? false);
+
+type ClipboardQuestion = 'canCopySelection' | 'canDeleteSelection' | 'canPasteContent';
+
+function tooltipFor(enabled: boolean, question: ClipboardQuestion, text: string): string {
   if (enabled) return text;
   return capabilities.value?.explain(question) || 'המסמך עדיין נטען';
 }
@@ -622,6 +627,9 @@ const cutTooltip = computed(() =>
     'גזירת הבחירה ללוח',
   ),
 );
+const pasteTooltip = computed(() =>
+  tooltipFor(canPaste.value, 'canPasteContent', 'הדבקת תוכן מהלוח'),
+);
 
 async function doCopy(): Promise<void> {
   report(await copySelection(superdoc.value), 'clipboard-copy');
@@ -631,8 +639,8 @@ async function doCut(): Promise<void> {
   report(await cutSelection(superdoc.value), 'clipboard-cut');
 }
 
-function doPaste(): void {
-  void navigator.clipboard?.readText?.();
+async function doPaste(): Promise<void> {
+  report(await pasteFromClipboard(superdoc.value), 'clipboard-paste');
 }
 
 function doSelectAll(): void {

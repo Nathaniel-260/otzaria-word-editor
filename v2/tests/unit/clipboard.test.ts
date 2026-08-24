@@ -21,9 +21,12 @@ import {
   copySelection,
   cutSelection,
   internalClipboard,
+  pasteFromClipboard,
   type ClipboardDocumentApi,
   type ClipboardHost,
   type ClipboardPayload,
+  type ClipboardPayloadItem,
+  type ClipboardPlan,
   type SelectionSnapshot,
 } from '../../src/engine/clipboard';
 
@@ -77,6 +80,46 @@ interface FakeCall {
   input: unknown;
 }
 
+/**
+ * הוולידטור של `clipboard.parse`/`clipboard.insert` כפי שהוא במנוע: `items`
+ * מערך, `type` מחרוזת לא ריקה, `kind` אחד משניים, ו-`data` **מהטיפוס** שהוא
+ * מכריז עליו. זה מה שהופך את הכפיל לבדיקה ולא להקלטה.
+ */
+function assertPayload(payload: ClipboardPayload | undefined, op: string): void {
+  if (!payload || typeof payload !== 'object' || !Array.isArray(payload.items)) {
+    throw new Error(`${op} requires a ClipboardPayload with items`);
+  }
+  payload.items.forEach((item: ClipboardPayloadItem, index: number) => {
+    if (!item || typeof item !== 'object') throw new Error(`${op} item ${index} must be an object`);
+    if (typeof item.type !== 'string' || item.type.length === 0) {
+      throw new Error(`${op} item ${index} requires a MIME type`);
+    }
+    if (item.kind !== 'string' && item.kind !== 'bytes') {
+      throw new Error(`${op} item ${index} has an invalid kind`);
+    }
+    if (item.kind === 'string' && typeof item.data !== 'string') {
+      throw new Error(`${op} item ${index} requires string data`);
+    }
+    if (item.kind === 'bytes' && !(item.data instanceof Uint8Array)) {
+      throw new Error(`${op} item ${index} requires Uint8Array data`);
+    }
+  });
+}
+
+/** אותו דבר ל-`plan`: `fragment.blocks` מערך, ו-`diagnostics` מערך. */
+function assertPlan(plan: ClipboardPlan | undefined, op: string): void {
+  if (!plan || typeof plan !== 'object') throw new Error(`${op} plan must be an object`);
+  if (!plan.fragment || typeof plan.fragment !== 'object' || !Array.isArray(plan.fragment.blocks)) {
+    throw new Error(`${op} fragment.blocks must be an array`);
+  }
+  if (!Array.isArray(plan.diagnostics)) throw new Error(`${op} plan.diagnostics must be an array`);
+}
+
+/** התכנית שהמנוע מחזיר מ-`parse`. */
+function enginePlan(): ClipboardPlan {
+  return { fragment: { blocks: [{ kind: 'paragraph', runs: [] }] }, diagnostics: [] };
+}
+
 function fakeDoc(overrides: Partial<ClipboardDocumentApi> = {}) {
   const calls: FakeCall[] = [];
 
@@ -93,6 +136,23 @@ function fakeDoc(overrides: Partial<ClipboardDocumentApi> = {}) {
         }
         calls.push({ op: 'clipboard.serializeSelection', input });
         return { payload: enginePayload() };
+      },
+      parse: (payload) => {
+        assertPayload(payload, 'clipboard.parse');
+        calls.push({ op: 'clipboard.parse', input: payload });
+        return { success: true, plan: enginePlan() };
+      },
+      insert: (input) => {
+        // „exactly one of payload, plan, or fragment” — זה החוזה, והוא זורק
+        // INVALID_INPUT על שניים או על אפס.
+        const provided = [input?.payload, input?.plan].filter((value) => value !== undefined);
+        if (provided.length !== 1) {
+          throw new Error('clipboard.insert requires exactly one of payload, plan, or fragment');
+        }
+        if (input.payload !== undefined) assertPayload(input.payload, 'clipboard.insert');
+        if (input.plan !== undefined) assertPlan(input.plan, 'clipboard.insert');
+        calls.push({ op: 'clipboard.insert', input });
+        return { success: true };
       },
     },
     delete: (input) => {
@@ -191,6 +251,38 @@ function deniedClipboard() {
   const denied = (): Promise<never> =>
     Promise.reject(Object.assign(new Error('denied'), { name: 'NotAllowedError' }));
   return { write: vi.fn(denied), writeText: vi.fn(denied), read: vi.fn(denied), readText: vi.fn(denied) };
+}
+
+/**
+ * פריט קריאה מלוח המערכת.
+ *
+ * ה-Blob כאן הוא כפיל ולא `new Blob(...)`, ובכוונה: ל-Blob של הדפדפן **יש**
+ * `text()` ו-`arrayBuffer()`, ולזה של jsdom אין. כפיל עם המתודות האמיתיות
+ * מתאר את המציאות יותר טוב מהאובייקט החסר שהסביבה מספקת.
+ */
+function readableItem(parts: Record<string, string | Uint8Array>) {
+  return {
+    types: Object.keys(parts),
+    getType: async (type: string) => {
+      const value = parts[type]!;
+      return {
+        type,
+        text: async () => (typeof value === 'string' ? value : new TextDecoder().decode(value)),
+        arrayBuffer: async () =>
+          typeof value === 'string'
+            ? new TextEncoder().encode(value).buffer
+            : (value.buffer as ArrayBuffer),
+      } as unknown as Blob;
+    },
+  } as unknown as ClipboardItem;
+}
+
+/** לוח שאפשר לקרוא ממנו. */
+function readableClipboard(parts: Record<string, string | Uint8Array>) {
+  return {
+    read: vi.fn(async () => [readableItem(parts)]),
+    readText: vi.fn(async () => String(parts['text/plain'] ?? '')),
+  };
 }
 
 beforeEach(() => {
@@ -555,5 +647,224 @@ describe('cutSelection', () => {
       expect(outcome.reason).toBe('threw');
       expect(outcome.message).toBe('הגזירה נכשלה: boom');
     }
+  });
+});
+
+describe('pasteFromClipboard', () => {
+  it('קוראת מלוח המערכת, מפרקת, ומדביקה את התכנית שהתקבלה', async () => {
+    const { host, calls } = fakeDoc();
+    setSystemClipboard(readableClipboard({ 'text/html': '<p>טקסט</p>', 'text/plain': 'טקסט' }));
+
+    const outcome = await pasteFromClipboard(host);
+
+    expect(outcome.ok).toBe(true);
+    expect(calls.map((call) => call.op)).toEqual(['clipboard.parse', 'clipboard.insert']);
+    // text/html לפני text/plain: הראשון הוא זה שנושא עיצוב, והמנוע בוחר
+    // את הייצוג הנאמן ביותר מבין הפריטים.
+    expect(calls[0]!.input).toEqual({
+      source: 'browser',
+      items: [
+        { type: 'text/html', kind: 'string', data: '<p>טקסט</p>' },
+        { type: 'text/plain', kind: 'string', data: 'טקסט' },
+      ],
+    });
+    expect(calls[1]!.input).toEqual({ plan: enginePlan() });
+  });
+
+  it('תמונה מהלוח נקראת כ-bytes, כפי שהוולידטור דורש', async () => {
+    // `data instanceof Uint8Array` הוא תנאי מפורש במנוע; מחרוזת base64 כאן
+    // הייתה נדחית ב-INVALID_INPUT.
+    const png = new Uint8Array([137, 80, 78, 71]);
+    const { host, calls } = fakeDoc();
+    setSystemClipboard(readableClipboard({ 'image/png': png }));
+
+    const outcome = await pasteFromClipboard(host);
+
+    expect(outcome.ok).toBe(true);
+    const payload = calls[0]!.input as ClipboardPayload;
+    expect(payload.items[0]!.kind).toBe('bytes');
+    expect(payload.items[0]!.data).toBeInstanceOf(Uint8Array);
+  });
+
+  it('`read` שנדחה נופל ל-`readText`', async () => {
+    const { host, calls } = fakeDoc();
+    setSystemClipboard({
+      read: vi.fn(() => Promise.reject(Object.assign(new Error('denied'), { name: 'NotAllowedError' }))),
+      readText: vi.fn(async () => 'רק טקסט'),
+    });
+
+    const outcome = await pasteFromClipboard(host);
+
+    expect(outcome.ok).toBe(true);
+    expect(calls[0]!.input).toEqual({
+      source: 'browser',
+      items: [{ type: 'text/plain', kind: 'string', data: 'רק טקסט' }],
+    });
+  });
+
+  it('הרשאה שנדחתה לגמרי — נופלת ללוח הפנימי', async () => {
+    // זה המסלול שמאפשר להעתיק ולהדביק בתוך התוסף גם כשלוח המערכת חסום לגמרי.
+    const { host, calls } = fakeDoc();
+    internalClipboard.write(enginePayload('מהתוסף'));
+    setSystemClipboard(deniedClipboard());
+
+    const outcome = await pasteFromClipboard(host);
+
+    expect(outcome.ok).toBe(true);
+    expect(calls[0]!.input).toEqual(enginePayload('מהתוסף'));
+  });
+
+  it('העתק ואז הדבק דרך הלוח הפנימי מכניס בדיוק את מה שהועתק', async () => {
+    // מסלול ה-round-trip: `file://` חוסם גם כתיבה וגם קריאה, ובלי הלוח הפנימי
+    // שני הכפתורים היו חסרי תוחלת.
+    const { host, calls } = fakeDoc();
+    setSystemClipboard(deniedClipboard());
+
+    const copied = await copySelection(host);
+    const pasted = await pasteFromClipboard(host);
+
+    expect(copied.ok).toBe(false); // ההודעה הכנה: לא הגיע ללוח המערכת
+    expect(pasted.ok).toBe(true);
+    const parseCall = calls.find((call) => call.op === 'clipboard.parse');
+    expect(parseCall!.input).toEqual(enginePayload());
+  });
+
+  it('אין הרשאה ואין לוח פנימי — הודעה שמפנה ל-Ctrl+V', async () => {
+    const { host, calls } = fakeDoc();
+    setSystemClipboard(deniedClipboard());
+
+    const outcome = await pasteFromClipboard(host);
+
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) {
+      expect(outcome.reason).toBe('system-clipboard-blocked');
+      expect(outcome.message).toContain('Ctrl+V');
+    }
+    expect(calls).toEqual([]);
+  });
+
+  it('לוח שנקרא והיה ריק אינו מדביק תוכן ישן מהלוח הפנימי', async () => {
+    // ההבחנה בין „נחסם” ל„ריק”: הדבקה של משהו שהועתק לפני חצי שעה בתוך
+    // התוסף, בזמן שהמשתמש רואה לוח מערכת ריק, היא הפתעה ולא נוחות.
+    const { host, calls } = fakeDoc();
+    internalClipboard.write(enginePayload('ישן'));
+    setSystemClipboard({ read: vi.fn(async () => []), readText: vi.fn(async () => '') });
+
+    const outcome = await pasteFromClipboard(host);
+
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) expect(outcome.message).toContain('לוח המערכת ריק');
+    expect(calls).toEqual([]);
+  });
+
+  it('`parse` שנכשל אינו נוגע במסמך, וההסבר הוא הסיבה המדויקת', async () => {
+    const { host, calls } = fakeDoc();
+    const clipboard = host.activeEditor!.doc!.clipboard!;
+    clipboard.parse = () => ({
+      success: false,
+      failure: {
+        code: 'CAPABILITY_UNSUPPORTED',
+        message: 'no faithful representation',
+        details: { unsupportedReason: 'paste-no-faithful-representation' },
+      },
+    });
+    setSystemClipboard(readableClipboard({ 'text/plain': 'א' }));
+
+    const outcome = await pasteFromClipboard(host);
+
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) {
+      expect(outcome.message).toBe('ההדבקה נכשלה: אין דרך להדביק את התוכן הזה בלי לשנות אותו');
+      expect(outcome.reason).toBe('CAPABILITY_UNSUPPORTED');
+    }
+    expect(calls.map((call) => call.op)).not.toContain('clipboard.insert');
+  });
+
+  it('`parse` שנכשל בלי unsupportedReason מציג את קוד המנוע', async () => {
+    const { host } = fakeDoc();
+    host.activeEditor!.doc!.clipboard!.parse = () => ({
+      success: false,
+      failure: { code: 'EMPTY_FRAGMENT' },
+    });
+    setSystemClipboard(readableClipboard({ 'text/plain': 'א' }));
+
+    const outcome = await pasteFromClipboard(host);
+
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) expect(outcome.message).toBe('ההדבקה נכשלה: אין תוכן להדבקה');
+  });
+
+  it('`insert` עם success:false מגיע למשתמש עם הקוד', async () => {
+    const { host } = fakeDoc();
+    host.activeEditor!.doc!.clipboard!.insert = () => ({
+      success: false,
+      failure: { code: 'DOCUMENT_READONLY' },
+    });
+    setSystemClipboard(readableClipboard({ 'text/plain': 'א' }));
+
+    const outcome = await pasteFromClipboard(host);
+
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) {
+      expect(outcome.reason).toBe('DOCUMENT_READONLY');
+      expect(outcome.message).toBe('ההדבקה נכשלה: המסמך פתוח לקריאה בלבד');
+    }
+  });
+
+  it('`insert` שזורק אינו מפיל את הרצועה', async () => {
+    const { host } = fakeDoc();
+    host.activeEditor!.doc!.clipboard!.insert = () => {
+      throw new Error('boom');
+    };
+    setSystemClipboard(readableClipboard({ 'text/plain': 'א' }));
+
+    const outcome = await pasteFromClipboard(host);
+
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) {
+      expect(outcome.reason).toBe('threw');
+      expect(outcome.message).toBe('ההדבקה נכשלה: boom');
+    }
+  });
+
+  it('גרסה שאין בה `parse` שולחת payload גולמי ל-`insert`', async () => {
+    // החוזה מקבל בדיוק אחד מ-payload/plan/fragment, ולכן שליחת שניהם או
+    // אפס הייתה זורקת. הכפיל מאמת את זה.
+    const { host, calls } = fakeDoc();
+    host.activeEditor!.doc!.clipboard!.parse = undefined;
+    setSystemClipboard(readableClipboard({ 'text/plain': 'א' }));
+
+    const outcome = await pasteFromClipboard(host);
+
+    expect(outcome.ok).toBe(true);
+    expect(calls.map((call) => call.op)).toEqual(['clipboard.insert']);
+    expect(calls[0]!.input).toEqual({
+      payload: { source: 'browser', items: [{ type: 'text/plain', kind: 'string', data: 'א' }] },
+    });
+  });
+
+  it('אין `doc.clipboard.insert` — מנוטרל עם „אינו זמין בגרסה זו”, בלי לקרוא את הלוח', async () => {
+    const { host } = fakeDoc({ clipboard: {} });
+    const clipboard = readableClipboard({ 'text/plain': 'א' });
+    setSystemClipboard(clipboard);
+
+    const outcome = await pasteFromClipboard(host);
+
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) {
+      expect(outcome.reason).toBe('command-unsupported');
+      expect(outcome.message).toBe('ההדבקה נכשלה: אינו זמין בגרסה זו');
+    }
+    expect(clipboard.read).not.toHaveBeenCalled();
+  });
+
+  it('סובלת גם קריאות שמחזירות הבטחה', async () => {
+    const { host } = fakeDoc();
+    const clipboard = host.activeEditor!.doc!.clipboard!;
+    clipboard.parse = () => Promise.resolve({ success: true, plan: enginePlan() });
+    clipboard.insert = () => Promise.resolve({ success: true });
+    setSystemClipboard(readableClipboard({ 'text/plain': 'א' }));
+
+    expect((await pasteFromClipboard(host)).ok).toBe(true);
   });
 });

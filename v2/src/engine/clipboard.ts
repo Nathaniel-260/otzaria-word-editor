@@ -1,14 +1,15 @@
 /**
- * קבוצת „לוח”: העתק וגזור.
+ * קבוצת „לוח”: העתק, גזור והדבק.
  *
  * ## למה מודול, ולא שלוש שורות בקומפוננטה
  *
  * מה שהיה ב-HomeTab: `doCut` ו-`doCopy` בגוף **ריק** עם הערה שהפעולה „נתמכת
- * דרך קיצור מקלדת”, ו-`doPaste` שקורא `navigator.clipboard.readText()` וזורק
- * את התוצאה. לפני זה היו שם `document.execCommand('cut'/'copy')`, שאסורים
- * (tests/unit/engine-boundaries: „אין עריכת מסמך דרך ה-DOM”), והתגובה לאיסור
- * הייתה למחוק את הגוף. שני הכיוונים נובעים מאותה טעות: הלוח נראה כמו יכולת
- * של הדפדפן.
+ * דרך קיצור מקלדת”, ו-`doPaste` שקורא `navigator.clipboard.readText()` ו-
+ * **זורק את התוצאה** (וב-`file://` גם מייצר unhandled rejection, כי הוא
+ * `void`-ed). לפני זה היו שם `document.execCommand('cut'/'copy'/'paste')`,
+ * שאסורים (tests/unit/engine-boundaries: „אין עריכת מסמך דרך ה-DOM”), והתגובה
+ * לאיסור הייתה למחוק את הגוף. שני הכיוונים נובעים מאותה טעות: הלוח נראה כמו
+ * יכולת של הדפדפן.
  *
  * הוא אינו. תוכן מעוצב שעובר ל-Word הוא עניין של מודל המסמך, ולמנוע יש לזה
  * משטח ציבורי — `doc.clipboard` — שממיר בין `ClipboardPayload` (סדרת פריטים
@@ -67,6 +68,35 @@ export interface ClipboardSerializeResult {
   payload?: ClipboardPayload;
 }
 
+/**
+ * התכנית ש-`parse` מחזיר ו-`insert` מקבל. שני השדות אינם עוברים כאן עיבוד —
+ * הם מוצהרים מפני שהוולידטור של המנוע דורש `fragment.blocks` כמערך ו-
+ * `diagnostics` כמערך, וכפיל שאינו מכריז עליהם היה מאשר תכנית פסולה.
+ */
+export interface ClipboardPlan {
+  fragment: { blocks: readonly unknown[] };
+  diagnostics: readonly unknown[];
+  summary?: { sourceKind?: string; plainFallback?: boolean };
+}
+
+/** צורת הכשל של משפחת `clipboard.*`. `details.unsupportedReason` הוא ההסבר האמיתי. */
+export interface ClipboardFailure {
+  code?: string;
+  message?: string;
+  details?: { unsupportedReason?: string };
+}
+
+export type ClipboardParseResult =
+  | { success: true; plan: ClipboardPlan }
+  | { success: false; failure?: ClipboardFailure };
+
+/** הקבלה של `insert`, בתוספת מה שהיא מספרת על מה שהודבק בפועל. */
+export interface ClipboardInsertReceipt extends DocReceipt {
+  failure?: ClipboardFailure;
+  plan?: { sourceKind?: string; plainFallback?: boolean };
+  diagnostics?: readonly unknown[];
+}
+
 /** מה שנצרך מ-`activeEditor.doc`. כל שדה אופציונלי: גרסה אחרת עשויה לא לחשוף אותו. */
 export interface ClipboardDocumentApi {
   clipboard?: {
@@ -74,6 +104,11 @@ export interface ClipboardDocumentApi {
       target?: SelectionTarget;
       includeHtml?: boolean;
     }) => MaybePromise<ClipboardSerializeResult | undefined>;
+    parse?: (payload: ClipboardPayload) => MaybePromise<ClipboardParseResult | undefined>;
+    insert?: (input: {
+      payload?: ClipboardPayload;
+      plan?: ClipboardPlan;
+    }) => MaybePromise<ClipboardInsertReceipt | undefined>;
   };
   delete?: (input: { target: SelectionTarget }) => MaybePromise<DocReceipt | undefined>;
 }
@@ -134,6 +169,7 @@ export const internalClipboard = {
 
 const COPY_FAILED = 'ההעתקה נכשלה';
 const CUT_FAILED = 'הגזירה נכשלה';
+const PASTE_FAILED = 'ההדבקה נכשלה';
 
 /**
  * הנוסח כשהמנוע אינו חושף את הלוח. זהה למה שהיכולת מחזירה על
@@ -392,5 +428,217 @@ export async function cutSelection(host: ClipboardHostTarget): Promise<CommandOu
   }
 
   if (!onSystemClipboard) return systemBlocked('הטקסט נגזר', 'Ctrl+X');
+  return { ok: true };
+}
+
+/* ------------------------------------------------------------------ */
+/* הדבק                                                               */
+/* ------------------------------------------------------------------ */
+
+/**
+ * ה-MIME-ים שמסלול הכפתור מעביר למנוע.
+ *
+ * `text/html` לפני `text/plain` — הראשון הוא זה שנושא עיצוב, וה-`parse` של
+ * המנוע בוחר את הייצוג הנאמן ביותר מבין הפריטים. התמונות נקראות כ-`bytes`,
+ * כי זה מה שהוולידטור דורש (`data instanceof Uint8Array`), והמנוע יודע להפוך
+ * אותן ל-assets בתוך ה-fragment.
+ *
+ * מה שמחוץ לרשימה — RTF, קבצים, `image/gif` — אינו מוברח בכל זאת: `parse`
+ * היה דוחה אותו, וההדבקה המקורית של המנוע (Ctrl+V) כן מטפלת בו.
+ */
+const READ_AS_TEXT = ['text/html', 'text/plain'] as const;
+const READ_AS_BYTES = ['image/png', 'image/jpeg'] as const;
+
+/**
+ * קודי הכשל של משפחת `clipboard.*` שאינם בטבלה המשותפת שב-document-api.ts.
+ *
+ * שכבה דקה ולא טבלה שנייה: כל השאר נופל ל-`receiptFailureText`, כדי שלא
+ * ייווצרו שני נוסחים עבריים לאותו קוד. (הטבלה שם פרטית ואינה מיוצאת.)
+ */
+const CLIPBOARD_FAILURE_TEXT: Record<string, string> = {
+  INVALID_PAYLOAD: 'תוכן הלוח אינו במבנה שהמנוע מקבל',
+  EMPTY_FRAGMENT: 'אין תוכן להדבקה',
+  INVALID_FRAGMENT: 'תוכן הלוח פגום ואינו ניתן להדבקה',
+};
+
+/**
+ * למה המנוע לא ידע להדביק. אלה קודי `SDPasteUnsupportedReason`, והם ההסבר
+ * **המדויק** — `failure.code` במקרים האלה הוא רק `CAPABILITY_UNSUPPORTED`.
+ */
+const PASTE_UNSUPPORTED_TEXT: Record<string, string> = {
+  'paste-empty': 'אין תוכן להדבקה',
+  'paste-payload-too-large': 'התוכן שבלוח גדול מדי להדבקה',
+  'paste-source-unsupported': 'המקור שהתוכן הועתק ממנו אינו נתמך',
+  'paste-no-faithful-representation': 'אין דרך להדביק את התוכן הזה בלי לשנות אותו',
+  'paste-structure-unsupported': 'מבנה התוכן שבלוח אינו נתמך בהדבקה',
+  'paste-media-unsupported-type': 'סוג התמונה שבלוח אינו נתמך',
+  'paste-media-too-large': 'התמונה שבלוח גדולה מדי',
+  'paste-media-bad-magic': 'התמונה שבלוח פגומה',
+  'paste-security-rejected': 'התוכן שבלוח נדחה מטעמי אבטחה',
+  'paste-target-unsupported': 'לא ניתן להדביק במקום הזה במסמך',
+  'paste-tracked-structural-unsupported': 'הדבקה כזאת אינה נתמכת במצב מעקב אחר שינויים',
+  'paste-cross-story-unsupported': 'לא ניתן להדביק בין חלקים שונים של המסמך',
+  'paste-fragment-version-unsupported': 'התוכן הועתק מגרסה אחרת של המנוע',
+  'paste-legacy-slice-unsupported': 'התוכן הועתק מגרסה ישנה של המנוע',
+  'paste-depth-exceeded': 'התוכן שבלוח מקונן עמוק מדי',
+};
+
+type SystemRead =
+  | { kind: 'payload'; payload: ClipboardPayload }
+  /** הלוח נקרא, ואין בו דבר שאפשר להעביר למנוע. */
+  | { kind: 'empty' }
+  /** אין API, או שההרשאה נדחתה. זה המצב הנפוץ ב-`file://`. */
+  | { kind: 'blocked' };
+
+/**
+ * קוראת את לוח המערכת ובונה ממנו `ClipboardPayload`.
+ *
+ * ההבחנה בין `empty` ל-`blocked` היא מה שמכריע אם ליפול ללוח הפנימי: לוח
+ * מערכת שנקרא **והיה ריק** הוא תשובה, והדבקה של משהו שהועתק לפני חצי שעה
+ * בתוך התוסף הייתה שגויה. הרשאה שנדחתה היא היעדר מידע, ושם הלוח הפנימי הוא
+ * הידע הטוב ביותר שיש.
+ */
+async function readSystemClipboard(): Promise<SystemRead> {
+  const api = systemClipboard();
+  if (!api) return { kind: 'blocked' };
+
+  let readable = false;
+
+  if (typeof api.read === 'function') {
+    try {
+      const items = (await api.read()) ?? [];
+      readable = true;
+      const collected: ClipboardPayloadItem[] = [];
+      for (const item of items) {
+        const types: readonly string[] = item?.types ?? [];
+        for (const type of READ_AS_TEXT) {
+          if (!types.includes(type)) continue;
+          const data = await (await item.getType(type)).text();
+          if (data) collected.push({ type, kind: 'string', data });
+        }
+        for (const type of READ_AS_BYTES) {
+          if (!types.includes(type)) continue;
+          const data = new Uint8Array(await (await item.getType(type)).arrayBuffer());
+          if (data.length > 0) collected.push({ type, kind: 'bytes', data });
+        }
+      }
+      if (collected.length > 0) {
+        return { kind: 'payload', payload: { source: 'browser', items: collected } };
+      }
+    } catch {
+      // `NotAllowedError` הוא המסלול הנפוץ ב-`file://`. `readText` מבקש הרשאה
+      // מצומצמת יותר ולעתים כן עובר, ולכן ממשיכים אליו.
+    }
+  }
+
+  if (typeof api.readText === 'function') {
+    try {
+      const text = await api.readText();
+      readable = true;
+      if (text) {
+        return {
+          kind: 'payload',
+          payload: { source: 'browser', items: [{ type: 'text/plain', kind: 'string', data: text }] },
+        };
+      }
+    } catch {
+      // אותו דבר; כאן נגמרו המסלולים.
+    }
+  }
+
+  return readable ? { kind: 'empty' } : { kind: 'blocked' };
+}
+
+/** ההודעה כשאין הרשאה לקרוא את הלוח. Ctrl+V כן עובד — המנוע מטפל בו במסמך. */
+function readBlocked(): CommandOutcome {
+  return {
+    ok: false,
+    message: 'ההדבקה נכשלה: אין הרשאה לקרוא את לוח המערכת. יש להדביק עם Ctrl+V — המנוע מטפל בו בתוך המסמך.',
+    reason: SYSTEM_BLOCKED_REASON,
+  };
+}
+
+/** ההסבר בעברית לכשל של `parse` או `insert`. */
+function pasteFailureText(failure: ClipboardFailure | undefined): string {
+  const unsupported = failure?.details?.unsupportedReason;
+  const explained = unsupported ? PASTE_UNSUPPORTED_TEXT[unsupported] : undefined;
+  if (explained) return `${PASTE_FAILED}: ${explained}`;
+
+  const known = failure?.code ? CLIPBOARD_FAILURE_TEXT[failure.code] : undefined;
+  if (known) return `${PASTE_FAILED}: ${known}`;
+
+  return receiptFailureText(PASTE_FAILED, { success: false, failure });
+}
+
+/**
+ * „הדבק”.
+ *
+ * המסלול הוא זה שהחוזה מתאר: `ClipboardPayload` → `parse` → `insert`. ה-`parse`
+ * נפרד מה-`insert` בכוונה — הוא **אינו** משנה את המסמך, ולכן תוכן שאי אפשר
+ * להדביק נעצר לפני שנגענו במסמך, והמשתמש מקבל את הסיבה המדויקת
+ * (`unsupportedReason`) ולא רק „הפעולה נכשלה”.
+ *
+ * `target` אינו נשלח: הוולידטור דורש בדיוק אחד מ-payload/plan/fragment ואינו
+ * דורש יעד, והמנוע פותר את מקום ההדבקה מהבחירה החיה בעצמו — בדיוק כמו
+ * ב-Ctrl+V. חישוב יעד כאן היה משחזר בקוד שלנו את מה שהוא כבר עושה.
+ *
+ * ההדבקה המקורית של המנוע אינה נוגעת בזה: המודול הזה אינו רושם מאזינים
+ * ואינו חוטף אירועי `paste`.
+ */
+export async function pasteFromClipboard(host: ClipboardHostTarget): Promise<CommandOutcome> {
+  const clipboard = docOf(host)?.clipboard;
+  const insert = clipboard?.insert;
+  if (typeof insert !== 'function') {
+    return { ok: false, message: `${PASTE_FAILED}: ${UNAVAILABLE}`, reason: 'command-unsupported' };
+  }
+
+  const read = await readSystemClipboard();
+  const payload = read.kind === 'payload' ? read.payload : read.kind === 'blocked' ? internalClipboard.read() : null;
+
+  if (!payload) {
+    if (read.kind === 'blocked') return readBlocked();
+    return {
+      ok: false,
+      message: 'ההדבקה נכשלה: לוח המערכת ריק, או שהתוכן שבו אינו נתמך כאן. Ctrl+V מדביק אותו דרך המנוע.',
+      reason: 'paste-source-unsupported',
+    };
+  }
+
+  let input: { payload?: ClipboardPayload; plan?: ClipboardPlan };
+  const parse = clipboard?.parse;
+  if (typeof parse === 'function') {
+    let parsed: ClipboardParseResult | undefined;
+    try {
+      parsed = await parse(payload);
+    } catch (error) {
+      return { ok: false, message: thrownText(PASTE_FAILED, error), reason: 'threw' };
+    }
+    if (!parsed || parsed.success !== true) {
+      const failure = parsed?.success === false ? parsed.failure : undefined;
+      return { ok: false, message: pasteFailureText(failure), reason: failure?.code ?? 'parse-failed' };
+    }
+    input = { plan: parsed.plan };
+  } else {
+    // גרסה שאינה חושפת `parse`: `insert` מקבל payload גולמי ומפרק אותו בעצמו.
+    input = { payload };
+  }
+
+  let receipt: ClipboardInsertReceipt | undefined;
+  try {
+    receipt = await insert(input);
+  } catch (error) {
+    return { ok: false, message: thrownText(PASTE_FAILED, error), reason: 'threw' };
+  }
+
+  if (receipt?.success === false) {
+    return { ok: false, message: pasteFailureText(receipt.failure), reason: receipt.failure?.code };
+  }
+
+  // הדבקה שנפלה לטקסט בלבד היא **הצלחה** עם אובדן עיצוב. אין לה ערוץ נפרד
+  // אל המשתמש (המדווח מציג כשלים), ולכן היא נרשמת ללוג ולא נצבעת כשגיאה.
+  if (receipt?.plan?.plainFallback === true) {
+    console.info('[otzaria-word] ההדבקה נפלה לטקסט בלבד', receipt.diagnostics);
+  }
+
   return { ok: true };
 }
