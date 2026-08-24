@@ -1,9 +1,19 @@
-import { ref, watch, onUnmounted, inject, type Ref, computed } from 'vue';
+import { ref, watch, onUnmounted, inject, computed } from 'vue';
 import type { CommandAdapter, CommandOutcome } from '../engine/command-adapter';
 import type { CommandState } from 'superdoc/ui';
+import { COMMAND_ADAPTER, COMMAND_REPORTER, type CommandReporter } from './keys';
+
+/**
+ * ברירת המחדל כשאין מדווח: הכשל לקונסולה ולא לשום מקום. משמש בבדיקות ובכל
+ * הרכבה חלקית של קומפוננטה — ולעולם לא במעטפת עצמה, שמזריקה מדווח אמיתי.
+ */
+const consoleReporter: CommandReporter = (outcome, commandId) => {
+  if (!outcome.ok) console.warn(`[otzaria-word] ${commandId}: ${outcome.message}`);
+};
 
 export function useCommand(commandId: string) {
-  const adapterRef = inject<Ref<CommandAdapter | null>>('commandAdapter', ref(null));
+  const adapterRef = inject(COMMAND_ADAPTER, ref(null));
+  const report = inject(COMMAND_REPORTER, consoleReporter);
 
   const state = ref<CommandState>({
     supported: false,
@@ -45,11 +55,18 @@ export function useCommand(commandId: string) {
     cleanup();
   });
 
+  /**
+   * מריצה את הפקודה **ומדווחת** על התוצאה. הדיווח כאן ולא באתר הקריאה בכוונה:
+   * הפקדים ב-Ribbon קוראים `void cmd.run()`, וכל דרך אחרת הייתה מחייבת 38
+   * אתרי קריאה לזכור לטפל בכשל — וזה בדיוק מה שלא קרה עד עכשיו.
+   */
   async function run(payload?: unknown): Promise<CommandOutcome> {
-    if (!adapterRef.value) {
-      return { ok: false, message: 'המנוע אינו מוכן', reason: 'not-ready' };
-    }
-    return adapterRef.value.run(commandId, payload);
+    const outcome = adapterRef.value
+      ? await adapterRef.value.run(commandId, payload)
+      : ({ ok: false, message: 'המנוע אינו מוכן', reason: 'not-ready' } as CommandOutcome);
+
+    report(outcome, commandId);
+    return outcome;
   }
 
   return {

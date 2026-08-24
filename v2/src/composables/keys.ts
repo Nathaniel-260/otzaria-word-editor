@@ -1,0 +1,23 @@
+/**
+ * מפתחות ה-provide/inject של המעטפת.
+ *
+ * `InjectionKey` מטופס ולא מחרוזת: מפתח מוקלד שגוי הוא באג שקט — הפקד עולה,
+ * ה-inject נופל לברירת המחדל, והכפתור פשוט לא עושה כלום. עם המפתחות האלה
+ * ה-typecheck תופס אותו.
+ */
+import type { InjectionKey, Ref } from 'vue';
+import type { CommandAdapter, CommandOutcome } from '../engine/command-adapter';
+
+/** האדפטר של ה-session הפעיל. `null` עד שיש מסמך פתוח. */
+export const COMMAND_ADAPTER: InjectionKey<Ref<CommandAdapter | null>> = Symbol('commandAdapter');
+
+/**
+ * מי שיודע להציג הודעה למשתמש. ה-adapter מחזיר תוצאה עם הודעה בעברית, אבל עד
+ * עכשיו כל 38 אתרי הקריאה ב-Ribbon עשו `void cmd.run()` וזרקו אותה — כלומר
+ * שלוש טבלאות התרגום ב-command-adapter.ts היו קוד מת, וכשל פקודה נראה למשתמש
+ * כמו כפתור שבור. ההזרקה הזאת היא מה שמחזיר אותן למסך בלי לגעת באתרי הקריאה.
+ */
+export const COMMAND_REPORTER: InjectionKey<CommandReporter> = Symbol('commandReporter');
+
+/** מקבלת את תוצאת הפקודה. נקראת גם בהצלחה, כדי שנוכל לנקות הודעה קודמת. */
+export type CommandReporter = (outcome: CommandOutcome, commandId: string) => void;

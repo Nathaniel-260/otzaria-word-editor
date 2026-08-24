@@ -87,7 +87,8 @@ import StatusBar from './ui/shell/StatusBar.vue';
 import FindReplaceDialog from './ui/panels/FindReplaceDialog.vue';
 import AboutDialog from './ui/panels/AboutDialog.vue';
 
-import { createCommandAdapter, type CommandAdapter } from './engine/command-adapter';
+import { createCommandAdapter, type CommandAdapter, type CommandOutcome } from './engine/command-adapter';
+import { COMMAND_ADAPTER, COMMAND_REPORTER } from './composables/keys';
 import {
   createSearchAdapter,
   idleSearchState,
@@ -119,7 +120,7 @@ import { loadLastDocument, saveLastDocument, forgetLastDocument } from './host/s
 const editorStackRef = ref<HTMLElement | null>(null);
 
 const commandAdapter = shallowRef<CommandAdapter | null>(null);
-provide('commandAdapter', commandAdapter);
+provide(COMMAND_ADAPTER, commandAdapter);
 
 const title = ref('מסמך חדש');
 const isOpening = ref(false);
@@ -176,6 +177,22 @@ function setStatus(text: string, isError = false): void {
   isStatusError.value = isError;
   if (isError) notifyError(text);
 }
+
+/**
+ * כל פקד ב-Ribbon מדווח לכאן דרך useCommand. עד עכשיו הפקדים עשו
+ * `void cmd.run()` וזרקו את התוצאה, ולכן „יש למקם את הסמן במסמך” או „הפעולה
+ * אינה נתמכת בגרסה הזאת של המנוע” לא הגיעו למשתמש אף פעם — הכפתור פשוט נראה
+ * שבור. כאן ההודעה נכנסת לשורת המצב, ובכשל גם ללוג של אוצריא.
+ */
+provide(COMMAND_REPORTER, (outcome: CommandOutcome, commandId: string) => {
+  if (!outcome.ok) {
+    setStatus(outcome.message, true);
+    console.warn(`[otzaria-word] ${commandId} נכשלה: ${outcome.message} (${outcome.reason ?? '—'})`);
+    return;
+  }
+  // הצלחה מנקה שגיאה קודמת שנשארה על המסך, ולא דורסת הודעה תקינה.
+  if (isStatusError.value) setStatus('');
+});
 
 function initSaveCoordinator(): SaveCoordinator {
   return createSaveCoordinator({
