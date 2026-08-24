@@ -80,28 +80,3 @@ export async function decideDocumentSwitch(deps: SwitchDeps): Promise<SwitchDeci
   });
   return discard ? { action: 'switch' } : { action: 'cancel', reason: 'user' };
 }
-
-/**
- * האם לטפל בקיצור השמירה.
- *
- * בזמן שמירה `saveNow` מצטרף לסבב שרץ, ולכן Ctrl+Shift+S היה נראה כאילו פתח
- * „שמור בשם” בעוד שבפועל הוא רק המתין לשמירה הרגילה — ואז לא נפתח שום דיאלוג.
- */
-export function saveShortcut(
-  event: Pick<KeyboardEvent, 'key' | 'ctrlKey' | 'metaKey' | 'shiftKey'>,
-  isSaving: boolean,
-): {
-  /** צירוף השמירה. יש לבטל את התנהגות ברירת המחדל גם בזמן שמירה, אחרת
-   *  ה-WebView פותח את דיאלוג השמירה של הדף עצמו. */
-  isSaveKey: boolean;
-  /** להריץ שמירה. `false` בזמן שמירה. */
-  handled: boolean;
-  saveAs: boolean;
-} {
-  const isSaveKey = event.key.toLowerCase() === 's' && (event.ctrlKey || event.metaKey);
-  return {
-    isSaveKey,
-    handled: isSaveKey && !isSaving,
-    saveAs: event.shiftKey,
-  };
-}

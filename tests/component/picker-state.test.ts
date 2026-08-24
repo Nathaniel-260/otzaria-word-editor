@@ -16,7 +16,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import HomeTab from '../../src/ui/ribbon/tabs/HomeTab.vue';
-import { autoUnmount, createCommandDouble, mountUi, settle } from './harness';
+import { autoUnmount, buttonByTitle, createCommandDouble, mountUi, settle } from './harness';
 
 autoUnmount();
 
@@ -77,7 +77,7 @@ describe('מסמך שדוחה את הפקודה', () => {
     await settle();
 
     for (let click = 0; click < 3; click += 1) {
-      await harness.wrapper.find('button[title="הגדל גופן (Ctrl+])"]').trigger('click');
+      await buttonByTitle(harness.wrapper, 'הגדל גופן').trigger('click');
       await settle();
     }
 
@@ -94,7 +94,7 @@ describe('מסמך שדוחה את הפקודה', () => {
     await settle();
 
     for (let click = 0; click < 3; click += 1) {
-      await harness.wrapper.find('button[title="הקטן גופן (Ctrl+[)"]').trigger('click');
+      await buttonByTitle(harness.wrapper, 'הקטן גופן').trigger('click');
       await settle();
     }
 
@@ -124,7 +124,7 @@ describe('מסמך שמקבל את הפקודה', () => {
     await settle();
 
     for (let click = 0; click < 3; click += 1) {
-      await harness.wrapper.find('button[title="הגדל גופן (Ctrl+])"]').trigger('click');
+      await buttonByTitle(harness.wrapper, 'הגדל גופן').trigger('click');
       await settle();
     }
 

@@ -7,7 +7,7 @@
         label="הדבק"
         variant="large"
         :tooltip="pasteTooltip"
-        shortcut="Ctrl+V"
+        shortcut-id="paste"
         :disabled="!canPaste"
         @click="doPaste"
       />
@@ -17,7 +17,7 @@
           label="גזור"
           variant="small"
           :tooltip="cutTooltip"
-          shortcut="Ctrl+X"
+          shortcut-id="cut"
           :disabled="!canCut"
           @click="doCut"
         />
@@ -26,7 +26,7 @@
           label="העתק"
           variant="small"
           :tooltip="copyTooltip"
-          shortcut="Ctrl+C"
+          shortcut-id="copy"
           :disabled="!canCopy"
           @click="doCopy"
         />
@@ -73,7 +73,6 @@
           icon="growFont"
           variant="icon-only"
           tooltip="הגדל גופן"
-          shortcut="Ctrl+]"
           :disabled="!fontSizeCmd.enabled.value"
           @click="growFontSize"
         />
@@ -81,7 +80,6 @@
           icon="shrinkFont"
           variant="icon-only"
           tooltip="הקטן גופן"
-          shortcut="Ctrl+["
           :disabled="!fontSizeCmd.enabled.value"
           @click="shrinkFontSize"
         />
@@ -114,7 +112,6 @@
           icon="bold"
           variant="icon-only"
           tooltip="מודגש"
-          shortcut="Ctrl+B"
           :active="boldCmd.active.value"
           :disabled="!boldCmd.enabled.value"
           @click="boldCmd.run()"
@@ -123,7 +120,6 @@
           icon="italic"
           variant="icon-only"
           tooltip="נטוי"
-          shortcut="Ctrl+I"
           :active="italicCmd.active.value"
           :disabled="!italicCmd.enabled.value"
           @click="italicCmd.run()"
@@ -132,7 +128,6 @@
           icon="underline"
           variant="icon-only"
           tooltip="קו תחתון"
-          shortcut="Ctrl+U"
           :active="underlineCmd.active.value"
           :disabled="!underlineCmd.enabled.value"
           @click="underlineCmd.run()"
@@ -267,7 +262,6 @@
           icon="alignRight"
           variant="icon-only"
           tooltip="יישור לימין"
-          shortcut="Ctrl+R"
           :active="alignCmd.value.value === 'right'"
           :disabled="!alignCmd.enabled.value"
           @click="onAlign('right')"
@@ -276,7 +270,6 @@
           icon="alignCenter"
           variant="icon-only"
           tooltip="מרכז"
-          shortcut="Ctrl+E"
           :active="alignCmd.value.value === 'center'"
           :disabled="!alignCmd.enabled.value"
           @click="onAlign('center')"
@@ -285,7 +278,6 @@
           icon="alignLeft"
           variant="icon-only"
           tooltip="יישור לשמאל"
-          shortcut="Ctrl+L"
           :active="alignCmd.value.value === 'left'"
           :disabled="!alignCmd.enabled.value"
           @click="onAlign('left')"
@@ -294,7 +286,6 @@
           icon="alignJustify"
           variant="icon-only"
           tooltip="יישור לשני הצדדים"
-          shortcut="Ctrl+J"
           :active="alignCmd.value.value === 'justify'"
           :disabled="!alignCmd.enabled.value"
           @click="onAlign('justify')"
@@ -352,7 +343,7 @@
           label="חפש"
           variant="small"
           tooltip="חיפוש טקסט במסמך"
-          shortcut="Ctrl+F"
+          shortcut-id="find"
           @click="$emit('open-find')"
         />
         <RibbonButton
@@ -360,7 +351,7 @@
           label="החלפה"
           variant="small"
           tooltip="החלפת טקסט במסמך"
-          shortcut="Ctrl+H"
+          shortcut-id="replace"
           @click="$emit('open-replace')"
         />
         <!--

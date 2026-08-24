@@ -98,6 +98,7 @@ import FindReplaceDialog from './ui/panels/FindReplaceDialog.vue';
 import AboutDialog from './ui/panels/AboutDialog.vue';
 
 import { createCommandAdapter, type CommandAdapter, type CommandOutcome } from './engine/command-adapter';
+import type { CommandId } from './engine/capabilities';
 import { COMMAND_ADAPTER, COMMAND_REPORTER, FONT_OPTIONS, STYLE_GALLERY } from './composables/keys';
 import { ACTIVE_SUPERDOC } from './engine/document-api';
 import { readDocSelection } from './engine/doc-selection';
@@ -155,7 +156,7 @@ import {
   resolveFileUrl,
   type UserFile,
 } from './host/files';
-import { decideDocumentSwitch, saveShortcut } from './sessions/open-flow';
+import { decideDocumentSwitch } from './sessions/open-flow';
 import { confirm, notifyError } from './host/otzaria-client';
 import {
   loadLastDocument,
@@ -165,6 +166,11 @@ import {
   saveAutosaveEnabled,
 } from './host/settings';
 import { revealZone, type RevealZone } from './composables/focus-mode';
+import { createShellActionRunner } from './ui/shortcuts/actions';
+import {
+  createShortcutDispatcher,
+  type ShortcutDispatcher,
+} from './ui/shortcuts/dispatch';
 
 const editorStackRef = ref<HTMLElement | null>(null);
 
@@ -283,7 +289,7 @@ function setStatus(text: string, isError = false): void {
  * אינה נתמכת בגרסה הזאת של המנוע” לא הגיעו למשתמש אף פעם — הכפתור פשוט נראה
  * שבור. כאן ההודעה נכנסת לשורת המצב, ובכשל גם ללוג של אוצריא.
  */
-provide(COMMAND_REPORTER, (outcome: CommandOutcome, commandId: string) => {
+function reportCommand(outcome: CommandOutcome, commandId: string): void {
   if (!outcome.ok) {
     setStatus(outcome.message, true);
     console.warn(`[otzaria-word] ${commandId} נכשלה: ${outcome.message} (${outcome.reason ?? '—'})`);
@@ -291,7 +297,9 @@ provide(COMMAND_REPORTER, (outcome: CommandOutcome, commandId: string) => {
   }
   // הצלחה מנקה שגיאה קודמת שנשארה על המסך, ולא דורסת הודעה תקינה.
   if (isStatusError.value) setStatus('');
-});
+}
+
+provide(COMMAND_REPORTER, reportCommand);
 
 function initSaveCoordinator(): SaveCoordinator {
   return createSaveCoordinator({
@@ -874,57 +882,52 @@ async function onOpenLibrary(): Promise<void> {
 }
 
 /**
- * האם הפוקוס בשדה טקסט של הממשק שלנו (שם המסמך, שדות החיפוש). התכנית אוסרת
- * לדרוס שם קיצור שאינו עריכת מסמך: Ctrl+F בתוך שדה הוא קיצור של השדה.
- * הבדיקה על `tagName` בלבד — אזור המסמך של המנוע אינו `input`, ולכן קיצורי
- * המסמך ממשיכים לעבוד כשהסמן בתוכו.
+ * קיצורי המקלדת. הרשימה עצמה ב-`ui/shortcuts/registry.ts`, ההכרעות (פוקוס,
+ * דיאלוג פתוח, בליעת ברירת המחדל של הדפדפן) במנתב — וכאן נשארת ההרכבה בלבד.
+ *
+ * מה שהיה כאן קודם היה שרשרת `else if` שהשוותה `event.key` לאות. בפריסת מקלדת
+ * עברית `Ctrl+S` מדווח `key: 'ד'`, ולכן כל הקיצורים מתו בדיוק כשהמשתמש עשה מה
+ * שהתוסף נועד לו — כתב עברית. ההתאמה עברה ל-`event.code`, שאינו תלוי בפריסה.
  */
-function isTextEntryTarget(event: KeyboardEvent): boolean {
-  const tag = (event.target as HTMLElement | null)?.tagName;
-  return tag === 'INPUT' || tag === 'TEXTAREA';
-}
-
-// קיצורי מקלדת
-function onKeyDown(event: KeyboardEvent): void {
-  if (event.key === 'Escape') {
-    if (isFindOpen.value) {
-      closeFindDialog();
-      event.preventDefault();
-    }
+const runShellAction = createShellActionRunner({
+  isSaving: () => saveSnapshot.value.isSaving,
+  save: (saveAs) => void onSave(saveAs),
+  print: () => void onPrint(),
+  openFind: (mode) => openFindDialog(mode),
+  // „אודות” הוא `aria-modal`, ולכן הוא זה שנסגר כשהוא פתוח. החיפוש אינו מודאלי
+  // ואפשר להמשיך לערוך מתחתיו, ולכן הוא נסגר רק כשאין חלון מעליו.
+  closeTopmost: () => {
     if (isAboutOpen.value) {
       isAboutOpen.value = false;
-      event.preventDefault();
+      return true;
     }
+    if (isFindOpen.value) {
+      closeFindDialog();
+      return true;
+    }
+    return false;
+  },
+});
+
+/** פקודת מנוע שמגיעה מקיצור. אותו מסלול, ואותו דיווח, כמו לחיצת כפתור. */
+async function runShortcutCommand(id: CommandId, payload?: unknown): Promise<void> {
+  const adapter = commandAdapter.value;
+  if (!adapter) {
+    setStatus('המסמך עדיין נטען', true);
     return;
   }
-
-  if (event.ctrlKey || event.metaKey) {
-    if (event.key === 's' || event.key === 'S') {
-      const shortcut = saveShortcut(event, saveSnapshot.value.isSaving);
-      if (shortcut.isSaveKey) {
-        event.preventDefault();
-        if (shortcut.handled) {
-          void onSave(shortcut.saveAs);
-        }
-      }
-    } else if (event.key === 'f' || event.key === 'F') {
-      if (isTextEntryTarget(event)) return;
-      event.preventDefault();
-      openFindDialog('find');
-    } else if (event.key === 'h' || event.key === 'H') {
-      if (isTextEntryTarget(event)) return;
-      event.preventDefault();
-      openFindDialog('replace');
-    } else if (event.key === 'p' || event.key === 'P') {
-      if (isTextEntryTarget(event)) return;
-      event.preventDefault();
-      void onPrint();
-    }
-  }
+  reportCommand(await adapter.run(id, payload), id);
 }
 
+let shortcuts: ShortcutDispatcher | null = null;
+
 onMounted(async () => {
-  window.addEventListener('keydown', onKeyDown);
+  shortcuts = createShortcutDispatcher({
+    runCommand: (id, payload) => void runShortcutCommand(id, payload),
+    runAction: runShellAction,
+    // רק „אודות” חוסם: הוא מודאלי. מעל דיאלוג החיפוש עדיין מותר לשמור.
+    isModalOpen: () => isAboutOpen.value,
+  });
 
   if (editorStackRef.value) {
     save = initSaveCoordinator();
@@ -963,7 +966,7 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
-  window.removeEventListener('keydown', onKeyDown);
+  shortcuts?.dispose();
   // חיפוש-בזמן-הקלדה שממתין ירוץ אחרי הפירוק על handle של controller מפורק.
   searchAdapter?.dispose();
 });
@@ -990,7 +993,7 @@ async function resolveLastDocument(): Promise<UserFile | undefined> {
   overflow: hidden;
   background: var(--color-surface);
   color: var(--color-on-surface);
-  font-family: var(--font-main);
+  font-family: var(--font-ui);
   direction: rtl;
 }
 

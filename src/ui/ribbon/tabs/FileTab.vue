@@ -25,7 +25,7 @@
         label="שמור"
         variant="large"
         :tooltip="saveTooltip('שמירת שינויים במסמך')"
-        shortcut="Ctrl+S"
+        shortcut-id="save"
         :disabled="isSaveBlocked"
         @click="$emit('save-doc')"
       />
@@ -34,7 +34,7 @@
         label="שמור בשם..."
         variant="large"
         :tooltip="saveTooltip('שמירת המסמך כקובץ חדש')"
-        shortcut="Ctrl+Shift+S"
+        shortcut-id="save-as"
         :disabled="isSaveBlocked"
         @click="$emit('save-as-doc')"
       />
@@ -54,7 +54,7 @@
         label="הדפסה"
         variant="large"
         :tooltip="documentTooltip('הדפסת המסמך')"
-        shortcut="Ctrl+P"
+        shortcut-id="print"
         :disabled="!hasDocument"
         @click="$emit('print-doc')"
       />
@@ -120,8 +120,9 @@
  *   * „מסמך חדש” / „פתח קובץ” — `onPickAndOpen` יוצא מיד כש-`isOpening`,
  *     ו-`decideDocumentSwitch` מחזיר `cancel` עם `reason: 'saving'` בזמן
  *     שמירה („השמירה עוד רצה — רגע אחד”).
- *   * „שמור” / „שמור בשם” — `onSave` יוצא מיד בלי מסמך, ו-`saveShortcut`
- *     חוסם את Ctrl+S בזמן שמירה. אותו תנאי בדיוק, ולא שני תנאים לאותה פעולה.
+ *   * „שמור” / „שמור בשם” — `onSave` יוצא מיד בלי מסמך, ומפעיל הפעולות של
+ *     הקיצורים חוסם את Ctrl+S בזמן שמירה. אותו תנאי בדיוק, ולא שני תנאים
+ *     לאותה פעולה.
  *   * „ייצוא” / „הדפסה” — שניהם דורשים מסמך פתוח ולא דורשים שהוא יהיה שמור:
  *     הייצוא קורא את המצב הנוכחי, וההדפסה מדפיסה את מה שמצויר.
  */

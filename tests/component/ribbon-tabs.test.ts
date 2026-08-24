@@ -266,8 +266,8 @@ describe('לשונית „קובץ” נשענת על מצב המעטפת', () =
   });
 
   it('שמירה שרצה: אין שמירה נוספת ואין מעבר מסמך', async () => {
-    // `decideDocumentSwitch` מחזיר cancel עם reason 'saving', ו-`saveShortcut`
-    // חוסם את Ctrl+S. הפקד מראה את זה מראש במקום לבלוע לחיצה.
+    // `decideDocumentSwitch` מחזיר cancel עם reason 'saving', ומפעיל הפעולות
+    // של הקיצורים חוסם את Ctrl+S. הפקד מראה את זה מראש במקום לבלוע לחיצה.
     const byLabel = await states({ hasDocument: true, isSaving: true });
 
     expect(byLabel['שמור']).toBe(true);
