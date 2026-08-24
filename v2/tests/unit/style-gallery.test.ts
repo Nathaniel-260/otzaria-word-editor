@@ -12,6 +12,8 @@
  * צורה מאשר גם צורה שהמנוע לא היה מחזיר, ואז הבדיקה ירוקה והתוסף שבור.
  */
 import { describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { StyleCatalogItem } from 'superdoc/ui';
 import {
   FALLBACK_STYLE_IDS,
@@ -523,6 +525,49 @@ describe('תוויות הסגנונות המובנים', () => {
       'כותרת משנה',
       'ציטוט',
     ]);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* גאומטריית הכרטיס                                                    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * הליקוי שנראה בריצה חיה: התקרה של מיכל הגלילה הייתה 340px — מספר עגול שאינו
+ * כפולה של רוחב כרטיס, ולכן הכרטיס החמישי הוצג חצוי. ב-Word הגלריה מציגה
+ * כרטיסים שלמים בלבד. מה שנבדק כאן הוא שהתקרה **מחושבת** מרוחב הכרטיס ולא
+ * חוזרת להיות מספר קסם.
+ */
+describe('רוחב הגלריה נצמד לגבול כרטיס', () => {
+  const source = readFileSync(
+    join(process.cwd(), 'src/ui/ribbon/common/StyleGallery.vue'),
+    'utf8',
+  );
+
+  it('רוחב הכרטיס קבוע, ולא טווח שאין לו גבול', () => {
+    expect(source).toMatch(/width:\s*var\(--style-card-width\)/);
+    expect(source).not.toMatch(/\bmin-width:\s*\d+px/);
+    expect(source).not.toMatch(/\bmax-width:\s*\d+px/);
+  });
+
+  it('התקרה מחושבת מרוחב הכרטיס, מהמרווח ומהריפוד', () => {
+    const declaration = /max-width:\s*calc\(([\s\S]*?)\);/.exec(source)?.[1] ?? '';
+    expect(declaration).toContain('--style-cards-visible');
+    expect(declaration).toContain('--style-card-width');
+    expect(declaration).toContain('--style-card-gap');
+    expect(declaration).toContain('--style-cards-padding');
+  });
+
+  it('הגלילה נצמדת לכרטיס גם כשהיא לא מגיעה מהכפתורים', () => {
+    expect(source).toMatch(/scroll-snap-type:\s*inline mandatory/);
+    expect(source).toMatch(/scroll-snap-align:\s*start/);
+  });
+
+  it('צעד הכפתור הוא כפולה שלמה של פסיעת כרטיס', () => {
+    const width = Number(/--style-card-width:\s*(\d+)px/.exec(source)?.[1]);
+    const gap = Number(/--style-card-gap:\s*(\d+)px/.exec(source)?.[1]);
+    expect(Number.isFinite(width) && Number.isFinite(gap)).toBe(true);
+    expect(GALLERY_SCROLL_STEP_PX % (width + gap)).toBe(0);
   });
 });
 

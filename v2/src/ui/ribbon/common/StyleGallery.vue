@@ -183,6 +183,14 @@ watch(items, () => void nextTick(measure));
 
 <style scoped>
 .style-gallery-container {
+  /* המידות של הגלריה במקום אחד, כי הן תלויות זו בזו: תקרת הרוחב של מיכל
+     הגלילה מחושבת מהן, ובלי החישוב היא מספר קסם שחותך כרטיס באמצע — זה מה
+     שקרה. הכרטיס ברוחב **קבוע** ולא בטווח, אחרת אין גבול כרטיס להיצמד אליו. */
+  --style-card-width: 68px;
+  --style-card-gap: 3px;
+  --style-cards-padding: 2px;
+  --style-cards-visible: 5;
+
   display: flex;
   align-items: center;
   gap: 2px;
@@ -202,16 +210,27 @@ watch(items, () => void nextTick(measure));
 .style-cards-scroll {
   display: flex;
   align-items: stretch;
-  gap: 3px;
+  gap: var(--style-card-gap);
   overflow-x: auto;
   scrollbar-width: none;
   height: 100%;
-  padding-inline: 2px;
+  padding-inline: var(--style-cards-padding);
   /* התקרה היא מה שמונע מגלריה של מסמך עשיר בסגנונות לדחוף את שאר הקבוצות
      מהרצועה: הקטלוג של Word מחזיר לעיתים חמישה-עשר סגנונות מהירים, ולא חמישה.
-     רוחב של כחמישה כרטיסים — ומשם גוללים. */
-  max-width: 340px;
+
+     והיא חשובה **בדיוק**: חמישה כרטיסים, ארבעה מרווחים ביניהם, ושני הריפודים
+     — כלומר גבול כרטיס. תקרה עגולה (340px) הותירה את הכרטיס החמישי חצוי, וב-
+     Word הגלריה מציגה כרטיסים שלמים בלבד. `box-sizing: border-box` גלובלי,
+     ולכן הריפוד נכלל בתקרה. */
+  max-width: calc(
+    var(--style-cards-visible) * var(--style-card-width) +
+      (var(--style-cards-visible) - 1) * var(--style-card-gap) +
+      2 * var(--style-cards-padding)
+  );
   min-width: 0;
+  /* וגם אחרי גלילה: הצמדה לגבול כרטיס, כדי שגלילה בגלגלת או צעד שלא יצא עגול
+     לא יעצרו באמצע כרטיס. */
+  scroll-snap-type: inline mandatory;
 }
 
 .style-cards-scroll::-webkit-scrollbar {
@@ -224,9 +243,9 @@ watch(items, () => void nextTick(measure));
   align-items: center;
   justify-content: center;
   flex: 0 0 auto;
-  min-width: 62px;
-  max-width: 84px;
+  width: var(--style-card-width);
   padding: 3px 6px;
+  scroll-snap-align: start;
   background: var(--color-surface);
   border: 1px solid var(--color-outline-variant);
   border-radius: var(--radius-xs);
