@@ -12,14 +12,29 @@
  *      האפליקציה קובעת אותה **רק** כששלוש הקבלות של המנוע — docDefaults, מקטע
  *      ופסקה — חזרו בהצלחה, ומוחקת אותה בכל כשל. כלומר התכונה הזאת היא
  *      הקבלות של המנוע, במקום שאפשר לקרוא אותו מבחוץ.
- *   2. אין שורת console של „כיווניות המסמך החדש לא הוחלה” — הנוסח שהאפליקציה
+ *   2. **הכיווניות שנראית בפועל**: `dir` ו-`text-align` המחושבים על הפסקה
+ *      שהמנוע רינדר. זו התוספת החשובה, והיא נולדה מחור אמיתי — עד כאן השער
+ *      מדד את ההצהרה של האפליקציה על עצמה בלבד, כלומר קבלות שחזרו „הצלחה”.
+ *      קבלה מוצלחת אינה פיקסל: `styles.apply` מחזירה `{success: true}` גם
+ *      כשלא נכתב דבר (ראו את בדיקת `after` ב-engine/document-defaults.ts), ולכן
+ *      השער היה עובר על מסמך שמרונדר משמאל לימין. ההמתנה גדלה בגלל זה: ההצהרה
+ *      נקבעת אחרי ~1.5 שניות, אבל הפסקה עצמה מרונדרת אחרי יותר מעשר — כלומר
+ *      ה-`SETTLE_MS` הקודם (9000) מדד רגע שבו לא היה מה לראות.
+ *   3. אין שורת console של „כיווניות המסמך החדש לא הוחלה” — הנוסח שהאפליקציה
  *      כותבת ללוג של אוצריא כשההחלה נכשלה חלקית.
  *
  * מה **אינו** נמדד כאן, במפורש: התוסף אינו חושף את מופע SuperDoc ל-`window`,
- * ולכן השער אינו קורא את `sectionDirection` ואת `bidi` מהמסמך בעצמו. הקריאה
- * הזאת נעשתה ידנית ב-CDP בזמן המימוש (המנוע החזיר `sectionDirection: "rtl"`
- * ו-`props: {bidi: true}`), וההחלפה שלה בשער הייתה מחייבת לפתוח את המנוע
- * ל-`window` בבנייה ארוזה — API ציבורי חדש לצורך בדיקה, שאינו שווה את המחיר.
+ * ולכן השער אינו קורא את `sectionDirection` ואת `bidi` מהמסמך בעצמו, ואינו יוצר
+ * פסקה שנייה כדי לאמת את שכבת `docDefaults` (זו שקובעת לפסקות הבאות). שתי
+ * הקריאות האלה נעשו ידנית ב-CDP בזמן המימוש — המנוע החזיר `sectionDirection:
+ * "rtl"`, פסקה שנוצרה אחרי הפתיחה רונדרה `dir="rtl"`, והייצוא נשא `w:bidi`
+ * ב-`w:pPrDefault`, ב-`w:sectPr` ובפסקה — והחלפתן בשער הייתה מחייבת לפתוח את
+ * המנוע ל-`window` בבנייה ארוזה: API ציבורי חדש לצורך בדיקה, שאינו שווה את
+ * המחיר. שכבת `docDefaults` מכוסה במקום זה בבדיקת ה-`after` שלה.
+ *
+ * שמות המחלקות `.superdoc-page` ו-`.superdoc-fragment` הם של המנוע ולא שלנו.
+ * שדרוג מנוע שישנה אותם יפיל את השער עם „לא נמצאה פסקה מרונדרת”, וזו התנהגות
+ * מכוונת: עדיף שער שנשבר בקול על שינוי מבנה מאשר שער שממשיך לעבור בלי למדוד.
  *
  *   npm run build && npm run check:rtl
  */
@@ -32,6 +47,13 @@ const DIST = join(dirname(fileURLToPath(import.meta.url)), '..', 'dist');
 const INDEX = join(DIST, 'index.html');
 /** נדיב: המנוע והמסמך הריק עולים ב-~500ms ארוז, וההחלה היא אחרי onReady. */
 const SETTLE_MS = 9000;
+/**
+ * הרינדור עצמו איטי בהרבה מההחלה — נמדד שהפסקה מופיעה בין 10 ל-20 שניות
+ * ב-headless. במקום להגדיל את ההמתנה הקבועה לגבול העליון, השער דוגם עד שיש מה
+ * למדוד: מכונה מהירה מסיימת מוקדם, ומכונה עמוסה אינה נכשלת על תזמון.
+ */
+const RENDER_TIMEOUT_MS = 45000;
+const POLL_MS = 500;
 
 if (!existsSync(INDEX)) {
   console.error('dist/index.html אינו קיים — הריצו npm run build תחילה');
@@ -79,9 +101,14 @@ const path = join(DIST, 'rtl-check-tmp.html');
 writeFileSync(path, html.slice(0, afterLatch) + STUB + html.slice(afterLatch));
 
 const PROBE = `(function () {
+  var fragments = [].slice.call(document.querySelectorAll('.superdoc-fragment'));
   return {
     direction: document.documentElement.getAttribute('data-document-direction'),
     status: (document.getElementById('status') || {}).textContent,
+    rendered: fragments.map(function (el) {
+      var style = getComputedStyle(el);
+      return { dir: el.getAttribute('dir'), direction: style.direction, textAlign: style.textAlign };
+    }),
     log: window.__rtlCheckLog || []
   };
 })()`;
@@ -91,6 +118,13 @@ let report;
 try {
   await sleep(SETTLE_MS);
   report = await page.cdp.evaluate(PROBE);
+  // דגימה עד שיש פסקה מרונדרת למדוד. הדגימה נעצרת ברגע שהיא מופיעה, ולכן
+  // ה-timeout הוא גבול ולא זמן ריצה.
+  const deadline = Date.now() + RENDER_TIMEOUT_MS;
+  while (report?.rendered?.length === 0 && Date.now() < deadline) {
+    await sleep(POLL_MS);
+    report = await page.cdp.evaluate(PROBE);
+  }
 } finally {
   page.close();
   rmSync(path, { force: true });
@@ -103,16 +137,39 @@ if (report?.direction !== 'rtl') {
       'כלומר לפחות אחת מקבלות המנוע נכשלה',
   );
 }
+const rendered = report?.rendered ?? [];
+if (rendered.length === 0) {
+  errors.push(
+    'לא נמצאה פסקה מרונדרת (.superdoc-fragment) — או שהרינדור לא הסתיים בזמן, ' +
+      'או שהמנוע שינה את מבנה ה-DOM שלו ויש לעדכן את השער',
+  );
+}
+// כל פסקה ולא רק הראשונה: מסמך ריק נפתח עם אחת, ובדיקה של „לפחות אחת RTL”
+// הייתה עוברת גם על מסמך שבו השאר משמאל לימין.
+for (const [index, fragment] of rendered.entries()) {
+  if (fragment.direction !== 'rtl') {
+    errors.push(`פסקה ${index + 1} מרונדרת ב-direction=${fragment.direction}, ולא rtl`);
+  }
+  // `start` ב-RTL מתפרש כימין, ולכן שני הערכים תקינים; `left` אינו.
+  if (fragment.textAlign !== 'right' && fragment.textAlign !== 'start') {
+    errors.push(`פסקה ${index + 1} מיושרת ל-${fragment.textAlign}, ולא לימין`);
+  }
+}
+
 for (const line of report?.log ?? []) {
   if (line.includes('כיווניות')) errors.push(`אזהרה מהתוסף: ${line}`);
 }
 
 console.log(
-  `direction=${report?.direction ?? '?'} status="${(report?.status ?? '').slice(0, 60)}"`,
+  `direction=${report?.direction ?? '?'} פסקות=${rendered.length} ` +
+    `מרונדר=${rendered.map((f) => `${f.direction}/${f.textAlign}`).join(', ') || 'אין'} ` +
+    `status="${(report?.status ?? '').slice(0, 40)}"`,
 );
 
 if (errors.length) {
   for (const error of errors) console.error(`שגיאה: ${error}`);
   process.exit(1);
 }
-console.log('שער הכיווניות עבר: מסמך חדש נפתח RTL — docDefaults, מקטע ופסקה.');
+console.log(
+  'שער הכיווניות עבר: מסמך חדש נפתח RTL — שלוש הקבלות, והפסקה מרונדרת מימין לשמאל.',
+);

@@ -49,6 +49,43 @@ interface Receipt {
   failure?: { code?: string; message?: string };
 }
 
+/**
+ * מצב תלת-מצבי של תכונת OOXML בוליאנית, כפי שהמנוע מחזיר אותו:
+ * `'on'` = הוצהר דלוק, `'off'` = הוצהר כבוי, `'inherit'` = **לא הוצהר כלל**.
+ *
+ * ההבחנה בין `'off'` ל-`'inherit'` היא כל ההבדל בין „המסמך ביקש משמאל לימין”
+ * ל„המסמך לא אמר דבר”, וזה מה שמאפשר לתקן את השני בלי לדרוך על הראשון.
+ */
+export type StyleFlagState = 'on' | 'off' | 'inherit';
+
+/**
+ * הקבלה של `styles.apply`. שלושה שדות מעבר ל-`success`, וכל אחד מהם נדרש:
+ *
+ * - `changed` — האם באמת נכתב משהו. `success: true, changed: false` הוא תשובה
+ *   חוקית ושכיחה (הערך כבר היה שם), ולכן הוא **אינו** סימן לכשל.
+ * - `after` — המצב אחרי הפעולה. זה מה שקובע אם ההחלה הצליחה, ולא `success`:
+ *   `success` אומר „הבקשה התקבלה ועובדה”, ו-`after` אומר „הערך אכן שם”. נמדד
+ *   על המנוע שהקבלה חוזרת `{success: true, changed: false, after:
+ *   {rightToLeft: 'on'}}` — כלומר בלי `after` אין דרך להבדיל בין „היה כבר
+ *   מוחל” לבין „התקבל ולא נכתב”.
+ * - `before` — המצב לפני. יחד עם `dryRun` הוא מסלול **קריאה** בלי כתיבה, וזה
+ *   מה ש-`readDeclaredParagraphDirection` נשען עליו.
+ */
+interface StylesReceipt extends Receipt {
+  changed?: boolean;
+  before?: Record<string, unknown>;
+  after?: Record<string, unknown>;
+}
+
+/** קורא מצב תכונה מ-`before`/`after` של הקבלה, ומחזיר `null` על צורה לא מוכרת. */
+export function readFlagState(
+  map: Record<string, unknown> | undefined,
+  key: string,
+): StyleFlagState | null {
+  const value = map?.[key];
+  return value === 'on' || value === 'off' || value === 'inherit' ? value : null;
+}
+
 /** הקבלה שהמנוע מחזיר עשויה להיות סינכרונית או הבטחה — הפאסדה בדפדפן א-סינכרונית. */
 type MaybePromise<T> = T | Promise<T>;
 
@@ -64,10 +101,13 @@ export interface DefaultsDocumentApi {
     }) => MaybePromise<Receipt>;
   };
   styles?: {
-    apply?: (input: {
-      target: { scope: 'docDefaults'; channel: 'paragraph' };
-      patch: { rightToLeft?: boolean };
-    }) => MaybePromise<Receipt>;
+    apply?: (
+      input: {
+        target: { scope: 'docDefaults'; channel: 'paragraph' };
+        patch: { rightToLeft?: boolean };
+      },
+      options?: { dryRun?: boolean },
+    ) => MaybePromise<StylesReceipt>;
   };
   format?: {
     paragraph?: {
@@ -120,8 +160,19 @@ export async function applyHebrewDocumentDefaults(
       });
       if (receipt?.success === false) {
         report.failures.push(failureText('ברירת המחדל של הגלריה נכשלה', receipt));
-      } else {
+      } else if (readFlagState(receipt?.after, 'rightToLeft') === 'on') {
         report.applied.push('docDefaults');
+      } else {
+        // `success: true` ו-`after` שאינו `'on'`: הבקשה התקבלה ועובדה, והערך
+        // אינו שם. זה הכשל השקט שהשכבה הזאת חשופה לו — היא היחידה מהשלוש
+        // שקובעת לפסקות **הבאות**, ולכן כשל בה אינו נראה במסמך שנפתח כרגע
+        // אלא רק כשהמשתמש מקיש Enter. `changed` בכוונה אינו נבדק: הוא `false`
+        // גם כשהערך כבר היה מוחל, וזו הצלחה.
+        report.failures.push(
+          `ברירת המחדל של הגלריה לא נכתבה (המנוע דיווח rightToLeft=${
+            readFlagState(receipt?.after, 'rightToLeft') ?? 'לא ידוע'
+          })`,
+        );
       }
     } catch (error) {
       report.failures.push(`ברירת המחדל של הגלריה שגתה: ${describe(error)}`);

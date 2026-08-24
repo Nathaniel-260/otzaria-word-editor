@@ -25,9 +25,13 @@ function fakeDoc(overrides: Partial<DefaultsDocumentApi> = {}) {
       },
     },
     styles: {
+      // הצורה האמיתית שהמנוע מחזיר, נמדדה ב-CDP על ה-dist:
+      // `{success: true, changed: false, before: {rightToLeft: 'on'}, after:
+      // {rightToLeft: 'on'}}`. כפיל שמחזיר `{success: true}` בלבד הוא נאמן
+      // פחות מהמנוע, וזה בדיוק מה שאיפשר לכשל „התקבל ולא נכתב” לעבור.
       apply: (input) => {
         calls.push({ op: 'styles.apply', input });
-        return { success: true };
+        return { success: true, changed: true, before: { rightToLeft: 'inherit' }, after: { rightToLeft: 'on' } };
       },
     },
     format: {
@@ -136,7 +140,10 @@ describe('applyHebrewDocumentDefaults', () => {
   it('סובלת קבלה סינכרונית וקבלה כהבטחה', async () => {
     // הפאסדה בדפדפן א-סינכרונית, ואותו קוד רץ גם מול מימוש סינכרוני.
     const { host } = fakeDoc({
-      styles: { apply: () => Promise.resolve({ success: true }) },
+      styles: {
+        apply: () =>
+          Promise.resolve({ success: true, changed: true, after: { rightToLeft: 'on' } }),
+      },
     });
 
     const report = await applyHebrewDocumentDefaults(host);
@@ -144,8 +151,53 @@ describe('applyHebrewDocumentDefaults', () => {
     expect(report.failures).toEqual([]);
   });
 
+  it('`success: true` בלי שהערך נכתב אינו הצלחה', async () => {
+    // זהו הכשל השקט שהשכבה הזאת חשופה לו: `success` אומר „הבקשה התקבלה
+    // ועובדה”, ולא „הערך שם”. השכבה הזאת היא היחידה מהשלוש שקובעת לפסקות
+    // **הבאות**, ולכן כשל בה אינו נראה במסמך שנפתח אלא רק כשהמשתמש מקיש Enter.
+    const { host } = fakeDoc({
+      styles: { apply: () => ({ success: true, changed: false, after: { rightToLeft: 'inherit' } }) },
+    });
+
+    const report = await applyHebrewDocumentDefaults(host);
+
+    expect(report.applied).not.toContain('docDefaults');
+    expect(report.failures).toEqual([
+      'ברירת המחדל של הגלריה לא נכתבה (המנוע דיווח rightToLeft=inherit)',
+    ]);
+  });
+
+  it('`changed: false` על ערך שכבר מוחל הוא הצלחה', async () => {
+    // זה מה שהמנוע מחזיר בקריאה שנייה, וזו התשובה השכיחה. בדיקת `changed`
+    // במקום `after` הייתה מדווחת כשל על מסמך שהוא בדיוק כפי שביקשנו.
+    const { host } = fakeDoc({
+      styles: {
+        apply: () => ({ success: true, changed: false, before: { rightToLeft: 'on' }, after: { rightToLeft: 'on' } }),
+      },
+    });
+
+    const report = await applyHebrewDocumentDefaults(host);
+
+    expect(report.failures).toEqual([]);
+    expect(report.applied).toContain('docDefaults');
+  });
+
+  it('`after` בצורה לא מוכרת נכשל סגור', async () => {
+    // תשובה שעברה סריאליזציה מ-worker עלולה להגיע כ-boolean במקום כתלת-מצבי.
+    // „truthy” אינו „on”, בדיוק כמו ב-readDocCapabilities.
+    for (const after of [{ rightToLeft: true }, { rightToLeft: 'ON' }, {}, undefined]) {
+      const { host } = fakeDoc({
+        styles: { apply: () => ({ success: true, changed: true, after }) },
+      });
+
+      const report = await applyHebrewDocumentDefaults(host);
+
+      expect(report.applied, JSON.stringify(after)).not.toContain('docDefaults');
+    }
+  });
+
   it('אינה נוגעת במנוע יותר מפעם אחת לכל שכבה', async () => {
-    const apply = vi.fn(() => ({ success: true }));
+    const apply = vi.fn(() => ({ success: true, changed: true, after: { rightToLeft: 'on' as const } }));
     const { host } = fakeDoc({ styles: { apply } });
 
     await applyHebrewDocumentDefaults(host);
