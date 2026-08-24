@@ -21,16 +21,16 @@
   --color-secondary-subtle: rgba(103, 80, 164, 0.08);
   --color-scrim: rgba(0, 0, 0, 0.32);
 
-  /* טוקנים ייעודיים ל-Word Fluent UI */
-  --word-blue: #185abd;
-  --word-blue-dark: #103f91;
-  --word-blue-light: #2b88d8;
-  --word-tab-active-border: #185abd;
+  /* טוקנים ייעודיים לממשק — נגזרים ישירות מצבע הנושא של אוצריא (--color-primary) */
+  --word-blue: var(--color-primary);
+  --word-blue-dark: var(--color-primary);
+  --word-blue-light: var(--color-secondary);
+  --word-tab-active-border: var(--color-primary);
   --word-ribbon-bg: var(--color-surface-container-high);
   --word-ribbon-border: var(--color-outline-variant);
-  --word-btn-hover: rgba(0, 0, 0, 0.05);
-  --word-btn-active: rgba(24, 90, 189, 0.12);
-  --word-btn-active-border: rgba(24, 90, 189, 0.35);
+  --word-btn-hover: var(--color-primary-subtle, rgba(0, 0, 0, 0.05));
+  --word-btn-active: var(--color-primary-subtle, rgba(21, 101, 192, 0.12));
+  --word-btn-active-border: var(--color-primary);
   --word-group-label-color: var(--color-on-surface-variant);
   --word-group-border: var(--color-outline-variant);
 

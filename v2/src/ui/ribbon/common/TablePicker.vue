@@ -152,7 +152,7 @@ onUnmounted(() => {
 }
 
 .grid-cell.highlighted {
-  background: rgba(24, 90, 189, 0.25);
-  border-color: var(--word-blue);
+  background: var(--color-primary-subtle);
+  border-color: var(--color-primary);
 }
 </style>

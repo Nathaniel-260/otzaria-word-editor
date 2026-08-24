@@ -393,8 +393,8 @@ defineEmits<{
   font-size: 11px;
   padding: 2px 8px;
   border-radius: var(--radius-pill);
-  background: rgba(24, 90, 189, 0.08);
-  color: var(--word-blue);
+  background: var(--color-primary-subtle, rgba(21, 101, 192, 0.08));
+  color: var(--color-primary);
 }
 
 .save-state-pill.error {
