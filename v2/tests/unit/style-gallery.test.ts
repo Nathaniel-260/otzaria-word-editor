@@ -14,7 +14,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { StyleCatalogItem } from 'superdoc/ui';
 import {
-  FALLBACK_STYLES,
+  FALLBACK_STYLE_IDS,
+  builtInStyleLabel,
+  styleDisplayLabel,
   GALLERY_SCROLL_STEP_PX,
   clampPreviewFontSize,
   fallbackStyleGallery,
@@ -89,7 +91,7 @@ const HEBREW_GALLERY: readonly StyleCatalogItem[] = [
   catalogItem({ id: 'MyStyle', name: 'סגנון שלי', custom: true, builtin: false }),
 ];
 
-const fallbackIds = FALLBACK_STYLES.map((style) => style.id);
+const fallbackIds = [...FALLBACK_STYLE_IDS];
 const ids = (state: StyleGalleryState) => state.items.map((item) => item.id);
 
 /* ------------------------------------------------------------------ */
@@ -187,8 +189,9 @@ describe('הגלריה מהמסמך', () => {
   });
 
   it('שם שהמנוע לא מסר נופל למזהה, ולא לכרטיס ריק', () => {
-    const items = toGalleryItems([catalogItem({ id: 'Quote', name: '   ' })]);
-    expect(items[0].label).toBe('Quote');
+    // מזהה שאינו בטבלת הסגנונות המובנים, כדי שהנפילה לשם ולמזהה תהיה זו שנמדדת.
+    const items = toGalleryItems([catalogItem({ id: 'AcmeLead', name: '   ' })]);
+    expect(items[0].label).toBe('AcmeLead');
   });
 
   it('פריט בלי מזהה וכפילות נשמטים', () => {
@@ -415,6 +418,111 @@ describe('תצוגה מקדימה', () => {
     const items = toGalleryItems(HEBREW_GALLERY);
     expect(items.find((item) => item.id === 'Normal')?.previewText).toBe('AaBbCc');
     expect(items.find((item) => item.id === 'Heading1')?.previewText).toBe('כותרת 1');
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* תוויות עבריות                                                       */
+/* ------------------------------------------------------------------ */
+
+describe('תוויות הסגנונות המובנים', () => {
+  it('מכסה את המזהים שבתבניות של Word', () => {
+    const expected: Record<string, string> = {
+      Normal: 'רגיל',
+      NoSpacing: 'ללא מרווח',
+      Title: 'כותרת',
+      Subtitle: 'כותרת משנה',
+      Heading1: 'כותרת 1',
+      Heading2: 'כותרת 2',
+      Heading3: 'כותרת 3',
+      Heading4: 'כותרת 4',
+      Heading5: 'כותרת 5',
+      Heading6: 'כותרת 6',
+      Quote: 'ציטוט',
+      IntenseQuote: 'ציטוט מודגש',
+      ListParagraph: 'פסקת רשימה',
+      Caption: 'כתובית',
+      Header: 'כותרת עליונה',
+      Footer: 'כותרת תחתונה',
+    };
+    for (const [id, label] of Object.entries(expected)) {
+      expect(builtInStyleLabel(id)).toBe(label);
+    }
+  });
+
+  it('„heading 1” של התבנית — אות קטנה ורווח — מתורגם כמו `Heading1`', () => {
+    // זו הרגרסיה מהריצה החיה: השם בקטלוג של המסמך הריק אינו ה-styleId הקנוני.
+    expect(builtInStyleLabel('heading 1')).toBe('כותרת 1');
+    expect(builtInStyleLabel('No Spacing')).toBe('ללא מרווח');
+    expect(builtInStyleLabel('intense_quote')).toBe('ציטוט מודגש');
+  });
+
+  it('מזהה שאינו בטבלה מחזיר `undefined`, ולא מחרוזת ריקה', () => {
+    expect(builtInStyleLabel('MyStyle')).toBeUndefined();
+    expect(builtInStyleLabel('')).toBeUndefined();
+    expect(builtInStyleLabel(undefined)).toBeUndefined();
+  });
+
+  it('המסמך הריק של המנוע — תבנית אנגלית — מוצג בעברית', () => {
+    // בדיוק החמישה שנראו בצילום המסך: Normal, heading 1, Title, Subtitle, Quote.
+    const english: readonly StyleCatalogItem[] = [
+      catalogItem({ id: 'Normal', name: 'Normal' }),
+      catalogItem({ id: 'Heading1', name: 'heading 1' }),
+      catalogItem({ id: 'Title', name: 'Title' }),
+      catalogItem({ id: 'Subtitle', name: 'Subtitle' }),
+      catalogItem({ id: 'Quote', name: 'Quote' }),
+    ];
+    expect(toGalleryItems(english).map((item) => item.label)).toEqual([
+      'רגיל',
+      'כותרת 1',
+      'כותרת',
+      'כותרת משנה',
+      'ציטוט',
+    ]);
+  });
+
+  it('סגנון מותאם אישית שומר את שמו — גם כששמו „Quote”', () => {
+    expect(
+      styleDisplayLabel(
+        catalogItem({ id: 'Quote1', name: 'Quote', custom: true, builtin: false }),
+      ),
+    ).toBe('Quote');
+    expect(
+      styleDisplayLabel(catalogItem({ id: 'MyStyle', name: 'סגנון שלי', custom: true })),
+    ).toBe('סגנון שלי');
+  });
+
+  it('מזהה שאינו מוכר נופל לשם שבמסמך, ושם ריק נופל למזהה', () => {
+    expect(styleDisplayLabel(catalogItem({ id: 'AcmeLead', name: 'Acme Lead' }))).toBe('Acme Lead');
+    expect(styleDisplayLabel(catalogItem({ id: 'AcmeLead', name: '   ' }))).toBe('AcmeLead');
+  });
+
+  it('מסמך עברי אינו משתנה — השם שבמסמך הוא כבר התשובה', () => {
+    expect(styleDisplayLabel(catalogItem({ id: 'Heading1', name: 'כותרת 1' }))).toBe('כותרת 1');
+    expect(styleDisplayLabel(catalogItem({ id: 'AcmeLead', name: 'פתיח' }))).toBe('פתיח');
+  });
+
+  it('`styleId` מקומי מתורגם דרך השם או ה-aliases האנגליים', () => {
+    // תבניות לא-אנגליות כותבות לעיתים styleId מקומי ומשאירות את השם הקנוני.
+    expect(styleDisplayLabel(catalogItem({ id: 'berschrift1', name: 'Heading 1' }))).toBe(
+      'כותרת 1',
+    );
+    expect(
+      styleDisplayLabel(
+        catalogItem({ id: 'Standardowy', name: 'Styl domyslny', aliases: ['Normal'] }),
+      ),
+    ).toBe('רגיל');
+  });
+
+  it('רשת הביטחון מקבלת את התוויות מאותה טבלה', () => {
+    expect(fallbackStyleGallery().items.map((item) => item.label)).toEqual([
+      'רגיל',
+      'ללא מרווח',
+      'כותרת 1',
+      'כותרת 2',
+      'כותרת משנה',
+      'ציטוט',
+    ]);
   });
 });
 

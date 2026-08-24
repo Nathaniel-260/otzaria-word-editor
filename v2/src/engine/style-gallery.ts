@@ -78,16 +78,18 @@ export interface StyleGalleryState {
 }
 
 /**
- * רשת הביטחון. שישה סגנונות בסיס של Word עם התוויות העבריות שלהם — מה שהוצג
- * עד עכשיו תמיד, וממשיך להוצג כשהקטלוג אינו זמין.
+ * רשת הביטחון. שישה סגנונות בסיס של Word — מה שהוצג עד עכשיו תמיד, וממשיך
+ * להוצג כשהקטלוג אינו זמין. מזהים בלבד: התווית העברית והתפקיד נגזרים מהמזהה
+ * באותן פונקציות שמשרתות את הקטלוג האמיתי, ולכן אין כאן רשימת תוויות שנייה
+ * שיכולה להיפרד ממנה.
  */
-export const FALLBACK_STYLES: readonly { id: string; label: string; role: StyleRole }[] = [
-  { id: 'Normal', label: 'רגיל', role: 'body' },
-  { id: 'NoSpacing', label: 'ללא מרווח', role: 'body' },
-  { id: 'Heading1', label: 'כותרת 1', role: 'heading' },
-  { id: 'Heading2', label: 'כותרת 2', role: 'heading' },
-  { id: 'Subtitle', label: 'כותרת משנה', role: 'subtle' },
-  { id: 'Quote', label: 'ציטוט', role: 'subtle' },
+export const FALLBACK_STYLE_IDS: readonly string[] = [
+  'Normal',
+  'NoSpacing',
+  'Heading1',
+  'Heading2',
+  'Subtitle',
+  'Quote',
 ];
 
 /** הטקסט בכרטיס של סגנון גוף. „AaBbCc” הוא מה ש-Word מציג, ולכן מזוהה. */
@@ -100,12 +102,98 @@ const BODY_PREVIEW_TEXT = 'AaBbCc';
 const HEADING_IDS = /^(heading[1-9]?|title)$/;
 const SUBTLE_IDS = /^(subtitle|quote|intensequote|caption|footnotetext|endnotetext)$/;
 
+/**
+ * המזהה בצורה שאפשר להשוות. הנרמול אינו קוסמטי: התבניות של Word אינן עקביות
+ * באות ראשית ובריווח — בקטלוג של המסמך הריק נמדד `heading 1` באות קטנה ועם
+ * רווח, בזמן שה-`w:styleId` הקנוני הוא `Heading1`. בלי הנרמול חצי מהטבלה
+ * הייתה מפספסת.
+ */
+function styleKey(value: string): string {
+  return value.trim().toLowerCase().replace(/[\s_-]+/g, '');
+}
+
 /** התפקיד של פריט קטלוג. */
 export function styleRole(id: string): StyleRole {
-  const key = id.trim().toLowerCase().replace(/[\s_-]/g, '');
+  const key = styleKey(id);
   if (HEADING_IDS.test(key)) return 'heading';
   if (SUBTLE_IDS.test(key)) return 'subtle';
   return 'body';
+}
+
+/**
+ * התוויות העבריות של הסגנונות המובנים של Word.
+ *
+ * למה זה נחוץ: `item.name` הוא השם כפי שהוא ב-`word/styles.xml`, והמסמך הריק
+ * שהמנוע יוצר הוא תבנית **אנגלית** (`w:pgSz w:w="12240"` — Letter). כלומר
+ * במסמך חדש הגלריה הציגה `Normal`, `heading 1`, `Title` — רגרסיה מול הרשימה
+ * הקשיחה שקדמה לה, שלפחות הייתה בעברית.
+ *
+ * מה ש-Word עצמו עושה, וזה הכלל כאן: שם של סגנון **מובנה** מתורגם לשפת
+ * הממשק, ושם של סגנון **מותאם אישית** מוצג כפי שהמשתמש נתן אותו. לכן ההתאמה
+ * על המזהה הקנוני ולא על השם, ולכן `custom: true` אינו מתורגם בשום מצב.
+ */
+const BUILT_IN_LABELS: Readonly<Record<string, string>> = {
+  normal: 'רגיל',
+  nospacing: 'ללא מרווח',
+  bodytext: 'גוף טקסט',
+  title: 'כותרת',
+  subtitle: 'כותרת משנה',
+  heading1: 'כותרת 1',
+  heading2: 'כותרת 2',
+  heading3: 'כותרת 3',
+  heading4: 'כותרת 4',
+  heading5: 'כותרת 5',
+  heading6: 'כותרת 6',
+  heading7: 'כותרת 7',
+  heading8: 'כותרת 8',
+  heading9: 'כותרת 9',
+  quote: 'ציטוט',
+  intensequote: 'ציטוט מודגש',
+  listparagraph: 'פסקת רשימה',
+  caption: 'כתובית',
+  strong: 'חזק',
+  emphasis: 'הדגשה',
+  subtleemphasis: 'הדגשה עדינה',
+  intenseemphasis: 'הדגשה מודגשת',
+  subtlereference: 'הפניה עדינה',
+  intensereference: 'הפניה מודגשת',
+  booktitle: 'שם ספר',
+  header: 'כותרת עליונה',
+  footer: 'כותרת תחתונה',
+  footnotetext: 'טקסט הערת שוליים',
+  endnotetext: 'טקסט הערת סיום',
+  commenttext: 'טקסט הערה',
+  hyperlink: 'היפר-קישור',
+};
+
+/** התווית העברית של סגנון מובנה, או `undefined` כשהוא אינו בטבלה. */
+export function builtInStyleLabel(value: string | undefined): string | undefined {
+  if (typeof value !== 'string' || value.trim() === '') return undefined;
+  return BUILT_IN_LABELS[styleKey(value)];
+}
+
+/**
+ * השם שהכרטיס מציג.
+ *
+ * שלושה מסלולי התאמה, בסדר יורד של קנוניות: המזהה, השם המוצג, ואז ה-aliases
+ * (`w:aliases`). השם וה-aliases נבדקים גם הם מפני שיש תבניות שבהן ה-`styleId`
+ * הוא מקומי ודווקא השם הוא האנגלי הקנוני; במסמך עברי הם פשוט לא מתאימים לאף
+ * מפתח, וזה בסדר — השם שבמסמך הוא כבר התשובה הנכונה.
+ */
+export function styleDisplayLabel(item: StyleCatalogItem): string {
+  const id = typeof item?.id === 'string' ? item.id.trim() : '';
+  const name = typeof item?.name === 'string' ? item.name.trim() : '';
+
+  // סגנון שהמשתמש יצר אינו מתורגם — גם אם קרא לו „Quote”.
+  if (item?.custom !== true) {
+    const translated =
+      builtInStyleLabel(id) ??
+      builtInStyleLabel(name) ??
+      (item?.aliases ?? []).map((alias) => builtInStyleLabel(alias)).find(Boolean);
+    if (translated) return translated;
+  }
+
+  return name !== '' ? name : id;
 }
 
 /**
@@ -202,7 +290,7 @@ export function toGalleryItems(
     if (item.visibility?.effectivelyHidden) continue;
     seen.add(id);
 
-    const label = typeof item.name === 'string' && item.name.trim() !== '' ? item.name.trim() : id;
+    const label = styleDisplayLabel(item);
     const role = styleRole(id);
     out.push({
       id,
@@ -219,12 +307,16 @@ export function toGalleryItems(
 /** רשת הביטחון, בצורת מצב גלריה. */
 export function fallbackStyleGallery(): StyleGalleryState {
   return {
-    items: FALLBACK_STYLES.map(({ id, label, role }) => ({
-      id,
-      label,
-      previewText: role === 'body' ? BODY_PREVIEW_TEXT : label,
-      previewStyle: { ...ROLE_STYLE[role] },
-    })),
+    items: FALLBACK_STYLE_IDS.map((id) => {
+      const label = builtInStyleLabel(id) ?? id;
+      const role = styleRole(id);
+      return {
+        id,
+        label,
+        previewText: role === 'body' ? BODY_PREVIEW_TEXT : label,
+        previewStyle: { ...ROLE_STYLE[role] },
+      };
+    }),
     activeId: null,
     fromDocument: false,
   };
