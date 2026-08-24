@@ -1,0 +1,107 @@
+/* גלון ההדפסה: מה שיוצא למדפסת הוא **המסמך**, לא הממשק.
+
+   למה הקובץ הזה נולד: לא היה בפרויקט אף `@media print` ואף `@page`, ולכן
+   „הדפסה” הדפיסה את פס הכותרת, את שמונה לשוניות הרצועה, את גלריית הסגנונות
+   ואת שורת המצב — ואת המסמך רק בגובה חלון אחד, כי המעטפת היא
+   `height: 100vh; overflow: hidden`. זה נמדד ב-CDP על ה-dist הארוז, לא הונח.
+
+   ההסבר המלא — היחידות, הזום ומה שאינו מטופל — ב-engine/print.ts, שם גם נקבע
+   `@page { size }` לפי מידות הדף של המסמך עצמו.
+
+   על ה-`!important`: הוא כאן בכל שורה כמעט, ולא מחוסר ברירה בלבד — יש לו שתי
+   סיבות מדויקות. הראשונה: הכללים שהוא דורס הם `<style scoped>` של App.vue,
+   שהסלקטור שלהם נושא `[data-v-…]` ולכן הוא ספציפי יותר מכל מחלקה בודדת.
+   השנייה: מיכל העמודים של המנוע נושא את הגלילה, את הרוחב ואת ה-transform של
+   הזום כ-**סגנון inline**, ואין דרך אחרת לגבור עליו.
+
+   כל הצבעים דרך var(--color-*) והגופנים דרך var(--font-*) — ראו tokens.css
+   ואת ההערה ב-shell.css על ולידציית העיצוב של אוצריא. כאן אין בכלל צבע: מה
+   שנדרש הוא הסרת רקע וצל, ו-`none` עושה זאת בלי לנקוב בצבע. */
+
+@media print {
+  /* המעטפת אינה גוללת יותר: המסמך הוא כל הדף, וגובהו נקבע ממספר העמודים.
+     בלי זה נדפס בדיוק מה שנראה בחלון — עמוד אחד, חתוך באמצע. */
+  html,
+  body {
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  #app {
+    display: block !important;
+    height: auto !important;
+  }
+
+  .word-app-shell {
+    display: block !important;
+    width: auto !important;
+    height: auto !important;
+    overflow: visible !important;
+    background: none !important;
+  }
+
+  /* פס הכותרת, הרצועה, שורת המצב והדיאלוגים — בשורה אחת, לפי מקומם במעטפת
+     ולא לפי שמם. זה מכוון: פקד או פאנל שיתווסף למעטפת מאוחר יותר לא ידפיס את
+     עצמו בלי שאיש ישים לב. */
+  .word-app-shell > :not(.editor-stack) {
+    display: none !important;
+  }
+
+  /* דיאלוגים שעושים Teleport ל-body (ראו LinkDialog.vue) יוצאים מהעץ של
+     המעטפת, ולכן הכלל שמעל אינו מגיע אליהם. */
+  body > :not(#app) {
+    display: none !important;
+  }
+
+  /* אזור המסמך: `position: absolute` על מיכל הגלילה נותן לו גובה של חלון
+     אחד. במדיית הדפסה הוא חוזר לזרימה, וכל העמודים נכנסים אליה. */
+  .editor-stack {
+    position: static !important;
+    height: auto !important;
+    overflow: visible !important;
+    background: none !important;
+  }
+
+  .editor-stack__host {
+    position: static !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  /* המרכוז של shell.css מיותר בהדפסה — הגיליון הוא בגודל העמוד. */
+  .editor-stack__host .superdoc {
+    display: block !important;
+  }
+
+  /* מיכל העמודים של המנוע. שלושת הערכים כאן הם סגנון inline שלו: הגלילה,
+     המידות והזום. ה-transform הוא הקריטי — הוא מה שהופך הדפסה ב-50% זום
+     למסמך מוקטן בפינת הגיליון (נמדד). */
+  .superdoc-layout {
+    width: auto !important;
+    height: auto !important;
+    overflow: visible !important;
+    transform: none !important;
+  }
+
+  /* המנוע כבר מסיר בעצמו במדיית print את המרווח, הגבול ומעבר העמוד של תיבת
+     העמוד — אבל הצל שלו הוא סגנון inline, וההצהרה שלו על כך אינה `important`
+     ולכן אינה מנצחת אותו. נמדד: הצל הופיע בפלט. */
+  .superdoc-page {
+    box-shadow: none !important;
+  }
+
+  /* המנוע קובע `page-break-after: always` על כל עמוד, כולל האחרון — כלומר
+     גיליון ריק בסוף כל הדפסה. נמדד: מסמך של שלושה עמודים יצא ארבעה. */
+  .superdoc-page:last-child {
+    page-break-after: auto !important;
+    break-after: auto !important;
+  }
+}
+
+/* ברירת המחדל כשגודל הדף לא נקרא מהמסמך: בלי שוליים כפולים. השוליים של
+   המסמך באים מה-DOCX ומצוירים בתוך תיבת העמוד; שוליים של דפדפן מעליהם דוחקים
+   את התוכן ומולידים עמוד נוסף. engine/print.ts דורס את החוק הזה עם `size`
+   כשהוא כן נקרא. */
+@page {
+  margin: 0;
+}

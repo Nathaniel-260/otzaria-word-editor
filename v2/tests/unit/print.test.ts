@@ -1,0 +1,274 @@
+/**
+ * ההדפסה. שלוש טענות נבדקות כאן, וכל אחת מהן נכשלה לפני התיקון:
+ *
+ *   1. יש גלון `@media print` שמסתיר את המעטפת ומשחרר את מיכל הגלילה. לפני
+ *      התיקון לא היה בכל `src` אף `@media print` ואף `@page`, ולכן ההדפסה
+ *      הדפיסה את הממשק (נמדד ב-CDP; ראו engine/print.ts).
+ *   2. `@page` מקבל את מידות הדף של המסמך, באינצ'ים ובעיגול כלפי מעלה.
+ *   3. כשל בקריאת המידות אינו מונע הדפסה — הוא מדווח.
+ *
+ * הבדיקה על ה-CSS היא סריקת מקור, כמו tests/unit/tab-controls.test.ts: מה
+ * שנמדד בפועל בדפדפן הוא הפלט (PDF), וזה נעשה ב-CDP ולא ב-jsdom — ל-jsdom אין
+ * עימוד, אין `@page` ואין הדפסה.
+ */
+import { describe, expect, it, vi, afterEach } from 'vitest';
+import { readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
+import {
+  ENGINE_LAYOUT_CLASS,
+  ENGINE_PAGE_CLASS,
+  PRINT_PAGE_STYLE_ID,
+  applyPrintPageSize,
+  pageRule,
+  pageSizeText,
+  printDocument,
+  readPrintPageSize,
+  type PrintDocumentApi,
+} from '../../src/engine/print';
+
+const STYLES = join(process.cwd(), 'src/styles');
+const PRINT_CSS = readFileSync(join(STYLES, 'print.css'), 'utf8');
+
+/** A4 כפי שהמנוע מדווח: 11906 twips / 1440. */
+const A4 = { width: 11906 / 1440, height: 16838 / 1440 };
+/** Letter, המסמך הריק של המנוע: 12240×15840 twips. */
+const LETTER = { width: 12240 / 1440, height: 15840 / 1440 };
+
+function fakeHost(
+  options: { items?: unknown; omitList?: boolean; throws?: boolean } = {},
+): { activeEditor: { doc: PrintDocumentApi } } {
+  const doc = {
+    sections: options.omitList
+      ? {}
+      : {
+          list: () => {
+            if (options.throws) throw new Error('boom');
+            return { items: options.items ?? [{ pageSetup: A4 }] };
+          },
+        },
+  } as unknown as PrintDocumentApi;
+  return { activeEditor: { doc } };
+}
+
+describe('גלון ההדפסה', () => {
+  it('קיים `@media print` ו-`@page` — ולא היו קודם בכלל', () => {
+    expect(PRINT_CSS).toContain('@media print');
+    expect(PRINT_CSS).toContain('@page');
+  });
+
+  it('הוא נטען ב-main.ts, ולא רק קיים בתיקייה', () => {
+    // קובץ CSS שאינו מיובא אינו נכנס לבאנדל, וזה הכשל שאי אפשר לראות בעין.
+    expect(readFileSync(join(process.cwd(), 'src/main.ts'), 'utf8')).toContain(
+      "import './styles/print.css'",
+    );
+  });
+
+  it('המעטפת מוסתרת — לפי מקומה במעטפת ולא לפי שם כל פס', () => {
+    // כלל אחד לכל הצאצאים שאינם אזור המסמך: פקד שיתווסף למעטפת לא ידפיס את
+    // עצמו בשקט. הכלל הזה הוא הליבה של התיקון.
+    expect(PRINT_CSS).toContain('.word-app-shell > :not(.editor-stack)');
+    // דיאלוג שעושה Teleport ל-body יוצא מהעץ של המעטפת.
+    expect(PRINT_CSS).toContain('body > :not(#app)');
+  });
+
+  it('מיכל הגלילה משוחרר — אחרת נדפס גובה חלון אחד', () => {
+    for (const selector of ['.editor-stack {', '.editor-stack__host {']) {
+      // תחילת בלוק ולא הופעה כלשהי: `:not(.editor-stack)` הוא הופעה אחרת
+      // לגמרי של אותו שם, ובדיקה עליה הייתה עוברת מהסיבה הלא נכונה.
+      const at = PRINT_CSS.indexOf(selector);
+      expect(at, selector).toBeGreaterThan(-1);
+      expect(PRINT_CSS.slice(at, at + 220), selector).toContain('position: static !important');
+    }
+  });
+
+  it('ה-transform של הזום מבוטל — אחרת הדפסה ב-50% יוצאת מוקטנת', () => {
+    const at = PRINT_CSS.indexOf(`.${ENGINE_LAYOUT_CLASS}`);
+    expect(at).toBeGreaterThan(-1);
+    expect(PRINT_CSS.slice(at, at + 240)).toContain('transform: none !important');
+  });
+
+  it('צל העמוד מוסר, ומעבר העמוד האחרון מבוטל', () => {
+    // שני אלה נמדדו בפלט: הצל הוא סגנון inline של המנוע וההצהרה שלו עליו
+    // אינה `important`; `page-break-after: always` על העמוד האחרון הוליד
+    // גיליון ריק נוסף.
+    expect(PRINT_CSS).toContain(`.${ENGINE_PAGE_CLASS} {`);
+    expect(PRINT_CSS).toContain('box-shadow: none !important');
+    expect(PRINT_CSS).toContain(`.${ENGINE_PAGE_CLASS}:last-child`);
+    expect(PRINT_CSS).toContain('page-break-after: auto !important');
+  });
+
+  it('אין בגלון צבע קשיח — ולידציית העיצוב של אוצריא פוסלת אותו', () => {
+    const withoutComments = PRINT_CSS.replace(/\/\*[\s\S]*?\*\//g, ' ');
+    expect(withoutComments).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
+    expect(withoutComments).not.toMatch(/\b(rgb|rgba|hsl|hsla)\(/);
+  });
+});
+
+describe('readPrintPageSize', () => {
+  it('A4 נקרא כאינצ׳ים ומעוגל כלפי מעלה', async () => {
+    // 11906/1440 = 8.26805… ; עיגול למטה היה נותן גיליון קטן מתיבת העמוד,
+    // וכל עמוד היה נשבר לשניים.
+    await expect(readPrintPageSize(fakeHost())).resolves.toEqual({
+      widthIn: 8.269,
+      heightIn: 11.694,
+    });
+  });
+
+  it('Letter נקרא כמו שהוא ואינו מוחלף ב-A4', async () => {
+    await expect(readPrintPageSize(fakeHost({ items: [{ pageSetup: LETTER }] }))).resolves.toEqual({
+      widthIn: 8.5,
+      heightIn: 11,
+    });
+  });
+
+  it('מקטע בלי pgSz מדולג, והמקטע הבא נקרא', async () => {
+    const items = [{ pageSetup: undefined }, {}, { pageSetup: A4 }];
+
+    await expect(readPrintPageSize(fakeHost({ items }))).resolves.toEqual({
+      widthIn: 8.269,
+      heightIn: 11.694,
+    });
+  });
+
+  it('מידה שאינה מידה אינה הופכת ל-`@page`', async () => {
+    for (const pageSetup of [
+      { width: 0, height: 11 },
+      { width: -8.5, height: 11 },
+      { width: Number.NaN, height: 11 },
+      { width: 8.5, height: 900 },
+      { width: '8.5in', height: 11 },
+      { width: 8.5 },
+    ]) {
+      await expect(readPrintPageSize(fakeHost({ items: [{ pageSetup }] }))).resolves.toBeNull();
+    }
+  });
+
+  it('אין מסמך, אין `sections.list`, או קריאה שזורקת — `null`, לא זריקה', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await expect(readPrintPageSize(null)).resolves.toBeNull();
+    await expect(readPrintPageSize({ activeEditor: { doc: null } })).resolves.toBeNull();
+    await expect(readPrintPageSize(fakeHost({ omitList: true }))).resolves.toBeNull();
+    await expect(readPrintPageSize(fakeHost({ throws: true }))).resolves.toBeNull();
+
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it('תשובה שאינה רשימה אינה תשובה', async () => {
+    await expect(readPrintPageSize(fakeHost({ items: 'nope' }))).resolves.toBeNull();
+  });
+});
+
+describe('pageRule', () => {
+  it('גודל שנקרא נכתב עם margin 0 — בלי שוליים כפולים', () => {
+    expect(pageRule({ widthIn: 8.269, heightIn: 11.694 })).toBe(
+      '@page { size: 8.269in 11.694in; margin: 0; }',
+    );
+  });
+
+  it('בלי גודל נשאר margin 0 בלבד', () => {
+    // גם כאן `margin: 0` הוא העיקר: השוליים של המסמך באים מה-DOCX.
+    expect(pageRule(null)).toBe('@page { margin: 0; }');
+  });
+
+  it('pageSizeText הוא הנוסח שהשער ב-CDP משווה מולו', () => {
+    expect(pageSizeText({ widthIn: 8.5, heightIn: 11 })).toBe('8.5in 11in');
+  });
+});
+
+describe('applyPrintPageSize', () => {
+  afterEach(() => {
+    document.getElementById(PRINT_PAGE_STYLE_ID)?.remove();
+    delete document.documentElement.dataset.printPageSize;
+  });
+
+  it('כותבת `@page` ואת התכונה שאפשר לקרוא מבחוץ', () => {
+    applyPrintPageSize({ widthIn: 8.269, heightIn: 11.694 }, document);
+
+    expect(document.getElementById(PRINT_PAGE_STYLE_ID)?.textContent).toContain('8.269in 11.694in');
+    expect(document.documentElement.dataset.printPageSize).toBe('8.269in 11.694in');
+  });
+
+  it('הדפסה שנייה מחדשת את אותו אלמנט ולא צוברת עוד אחד', () => {
+    applyPrintPageSize({ widthIn: 8.269, heightIn: 11.694 }, document);
+    applyPrintPageSize({ widthIn: 8.5, heightIn: 11 }, document);
+
+    expect(document.querySelectorAll(`#${PRINT_PAGE_STYLE_ID}`)).toHaveLength(1);
+    expect(document.documentElement.dataset.printPageSize).toBe('8.5in 11in');
+  });
+
+  it('גודל שלא נקרא מוחק את התכונה — ולא משאיר את של הפעם הקודמת', () => {
+    applyPrintPageSize({ widthIn: 8.5, heightIn: 11 }, document);
+    applyPrintPageSize(null, document);
+
+    expect(document.documentElement.dataset.printPageSize).toBeUndefined();
+    expect(document.getElementById(PRINT_PAGE_STYLE_ID)?.textContent).toBe('@page { margin: 0; }');
+  });
+});
+
+describe('printDocument', () => {
+  afterEach(() => {
+    document.getElementById(PRINT_PAGE_STYLE_ID)?.remove();
+    delete document.documentElement.dataset.printPageSize;
+  });
+
+  it('כותבת את `@page` **לפני** שהיא פותחת את הדיאלוג', async () => {
+    // הסדר הוא כל התיקון: `window.print()` הוא סינכרוני וחוסם, ו-`@page`
+    // שנכתב אחריו אינו משפיע על הפלט.
+    let ruleAtPrintTime: string | null = null;
+    const outcome = await printDocument(fakeHost(), {
+      print: () => {
+        ruleAtPrintTime = document.getElementById(PRINT_PAGE_STYLE_ID)?.textContent ?? null;
+      },
+    });
+
+    expect(outcome).toEqual({ ok: true, size: { widthIn: 8.269, heightIn: 11.694 } });
+    expect(ruleAtPrintTime).toContain('size: 8.269in 11.694in');
+  });
+
+  it('גודל שלא נקרא אינו מונע הדפסה — הוא מדווח', async () => {
+    let printed = false;
+    const outcome = await printDocument(null, { print: () => { printed = true; } });
+
+    expect(printed).toBe(true);
+    expect(outcome).toMatchObject({ ok: true, size: null });
+    if (outcome.ok) expect(outcome.warning).toContain('גודל הדף');
+  });
+
+  it('דיאלוג הדפסה חסום מחזיר תוצאה מטופסת ולא זריקה', async () => {
+    // WebView בלי הרשאת הדפסה זורק, וחריגה במטפל הלחיצה משאירה את המשתמש
+    // בלי שום סימן.
+    const outcome = await printDocument(fakeHost(), {
+      print: () => {
+        throw new Error('printing is not allowed');
+      },
+    });
+
+    expect(outcome).toMatchObject({ ok: false, reason: 'threw' });
+    if (!outcome.ok) expect(outcome.message).toContain('printing is not allowed');
+  });
+});
+
+describe('הכפתור מחובר למסלול הזה', () => {
+  it('App.vue אינו קורא ל-window.print ישירות', () => {
+    const app = readFileSync(join(process.cwd(), 'src/App.vue'), 'utf8');
+
+    expect(app).toContain('printDocument(activeSuperdoc.value)');
+    // ההערות מוסרות: התיעוד מסביר במפורש מה היה כאן קודם, וההסבר אינו קריאה.
+    // אותה תבנית כמו tests/unit/engine-boundaries.test.ts.
+    const code = app.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/\/\/.*$/gm, '');
+    expect(code.includes('window.print')).toBe(false);
+  });
+
+  it('אין קובץ אחר שמדפיס בעצמו', () => {
+    const engine = readdirSync(join(process.cwd(), 'src/engine'));
+    for (const file of engine) {
+      if (file === 'print.ts') continue;
+      expect(
+        readFileSync(join(process.cwd(), 'src/engine', file), 'utf8').includes('window.print'),
+        file,
+      ).toBe(false);
+    }
+  });
+});

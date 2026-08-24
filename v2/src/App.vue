@@ -139,6 +139,7 @@ import {
 } from './engine/document-defaults';
 import type { SuperDoc } from 'superdoc';
 import { exportDocx, docxFileName } from './engine/export';
+import { printDocument } from './engine/print';
 import { downloadBlob } from './host/download';
 import {
   beginBinaryWrite,
@@ -561,8 +562,31 @@ async function onExportDocx(): Promise<void> {
   }
 }
 
-function onPrint(): void {
-  window.print();
+/**
+ * הדפסה. הכפתור קרא ל-`window.print()` בלבד, ולא היה בפרויקט אף `@media print`
+ * — כלומר הוא הדפיס את הממשק (נמדד ב-CDP). הגלון ב-styles/print.css, וקביעת
+ * `@page` לפי מידות הדף של המסמך ב-engine/print.ts; כאן רק הדיווח.
+ *
+ * גודל דף שלא נקרא אינו שגיאה: ההדפסה כן נפתחת, והמשתמש צריך לדעת שעליו לוודא
+ * את גודל הנייר בדיאלוג. „הצלחה אינה מכריזה על עצמה” — התוצאה הנראית של
+ * הדפסה היא דיאלוג ההדפסה עצמו.
+ */
+async function onPrint(): Promise<void> {
+  if (!swap?.current) {
+    setStatus('אין מסמך פתוח להדפסה', true);
+    return;
+  }
+
+  const outcome = await printDocument(activeSuperdoc.value);
+  if (!outcome.ok) {
+    setStatus(outcome.message, true);
+    return;
+  }
+  if (outcome.warning) {
+    setStatus(outcome.warning);
+    return;
+  }
+  if (isStatusError.value) setStatus('');
 }
 
 function onUndo(): void {
@@ -811,7 +835,7 @@ function onKeyDown(event: KeyboardEvent): void {
     } else if (event.key === 'p' || event.key === 'P') {
       if (isTextEntryTarget(event)) return;
       event.preventDefault();
-      onPrint();
+      void onPrint();
     }
   }
 }
