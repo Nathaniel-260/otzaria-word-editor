@@ -89,7 +89,13 @@ import FindReplaceDialog from './ui/panels/FindReplaceDialog.vue';
 import AboutDialog from './ui/panels/AboutDialog.vue';
 
 import { createCommandAdapter, type CommandAdapter, type CommandOutcome } from './engine/command-adapter';
-import { COMMAND_ADAPTER, COMMAND_REPORTER, FONT_OPTIONS } from './composables/keys';
+import { COMMAND_ADAPTER, COMMAND_REPORTER, FONT_OPTIONS, STYLE_GALLERY } from './composables/keys';
+import { ACTIVE_SUPERDOC } from './engine/document-api';
+import {
+  fallbackStyleGallery,
+  observeStyleGallery,
+  type StyleGalleryState,
+} from './engine/style-gallery';
 import { fallbackFontOptions, observeFontOptions, type FontOptions } from './engine/font-options';
 import { zoomPayload } from './engine/payloads';
 import {
@@ -147,6 +153,22 @@ provide(COMMAND_ADAPTER, commandAdapter);
  */
 const fontOptions = shallowRef<FontOptions>(fallbackFontOptions());
 provide(FONT_OPTIONS, fontOptions);
+
+/**
+ * גלריית הסגנונות של המסמך הפתוח. מאותו טעם כמו אפשרויות הגופן, וביתר שאת:
+ * `ui.styles` פותר את הקטלוג **אסינכרונית** אחרי הפתיחה, ולכן קריאה חד-פעמית
+ * מחזירה רשימה ריקה — רק מי שמנהל את ה-session יודע מתי להירשם.
+ */
+const styleGallery = shallowRef<StyleGalleryState>(fallbackStyleGallery());
+provide(STYLE_GALLERY, styleGallery);
+
+/**
+ * המופע הפתוח, בשביל הפקדים שאין להם פקודה ב-registry של ה-controller —
+ * שוליים, כיוון דף, עמודות, הערות שוליים. המסלול הציבורי היחיד שלהם הוא
+ * ה-Document API, והוא יושב על המופע ולא על ה-controller. ראו engine/document-api.ts.
+ */
+const activeSuperdoc = shallowRef<SuperDoc | null>(null);
+provide(ACTIVE_SUPERDOC, activeSuperdoc);
 
 const title = ref('מסמך חדש');
 const isOpening = ref(false);
@@ -292,6 +314,13 @@ async function openDocument(file?: UserFile): Promise<boolean> {
   const adapter = createCommandAdapter(editor.ui);
   commandAdapter.value = adapter;
 
+  // ה-`editor.superdoc` המקומי ולא `activeSuperdoc.value` בפירוק: אותה מלכודת
+  // כמו באדפטר החיפוש — סגירת המסמך הקודם קורית אחרי שהחדש כבר נרשם.
+  activeSuperdoc.value = editor.superdoc;
+  editor.onDispose(() => {
+    if (activeSuperdoc.value === editor.superdoc) activeSuperdoc.value = null;
+  });
+
   // החיפוש שייך ל-session: ה-handle הוא של ה-controller של המופע, ומסמך חדש
   // מקבל אדפטר חדש. ה-`session` המקומי ולא `searchAdapter` בפירוק — אחרת
   // סגירת המסמך הקודם הייתה מפרקת את האדפטר של המסמך שנפתח אחריו.
@@ -300,6 +329,14 @@ async function openDocument(file?: UserFile): Promise<boolean> {
   editor.onDispose(
     observeFontOptions(editor.ui, (options) => {
       fontOptions.value = options;
+    })
+  );
+
+  // אותו טעם, ועוד יותר: `getQuickGallery()` מחזיר רשימה ריקה עד שהקטלוג
+  // מתייצב, ולכן בלי ההרשמה הגלריה הייתה נשארת על רשת הביטחון לתמיד.
+  editor.onDispose(
+    observeStyleGallery(editor.ui, (state) => {
+      styleGallery.value = state;
     })
   );
 

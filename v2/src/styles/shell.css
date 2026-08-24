@@ -94,6 +94,27 @@ button:disabled {
   overflow: auto;
 }
 
+/* מרכוז העמוד.
+
+   נמדד על ה-dist הארוז: המנוע מרנדר `.superdoc` כ-`display: flex; position:
+   relative` **בלי `justify-content`**, וב-style.css שלו יש גם
+   `.superdoc .superdoc__layers { margin: 0 }` — כלומר הוא מסיר במפורש את
+   האפשרות שהעמוד ימרכז את עצמו במרווח אוטומטי. המשמעות: המרכוז הוא באחריות
+   המיכל של האפליקציה המשלבת, ומעולם לא היה כאן. בלעדיו העמוד נצמד ל-inline
+   start של המיכל — ובממשק עברי זה הקצה הימני, עם חצי מסך אפור וריק.
+
+   זה הכלל היחיד שנוגע במחלקה של המנוע, ובכוונה: החלופות גרועות ממנו. flex על
+   ה-host שלנו לא עוזר (`.superdoc` נמתח לכל הרוחב), ו-margin על `__layers`
+   מחייב `!important` נגד `!important` של המנוע.
+
+   `safe center` בשורה שנייה ולא במקומה: ב-zoom גבוה העמוד רחב מהמיכל, ומרכוז
+   רגיל היה חותך את תחילתו בלי שאפשר לגלול לשם. מנוע שאינו מכיר את המילה
+   מתעלם מההצהרה השנייה ונשאר עם `center`. */
+.editor-stack__host .superdoc {
+  justify-content: center;
+  justify-content: safe center;
+}
+
 /* visibility ולא display: ל-host שנטען חייב להיות box אמיתי, אחרת המנוע מודד
    עימוד באלמנט בגודל אפס. */
 .editor-stack__host--pending {
