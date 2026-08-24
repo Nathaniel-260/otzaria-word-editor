@@ -78,7 +78,7 @@ describe('readPageBreakSupport', () => {
 
     await expect(readPageBreakSupport(host)).resolves.toEqual({
       available: false,
-      explanation: 'אינו זמין בגרסה זו',
+      explanation: 'הפעולה אינה זמינה בגרסה הזאת של המנוע',
     });
   });
 

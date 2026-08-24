@@ -75,6 +75,7 @@ const CAPABILITY_SPECS = {
   canSetPageBorders: { operation: 'sections.setPageBorders' },
   // הפניות והוספה
   canInsertFootnote: { operation: 'footnotes.insert' },
+  canSetPageBreakBefore: { operation: 'format.paragraph.setFlowOptions' },
   canInsertImage: { operation: 'create.image' },
   canInsertLink: { operation: 'hyperlinks.insert' },
   canInsertSectionBreak: { operation: 'create.sectionBreak' },

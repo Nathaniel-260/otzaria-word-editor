@@ -47,6 +47,7 @@ import type { SuperDoc } from 'superdoc';
 import type { CommandOutcome } from './command-adapter';
 import { receiptFailureText, thrownText, type DocReceipt, type MaybePromise } from './document-api';
 import { readDocSelection, type SelectionDocumentApi } from './doc-selection';
+import { readDocCapabilities } from './doc-capabilities';
 
 /** מזהה הפעולה בקטלוג של המנוע. מיוצא כדי שהבדיקה תקבע אותו מול החבילה. */
 export const PAGE_BREAK_OPERATION = 'format.paragraph.setFlowOptions';
@@ -107,10 +108,8 @@ export interface PageBreakSupport {
  * מרחב שאלות סגור (`CAPABILITY_SPECS`), ואין בו שאלה על
  * `format.paragraph.setFlowOptions`. הוא היה בבעלות גל אחר בזמן כתיבת הקומיט
  * הזה, ולכן לא נגעתי בו. התוספת שנדרשת שם היא שורה אחת —
- * `canSetPageBreakBefore: { operation: PAGE_BREAK_OPERATION }` — ואז הפונקציה
- * הזאת נמחקת והפקד עובר ל-`readDocCapabilities` כמו כל שאר הפקדים. מדווח
- * כמשימת המשך. (אותו דפוס ואותה סיבה כמו ההערה ב-document-api.ts על
- * `ACTIVE_SUPERDOC` שיושב שם ולא ב-composables/keys.ts.)
+ * השאלה `canSetPageBreakBefore` נוספה ל-doc-capabilities.ts, ולכן הפונקציה
+ * הזאת רק מתרגמת את הדוח שלו לשני המצבים שה-tooltip צריך.
  *
  * לעולם אינה זורקת: כשל של קריאת יכולות אינו סיבה להפיל את רינדור הרצועה.
  * נכשלת **סגור** — „אולי כן” הוא בדיוק הכפתור המת.
@@ -119,25 +118,25 @@ export async function readPageBreakSupport(host: PageBreakTarget): Promise<PageB
   const doc = (host as PageBreakHost | null | undefined)?.activeEditor?.doc;
   if (!doc) return { available: false, explanation: LOADING_TEXT };
 
-  // גרסה שאינה חושפת את הפעולה בכלל. נבדק לפני היכולות, כי אין טעם לשאול על
-  // פעולה שאין לה פונקציה לקרוא לה.
+  // נוכחות הפונקציה נבדקת **לפני** היכולות, ולא רק בגללן: מפת ה-`operations`
+  // של המנוע נבנית מקטלוג הפעולות, ולכן גרסה שהסירה את המימוש ועוד מכריזה על
+  // הפעולה בקטלוג הייתה מחזירה „זמין” לפקד שאין לו למה לקרוא. בדיקה שכיסתה
+  // בדיוק את המקרה הזה תפסה את ההסרה שלה.
   if (typeof doc.format?.paragraph?.setFlowOptions !== 'function') {
     return { available: false, explanation: UNAVAILABLE_TEXT };
   }
 
-  const get = doc.capabilities?.get;
-  if (typeof get !== 'function') return { available: false, explanation: LOADING_TEXT };
+  const report = await readDocCapabilities(host);
 
-  try {
-    const raw = await get();
-    if (!raw || typeof raw !== 'object') return { available: false, explanation: LOADING_TEXT };
-    const entry = raw.operations?.[PAGE_BREAK_OPERATION];
-    if (entry?.available === true) return { available: true, explanation: '' };
-    return { available: false, explanation: UNAVAILABLE_TEXT };
-  } catch (error) {
-    console.warn('[otzaria-word] קריאת זמינות מעבר העמוד נכשלה', error);
-    return { available: false, explanation: LOADING_TEXT };
-  }
+  // אין Document API לשאול — המסמך עדיין נטען. שונה מ„הפעולה אינה נתמכת”,
+  // ולכן ההסבר שונה: פקד שנעלם לרגע בזמן פתיחה אינו פקד חסר.
+  if (!report.available) return { available: false, explanation: LOADING_TEXT };
+
+  if (report.can('canSetPageBreakBefore')) return { available: true, explanation: '' };
+
+  // ההסבר של הדוח נושא את קוד הסיבה שהמנוע נתן; UNAVAILABLE_TEXT הוא הנוסח
+  // כשהוא לא נתן כלום.
+  return { available: false, explanation: report.explain('canSetPageBreakBefore') || UNAVAILABLE_TEXT };
 }
 
 /**

@@ -32,6 +32,7 @@ function fullCapabilities() {
       'sections.setBreakType': { available: true },
       'sections.setPageBorders': { available: true },
       'footnotes.insert': { available: true },
+      'format.paragraph.setFlowOptions': { available: true },
       'create.image': { available: true },
       'hyperlinks.insert': { available: true },
       'create.sectionBreak': { available: true },
