@@ -108,3 +108,59 @@ describe('פקדי הלשוניות פריסה, הפניות, סקירה ואו�
   });
 
 });
+
+/**
+ * „קובץ” נבדקת בנפרד ולא נוספה ל-FILES שמעל, ובכוונה: היא **כן** מציגה קיצורי
+ * מקלדת (Ctrl+S, Ctrl+Shift+S, Ctrl+P), ושלושתם רשומים בפועל במטפל המקלדת של
+ * App.vue — כלומר הכלל „אין קיצור מוצג” אינו חל עליה, בעוד הכלל על חיווט
+ * ה-`disabled` דווקא כן.
+ *
+ * מה שנמדד כאן ואינו נראה בהרכבה: שלכל פקד **יש** תנאי, ושהיחיד שאין לו הוא
+ * היחיד שאין לו תנאי אמיתי. המצבים עצמם — אין מסמך, שמירה שרצה, פתיחה שרצה —
+ * נמדדים בהרכבה ב-tests/component/ribbon-tabs.test.ts.
+ */
+describe('פקדי לשונית „קובץ”', () => {
+  const FILE_TAB = readFileSync(join(TABS, 'FileTab.vue'), 'utf8');
+
+  /**
+   * הפקד היחיד בלי `:disabled`, ובכוונה: דיאלוג „אודות” הוא של התוסף, אינו
+   * נוגע במסמך ואינו נוגע במנוע. `:disabled="false"` קבוע היה נראה כמו תנאי
+   * ואינו תנאי, וזה גרוע מהיעדרו.
+   */
+  const UNCONDITIONAL = 'אודות';
+
+  it('נמצאו שבעה פקדים', () => {
+    expect(controls(FILE_TAB)).toHaveLength(7);
+  });
+
+  it('לכל פקד יש חיווט של disabled — חוץ מ„אודות”', () => {
+    const unguarded = controls(FILE_TAB)
+      .filter((control) => !/:disabled=/.test(control))
+      .map((control) => labelOf(control));
+
+    expect(unguarded).toEqual([UNCONDITIONAL]);
+  });
+
+  it('התנאי הוא מצב המעטפת, ולא `true` קשיח', () => {
+    // `:disabled="true"` כאן היה אומר „הפקד לא ממומש”, וכל השבעה ממומשים.
+    for (const control of controls(FILE_TAB)) {
+      expect(control, labelOf(control)).not.toContain(':disabled="true"');
+    }
+    for (const state of ['hasDocument', 'isSaving', 'isOpening']) {
+      expect(FILE_TAB, state).toContain(state);
+    }
+  });
+
+  it('המעטפת מעבירה את שלושת המצבים דרך הרצועה', () => {
+    // שלוש שכבות, וכל אחת מהן יכולה להישמט בלי שה-typecheck יתלונן: prop
+    // שאינו נמסר פשוט נופל לברירת המחדל, כלומר פקד שמנוטרל לנצח.
+    const ribbon = readFileSync(join(process.cwd(), 'src/ui/ribbon/Ribbon.vue'), 'utf8');
+    const app = readFileSync(join(process.cwd(), 'src/App.vue'), 'utf8');
+
+    for (const attribute of [':has-document', ':is-saving', ':is-opening']) {
+      expect(ribbon, `Ribbon → FileTab: ${attribute}`).toContain(attribute);
+      expect(app, `App → Ribbon: ${attribute}`).toContain(attribute);
+    }
+    expect(app).toContain('const hasDocument = computed(() => activeSuperdoc.value !== null)');
+  });
+});

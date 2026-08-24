@@ -20,8 +20,14 @@ autoUnmount();
 
 const TAB_LABELS = ['קובץ', 'בית', 'הוספה', 'פריסה', 'הפניות', 'סקירה', 'תצוגה', '✦ אוצריא'];
 
-async function mountRibbon() {
-  const harness = mountUi(Ribbon);
+/**
+ * `hasDocument: true` כברירת מחדל: פקדי „קובץ” הם פעולות מעטפת, וברירת המחדל
+ * שלהם היא „אין מסמך” — מה שמנטרל את „שמור” ומחליף את ה-tooltip שלו בהסבר.
+ * הבדיקות כאן מודדות את הרצועה ולא את המצב הזה, ולכן הן מודדות מעטפת שיש בה
+ * מסמך פתוח. הניטרול עצמו נמדד ב-ribbon-tabs.test.ts.
+ */
+async function mountRibbon(props: Record<string, unknown> = { hasDocument: true }) {
+  const harness = mountUi(Ribbon, { props });
   await settle();
   return harness;
 }

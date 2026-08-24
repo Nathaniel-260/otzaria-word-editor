@@ -5,14 +5,16 @@
         icon="newDoc"
         label="מסמך חדש"
         variant="large"
-        tooltip="יצירת מסמך Word ריק חדש"
+        :tooltip="switchTooltip('יצירת מסמך Word ריק חדש')"
+        :disabled="isSwitchBlocked"
         @click="$emit('new-doc')"
       />
       <RibbonButton
         icon="folder"
         label="פתח קובץ"
         variant="large"
-        tooltip="פתיחת מסמך Word (.docx) מהמחשב"
+        :tooltip="switchTooltip('פתיחת מסמך Word (.docx) מהמחשב')"
+        :disabled="isSwitchBlocked"
         @click="$emit('open-doc')"
       />
     </RibbonGroup>
@@ -22,16 +24,18 @@
         icon="save"
         label="שמור"
         variant="large"
-        tooltip="שמירת שינויים במסמך"
+        :tooltip="saveTooltip('שמירת שינויים במסמך')"
         shortcut="Ctrl+S"
+        :disabled="isSaveBlocked"
         @click="$emit('save-doc')"
       />
       <RibbonButton
         icon="saveAs"
         label="שמור בשם..."
         variant="large"
-        tooltip="שמירת המסמך כקובץ חדש"
+        :tooltip="saveTooltip('שמירת המסמך כקובץ חדש')"
         shortcut="Ctrl+Shift+S"
+        :disabled="isSaveBlocked"
         @click="$emit('save-as-doc')"
       />
     </RibbonGroup>
@@ -41,20 +45,26 @@
         icon="export"
         label="ייצוא ל-Word"
         variant="large"
-        tooltip="הורדת קובץ .docx תואם Microsoft Word"
+        :tooltip="documentTooltip('הורדת קובץ .docx תואם Microsoft Word')"
+        :disabled="!hasDocument"
         @click="$emit('export-doc')"
       />
       <RibbonButton
         icon="print"
         label="הדפסה"
         variant="large"
-        tooltip="הדפסת המסמך"
+        :tooltip="documentTooltip('הדפסת המסמך')"
         shortcut="Ctrl+P"
+        :disabled="!hasDocument"
         @click="$emit('print-doc')"
       />
     </RibbonGroup>
 
     <RibbonGroup title="מידע">
+      <!-- הפקד היחיד בלשונית בלי `:disabled`, ובכוונה: הדיאלוג הוא של התוסף,
+           הוא אינו נוגע במסמך ואינו נוגע במנוע, ואין מצב שבו הוא אינו זמין.
+           `:disabled="false"` קבוע היה חיווט מדומה — הוא נראה כמו תנאי ואינו
+           תנאי. tests/unit/tab-controls.test.ts מקבע את ההחרגה הזאת בשמה. -->
       <RibbonButton
         icon="info"
         label="אודות"
@@ -67,8 +77,65 @@
 </template>
 
 <script setup lang="ts">
+/**
+ * „קובץ”.
+ *
+ * ## למה כאן התנאי שונה מכל שאר הלשוניות
+ *
+ * זו הייתה הלשונית האחרונה בלי `:disabled` על אף פקד (בשאר: 31 ב„בית”, 7
+ * ב„סקירה”, 6 ב„אוצריא”, 5 ב„הוספה”, 5 ב„פריסה”, 4 ב„הפניות”, 4 ב„תצוגה”), וזה
+ * לא במקרה: הפקדים כאן אינם פקודות מנוע ואינם פעולות Document API, אלא פעולות
+ * **מעטפת**. אין להם `CommandState` ואין להם `capabilities` לשאול, ולכן
+ * `useCommand` ו-`readDocCapabilities` — שני המסלולים שכל שאר הלשוניות נשענות
+ * עליהם — אינם רלוונטיים כאן בכלל.
+ *
+ * מה שכן קובע הוא שלושה מצבים שהמעטפת מחזיקה: האם יש מסמך פתוח, האם השמירה
+ * רצה כרגע, והאם פתיחה רצה כרגע. שלושתם מגיעים כ-props מ-App.vue דרך
+ * `Ribbon.vue`.
+ *
+ * ## למה props ולא inject
+ *
+ * `provide/inject` היה חוסך את המסירה דרך הרצועה, וזה מה שנעשה ל-
+ * `COMMAND_ADAPTER` ול-`ACTIVE_SUPERDOC`. ההבדל: אלה חוזים מול **המנוע**,
+ * שמספר קוראים בכמה לשוניות צורכים. מצב המעטפת נצרך בלשונית אחת, והוא בדיוק
+ * מה ש-props נועדו לו — מפתח הזרקה חדש בשביל צרכן אחד הוא חיווט סמוי במקום
+ * חיווט שאפשר לקרוא.
+ *
+ * ## התנאי לכל פקד, ומאיפה הוא
+ *
+ * הם אינם המצאה אלא בדיוק מה ש-App.vue כבר עושה, רק גלוי מראש במקום כשל אחרי
+ * לחיצה:
+ *
+ *   * „מסמך חדש” / „פתח קובץ” — `onPickAndOpen` יוצא מיד כש-`isOpening`,
+ *     ו-`decideDocumentSwitch` מחזיר `cancel` עם `reason: 'saving'` בזמן
+ *     שמירה („השמירה עוד רצה — רגע אחד”).
+ *   * „שמור” / „שמור בשם” — `onSave` יוצא מיד בלי מסמך, ו-`saveShortcut`
+ *     חוסם את Ctrl+S בזמן שמירה. אותו תנאי בדיוק, ולא שני תנאים לאותה פעולה.
+ *   * „ייצוא” / „הדפסה” — שניהם דורשים מסמך פתוח ולא דורשים שהוא יהיה שמור:
+ *     הייצוא קורא את המצב הנוכחי, וההדפסה מדפיסה את מה שמצויר.
+ */
+import { computed } from 'vue';
 import RibbonGroup from '../common/RibbonGroup.vue';
 import RibbonButton from '../common/RibbonButton.vue';
+
+const props = withDefaults(
+  defineProps<{
+    /** האם יש מסמך פתוח (session חי במנוע). */
+    hasDocument?: boolean;
+    /** האם סבב שמירה רץ כרגע. */
+    isSaving?: boolean;
+    /** האם פתיחת מסמך רצה כרגע. */
+    isOpening?: boolean;
+  }>(),
+  {
+    // ברירת המחדל היא „אין מסמך ואין פעולה שרצה”, כלומר המצב לפני שהמעטפת
+    // פתחה משהו. נכשלת סגור: לשונית שהורכבה בלי מידע אינה מציעה לשמור מסמך
+    // שאינה יודעת עליו דבר.
+    hasDocument: false,
+    isSaving: false,
+    isOpening: false,
+  },
+);
 
 defineEmits<{
   (e: 'new-doc'): void;
@@ -79,6 +146,32 @@ defineEmits<{
   (e: 'print-doc'): void;
   (e: 'about'): void;
 }>();
+
+/** מעבר מסמך — חדש או פתיחה. אינו דורש מסמך פתוח, אבל כן שקט מסביב. */
+const isSwitchBlocked = computed(() => props.isOpening || props.isSaving);
+
+const isSaveBlocked = computed(() => !props.hasDocument || props.isSaving);
+
+const NO_DOCUMENT = 'אין מסמך פתוח';
+const SAVING_NOW = 'השמירה רצה כרגע — רגע אחד';
+const OPENING_NOW = 'פתיחת מסמך רצה כרגע';
+
+/** ה-tooltip אומר **למה** הפקד מנוטרל, ולא חוזר על התווית. */
+function switchTooltip(enabledText: string): string {
+  if (props.isOpening) return OPENING_NOW;
+  if (props.isSaving) return SAVING_NOW;
+  return enabledText;
+}
+
+function saveTooltip(enabledText: string): string {
+  if (!props.hasDocument) return NO_DOCUMENT;
+  if (props.isSaving) return SAVING_NOW;
+  return enabledText;
+}
+
+function documentTooltip(enabledText: string): string {
+  return props.hasDocument ? enabledText : NO_DOCUMENT;
+}
 </script>
 
 <style scoped>

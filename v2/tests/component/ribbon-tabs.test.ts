@@ -29,6 +29,7 @@ import ReferencesTab from '../../src/ui/ribbon/tabs/ReferencesTab.vue';
 import ReviewTab from '../../src/ui/ribbon/tabs/ReviewTab.vue';
 import ViewTab from '../../src/ui/ribbon/tabs/ViewTab.vue';
 import OtzariaTab from '../../src/ui/ribbon/tabs/OtzariaTab.vue';
+import Ribbon from '../../src/ui/ribbon/Ribbon.vue';
 import {
   autoUnmount,
   createSuperdocDouble,
@@ -44,8 +45,18 @@ autoUnmount();
 const withSelection = () =>
   createSuperdocDouble({ selection: { hasRange: true, text: 'טקסט נבחר' } });
 
-const TABS: ReadonlyArray<{ name: string; component: Component }> = [
-  { name: 'קובץ', component: FileTab },
+/**
+ * `props` נדרש ללשונית „קובץ” בלבד: פקדיה הם פעולות מעטפת (מסמך פתוח, שמירה
+ * שרצה, פתיחה שרצה) ולא פקודות מנוע, ולכן המצב שלהם מגיע מ-App.vue ולא
+ * מהכפילים. ברירת המחדל שלהם היא „אין מסמך”, כלומר הרכבה בלי props הייתה
+ * מודדת חצי מהלשונית מנוטרלת — ומאשרת בירוק בדיוק את מה שהשער הזה נבנה לתפוס.
+ */
+const TABS: ReadonlyArray<{
+  name: string;
+  component: Component;
+  props?: Record<string, unknown>;
+}> = [
+  { name: 'קובץ', component: FileTab, props: { hasDocument: true } },
   { name: 'בית', component: HomeTab },
   { name: 'הוספה', component: InsertTab },
   { name: 'פריסה', component: LayoutTab },
@@ -77,8 +88,12 @@ interface Probe {
  * `count` מוחזר בהרכבה הראשונה כדי שהסוקר ידע כמה כפתורים יש; אין דרך לדעת
  * את זה בלי להרכיב, וספירה קשיחה כאן הייתה מתיישנת בכל פקד שנוסף.
  */
-async function probe(component: Component, index: number): Promise<Probe & { count: number }> {
-  const harness = mountUi(component, { superdoc: withSelection() });
+async function probe(
+  component: Component,
+  index: number,
+  props?: Record<string, unknown>,
+): Promise<Probe & { count: number }> {
+  const harness = mountUi(component, { superdoc: withSelection(), props });
   await settle();
 
   const buttons = harness.wrapper.findAll('button');
@@ -108,11 +123,14 @@ async function probe(component: Component, index: number): Promise<Probe & { cou
 }
 
 /** סוקרת את כל הכפתורים בלשונית, כל אחד בהרכבה נפרדת. */
-async function probeAll(component: Component): Promise<Probe[]> {
-  const first = await probe(component, 0);
+async function probeAll(
+  component: Component,
+  props?: Record<string, unknown>,
+): Promise<Probe[]> {
+  const first = await probe(component, 0, props);
   const probes: Probe[] = [first];
   for (let index = 1; index < first.count; index += 1) {
-    probes.push(await probe(component, index));
+    probes.push(await probe(component, index, props));
   }
   return probes;
 }
@@ -130,7 +148,7 @@ afterEach(() => {
 describe('אין כפתור מת באף לשונית', () => {
   for (const tab of TABS) {
     it(`„${tab.name}”: כל כפתור מנוטרל, או שלחיצה עליו עושה משהו`, async () => {
-      const probes = await probeAll(tab.component);
+      const probes = await probeAll(tab.component, tab.props);
 
       expect(probes.length, 'נמצאו כפתורים לבדוק').toBeGreaterThan(0);
 
@@ -167,11 +185,105 @@ describe('הפקדים שמנוטרלים בכוונה', () => {
 
   for (const tab of TABS) {
     it(`„${tab.name}”: רק הפקדים שאין להם API נשארים מנוטרלים`, async () => {
-      const probes = await probeAll(tab.component);
+      const probes = await probeAll(tab.component, tab.props);
       const disabled = probes.filter((item) => item.disabled).map((item) => item.name);
       expect(disabled).toEqual(EXPECTED_DISABLED[tab.name]);
     });
   }
+});
+
+describe('לשונית „קובץ” נשענת על מצב המעטפת', () => {
+  /**
+   * זו הלשונית האחרונה שהיו בה שבעה פקדים ואפס `:disabled`. התנאי כאן שונה
+   * מכל שאר הלשוניות ולכן הוא נמדד בנפרד: הפקדים אינם פקודות מנוע אלא פעולות
+   * מעטפת, ומה שקובע הוא שלושה מצבים שרק App.vue מחזיק. לפני התיקון „שמור”
+   * נראה זמין על מסמך שאינו קיים, ו„פתח קובץ” נראה זמין בזמן שהשמירה רצה —
+   * ובשני המקרים הלחיצה נבלעה בלי הודעה.
+   */
+  const LABELS = [
+    'מסמך חדש',
+    'פתח קובץ',
+    'שמור',
+    'שמור בשם...',
+    'ייצוא ל-Word',
+    'הדפסה',
+    'אודות',
+  ] as const;
+
+  /** תווית → האם הפקד מנוטרל. התווית היא הטקסט שהמשתמש רואה על הכפתור. */
+  async function states(props: Record<string, unknown>): Promise<Record<string, boolean>> {
+    const harness = mountUi(FileTab, { superdoc: withSelection(), props });
+    await settle();
+
+    const byLabel: Record<string, boolean> = {};
+    for (const button of harness.wrapper.findAll('button')) {
+      byLabel[button.text().trim()] = button.attributes('disabled') !== undefined;
+    }
+    return byLabel;
+  }
+
+  it('שבעה פקדים, וכל התוויות נמצאו — אחרת הבדיקות למטה מודדות אוויר', async () => {
+    const byLabel = await states({ hasDocument: true });
+
+    expect(Object.keys(byLabel)).toHaveLength(LABELS.length);
+    for (const label of LABELS) expect(byLabel[label], label).toBeDefined();
+  });
+
+  it('אין מסמך פתוח: שמירה, ייצוא והדפסה מנוטרלים; פתיחה ו„אודות” לא', async () => {
+    const byLabel = await states({ hasDocument: false });
+
+    expect(byLabel['שמור']).toBe(true);
+    expect(byLabel['שמור בשם...']).toBe(true);
+    expect(byLabel['ייצוא ל-Word']).toBe(true);
+    expect(byLabel['הדפסה']).toBe(true);
+    // „מסמך חדש” ו„פתח קובץ” הם בדיוק מה שעושים כשאין מסמך.
+    expect(byLabel['מסמך חדש']).toBe(false);
+    expect(byLabel['פתח קובץ']).toBe(false);
+    expect(byLabel['אודות']).toBe(false);
+  });
+
+  it('שמירה שרצה: אין שמירה נוספת ואין מעבר מסמך', async () => {
+    // `decideDocumentSwitch` מחזיר cancel עם reason 'saving', ו-`saveShortcut`
+    // חוסם את Ctrl+S. הפקד מראה את זה מראש במקום לבלוע לחיצה.
+    const byLabel = await states({ hasDocument: true, isSaving: true });
+
+    expect(byLabel['שמור']).toBe(true);
+    expect(byLabel['שמור בשם...']).toBe(true);
+    expect(byLabel['מסמך חדש']).toBe(true);
+    expect(byLabel['פתח קובץ']).toBe(true);
+    // ייצוא והדפסה קוראים את המסמך ואינם מתנגשים בשמירה.
+    expect(byLabel['ייצוא ל-Word']).toBe(false);
+    expect(byLabel['הדפסה']).toBe(false);
+  });
+
+  it('פתיחה שרצה: אין מעבר מסמך נוסף', async () => {
+    const byLabel = await states({ hasDocument: true, isOpening: true });
+
+    expect(byLabel['מסמך חדש']).toBe(true);
+    expect(byLabel['פתח קובץ']).toBe(true);
+    expect(byLabel['שמור']).toBe(false);
+  });
+
+  it('ה-tooltip של פקד מנוטרל אומר למה, ולא חוזר על התווית', async () => {
+    const harness = mountUi(FileTab, { superdoc: withSelection(), props: { hasDocument: false } });
+    await settle();
+
+    const save = harness.wrapper.findAll('button').find((b) => b.text().trim() === 'שמור');
+    expect(save?.attributes('title')).toContain('אין מסמך פתוח');
+  });
+
+  it('הרצועה מעבירה את שלושת המצבים — אחרת ה-props כאן הם קוד מת', async () => {
+    const harness = mountUi(Ribbon, { props: { hasDocument: false } });
+    await settle();
+    const fileTab = harness.wrapper
+      .findAll('[role="tab"]')
+      .find((tab) => tab.text() === 'קובץ');
+    await fileTab!.trigger('click');
+    await settle();
+
+    const save = harness.wrapper.findAll('button').find((b) => b.text().trim() === 'שמור');
+    expect(save?.attributes('disabled'), 'המצב לא עבר דרך הרצועה').not.toBeUndefined();
+  });
 });
 
 describe('„אוצריא”', () => {

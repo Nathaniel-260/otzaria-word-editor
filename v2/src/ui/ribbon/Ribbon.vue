@@ -60,6 +60,9 @@
     >
       <FileTab
         v-if="activeTabId === 'file'"
+        :has-document="hasDocument"
+        :is-saving="isSaving"
+        :is-opening="isOpening"
         @new-doc="$emit('new-doc')"
         @open-doc="$emit('open-doc')"
         @save-doc="$emit('save-doc')"
@@ -120,6 +123,27 @@ const TABS: TabDefinition[] = [
   { id: 'view', label: 'תצוגה' },
   { id: 'otzaria', label: '✦ אוצריא', className: 'otzaria-tab' },
 ];
+
+/**
+ * מצב המעטפת, לפקדי לשונית „קובץ”.
+ *
+ * הרצועה קיבלה עד עכשיו אפס props, וזה היה נכון: כל שאר הלשוניות שואבות את
+ * המצב שלהן מהמנוע (`useCommand`, `ACTIVE_SUPERDOC`) ואינן צריכות דבר מהאב.
+ * „קובץ” היא היחידה שפקדיה הם פעולות מעטפת — מסמך פתוח, שמירה שרצה, פתיחה
+ * שרצה — ואת המצב הזה רק App.vue מחזיק. ההסבר המלא, כולל למה props ולא מפתח
+ * הזרקה חדש, ב-FileTab.vue.
+ *
+ * הרצועה עצמה אינה קוראת אותם: היא צינור, בדיוק כמו שהיא צינור ל-events
+ * בכיוון ההפוך.
+ */
+withDefaults(
+  defineProps<{
+    hasDocument?: boolean;
+    isSaving?: boolean;
+    isOpening?: boolean;
+  }>(),
+  { hasDocument: false, isSaving: false, isOpening: false },
+);
 
 const activeTabId = ref('home');
 const isCollapsed = ref(false);

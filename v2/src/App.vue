@@ -28,6 +28,9 @@
 
     <!-- רצועת הכלים (Ribbon) -->
     <Ribbon
+      :has-document="hasDocument"
+      :is-saving="saveSnapshot.isSaving"
+      :is-opening="isOpening"
       @new-doc="onNewDocument"
       @open-doc="onPickAndOpen"
       @save-doc="onSave(false)"
@@ -190,6 +193,16 @@ provide(STYLE_GALLERY, styleGallery);
  */
 const activeSuperdoc = shallowRef<SuperDoc | null>(null);
 provide(ACTIVE_SUPERDOC, activeSuperdoc);
+
+/**
+ * האם יש מסמך פתוח — מה שפקדי לשונית „קובץ” נשענים עליו.
+ *
+ * נגזר מ-`activeSuperdoc` ולא מ-`swap?.current`, שזו הבדיקה שהמטפלים עצמם
+ * עושים: `swap` הוא משתנה רגיל ולא מצב reactive, ולכן פקד שהיה נשען עליו לא
+ * היה מתעדכן כשמסמך נפתח או נסגר. שני הערכים עולים ונופלים יחד — `activeSuperdoc`
+ * נקבע מיד אחרי פתיחה מוצלחת ומתאפס בפירוק ה-session.
+ */
+const hasDocument = computed(() => activeSuperdoc.value !== null);
 
 const title = ref('מסמך חדש');
 const isOpening = ref(false);
