@@ -207,6 +207,7 @@ describe('לשונית „קובץ” נשענת על מצב המעטפת', () =
     'שמור בשם...',
     'ייצוא ל-Word',
     'הדפסה',
+    'יציאה',
     'אודות',
   ] as const;
 
@@ -222,7 +223,7 @@ describe('לשונית „קובץ” נשענת על מצב המעטפת', () =
     return byLabel;
   }
 
-  it('שבעה פקדים, וכל התוויות נמצאו — אחרת הבדיקות למטה מודדות אוויר', async () => {
+  it('שמונה פקדים, וכל התוויות נמצאו — אחרת הבדיקות למטה מודדות אוויר', async () => {
     const byLabel = await states({ hasDocument: true });
 
     expect(Object.keys(byLabel)).toHaveLength(LABELS.length);
@@ -240,6 +241,8 @@ describe('לשונית „קובץ” נשענת על מצב המעטפת', () =
     expect(byLabel['מסמך חדש']).toBe(false);
     expect(byLabel['פתח קובץ']).toBe(false);
     expect(byLabel['אודות']).toBe(false);
+    // „יציאה” אינו דורש מסמך: יציאה ממסך ריק היא בקשה תקפה.
+    expect(byLabel['יציאה']).toBe(false);
   });
 
   it('שמירה שרצה: אין שמירה נוספת ואין מעבר מסמך', async () => {
@@ -254,6 +257,9 @@ describe('לשונית „קובץ” נשענת על מצב המעטפת', () =
     // ייצוא והדפסה קוראים את המסמך ואינם מתנגשים בשמירה.
     expect(byLabel['ייצוא ל-Word']).toBe(false);
     expect(byLabel['הדפסה']).toBe(false);
+    // „יציאה” כן: הוא שואל „לשמור לפני יציאה?”, ובזמן סבב שמירה השאלה הזאת
+    // הייתה מציעה לשמור שוב את מה שנשמר כרגע.
+    expect(byLabel['יציאה']).toBe(true);
   });
 
   it('פתיחה שרצה: אין מעבר מסמך נוסף', async () => {
@@ -270,6 +276,42 @@ describe('לשונית „קובץ” נשענת על מצב המעטפת', () =
 
     const save = harness.wrapper.findAll('button').find((b) => b.text().trim() === 'שמור');
     expect(save?.attributes('title')).toContain('אין מסמך פתוח');
+  });
+
+  it('„יציאה” פולט exit-app, וההודעה עוברת דרך הרצועה', async () => {
+    // בלי המסלול הזה הכפתור היה כפתור מת: הוא נראה, הוא נלחץ, ואף אחד לא
+    // מקשיב. שני השלבים נמדדים — הלשונית פולטת, והרצועה מעבירה הלאה.
+    const tab = mountUi(FileTab, { superdoc: withSelection(), props: { hasDocument: true } });
+    await settle();
+    const exitButton = tab.wrapper
+      .findAll('button')
+      .find((button) => button.text().trim() === 'יציאה');
+    await exitButton!.trigger('click');
+    expect(tab.wrapper.emitted('exit-app')).toHaveLength(1);
+
+    const ribbon = mountUi(Ribbon, { props: { hasDocument: true } });
+    await settle();
+    const fileTab = ribbon.wrapper.findAll('[role="tab"]').find((t) => t.text() === 'קובץ');
+    await fileTab!.trigger('click');
+    await settle();
+    const inRibbon = ribbon.wrapper
+      .findAll('button')
+      .find((button) => button.text().trim() === 'יציאה');
+    await inRibbon!.trigger('click');
+    expect(ribbon.wrapper.emitted('exit-app'), 'הרצועה לא העבירה את exit-app').toHaveLength(1);
+  });
+
+  it('ה-tooltip של „יציאה” מסביר שהמסמך נשאר פתוח', async () => {
+    // „יציאה” מלשונית בתוך אוצריא אינו מובן מאליו: `navigation.goTo` משהה את
+    // ה-WebView ואינו הורס אותו, ולכן המסמך ממתין כפי שהיה. tooltip שלא אומר
+    // את זה היה משאיר את המשתמש בהנחה שהוא מאבד את העבודה.
+    const harness = mountUi(FileTab, { superdoc: withSelection(), props: { hasDocument: true } });
+    await settle();
+
+    const exitButton = harness.wrapper
+      .findAll('button')
+      .find((button) => button.text().trim() === 'יציאה');
+    expect(exitButton?.attributes('title')).toContain('המסמך יישאר פתוח');
   });
 
   it('הרצועה מעבירה את שלושת המצבים — אחרת ה-props כאן הם קוד מת', async () => {

@@ -129,8 +129,8 @@ describe('פקדי לשונית „קובץ”', () => {
    */
   const UNCONDITIONAL = 'אודות';
 
-  it('נמצאו שבעה פקדים', () => {
-    expect(controls(FILE_TAB)).toHaveLength(7);
+  it('נמצאו שמונה פקדים', () => {
+    expect(controls(FILE_TAB)).toHaveLength(8);
   });
 
   it('לכל פקד יש חיווט של disabled — חוץ מ„אודות”', () => {
@@ -142,7 +142,7 @@ describe('פקדי לשונית „קובץ”', () => {
   });
 
   it('התנאי הוא מצב המעטפת, ולא `true` קשיח', () => {
-    // `:disabled="true"` כאן היה אומר „הפקד לא ממומש”, וכל השבעה ממומשים.
+    // `:disabled="true"` כאן היה אומר „הפקד לא ממומש”, וכל השמונה ממומשים.
     for (const control of controls(FILE_TAB)) {
       expect(control, labelOf(control)).not.toContain(':disabled="true"');
     }

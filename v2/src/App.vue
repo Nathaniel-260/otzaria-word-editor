@@ -38,6 +38,7 @@
       @export-doc="onExportDocx"
       @print-doc="onPrint"
       @about="isAboutOpen = true"
+      @exit-app="onExit"
       @open-find="openFindDialog('find')"
       @open-replace="openFindDialog('replace')"
       @toggle-focus-mode="toggleFocusMode"
@@ -570,6 +571,56 @@ async function onNewDocument(): Promise<void> {
     }
   }
   await openDocument();
+}
+
+/**
+ * „יציאה”.
+ *
+ * מה „יציאה” אומרת כאן, וזה אינו מובן מאליו: התוסף הוא לשונית בתוך אוצריא,
+ * ולא אפליקציה שנסגרת. `navigation.goTo` מוציא את המשתמש מהמסך, ואוצריא
+ * **משהה** את ה-WebView (`plugin.suspended`) במקום להרוס אותו — כלומר המסמך
+ * ממתין כפי שהיה כשחוזרים. לכן היציאה אינה סוגרת את המסמך ואינה מוחקת דבר:
+ * לסגור אותו היה מוחק עבודה שהמשתמש רק ביקש להתרחק ממנה, ודווקא בענף
+ * „בלי לשמור” — שבו הוא אמר „אל תכתוב לדיסק”, ולא „תמחק לי את הטקסט”.
+ *
+ * מה שהכפתור כן קונה הוא השאלה: השמירה האוטומטית פועלת רק כשיש יעד כתיבה,
+ * ומסמך חדש שטרם נשמר אין לו יעד — כלומר עד כאן הדרך היחידה לצאת ממנו הייתה
+ * „פתח ספרייה” בלשונית „אוצריא”, שהוא כפתור ניווט ואינו שואל דבר. עכשיו יש
+ * מסלול שמציע לשמור לפני שהולכים.
+ *
+ * ההחלטה עצמה היא `decideDocumentSwitch` עם `intent: 'exit'` — אותו קוד בדיוק
+ * שמחליט על מעבר מסמך, כי „לצאת בלי לשמור” ו„לפתוח בלי לשמור” הם אותו סיכון.
+ */
+async function onExit(): Promise<void> {
+  if (save && save.snapshot.isDirty) {
+    const decision = await decideDocumentSwitch({
+      isDirty: () => save!.snapshot.isDirty,
+      isSaving: () => save!.snapshot.isSaving,
+      confirm,
+      documentName: () => title.value,
+      intent: 'exit',
+    });
+    if (decision.action === 'cancel') {
+      // בזמן שמירה אין לצאת: הסבב שרץ עוד לא כתב לדיסק. ההודעה היא זו של
+      // מעבר מסמך, מאותו טעם ובאותו נוסח.
+      if (decision.reason === 'saving') setStatus('השמירה עוד רצה — רגע אחד');
+      return;
+    }
+    if (decision.action === 'save-first') {
+      const outcome = await save.saveNow({ suggestedName: title.value });
+      // שמירה שנכשלה או שבוטלה עוצרת את היציאה: המשתמש ביקש לשמור, וללכת
+      // בכל זאת היה מתעלם ממה שביקש.
+      if (outcome.status !== 'saved') {
+        if (outcome.status === 'failed') setStatus(outcome.message, true);
+        else setStatus('היציאה בוטלה — המסמך לא נשמר');
+        return;
+      }
+    }
+  }
+
+  // אותו מסלול דיווח כמו „פתח ספרייה” בלשונית „אוצריא”: הודעה בעברית למשתמש
+  // ושורה בלוג של אוצריא. כשל ניווט אינו מבטל את השמירה שכבר נעשתה.
+  reportReader(await openLibrary());
 }
 
 async function onExportDocx(): Promise<void> {

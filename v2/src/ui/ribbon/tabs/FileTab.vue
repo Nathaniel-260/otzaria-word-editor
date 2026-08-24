@@ -60,6 +60,17 @@
       />
     </RibbonGroup>
 
+    <RibbonGroup title="יציאה">
+      <RibbonButton
+        icon="exit"
+        label="יציאה"
+        variant="large"
+        :tooltip="exitTooltip"
+        :disabled="isSaving"
+        @click="$emit('exit-app')"
+      />
+    </RibbonGroup>
+
     <RibbonGroup title="מידע">
       <!-- הפקד היחיד בלשונית בלי `:disabled`, ובכוונה: הדיאלוג הוא של התוסף,
            הוא אינו נוגע במסמך ואינו נוגע במנוע, ואין מצב שבו הוא אינו זמין.
@@ -145,6 +156,7 @@ defineEmits<{
   (e: 'export-doc'): void;
   (e: 'print-doc'): void;
   (e: 'about'): void;
+  (e: 'exit-app'): void;
 }>();
 
 /** מעבר מסמך — חדש או פתיחה. אינו דורש מסמך פתוח, אבל כן שקט מסביב. */
@@ -172,6 +184,18 @@ function saveTooltip(enabledText: string): string {
 function documentTooltip(enabledText: string): string {
   return props.hasDocument ? enabledText : NO_DOCUMENT;
 }
+
+/**
+ * „יציאה” אינו דורש מסמך פתוח — יציאה ממסך שאין בו מסמך היא בקשה תקפה — אבל
+ * הוא כן דורש שהשמירה לא תרוץ: השאלה „לשמור לפני יציאה?” בזמן שסבב שמירה
+ * באוויר הייתה מציעה שמירה שנייה על מה שנשמר כרגע.
+ *
+ * ה-tooltip אומר גם מה הכפתור עושה, כי „יציאה” מלשונית בתוך אוצריא אינו מובן
+ * מאליו: המסמך נשאר פתוח, ומה שקורה הוא מעבר למסך הספרייה.
+ */
+const exitTooltip = computed(() =>
+  props.isSaving ? SAVING_NOW : 'חזרה למסך הספרייה של אוצריא; המסמך יישאר פתוח',
+);
 </script>
 
 <style scoped>

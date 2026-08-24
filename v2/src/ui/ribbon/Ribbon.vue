@@ -70,6 +70,7 @@
         @export-doc="$emit('export-doc')"
         @print-doc="$emit('print-doc')"
         @about="$emit('about')"
+        @exit-app="$emit('exit-app')"
       />
       <HomeTab
         v-else-if="activeTabId === 'home'"
@@ -156,6 +157,7 @@ defineEmits<{
   (e: 'export-doc'): void;
   (e: 'print-doc'): void;
   (e: 'about'): void;
+  (e: 'exit-app'): void;
   (e: 'open-find'): void;
   (e: 'open-replace'): void;
   (e: 'toggle-focus-mode'): void;
