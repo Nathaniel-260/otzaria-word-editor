@@ -1,5 +1,6 @@
 /**
- * גלריית הסגנונות ובורר הצבעים — שני הפקדים המורכבים ביותר ברצועה.
+ * הפקדים המורכבים ברצועה: גלריית הסגנונות, בורר הצבעים, כפתור התפריט ובורר
+ * הטבלה.
  *
  * שניהם מקבלים את מה שהם מציגים מהמנוע: הגלריה את הקטלוג של המסמך הפתוח
  * (`STYLE_GALLERY`), והבורר את הצבע שהמנוע מדווח על הבחירה. הרשימה הקשיחה
@@ -9,9 +10,16 @@
  * מה שנמדד כאן הוא מה שדורש רינדור: הכרטיסים שנבנו מהקטלוג, הכרטיס המסומן
  * (כולל בחירה מעורבת, שבה **אין** כרטיס מסומן), כפתורי הגלילה שמופיעים רק
  * כשיש לאן לגלול, וה-payload שיוצא מהשבב.
+ *
+ * שני הפופאוברים האחרונים חולקים מכניקה אחת, וזו הסיבה שהם באותו קובץ:
+ * `@pointerdown.prevent` על הפקד (בלעדיו הלחיצה גוזלת את המיקוד מהעורך והבחירה
+ * במסמך אובדת), `.stop` על התוכן כדי שהמאזין הגלובלי לא יסגור אותו ברגע
+ * שנוגעים בו, ו-Escape שסוגר ומחזיר מיקוד.
  */
 import { describe, expect, it, vi } from 'vitest';
 import ColorPickerPopover from '../../src/ui/ribbon/common/ColorPickerPopover.vue';
+import RibbonMenuButton from '../../src/ui/ribbon/common/RibbonMenuButton.vue';
+import TablePicker from '../../src/ui/ribbon/common/TablePicker.vue';
 import StyleGallery from '../../src/ui/ribbon/common/StyleGallery.vue';
 import { GALLERY_SCROLL_STEP_PX, type StyleGalleryState } from '../../src/engine/style-gallery';
 import { autoUnmount, clickOutside, mountUi, settle } from './harness';
@@ -272,5 +280,120 @@ describe('ColorPickerPopover', () => {
 
     expect(harness.wrapper.emitted('change')).toBeUndefined();
     expect(harness.wrapper.find('.color-palette-popover').exists()).toBe(false);
+  });
+});
+
+describe('RibbonMenuButton', () => {
+  const MENU_PROPS = {
+    icon: 'margins',
+    label: 'שוליים',
+    tooltip: 'הגדרת שולי הדף',
+    items: [
+      { id: 'normal', label: 'רגיל', hint: '2.54 ס"מ מכל צד' },
+      { id: 'narrow', label: 'צר', hint: '1.27 ס"מ מכל צד' },
+    ],
+  };
+
+  it('נפתח, מכריז על עצמו כתפריט, ומציג את הפריטים עם ההסבר', async () => {
+    const harness = mountUi(RibbonMenuButton, { props: MENU_PROPS });
+    const button = harness.wrapper.find('button');
+
+    expect(button.attributes('aria-haspopup')).toBe('menu');
+    expect(button.attributes('aria-expanded')).toBe('false');
+
+    await button.trigger('click');
+    await settle();
+
+    expect(harness.wrapper.find('button').attributes('aria-expanded')).toBe('true');
+    const items = harness.wrapper.findAll('[role="menuitem"]');
+    expect(items).toHaveLength(2);
+    expect(items[0].text()).toContain('רגיל');
+    expect(items[0].text()).toContain('2.54');
+    expect(harness.wrapper.find('[role="menu"]').attributes('aria-label')).toBe('שוליים');
+  });
+
+  it('בחירה פולטת את המזהה וסוגרת', async () => {
+    const harness = mountUi(RibbonMenuButton, { props: MENU_PROPS });
+    await harness.wrapper.find('button').trigger('click');
+    await settle();
+
+    await harness.wrapper.findAll('[role="menuitem"]')[1].trigger('click');
+    await settle();
+
+    expect(harness.wrapper.emitted('select')).toEqual([['narrow']]);
+    expect(harness.wrapper.find('[role="menu"]').exists()).toBe(false);
+  });
+
+  it('Escape סוגר ומחזיר את המיקוד לכפתור', async () => {
+    const harness = mountUi(RibbonMenuButton, { props: MENU_PROPS });
+    await harness.wrapper.find('button').trigger('click');
+    await settle();
+
+    await harness.wrapper.find('.ribbon-menu').trigger('keydown.escape');
+    await settle();
+
+    expect(harness.wrapper.find('[role="menu"]').exists()).toBe(false);
+    expect(document.activeElement).toBe(harness.wrapper.find('button').element);
+  });
+
+  it('לחיצה בחוץ סוגרת, ולחיצה בתוך התפריט אינה', async () => {
+    const harness = mountUi(RibbonMenuButton, { props: MENU_PROPS });
+    await harness.wrapper.find('button').trigger('click');
+    await settle();
+
+    // `.stop` על הפופאובר הוא מה שמונע מהמאזין הגלובלי לסגור אותו מיד.
+    await harness.wrapper.find('[role="menu"]').trigger('pointerdown');
+    await settle();
+    expect(harness.wrapper.find('[role="menu"]').exists()).toBe(true);
+
+    clickOutside();
+    await settle();
+    expect(harness.wrapper.find('[role="menu"]').exists()).toBe(false);
+  });
+
+  it('פקד מנוטרל אינו נפתח', async () => {
+    const harness = mountUi(RibbonMenuButton, {
+      props: { ...MENU_PROPS, disabled: true },
+    });
+
+    const button = harness.wrapper.find('button');
+    expect(button.attributes('disabled')).toBeDefined();
+    await button.trigger('click');
+    await settle();
+
+    expect(harness.wrapper.find('[role="menu"]').exists()).toBe(false);
+  });
+});
+
+describe('TablePicker', () => {
+  it('הכותרת מדווחת את המידות שמעל הסמן, ובחירה פולטת אותן', async () => {
+    const harness = mountUi(TablePicker);
+    await harness.wrapper.find('button').trigger('click');
+    await settle();
+
+    expect(harness.wrapper.find('.table-picker-header').text()).toBe('הוסף טבלה');
+
+    // התא ה-13 בגריד 10×10 הוא שורה 2 עמודה 3.
+    const cells = harness.wrapper.findAll('.grid-cell');
+    await cells[12].trigger('mouseenter');
+    expect(harness.wrapper.find('.table-picker-header').text()).toBe('טבלה 3 × 2');
+
+    await cells[12].trigger('click');
+    await settle();
+
+    expect(harness.wrapper.emitted('select')).toEqual([[{ rows: 2, cols: 3 }]]);
+    expect(harness.wrapper.find('.table-picker-popover').exists()).toBe(false);
+  });
+
+  it('לחיצה בחוץ סוגרת בלי לבחור', async () => {
+    const harness = mountUi(TablePicker);
+    await harness.wrapper.find('button').trigger('click');
+    await settle();
+
+    clickOutside();
+    await settle();
+
+    expect(harness.wrapper.find('.table-picker-popover').exists()).toBe(false);
+    expect(harness.wrapper.emitted('select')).toBeUndefined();
   });
 });

@@ -128,6 +128,27 @@ describe('פקד מנוטרל', () => {
   });
 });
 
+describe('החלפת מסמך', () => {
+  it('היכולות נקראות מחדש, והפקד מתעדכן לפי המסמך החדש', async () => {
+    // ה-`watch` על `ACTIVE_SUPERDOC` הוא מה שמחזיק את זה, ומונה הדורות שבו הוא
+    // מה שמונע מתשובה של מסמך קודם לדרוס את התשובה של הנוכחי.
+    const harness = mountUi(LayoutTab, {
+      superdoc: createSuperdocDouble({ denied: ['sections.setPageMargins'] }),
+    });
+    await settle();
+
+    const margins = () => harness.wrapper.findAll('button')[0];
+    expect(margins().attributes('disabled'), 'מסמך שאינו מאפשר שוליים').toBeDefined();
+
+    await harness.setSuperdoc(createSuperdocDouble());
+    expect(margins().attributes('disabled'), 'מסמך שכן מאפשר').toBeUndefined();
+
+    await harness.setSuperdoc(null);
+    expect(margins().attributes('disabled'), 'ואחרי סגירת המסמך').toBeDefined();
+    expect(margins().attributes('title')).toBe('המסמך עדיין נטען');
+  });
+});
+
 describe('כשל של Document API', () => {
   it('קבלה שנכשלה מגיעה למדווח בעברית, עם הפעולה שנכשלה', async () => {
     const superdoc = createSuperdocDouble({
