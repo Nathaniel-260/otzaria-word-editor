@@ -8,8 +8,12 @@
 import { describe, it, expect } from 'vitest';
 import {
   DEFAULT_FONT_SIZE_PT,
+  EMBEDDABLE_IMAGE_EXTENSIONS,
   WORD_FONT_SIZES,
   grownFontSize,
+  imageMimeForFileName,
+  imagePayload,
+  isEmbeddableImageSrc,
   parseColor,
   parseFontFamily,
   parseFontSizePt,
@@ -118,5 +122,88 @@ describe('סולם הגדלים של Word', () => {
   it('הסולם הוא של Word, וברירת המחדל עליו', () => {
     expect(WORD_FONT_SIZES).toEqual([8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 36, 48, 72]);
     expect(WORD_FONT_SIZES).toContain(DEFAULT_FONT_SIZE_PT);
+  });
+});
+
+describe('imageMimeForFileName', () => {
+  it('שתי הסיומות שהמנוע מטמיע, ללא תלות ברישיות', () => {
+    expect(imageMimeForFileName('ציון.png')).toBe('image/png');
+    expect(imageMimeForFileName('a.PNG')).toBe('image/png');
+    expect(imageMimeForFileName('a.jpg')).toBe('image/jpeg');
+    expect(imageMimeForFileName('a.JPEG')).toBe('image/jpeg');
+  });
+
+  it('כל השאר null — כולל webp, שהמנוע פורס ואז דוחה במפורש', () => {
+    expect(imageMimeForFileName('a.webp')).toBeNull();
+    expect(imageMimeForFileName('a.gif')).toBeNull();
+    expect(imageMimeForFileName('a.bmp')).toBeNull();
+    expect(imageMimeForFileName('a.svg')).toBeNull();
+    expect(imageMimeForFileName('a.tiff')).toBeNull();
+    expect(imageMimeForFileName('בלי-סיומת')).toBeNull();
+    expect(imageMimeForFileName('')).toBeNull();
+  });
+
+  it('רשימת הסיומות של הבורר וההמרה מסכימות', () => {
+    // בורר שמציע סיומת שההמרה תדחה = דיאלוג שנפתח כדי להיכשל.
+    for (const extension of EMBEDDABLE_IMAGE_EXTENSIONS) {
+      expect(imageMimeForFileName(`a.${extension}`), extension).not.toBeNull();
+    }
+  });
+});
+
+describe('isEmbeddableImageSrc', () => {
+  it('data URI של PNG או JPEG בבסיס 64', () => {
+    expect(isEmbeddableImageSrc('data:image/png;base64,iVBORw==')).toBe(true);
+    expect(isEmbeddableImageSrc('data:image/jpeg;base64,/9j/4AA=')).toBe(true);
+  });
+
+  it('URL נדחה — זו בדיוק נקודת אובדן הנתונים', () => {
+    // `create.image` היה מחזיר INVALID_INPUT עם הודעה באנגלית; וגם אילו קיבל,
+    // הפורט של ה-loopback משתנה בכל הפעלה והתמונה נשברת.
+    expect(isEmbeddableImageSrc('http://127.0.0.1:51763/file/abc')).toBe(false);
+    expect(isEmbeddableImageSrc('file:///C:/Users/a/b.png')).toBe(false);
+    expect(isEmbeddableImageSrc('https://example.com/a.png')).toBe(false);
+  });
+
+  it('פורמט שהמנוע אינו מטמיע נדחה כאן ולא שם', () => {
+    expect(isEmbeddableImageSrc('data:image/webp;base64,UklGRg==')).toBe(false);
+    expect(isEmbeddableImageSrc('data:image/gif;base64,R0lGOD==')).toBe(false);
+    expect(isEmbeddableImageSrc('data:image/svg+xml;base64,PHN2Zz4=')).toBe(false);
+  });
+
+  it('data URI שאינו base64 או ריק נדחה', () => {
+    expect(isEmbeddableImageSrc('data:image/png,abc')).toBe(false);
+    expect(isEmbeddableImageSrc('data:image/png;base64,')).toBe(false);
+    expect(isEmbeddableImageSrc('data:image/png;base64,לא-base64')).toBe(false);
+    expect(isEmbeddableImageSrc('')).toBe(false);
+    expect(isEmbeddableImageSrc(undefined)).toBe(false);
+  });
+});
+
+describe('imagePayload', () => {
+  it('המפתח הוא src — זה מה ש-executeCreateCommand מחלץ', () => {
+    expect(imagePayload({ src: 'data:image/png;base64,iVBORw==' })).toEqual({
+      src: 'data:image/png;base64,iVBORw==',
+    });
+  });
+
+  it('alt נשלח בלי title: ערך אחד ממלא את שני שדות ה-OOXML', () => {
+    expect(imagePayload({ src: 'data:image/png;base64,iVBORw==', alt: '  ציון  ' })).toEqual({
+      src: 'data:image/png;base64,iVBORw==',
+      alt: 'ציון',
+    });
+  });
+
+  it('alt ריק אינו נשלח בכלל', () => {
+    expect(imagePayload({ src: 'data:image/png;base64,iVBORw==', alt: '   ' })).toEqual({
+      src: 'data:image/png;base64,iVBORw==',
+    });
+  });
+
+  it('src שהמנוע ידחה מחזיר null ולא payload שייכשל סגור', () => {
+    // הבדיקה שנכשלת על הצורה השגויה: `run('image')` בלי src, ו-src שהוא URL.
+    expect(imagePayload({ src: '' })).toBeNull();
+    expect(imagePayload({ src: 'http://127.0.0.1:1/i' })).toBeNull();
+    expect(imagePayload({ src: 'data:image/webp;base64,UklGRg==' })).toBeNull();
   });
 });

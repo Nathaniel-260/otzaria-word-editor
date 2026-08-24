@@ -9,6 +9,7 @@
  */
 import { call, tryCall } from './otzaria-client';
 import { DOCX_MIME } from '../engine/export';
+import { EMBEDDABLE_IMAGE_EXTENSIONS, imageMimeForFileName } from '../engine/payloads';
 
 export interface UserFile {
   token: string;
@@ -63,6 +64,130 @@ export async function pickDocxFile(
 
 function isPermissionDenied(error: unknown): boolean {
   return error instanceof Error && error.message.includes('permission_denied');
+}
+
+/**
+ * בורר תמונה. `access: 'read'` ולא `readwrite`: תמונה נקראת ומוטמעת במסמך,
+ * ואין שום מסלול שכותב אליה בחזרה — בקשת הרשאת כתיבה עליה הייתה הרשאה מיותרת
+ * ודיאלוג נוסף שיכול להיכשל.
+ *
+ * `extensions` הוא הרשימה שהמנוע מטמיע בפועל (ראו `EMBEDDABLE_IMAGE_EXTENSIONS`)
+ * ולא רשימת תמונות רחבה: הדיאלוג מסנן לפיה, וכך המשתמש אינו בוחר GIF שייכשל
+ * רק אחרי שהוא כבר לחץ „פתח”.
+ *
+ * `null` = ביטול. אינו כשל ואין להציג עליו שגיאה.
+ */
+export async function pickImageFile(options: { title?: string } = {}): Promise<UserFile | null> {
+  const { title = 'בחירת תמונה' } = options;
+  const res = await call<PickResponse>('fs.pickUserFile', {
+    extensions: [...EMBEDDABLE_IMAGE_EXTENSIONS],
+    access: 'read',
+    title,
+  });
+  if (!res || res.cancelled || !res.token || !res.url) return null;
+  return {
+    token: res.token,
+    url: res.url,
+    name: res.name ?? 'תמונה',
+    size: res.size ?? 0,
+    access: res.access ?? 'read',
+  };
+}
+
+/**
+ * הגבול שמעליו תמונה אינה מוטמעת.
+ *
+ * לא גבול של ה-SDK אלא שלנו, ומשתי סיבות: ה-data URI תופס שליש יותר מהבייטים
+ * (base64), והבייטים עצמם נכתבים לתוך ה-DOCX — כלומר תמונה של 30MB מייצרת
+ * מסמך של 30MB שכל שמירה שלו עוברת שוב בגשר. 10MB מכסה כל צילום מטלפון,
+ * ומעליו ההודעה מסבירה מה לעשות במקום להיתקע.
+ */
+export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+
+/**
+ * התוצאה של קריאת תמונה. מטופסת ולא זריקה, כדי שהקורא בממשק יציג הודעה אחת
+ * בעברית ולא יעטוף כל מסלול ב-try. הדפוס זהה ל-`SearchOutcome` ב-engine/search.ts.
+ */
+export type ImageDataUrlResult =
+  | { ok: true; dataUrl: string }
+  | { ok: false; message: string; reason: string };
+
+/**
+ * קוראת את בייטי התמונה מ-URL ה-loopback וממירה אותם ל-data URI.
+ *
+ * למה בכלל: `create.image` דורש data URI בבסיס 64 ודוחה URL — ראו ההסבר המלא
+ * ב-engine/payloads.ts. גם אילו קיבל URL, ה-URL של אוצריא תקף לריצה אחת (הפורט
+ * משתנה בכל הפעלה) והקובץ אינו קיים במכונה של מי שיקבל את המסמך — כלומר תמונה
+ * שבורה. ההמרה כאן היא מה שהופך את התמונה לחלק מהמסמך.
+ *
+ * ה-mime נגזר משם הקובץ ולא מ-`Content-Type` של התגובה: השרת מגיש קבצי משתמש
+ * ו-`application/octet-stream` הוא תשובה חוקית שלו, בעוד ה-mime שב-data URI הוא
+ * זה שקובע אם המנוע ינתב את הבייטים ל-PNG או ל-JPEG.
+ */
+export async function readImageAsDataUrl(file: UserFile): Promise<ImageDataUrlResult> {
+  const mime = imageMimeForFileName(file.name);
+  if (!mime) {
+    return {
+      ok: false,
+      reason: 'unsupported-format',
+      message: `אפשר להוסיף תמונות מסוג ${EMBEDDABLE_IMAGE_EXTENSIONS.join(', ')} בלבד`,
+    };
+  }
+
+  // נבדק לפני ההורדה כשהבורר דיווח גודל: אין טעם למשוך 40MB דרך הגשר כדי
+  // לדחות אותם. `size: 0` פירושו שלא דווח, והבדיקה האמיתית היא זו שאחרי.
+  if (file.size > MAX_IMAGE_BYTES) return tooLarge();
+
+  let bytes: Uint8Array;
+  try {
+    const response = await fetch(file.url);
+    if (!response.ok) {
+      return {
+        ok: false,
+        reason: 'fetch-failed',
+        message: `קריאת התמונה נכשלה (${response.status})`,
+      };
+    }
+    bytes = new Uint8Array(await response.arrayBuffer());
+  } catch (error) {
+    return {
+      ok: false,
+      reason: 'fetch-threw',
+      message: error instanceof Error ? error.message : 'קריאת התמונה נכשלה',
+    };
+  }
+
+  if (bytes.byteLength === 0) {
+    return { ok: false, reason: 'empty', message: 'הקובץ שנבחר ריק' };
+  }
+  if (bytes.byteLength > MAX_IMAGE_BYTES) return tooLarge();
+
+  return { ok: true, dataUrl: `data:${mime};base64,${bytesToBase64(bytes)}` };
+}
+
+function tooLarge(): ImageDataUrlResult {
+  const limit = Math.round(MAX_IMAGE_BYTES / (1024 * 1024));
+  return {
+    ok: false,
+    reason: 'too-large',
+    message: `התמונה גדולה מ-${limit}MB. כדאי להקטין אותה לפני ההוספה`,
+  };
+}
+
+/**
+ * בייטים ל-base64.
+ *
+ * בגושים ולא במעבר אחד: `String.fromCharCode(...bytes)` על מערך של מיליוני
+ * איברים חורג ממגבלת הארגומנטים של המנוע וזורק `RangeError` — כלומר דווקא
+ * התמונות הגדולות היו נכשלות. 32KB לגוש הוא בטוח בכל מנוע.
+ */
+function bytesToBase64(bytes: Uint8Array): string {
+  const CHUNK = 0x8000;
+  let binary = '';
+  for (let offset = 0; offset < bytes.byteLength; offset += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + CHUNK));
+  }
+  return btoa(binary);
 }
 
 export interface WriteTicket {

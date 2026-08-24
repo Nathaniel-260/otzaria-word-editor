@@ -197,3 +197,164 @@ export function shrunkFontSize(current: number): number {
   const smaller = WORD_FONT_SIZES.filter((size) => size < current);
   return smaller.length > 0 ? smaller[smaller.length - 1] : WORD_FONT_SIZES[0];
 }
+
+/* ------------------------------------------------------------------ */
+/* תמונה                                                              */
+/* ------------------------------------------------------------------ */
+
+/**
+ * **`create.image` מטמיע בייטים ואינו מפנה ל-URL.** נמדד במימוש
+ * (`@superdoc/docx-engine`, שני המשפטים הראשונים ב-`create.image`):
+ *
+ *     const parsed = /^data:([^;,]+);base64,(.*)$/i.exec(input.src);
+ *     if (!parsed) return failure('INVALID_INPUT',
+ *       'create.image currently requires a base64 data URI.');
+ *     ...
+ *     if (parsed.format === 'webp') return failure('INVALID_INPUT',
+ *       'create.image currently requires PNG or JPEG input.');
+ *
+ * ואחריהם הבייטים שנפרסו נכתבים ל-`/word/media/imageN.<ext>` ונרשמים ב-rels.
+ *
+ * למה זו נקודת אובדן נתונים, ולא פרט מימוש: בורר הקבצים של אוצריא מחזיר `url`
+ * של שרת ה-loopback, והפורט שלו משתנה בכל הפעלה. URL כזה נדחה כאן **סגור** —
+ * וזה למעשה מצב טוב, כי אם הוא היה מתקבל התמונה הייתה נשמרת כהפניה לקובץ
+ * מקומי: שבורה בפתיחה הבאה, ושבורה לגמרי במסמך שיישלח למישהו אחר. לכן
+ * `host/files.ts` קורא את הבייטים מה-loopback וממיר אותם ל-data URI, וזה
+ * הדבר היחיד שנשלח למנוע.
+ *
+ * המידות אינן נשלחות: בהיעדר `size` המנוע קורא אותן מכותרת ה-PNG/JPEG שפירסר,
+ * ושליחת מידות משלנו הייתה מחייבת לפרסר את הכותרת בעצמנו.
+ */
+export const EMBEDDABLE_IMAGE_MIME_TYPES = ['image/png', 'image/jpeg'] as const;
+
+/**
+ * הסיומות שהבורר מציע. **צרה בכוונה** מול הרשימה הרחבה שאפשר היה לתת:
+ * `webp` נפרס אך נדחה במפורש ב-`create.image`, ו-`gif`, `bmp`, `svg` ו-`tiff`
+ * אינם מגיעים לפרסר בכלל (המסלול היחיד הוא png/jpeg/webp). סיומת שהמנוע ידחה
+ * אחרי שהמשתמש בחר קובץ היא כפתור שנראה עובד — בדיוק מה שנמנע כאן.
+ */
+export const EMBEDDABLE_IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg'] as const;
+
+/**
+ * ה-mime של קובץ לפי שמו, או `null` לסיומת שהמנוע אינו מטמיע.
+ *
+ * לפי הסיומת ולא לפי `Content-Type` של שרת ה-loopback: השרת מגיש קבצי משתמש
+ * ואינו מבטיח mime מדויק (`application/octet-stream` הוא תשובה חוקית שלו),
+ * וה-mime שנכתב ל-data URI הוא זה שקובע לאיזה מסלול המנוע ינתב את הבייטים.
+ */
+export function imageMimeForFileName(name: string): (typeof EMBEDDABLE_IMAGE_MIME_TYPES)[number] | null {
+  const extension = name.toLowerCase().match(/\.([a-z0-9]+)$/)?.[1];
+  if (extension === 'png') return 'image/png';
+  if (extension === 'jpg' || extension === 'jpeg') return 'image/jpeg';
+  return null;
+}
+
+/**
+ * אותו שער שהמנוע מפעיל, מוקדם יותר: אם ה-src אינו data URI של PNG/JPEG,
+ * `create.image` יחזיר `INVALID_INPUT` עם הודעה באנגלית. עדיף לעצור כאן ולהציג
+ * הסבר בעברית.
+ *
+ * `image/jpg` אינו ברשימה למרות שהמנוע מקבל גם אותו: אנחנו אלה שבונים את
+ * ה-data URI, ואין סיבה לייצר שתי צורות לאותו פורמט.
+ */
+const EMBEDDABLE_IMAGE_SRC = /^data:(?:image\/png|image\/jpeg);base64,[A-Za-z0-9+/]+={0,2}$/;
+
+export function isEmbeddableImageSrc(src: unknown): boolean {
+  return typeof src === 'string' && EMBEDDABLE_IMAGE_SRC.test(src);
+}
+
+/**
+ * ה-payload של פקודת `image`. המפתח `src` הוא מה ש-`executeCreateCommand`
+ * מחלץ (`record.src ?? record.value`), וה-`at` נקבע על ידי המנוע מהסמן —
+ * ולכן אינו נשלח מכאן.
+ *
+ * `alt` בלבד ולא גם `title`: נמדד שהמנוע כותב `name: alt ?? title` ל-
+ * `wp:docPr/@name` ואחר כך `description: title ?? alt` ל-`wp:docPr/@descr`,
+ * כלומר ערך אחד ממלא את שני השדות ושליחת שניהם רק מפצלת אותם.
+ */
+export function imagePayload(input: { src: string; alt?: string }): { src: string; alt?: string } | null {
+  if (!isEmbeddableImageSrc(input.src)) return null;
+  const alt = input.alt?.trim();
+  return alt ? { src: input.src, alt } : { src: input.src };
+}
+
+/* ------------------------------------------------------------------ */
+/* קישור                                                              */
+/* ------------------------------------------------------------------ */
+
+/**
+ * הסכימות שמותר לשלוח למנוע — היתר מפורש, ולא שלילה של מה שנזכר.
+ *
+ * `javascript:` אינו כתובת חסרת טעם אלא הרצת קוד בהקשר של מי שיפתח את המסמך,
+ * ו-`data:` הוא אותו דבר בעטיפה אחרת. רשימת שלילה הייתה מפספסת את הצורה הבאה
+ * שאיש לא חשב עליה; רשימת היתר נכשלת סגור על כל מה שאינה מכירה.
+ */
+export const LINK_SCHEMES = ['http:', 'https:', 'mailto:'] as const;
+
+/**
+ * הכתובת בצורתה הקנונית, או `null` אם אין לשלוח אותה למנוע.
+ *
+ * `new URL` ולא regex: הוא הפרסר שגם הדפדפן וגם Word ישתמשו בו, והוא זה
+ * שיודע ש-`java\nscript:alert(1)` הוא `javascript:` — תווי בקרה מושמטים
+ * בפרסור, ובדיקת תחילית על המחרוזת הגולמית הייתה מפספסת אותו.
+ *
+ * מוחזר `url.href` ולא מה שהמשתמש הקליד: זו הצורה שנבדקה, והיא היחידה
+ * שמובטח שאין בה תווי בקרה שיישברו בתוך `w:hyperlink`. המחיר הוא לוכסן סוגר
+ * שנוסף לדומיין חשוף (`https://foo.com` → `https://foo.com/`), וזו גם הצורה
+ * שדפדפן מציג.
+ *
+ * כתובת בלי סכימה נדחית ואינה מושלמת ל-`https://` לבדה: השלמה כזאת מנחשת מה
+ * המשתמש התכוון, והנחיה בדיאלוג עדיפה על ניחוש שנכתב למסמך.
+ */
+export function normalizeLinkHref(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (trimmed === '') return null;
+
+  let url: URL;
+  try {
+    url = new URL(trimmed);
+  } catch {
+    return null;
+  }
+
+  if (!(LINK_SCHEMES as readonly string[]).includes(url.protocol)) return null;
+  return url.href;
+}
+
+/** מה שהדיאלוג צריך להציג כשהכתובת נדחתה. נוסח אחד, במקום אחד. */
+export const LINK_HREF_HINT = 'הכתובת חייבת להתחיל ב-https:// או ב-mailto:';
+
+/**
+ * ה-payload של פקודת `link`, לפי מה ש-`executeLinkCommand` מחלץ:
+ *
+ * | שדה     | מה המנוע עושה איתו                                          |
+ * |---------|-------------------------------------------------------------|
+ * | `href`  | `readLinkPayloadHref` — `href` או `value`, ואז `trim`        |
+ * | `text`  | `readLinkPayloadText` — רק במסלול `hyperlinks.insert`        |
+ * | `target`| `readLinkPayloadTarget` — הראשון שנבדק, לפני ה-capture       |
+ *
+ * `target` נשלח מפני שהדיאלוג גוזל את המיקוד מהעורך. `linkPayloadHasExplicitTarget`
+ * הוא מה שמאפשר לפקודה לרוץ בלי בחירה חיה — ובלעדיו `commandSelectionIsReady`
+ * היה נכשל, והקישור היה נכתב על טווח שכבר לא קיים או לא נכתב בכלל.
+ *
+ * `text` אינו נשלח כשיש טווח מסומן: המסלול אז הוא `hyperlinks.wrap`, שמעטיף
+ * את הטקסט הקיים ומתעלם מ-`text` לגמרי. שליחתו הייתה יוצרת ציפייה שהטקסט
+ * המסומן יוחלף.
+ */
+export function linkPayload(input: {
+  href: string;
+  /** הטקסט להצגה. משמש רק כשאין טווח מסומן. */
+  text?: string;
+  /** ה-`TextTarget` שנתפס מהבחירה לפני שהדיאלוג נפתח. */
+  target?: unknown;
+}): { href: string; text?: string; target?: unknown } | null {
+  const href = normalizeLinkHref(input.href);
+  if (href === null) return null;
+
+  const text = input.text?.trim();
+  return {
+    href,
+    ...(text ? { text } : {}),
+    ...(input.target ? { target: input.target } : {}),
+  };
+}
