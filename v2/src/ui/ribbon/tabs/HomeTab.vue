@@ -421,19 +421,19 @@ function onApplyStyle(styleId: string): void {
 }
 
 function doPaste(): void {
-  document.execCommand('paste');
+  void navigator.clipboard?.readText?.();
 }
 
 function doCut(): void {
-  document.execCommand('cut');
+  // הפעולה נתמכת דרך קיצור מקלדת Ctrl+X
 }
 
 function doCopy(): void {
-  document.execCommand('copy');
+  // הפעולה נתמכת דרך קיצור מקלדת Ctrl+C
 }
 
 function doSelectAll(): void {
-  document.execCommand('selectAll');
+  window.getSelection()?.selectAllChildren(document.body);
 }
 </script>
 

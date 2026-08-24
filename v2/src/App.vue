@@ -131,7 +131,8 @@ const saveSnapshot = ref<SaveSnapshot>({
   isDirty: false,
   isSaving: false,
   targetToken: null,
-  exportedRevision: 0,
+  name: null,
+  lastError: null,
 });
 
 let swap: EditorSwap | null = null;

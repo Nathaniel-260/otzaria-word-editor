@@ -84,7 +84,7 @@ function onInsertTable(dimensions: { rows: number; cols: number }): void {
 }
 
 function insertPageBreak(): void {
-  document.execCommand('insertParagraph');
+  // מעבר עמוד דרך קיצור מקלדת Ctrl+Enter
 }
 </script>
 
