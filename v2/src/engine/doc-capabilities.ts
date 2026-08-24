@@ -21,6 +21,7 @@
  * עניינים) ולא רק „פריסה”/„סקירה”: אותה בדיקה תידרש שם, ושני מודולים כאלה
  * היו נותנים שתי תשובות לאותה שאלה.
  */
+import type { SuperDoc } from 'superdoc';
 import type { MaybePromise } from './document-api';
 
 /**
@@ -127,6 +128,9 @@ export interface CapabilitiesHost {
   activeEditor?: { doc?: CapabilitiesDocumentApi | null } | null;
 }
 
+/** ה-union מאפשר גם את המופע האמיתי וגם כפיל. ההסבר המלא ב-page-setup.ts. */
+export type CapabilitiesTarget = SuperDoc | CapabilitiesHost | null | undefined;
+
 /** הסיבה כשהמנוע חסם ולא אמר למה. */
 const FALLBACK_REASON: DocCapabilityReasonCode = 'OPERATION_UNAVAILABLE';
 
@@ -179,9 +183,9 @@ function buildReport(answers: Map<DocCapabilityQuestion, Answer>, available: boo
  * מחדש כשהמסמך מתחלף, ולא מחזיק מנוי על המנוע.
  */
 export async function readDocCapabilities(
-  host: CapabilitiesHost | null | undefined,
+  host: CapabilitiesTarget,
 ): Promise<DocCapabilityReport> {
-  const get = host?.activeEditor?.doc?.capabilities?.get;
+  const get = (host as CapabilitiesHost | null | undefined)?.activeEditor?.doc?.capabilities?.get;
   if (typeof get !== 'function') return buildReport(closedAnswers(), false);
 
   let raw: RawCapabilities | undefined;
