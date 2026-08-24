@@ -326,12 +326,17 @@
           shortcut="Ctrl+H"
           @click="$emit('open-replace')"
         />
+        <!--
+          בלי `shortcut`: Ctrl+A במסמך הוא התנהגות מקורית של משטח העריכה של
+          הדפדפן, ואין במנוע פקודת select-all שתרחיב אותה לכל המסמך בפריסה
+          מרובת עמודים. קיצור שמוצג ואינו עושה את מה שהכפתור עושה הוא שקר קטן.
+        -->
         <RibbonButton
           icon="select"
           label="בחר הכל"
           variant="small"
-          tooltip="בחירת כל הטקסט במסמך"
-          shortcut="Ctrl+A"
+          :tooltip="selectAllTooltip"
+          :disabled="!canSelectAll"
           @click="doSelectAll"
         />
       </div>
@@ -352,7 +357,12 @@ import { useFontOptions } from '../../../composables/useFontOptions';
 import { COMMAND_REPORTER, type CommandReporter } from '../../../composables/keys';
 import { ACTIVE_SUPERDOC } from '../../../engine/document-api';
 import { readDocCapabilities, type DocCapabilityReport } from '../../../engine/doc-capabilities';
-import { copySelection, cutSelection, pasteFromClipboard } from '../../../engine/clipboard';
+import {
+  copySelection,
+  cutSelection,
+  pasteFromClipboard,
+  selectWholeDocument,
+} from '../../../engine/clipboard';
 import {
   DEFAULT_FONT_SIZE_PT,
   DEFAULT_LINE_HEIGHT,
@@ -610,7 +620,18 @@ const canCut = computed(
 
 const canPaste = computed(() => capabilities.value?.can('canPasteContent') ?? false);
 
-type ClipboardQuestion = 'canCopySelection' | 'canDeleteSelection' | 'canPasteContent';
+/**
+ * „בחר הכל” עובר ב-`ranges.resolve` (גבולות גוף המסמך) ואז ב-
+ * `ui.selection.apply`. רק הראשון נשאל ביכולות — לשני אין מזהה פעולה בקטלוג,
+ * והוא נכשל סגור עם `reason` משלו.
+ */
+const canSelectAll = computed(() => capabilities.value?.can('canResolveRange') ?? false);
+
+type ClipboardQuestion =
+  | 'canCopySelection'
+  | 'canDeleteSelection'
+  | 'canPasteContent'
+  | 'canResolveRange';
 
 function tooltipFor(enabled: boolean, question: ClipboardQuestion, text: string): string {
   if (enabled) return text;
@@ -630,6 +651,9 @@ const cutTooltip = computed(() =>
 const pasteTooltip = computed(() =>
   tooltipFor(canPaste.value, 'canPasteContent', 'הדבקת תוכן מהלוח'),
 );
+const selectAllTooltip = computed(() =>
+  tooltipFor(canSelectAll.value, 'canResolveRange', 'בחירת כל הטקסט במסמך'),
+);
 
 async function doCopy(): Promise<void> {
   report(await copySelection(superdoc.value), 'clipboard-copy');
@@ -643,8 +667,8 @@ async function doPaste(): Promise<void> {
   report(await pasteFromClipboard(superdoc.value), 'clipboard-paste');
 }
 
-function doSelectAll(): void {
-  window.getSelection()?.selectAllChildren(document.body);
+async function doSelectAll(): Promise<void> {
+  report(await selectWholeDocument(superdoc.value), 'select-all');
 }
 </script>
 

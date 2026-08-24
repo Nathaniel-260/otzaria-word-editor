@@ -17,11 +17,14 @@
  * גם מה שמאפשר לכפול את המצב הנפוץ באמת ב-`file://`: `NotAllowedError`.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   copySelection,
   cutSelection,
   internalClipboard,
   pasteFromClipboard,
+  selectWholeDocument,
   type ClipboardDocumentApi,
   type ClipboardHost,
   type ClipboardPayload,
@@ -866,5 +869,205 @@ describe('pasteFromClipboard', () => {
     setSystemClipboard(readableClipboard({ 'text/plain': 'א' }));
 
     expect((await pasteFromClipboard(host)).ok).toBe(true);
+  });
+});
+
+describe('selectWholeDocument', () => {
+  /** `ranges.resolve` שמאמת את העוגנים ומחזיר טווח שמכסה את הגוף. */
+  function rangesHost(overrides: Partial<ClipboardDocumentApi> = {}) {
+    const calls: FakeCall[] = [];
+    const applied: unknown[] = [];
+
+    const doc: ClipboardDocumentApi = {
+      ranges: {
+        resolve: (input) => {
+          // הוולידטור של המנוע דורש עוגן עם `kind` מוכר. `{kind:'document'}`
+          // בלי `edge`, או `edge` שאינו start/end, נדחים.
+          for (const anchor of [input?.start, input?.end]) {
+            if (anchor?.kind !== 'document' || (anchor.edge !== 'start' && anchor.edge !== 'end')) {
+              throw new Error('ranges.resolve requires a valid RangeAnchor');
+            }
+          }
+          calls.push({ op: 'ranges.resolve', input });
+          return { target: RANGE as never };
+        },
+      },
+      ...overrides,
+    };
+
+    const host: ClipboardHost = {
+      activeEditor: { doc },
+      ui: {
+        selection: {
+          getSnapshot: () => READY_SELECTION,
+          apply: (target) => {
+            if (!isSelectionTarget(target)) throw new Error('apply requires a SelectionTarget');
+            applied.push(target);
+            return { ok: true };
+          },
+        },
+      },
+    };
+
+    return { host, calls, applied };
+  }
+
+  it('פותרת את גבולות המסמך ומחילה את הטווח על העורך', async () => {
+    const { host, calls, applied } = rangesHost();
+
+    const outcome = await selectWholeDocument(host);
+
+    expect(outcome.ok).toBe(true);
+    expect(calls[0]!.input).toEqual({
+      start: { kind: 'document', edge: 'start' },
+      end: { kind: 'document', edge: 'end' },
+    });
+    expect(applied).toEqual([RANGE]);
+  });
+
+  it('אינה נוגעת ב-DOM: אין קריאה ל-window.getSelection', async () => {
+    // זו הרגרסיה עצמה — `selectAllChildren(document.body)` סימן את הרצועה
+    // ואת שורת המצב, ולא את המסמך.
+    const { host } = rangesHost();
+    const spy = vi.spyOn(window, 'getSelection');
+
+    await selectWholeDocument(host);
+
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('אין `ranges.resolve` — מנוטרל עם „אינו זמין בגרסה זו”', async () => {
+    const { host } = rangesHost({ ranges: undefined });
+
+    const outcome = await selectWholeDocument(host);
+
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) {
+      expect(outcome.reason).toBe('command-unsupported');
+      expect(outcome.message).toBe('בחירת כל המסמך נכשלה: אינו זמין בגרסה זו');
+    }
+  });
+
+  it('אין `ui.selection.apply` — נכשלת לפני שפותרת טווח', async () => {
+    const { host, calls } = rangesHost();
+    host.ui = { selection: { getSnapshot: () => READY_SELECTION } };
+
+    const outcome = await selectWholeDocument(host);
+
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) {
+      expect(outcome.reason).toBe('host-capability-unavailable');
+      expect(outcome.message).toBe('בחירת כל המסמך נכשלה: היכולת הדרושה לפעולה אינה זמינה');
+    }
+    expect(calls).toEqual([]);
+  });
+
+  it('`apply` שנכשל סגור מדווח את ה-reason של המנוע', async () => {
+    const { host } = rangesHost();
+    host.ui = {
+      selection: {
+        getSnapshot: () => READY_SELECTION,
+        apply: () => ({ ok: false, reason: 'document-readonly' }),
+      },
+    };
+
+    const outcome = await selectWholeDocument(host);
+
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) expect(outcome.message).toBe('בחירת כל המסמך נכשלה: המסמך פתוח לקריאה בלבד');
+  });
+
+  it('טווח שלא נפתר אינו נשלח ל-apply', async () => {
+    for (const target of [undefined, null, 'body']) {
+      const { host, applied } = rangesHost({
+        ranges: { resolve: () => ({ target: target as never }) },
+      });
+
+      const outcome = await selectWholeDocument(host);
+
+      expect(outcome.ok, String(target)).toBe(false);
+      if (!outcome.ok) expect(outcome.reason).toBe('target-unresolved');
+      expect(applied).toEqual([]);
+    }
+  });
+
+  it('`resolve` שזורק אינו מפיל את הרצועה', async () => {
+    const { host } = rangesHost({
+      ranges: {
+        resolve: () => {
+          throw new Error('boom');
+        },
+      },
+    });
+
+    const outcome = await selectWholeDocument(host);
+
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) {
+      expect(outcome.reason).toBe('threw');
+      expect(outcome.message).toBe('בחירת כל המסמך נכשלה: boom');
+    }
+  });
+
+  it('סובלת גם קריאות שמחזירות הבטחה', async () => {
+    const { host } = rangesHost({
+      ranges: { resolve: () => Promise.resolve({ target: RANGE as never }) },
+    });
+    const apply = vi.fn(() => Promise.resolve({ ok: true }));
+    host.ui = { selection: { getSnapshot: () => READY_SELECTION, apply } };
+
+    expect((await selectWholeDocument(host)).ok).toBe(true);
+    expect(apply).toHaveBeenCalledWith(RANGE);
+  });
+
+  it('אין Document API — כשל סגור, בלי חריגה', async () => {
+    for (const host of [null, undefined, {}, { activeEditor: { doc: null } }]) {
+      const outcome = await selectWholeDocument(host as ClipboardHost);
+
+      expect(outcome.ok).toBe(false);
+      if (!outcome.ok) expect(outcome.reason).toBe('command-unsupported');
+    }
+  });
+});
+
+/**
+ * שער על המקור עצמו, בנוסף לבדיקות ההתנהגות.
+ *
+ * ההתנהגות נבדקת מול כפילים, אבל מה שהיה ב-HomeTab היה **היעדר** התנהגות:
+ * פונקציה ריקה, ובחירה שמסמנת את הממשק. שני אלה הם JavaScript תקין לחלוטין
+ * ואף typecheck אינו מתלונן עליהם, ולכן הם נבדקים כאן — כמו ב-
+ * tests/unit/tab-controls.test.ts.
+ */
+describe('קבוצת „לוח” ב-HomeTab', () => {
+  const source = readFileSync(join(process.cwd(), 'src/ui/ribbon/tabs/HomeTab.vue'), 'utf8');
+
+  it('אין בחירה דרך ה-DOM', () => {
+    // `selectAllChildren(document.body)` סימן את הרצועה ואת שורת המצב.
+    expect(source).not.toContain('selectAllChildren');
+    expect(source).not.toContain('getSelection');
+  });
+
+  it('אין קריאה ישירה ל-navigator.clipboard מהקומפוננטה', () => {
+    // הלוח עובר בשכבה שאפשר לבדוק, ולא כ-`void ...readText()` שזורק את התוצאה.
+    expect(source).not.toContain('navigator.clipboard');
+  });
+
+  it('לכל אחד מארבעת הפקדים יש מטפל וגם חיווט של disabled', () => {
+    for (const label of ['הדבק', 'גזור', 'העתק', 'בחר הכל']) {
+      const control = source.match(new RegExp(`<RibbonButton\\b[^>]*?label="${label}"[\\s\\S]*?/>`));
+      expect(control, label).not.toBeNull();
+      expect(control![0], label).toMatch(/@click=/);
+      expect(control![0], label).toMatch(/:disabled=/);
+    }
+  });
+
+  it('הפקד עצמו מונע מהלחיצה לגזול את המיקוד מהעורך', () => {
+    // בלי `@pointerdown.prevent` ב-RibbonButton, לחיצה על „העתק” מעבירה את
+    // המיקוד לכפתור — והבחירה במסמך, שהיא כל מה שיש להעתיק, אובדת.
+    const button = readFileSync(
+      join(process.cwd(), 'src/ui/ribbon/common/RibbonButton.vue'),
+      'utf8',
+    );
+    expect(button).toContain('@pointerdown.prevent');
   });
 });

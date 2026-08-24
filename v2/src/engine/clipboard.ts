@@ -1,5 +1,5 @@
 /**
- * קבוצת „לוח”: העתק, גזור והדבק.
+ * קבוצת „לוח” — העתק, גזור והדבק — ו„בחר הכל”.
  *
  * ## למה מודול, ולא שלוש שורות בקומפוננטה
  *
@@ -15,6 +15,10 @@
  * משטח ציבורי — `doc.clipboard` — שממיר בין `ClipboardPayload` (סדרת פריטים
  * לפי MIME) לבין fragment של המסמך. `navigator.clipboard` הוא רק הצינור אל
  * מערכת ההפעלה, ומה שנשלח בו הוא מה שהמנוע סידר.
+ *
+ * `doSelectAll` היה אותה טעות בצורתה החריפה: `selectAllChildren(document.body)`
+ * סימן את **הרצועה, שורת המצב וכל הממשק** — ולא את המסמך. בחירה במסמך היא
+ * `SelectionTarget` במודל של המנוע, ולא טווח DOM.
  *
  * ## מה אינו ודאי בזמן ריצה
  *
@@ -111,6 +115,18 @@ export interface ClipboardDocumentApi {
     }) => MaybePromise<ClipboardInsertReceipt | undefined>;
   };
   delete?: (input: { target: SelectionTarget }) => MaybePromise<DocReceipt | undefined>;
+  ranges?: {
+    resolve?: (input: {
+      start: DocumentEdgeAnchor;
+      end: DocumentEdgeAnchor;
+    }) => MaybePromise<{ target?: SelectionTarget | null } | undefined>;
+  };
+}
+
+/** קצה המסמך, כעוגן ל-`ranges.resolve`. אחת משלוש צורות העוגן שהחוזה מגדיר. */
+export interface DocumentEdgeAnchor {
+  kind: 'document';
+  edge: 'start' | 'end';
 }
 
 /**
@@ -125,6 +141,8 @@ export interface SelectionSnapshot {
 
 export interface SelectionSurface {
   getSnapshot?: () => SelectionSnapshot | undefined;
+  /** מחילה בחירה על העורך החי. נכשלת סגור עם `reason`, ואינה זורקת. */
+  apply?: (target: SelectionTarget) => MaybePromise<{ ok?: boolean; reason?: string } | undefined>;
 }
 
 export interface ClipboardHost {
@@ -640,5 +658,67 @@ export async function pasteFromClipboard(host: ClipboardHostTarget): Promise<Com
     console.info('[otzaria-word] ההדבקה נפלה לטקסט בלבד', receipt.diagnostics);
   }
 
+  return { ok: true };
+}
+
+/* ------------------------------------------------------------------ */
+/* בחר הכל                                                            */
+/* ------------------------------------------------------------------ */
+
+const SELECT_ALL_FAILED = 'בחירת כל המסמך נכשלה';
+
+/**
+ * „בחר הכל”.
+ *
+ * שני מסלולים ציבוריים משורשרים, ואף אחד מהם אינו DOM:
+ *
+ * 1. `doc.ranges.resolve` עם עוגני `{kind:'document', edge:'start'|'end'}`.
+ *    אלה בדיוק העוגנים שהחוזה מגדיר לגבולות גוף המסמך, והפלט הוא
+ *    `SelectionTarget` — „transparent selection target”, כלומר הצורה שפעולות
+ *    הבחירה והכתיבה מקבלות. אין צורך לרוץ על `blocks.list()` ולהרכיב קצוות
+ *    בעצמנו; המנוע כבר יודע איפה המסמך מתחיל ונגמר.
+ * 2. `ui.selection.apply(target)` — „apply a public selection target through
+ *    the host-owned selection helper”. זה גם מה שהמנוע עצמו עושה כשהוא מחיל
+ *    בחירה מבחוץ, והוא נכשל סגור עם `reason` מהטקסונומיה הציבורית במקום
+ *    לזרוק.
+ *
+ * שני השלבים אינם מובטחים: `ranges` אינו חשוף בכל גרסה, ו-`apply` תלוי
+ * ב-helper שה-host מספק. כשאחד מהם חסר הפקד מנוטרל עם הסבר — §12 — ולא
+ * מנסה מסלול עקיף.
+ */
+export async function selectWholeDocument(host: ClipboardHostTarget): Promise<CommandOutcome> {
+  const resolve = docOf(host)?.ranges?.resolve;
+  if (typeof resolve !== 'function') {
+    return { ok: false, message: `${SELECT_ALL_FAILED}: ${UNAVAILABLE}`, reason: 'command-unsupported' };
+  }
+
+  const apply = selectionOf(host)?.apply;
+  if (typeof apply !== 'function') {
+    return failed(SELECT_ALL_FAILED, 'host-capability-unavailable');
+  }
+
+  let target: SelectionTarget | null | undefined;
+  try {
+    const resolved = await resolve({
+      start: { kind: 'document', edge: 'start' },
+      end: { kind: 'document', edge: 'end' },
+    });
+    target = resolved?.target;
+  } catch (error) {
+    return { ok: false, message: thrownText(SELECT_ALL_FAILED, error), reason: 'threw' };
+  }
+
+  if (!target || typeof target !== 'object') {
+    return failed(SELECT_ALL_FAILED, 'target-unresolved');
+  }
+
+  let result: { ok?: boolean; reason?: string } | undefined;
+  try {
+    result = await apply(target);
+  } catch (error) {
+    return { ok: false, message: thrownText(SELECT_ALL_FAILED, error), reason: 'threw' };
+  }
+
+  if (result?.ok !== true) return failed(SELECT_ALL_FAILED, result?.reason ?? 'target-unresolved');
   return { ok: true };
 }
