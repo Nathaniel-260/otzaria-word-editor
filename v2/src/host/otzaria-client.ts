@@ -30,8 +30,9 @@ export function isAvailable(): boolean {
  * למה נדרש: ה-envelope של ה-SDK מפריד בין `code` (`error.permission_denied`)
  * ל-`message`, וההודעה היא טקסט חופשי שאינו מבטיח להזכיר את הקוד. בלי הקוד,
  * זיהוי „ההרשאה חסרה” נעשה בחיפוש מחרוזת בהודעה — כלומר תלוי בנוסח שאוצריא
- * בחרה, ומשתנה בלי התראה. ההודעה נשארת בדיוק כשהייתה, ולכן קוד שבודק אותה
- * (`host/files.ts`) ממשיך לעבוד כפי שעבד.
+ * בחרה, ומשתנה בלי התראה. ההודעה נשארת בדיוק כשהייתה, ולכן `isPermissionDenied`
+ * כאן הוא המקום היחיד שמזהה את הכשל: גם `host/otzaria-reader.ts` וגם
+ * `host/files.ts` נשענים עליו, ואין שתי תשובות לאותה שאלה.
  */
 export class HostCallError extends Error {
   constructor(

@@ -84,6 +84,53 @@ describe('pickDocxFile', () => {
     expect(call).toHaveBeenCalledTimes(2);
   });
 
+  it('מזהה כשל הרשאה מה-code גם כשההודעה אינה מזכירה אותו', async () => {
+    // הזיהוי היה בחיפוש מחרוזת בהודעה. אוצריא מפרידה בין `code` להודעה,
+    // וההודעה היא טקסט חופשי — גרסה שתנסח אותה אחרת הייתה מפילה את הפתיחה
+    // במקום ליפול לקריאה בלבד.
+    const call = vi.fn(async (_method: string, payload?: Record<string, unknown>) => {
+      if (payload?.access === 'readwrite') {
+        return {
+          success: false,
+          data: null,
+          error: { code: 'error.permission_denied', message: 'ההרשאה לא אושרה' },
+        };
+      }
+      return {
+        success: true,
+        data: { cancelled: false, token: 't', url: 'u', name: 'a.docx', size: 1 },
+        error: null,
+      };
+    });
+    window.Otzaria = { call } as never;
+
+    const file = await pickDocxFile();
+
+    expect(file?.access).toBe('read');
+    expect(call).toHaveBeenCalledTimes(2);
+  });
+
+  it('מזהה כשל הרשאה גם מהודעה בלי code — גרסת אוצריא ותיקה', async () => {
+    // תאימות לאחור: envelope בלי `code` הוא כל מה שגרסה קודמת נותנת, וההודעה
+    // היא הסימן היחיד שנשאר.
+    const call = vi.fn(async (_method: string, payload?: Record<string, unknown>) => {
+      if (payload?.access === 'readwrite') {
+        return { success: false, data: null, error: { message: 'permission_denied' } };
+      }
+      return {
+        success: true,
+        data: { cancelled: false, token: 't', url: 'u', name: 'a.docx', size: 1 },
+        error: null,
+      };
+    });
+    window.Otzaria = { call } as never;
+
+    const file = await pickDocxFile();
+
+    expect(file?.access).toBe('read');
+    expect(call).toHaveBeenCalledTimes(2);
+  });
+
   it('שגיאה שאינה הרשאה אינה מנסה שוב', async () => {
     const call = vi.fn(async () => ({
       success: false,

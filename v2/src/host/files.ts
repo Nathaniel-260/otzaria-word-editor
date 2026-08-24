@@ -7,7 +7,7 @@
  * לאן הבייטים נכתבים. ה-url תקף לריצה אחת בלבד — הפורט משתנה בכל הפעלה —
  * ולכן ה-token הוא מה שנשמר, ובעלייה חוזרת קוראים `fs.resolveFileUrl`.
  */
-import { call, tryCall } from './otzaria-client';
+import { call, tryCall, isPermissionDenied } from './otzaria-client';
 import { DOCX_MIME } from '../engine/export';
 import { EMBEDDABLE_IMAGE_EXTENSIONS, imageMimeForFileName } from '../engine/payloads';
 
@@ -56,14 +56,14 @@ export async function pickDocxFile(
   try {
     return await request(access);
   } catch (error) {
+    // הזיהוי נעשה ב-otzaria-client לפי ה-`code` שאוצריא נתנה, עם ההודעה
+    // כגיבוי. הבדיקה שהייתה כאן קראה **תוכן מחרוזת** בלבד, כלומר נשענה על
+    // נוסח שאוצריא בחרה ויכולה לשנות בלי התראה — ואז „אין הרשאת כתיבה” היה
+    // מפיל את הפתיחה במקום ליפול לקריאה בלבד.
     if (access === 'read' || !isPermissionDenied(error)) throw error;
     console.warn('[otzaria-word] אין הרשאת כתיבה; נפתח לקריאה בלבד', error);
     return request('read');
   }
-}
-
-function isPermissionDenied(error: unknown): boolean {
-  return error instanceof Error && error.message.includes('permission_denied');
 }
 
 /**
