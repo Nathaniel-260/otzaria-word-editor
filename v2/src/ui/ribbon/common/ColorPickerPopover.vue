@@ -52,7 +52,8 @@
         <button
           type="button"
           class="palette-clear-btn"
-          @click="selectColor('')"
+          @pointerdown.prevent
+          @click="selectColor(null)"
         >
           <span class="clear-icon" />
           ללא צבע
@@ -78,6 +79,7 @@
               :class="{ selected: modelValue?.toLowerCase() === hex.toLowerCase() }"
               :style="{ backgroundColor: hex }"
               :title="hex"
+              @pointerdown.prevent
               @click="selectColor(hex)"
             />
           </div>
@@ -98,6 +100,7 @@
             :class="{ selected: modelValue?.toLowerCase() === hex.toLowerCase() }"
             :style="{ backgroundColor: hex }"
             :title="hex"
+            @pointerdown.prevent
             @click="selectColor(hex)"
           />
         </div>
@@ -105,9 +108,13 @@
 
       <!-- צבע מותאם אישית -->
       <div class="palette-section custom-color-section">
-        <label class="custom-color-label">
+        <label
+          class="custom-color-label"
+          @pointerdown.prevent="openCustomColorPicker"
+        >
           <span>צבעים נוספים...</span>
           <input
+            ref="customColorRef"
             type="color"
             :value="modelValue || defaultColor"
             class="custom-color-input"
@@ -158,12 +165,19 @@ const props = withDefaults(
   }
 );
 
+/**
+ * `null` = „ללא צבע”, ולא מחרוזת ריקה. זה החוזה של המנוע: `format.color` /
+ * `format.highlight` מתעדים `if (value === null) return { target, value: null }`
+ * כמסלול הניקוי, ומחרוזת ריקה נדחית שם במפורש (`value.trim() === ''` → `null`
+ * → הפקודה נכשלת סגור). ראו engine/payloads.ts.
+ */
 const emit = defineEmits<{
   (e: 'update:modelValue', color: string): void;
-  (e: 'change', color: string): void;
+  (e: 'change', color: string | null): void;
 }>();
 
 const containerRef = ref<HTMLElement | null>(null);
+const customColorRef = ref<HTMLInputElement | null>(null);
 const isOpen = ref(false);
 
 function toggleDropdown(): void {
@@ -171,10 +185,21 @@ function toggleDropdown(): void {
   isOpen.value = !isOpen.value;
 }
 
-function selectColor(hex: string): void {
-  emit('update:modelValue', hex);
+function selectColor(hex: string | null): void {
+  // `modelValue` נשאר מחרוזת — הוא מזין את פס הצבע שעל הכפתור, ו-CSS צריך שם
+  // ערך ולא null. רק ה-`change`, כלומר מה שהופך ל-payload, נושא את ההבחנה.
+  emit('update:modelValue', hex ?? '');
   emit('change', hex);
   isOpen.value = false;
+}
+
+/**
+ * `@pointerdown.prevent` על התווית מונע מהלחיצה לגזול את המיקוד מהעורך — בלעדיו
+ * הבחירה במסמך אובדת והצבע לא מוחל על שום דבר. אבל הוא גם מבטל את ההתנהגות
+ * המובנית של `label`, שפותחת את ה-`input[type=color]`, ולכן הפתיחה נעשית כאן.
+ */
+function openCustomColorPicker(): void {
+  customColorRef.value?.click();
 }
 
 function applyCurrentColor(): void {

@@ -222,7 +222,7 @@
           tooltip="יישור לימין"
           shortcut="Ctrl+R"
           :active="alignCmd.value.value === 'right'"
-          @click="alignCmd.run({ alignment: 'right' })"
+          @click="onAlign('right')"
         />
         <RibbonButton
           icon="alignCenter"
@@ -230,7 +230,7 @@
           tooltip="מרכז"
           shortcut="Ctrl+E"
           :active="alignCmd.value.value === 'center'"
-          @click="alignCmd.run({ alignment: 'center' })"
+          @click="onAlign('center')"
         />
         <RibbonButton
           icon="alignLeft"
@@ -238,7 +238,7 @@
           tooltip="יישור לשמאל"
           shortcut="Ctrl+L"
           :active="alignCmd.value.value === 'left'"
-          @click="alignCmd.run({ alignment: 'left' })"
+          @click="onAlign('left')"
         />
         <RibbonButton
           icon="alignJustify"
@@ -246,7 +246,7 @@
           tooltip="יישור לשני הצדדים"
           shortcut="Ctrl+J"
           :active="alignCmd.value.value === 'justify'"
-          @click="alignCmd.run({ alignment: 'justify' })"
+          @click="onAlign('justify')"
         />
 
         <div class="word-separator" />
@@ -316,6 +316,18 @@ import RibbonSelect, { type SelectOption } from '../common/RibbonSelect.vue';
 import ColorPickerPopover from '../common/ColorPickerPopover.vue';
 import StyleGallery from '../common/StyleGallery.vue';
 import { useCommand } from '../../../composables/useCommand';
+import {
+  alignmentPayload,
+  colorPayload,
+  fontFamilyPayload,
+  fontSizePayload,
+  grownFontSize,
+  lineHeightPayload,
+  parseFontSizePt,
+  shrunkFontSize,
+  stylePayload,
+  type ParagraphAlignment,
+} from '../../../engine/payloads';
 
 defineEmits<{
   (e: 'open-find'): void;
@@ -381,43 +393,60 @@ const selectedLineSpacing = ref('1.5');
 const textColor = ref('#000000');
 const highlightColor = ref('');
 
+// כל ה-payloads נבנים ב-engine/payloads.ts, ולא כליטרל כאן: מה שנשלח לפקודה
+// הוא חוזה מול ולידטור בתוך המנוע, והוולידטור נכשל **סגור**. ראו את הטבלה
+// שם, ואת בדיקת החוזה ב-tests/contract/command-payloads.test.ts.
 function onFontFamilyChange(font: string): void {
-  selectedFontFamily.value = font;
-  void fontFamilyCmd.run({ fontFamily: font });
+  const payload = fontFamilyPayload(font);
+  if (payload === null) return;
+  selectedFontFamily.value = payload;
+  void fontFamilyCmd.run(payload);
+}
+
+function applyFontSize(pt: number): void {
+  const payload = fontSizePayload(pt);
+  if (payload === null) return;
+  selectedFontSize.value = String(payload);
+  void fontSizeCmd.run(payload);
 }
 
 function onFontSizeChange(size: string): void {
-  selectedFontSize.value = size;
-  void fontSizeCmd.run({ fontSize: `${size}pt` });
+  const pt = parseFontSizePt(size);
+  if (pt !== null) applyFontSize(pt);
 }
 
+/** על סולם הגדלים של Word, ולא ב-+2 עיוור. */
 function growFontSize(): void {
-  const current = parseInt(selectedFontSize.value, 10) || 12;
-  const next = current < 12 ? current + 1 : current < 28 ? current + 2 : current + 4;
-  onFontSizeChange(String(next));
+  applyFontSize(grownFontSize(parseFontSizePt(selectedFontSize.value) ?? 12));
 }
 
 function shrinkFontSize(): void {
-  const current = parseInt(selectedFontSize.value, 10) || 12;
-  const next = current <= 12 ? Math.max(8, current - 1) : current <= 28 ? current - 2 : current - 4;
-  onFontSizeChange(String(next));
+  applyFontSize(shrunkFontSize(parseFontSizePt(selectedFontSize.value) ?? 12));
 }
 
-function onTextColorChange(color: string): void {
-  void fontColorCmd.run({ color });
+function onTextColorChange(color: string | null): void {
+  void fontColorCmd.run(colorPayload(color));
 }
 
-function onHighlightChange(color: string): void {
-  void highlightCmd.run({ color });
+function onHighlightChange(color: string | null): void {
+  void highlightCmd.run(colorPayload(color));
 }
 
 function onLineSpacingChange(val: string): void {
+  const payload = lineHeightPayload(parseFloat(val));
+  if (payload === null) return;
   selectedLineSpacing.value = val;
-  void lineSpacingCmd.run({ lineHeight: parseFloat(val) });
+  void lineSpacingCmd.run(payload);
+}
+
+function onAlign(alignment: ParagraphAlignment): void {
+  void alignCmd.run(alignmentPayload(alignment));
 }
 
 function onApplyStyle(styleId: string): void {
-  void styleCmd.run({ style: styleId });
+  const payload = stylePayload(styleId);
+  if (payload === null) return;
+  void styleCmd.run(payload);
 }
 
 function doPaste(): void {

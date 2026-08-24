@@ -44,12 +44,16 @@
       title="שינוי גודל תצוגה"
       :launcher="false"
     >
+      <!--
+        `zoomPayload(100)` ולא `{ zoom: 1 }`: הזום הוא **אחוזים**, ואובייקט
+        נדחה עוד לפני `SuperDoc.setZoom`. ראו engine/payloads.ts.
+      -->
       <RibbonButton
         icon="zoom"
         label="100%"
         variant="large"
         tooltip="הצג את המסמך בגודל 100%"
-        @click="zoomCmd.run({ zoom: 1 })"
+        @click="zoomCmd.run(zoomPayload(100))"
       />
       <RibbonButton
         icon="fitWidth"
@@ -66,6 +70,7 @@
 import RibbonGroup from '../common/RibbonGroup.vue';
 import RibbonButton from '../common/RibbonButton.vue';
 import { useCommand } from '../../../composables/useCommand';
+import { zoomPayload } from '../../../engine/payloads';
 
 defineEmits<{
   (e: 'toggle-focus-mode'): void;

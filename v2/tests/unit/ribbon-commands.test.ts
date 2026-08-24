@@ -1,264 +1,124 @@
 /**
- * בדיקות חיבור פקודות ה-Ribbon ל-SuperDoc דרך ה-CommandAdapter וה-useCommand Composable.
+ * חיבור פקדי ה-Ribbon לפקודות המנוע.
  *
- * מוודא שכל פקדי ה-UI (עיצוב גופן, פיסקה, יישור, סגנונות, טבלאות, מדיה, זום והיסטוריה)
- * מפעילים ומעבירים במדויק את הפרמטרים למנוע SuperDoc.
+ * מה שהיה בקובץ הזה, ולמה הוא נמחק: שמונה בדיקות שהריצו payloads מול mock
+ * שכל תפקידו היה `calls.push({ id, payload }); return true;`, ואחר כך השוו
+ * את `calls` לאותם payloads. ה-docblock הבטיח שהן מאמתות „העברה במדויק...
+ * למנוע SuperDoc”, אבל mock אינו מנוע: ארבעה מהם — `{ fontFamily }`,
+ * `{ fontSize }`, `{ color }` ו-`{ zoom }` — נדחים בשקט על ידי superdoc,
+ * והבדיקה אישרה אותם בירוק. היא לא בדקה חוזה אלא ש-JavaScript מעביר
+ * ארגומנטים.
+ *
+ * במקומן: tests/contract/command-payloads.test.ts, שמריץ את ה-payloads מול
+ * הוולידטורים האמיתיים של החבילה. כאן נשאר מה שאותה בדיקה **אינה** יכולה
+ * לכסות — שני חיבורים בין הקוד שלנו לבין החוזה הזה.
  */
 import { describe, it, expect } from 'vitest';
+import { readFileSync, readdirSync } from 'node:fs';
+import { join, relative } from 'node:path';
 import type { BorrowedSuperDocUI } from 'superdoc';
 import type { CommandExecutionResult, CommandState } from 'superdoc/ui';
 import { createCommandAdapter } from '../../src/engine/command-adapter';
+import { COMMAND_IDS } from '../../src/engine/capabilities';
 
-interface CommandCallRecord {
-  id: string;
-  payload?: unknown;
+// vitest רץ עם root=v2, ולכן cwd הוא שורש הפרויקט.
+const SRC = join(process.cwd(), 'src');
+
+function sourceFiles(dir = SRC): string[] {
+  const files: string[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) files.push(...sourceFiles(full));
+    else if (/\.(ts|vue)$/.test(entry.name) && !entry.name.endsWith('.d.ts')) files.push(full);
+  }
+  return files;
 }
 
-function createMockSuperDocUi(commandCatalog: Record<string, Partial<CommandState>>): {
-  ui: BorrowedSuperDocUI;
-  calls: CommandCallRecord[];
-  stateUpdaters: Record<string, (state: Partial<CommandState>) => void>;
-} {
-  const calls: CommandCallRecord[] = [];
-  const stateUpdaters: Record<string, (state: Partial<CommandState>) => void> = {};
-  const listeners: Record<string, Array<(state: CommandState) => void>> = {};
-
-  const baseState: CommandState = {
-    enabled: true,
-    active: false,
-    supported: true,
-    source: 'builtin',
-  };
-
-  const ui = {
-    commands: {
-      has: (id: string) => id in commandCatalog,
-      get: (id: string) => ({
-        id,
-        getState: (): CommandState => ({
-          ...baseState,
-          ...commandCatalog[id],
-        }),
-        observe: (listener: (state: CommandState) => void) => {
-          if (!listeners[id]) listeners[id] = [];
-          listeners[id].push(listener);
-          stateUpdaters[id] = (newState: Partial<CommandState>) => {
-            const full = { ...baseState, ...commandCatalog[id], ...newState };
-            commandCatalog[id] = full;
-            listener(full);
-          };
-          return () => {
-            const idx = listeners[id]?.indexOf(listener) ?? -1;
-            if (idx >= 0) listeners[id].splice(idx, 1);
-          };
-        },
-        execute: (payload?: unknown) => {
-          calls.push({ id, payload });
-          return true;
-        },
-        executeAsync: async (payload?: unknown): Promise<CommandExecutionResult> => {
-          calls.push({ id, payload });
-          return true;
-        },
-      }),
-      async executeAsync(id: string, payload?: unknown): Promise<CommandExecutionResult> {
-        calls.push({ id, payload });
-        return true;
-      },
-    },
-  } as unknown as BorrowedSuperDocUI;
-
-  return { ui, calls, stateUpdaters };
+/** הערות מוסרות: הן מתעדות במפורש את ה-payloads השגויים, וזה אינו הפרה. */
+function stripComments(text: string): string {
+  return text
+    .replace(/\/\*[\s\S]*?\*\//g, (block) => block.replace(/[^\n]/g, ' '))
+    .replace(/\/\/.*$/gm, '')
+    .replace(/<!--[\s\S]*?-->/g, (block) => block.replace(/[^\n]/g, ' '));
 }
 
-describe('Ribbon Commands & SuperDoc Integration', () => {
-  const allKnownCommands: Record<string, Partial<CommandState>> = {
-    undo: { enabled: true },
-    redo: { enabled: true },
-    bold: { enabled: true, active: false },
-    italic: { enabled: true, active: false },
-    underline: { enabled: true, active: false },
-    strikethrough: { enabled: true, active: false },
-    'clear-formatting': { enabled: true },
-    'copy-format': { enabled: true },
-    'font-family': { enabled: true, value: 'FrankRuhlCLM' },
-    'font-size': { enabled: true, value: '12pt' },
-    'text-color': { enabled: true, value: '#000000' },
-    'highlight-color': { enabled: true },
-    'bullet-list': { enabled: true },
-    'numbered-list': { enabled: true },
-    'indent-increase': { enabled: true },
-    'indent-decrease': { enabled: true },
-    'direction-rtl': { enabled: true, active: true },
-    'direction-ltr': { enabled: true, active: false },
-    'formatting-marks': { enabled: true, active: false },
-    'text-align': { enabled: true, value: 'right' },
-    'line-height': { enabled: true, value: 1.5 },
-    'linked-style': { enabled: true, value: 'Normal' },
-    'table-insert': { enabled: true },
-    'table-add-row-before': { enabled: true },
-    'table-add-row-after': { enabled: true },
-    'table-delete-row': { enabled: true },
-    'table-add-column-before': { enabled: true },
-    'table-add-column-after': { enabled: true },
-    'table-delete-column': { enabled: true },
-    'table-delete': { enabled: true },
-    image: { enabled: true },
-    link: { enabled: true },
-    'table-of-contents-insert': { enabled: true },
-    ruler: { enabled: true },
-    zoom: { enabled: true },
-    'zoom-fit-width': { enabled: true },
-    acceptChange: { enabled: true },
-    rejectChange: { enabled: true },
-    acceptAllChanges: { enabled: true },
-    rejectAllChanges: { enabled: true },
-  };
+const sources = sourceFiles().map((path) => ({
+  path: relative(SRC, path),
+  text: stripComments(readFileSync(path, 'utf8')),
+}));
 
-  it('מעביר פקודות עיצוב גופן בסיסיות למנוע SuperDoc', async () => {
-    const { ui, calls } = createMockSuperDocUi(allKnownCommands);
-    const adapter = createCommandAdapter(ui);
-
-    await adapter.run('bold');
-    await adapter.run('italic');
-    await adapter.run('underline');
-    await adapter.run('strikethrough');
-    await adapter.run('clear-formatting');
-    await adapter.run('copy-format');
-
-    expect(calls.map((c) => c.id)).toEqual([
-      'bold',
-      'italic',
-      'underline',
-      'strikethrough',
-      'clear-formatting',
-      'copy-format',
-    ]);
-  });
-
-  it('מעביר פקודות טיפוגרפיה וצבעים עם ה-Payload המדויק', async () => {
-    const { ui, calls } = createMockSuperDocUi(allKnownCommands);
-    const adapter = createCommandAdapter(ui);
-
-    await adapter.run('font-family', { fontFamily: 'TaameyDavidCLM' });
-    await adapter.run('font-size', { fontSize: '16pt' });
-    await adapter.run('text-color', { color: '#0055FF' });
-    await adapter.run('highlight-color', { color: '#FFFF00' });
-
-    expect(calls).toEqual([
-      { id: 'font-family', payload: { fontFamily: 'TaameyDavidCLM' } },
-      { id: 'font-size', payload: { fontSize: '16pt' } },
-      { id: 'text-color', payload: { color: '#0055FF' } },
-      { id: 'highlight-color', payload: { color: '#FFFF00' } },
-    ]);
-  });
-
-  it('מעביר פקודות פיסקה, רשימות והזחות', async () => {
-    const { ui, calls } = createMockSuperDocUi(allKnownCommands);
-    const adapter = createCommandAdapter(ui);
-
-    await adapter.run('bullet-list');
-    await adapter.run('numbered-list');
-    await adapter.run('indent-increase');
-    await adapter.run('indent-decrease');
-    await adapter.run('formatting-marks');
-
-    expect(calls.map((c) => c.id)).toEqual([
-      'bullet-list',
-      'numbered-list',
-      'indent-increase',
-      'indent-decrease',
-      'formatting-marks',
-    ]);
-  });
-
-  it('מעביר פקודות כיווניות עברית RTL, יישור טקסט ומרווח שורות', async () => {
-    const { ui, calls } = createMockSuperDocUi(allKnownCommands);
-    const adapter = createCommandAdapter(ui);
-
-    await adapter.run('direction-rtl');
-    await adapter.run('text-align', { alignment: 'right' });
-    await adapter.run('text-align', { alignment: 'center' });
-    await adapter.run('text-align', { alignment: 'justify' });
-    await adapter.run('line-height', { lineHeight: 2.0 });
-
-    expect(calls).toEqual([
-      { id: 'direction-rtl', payload: undefined },
-      { id: 'text-align', payload: { alignment: 'right' } },
-      { id: 'text-align', payload: { alignment: 'center' } },
-      { id: 'text-align', payload: { alignment: 'justify' } },
-      { id: 'line-height', payload: { lineHeight: 2.0 } },
-    ]);
-  });
-
-  it('מעביר פקודות סגנונות (StyleGallery) עם שם הסגנון', async () => {
-    const { ui, calls } = createMockSuperDocUi(allKnownCommands);
-    const adapter = createCommandAdapter(ui);
-
-    await adapter.run('linked-style', { style: 'Heading1' });
-    await adapter.run('linked-style', { style: 'Quote' });
-
-    expect(calls).toEqual([
-      { id: 'linked-style', payload: { style: 'Heading1' } },
-      { id: 'linked-style', payload: { style: 'Quote' } },
-    ]);
-  });
-
-  it('מעביר פקודות הוספת טבלאות ומדיה (InsertTab)', async () => {
-    const { ui, calls } = createMockSuperDocUi(allKnownCommands);
-    const adapter = createCommandAdapter(ui);
-
-    await adapter.run('table-insert', { rows: 4, cols: 5 });
-    await adapter.run('image');
-    await adapter.run('link');
-    await adapter.run('table-of-contents-insert');
-
-    expect(calls).toEqual([
-      { id: 'table-insert', payload: { rows: 4, cols: 5 } },
-      { id: 'image', payload: undefined },
-      { id: 'link', payload: undefined },
-      { id: 'table-of-contents-insert', payload: undefined },
-    ]);
-  });
-
-  it('מעביר פקודות תצוגה (ViewTab) ובקרת זום', async () => {
-    const { ui, calls } = createMockSuperDocUi(allKnownCommands);
-    const adapter = createCommandAdapter(ui);
-
-    await adapter.run('ruler');
-    await adapter.run('zoom', { zoom: 1.25 });
-    await adapter.run('zoom-fit-width');
-
-    expect(calls).toEqual([
-      { id: 'ruler', payload: undefined },
-      { id: 'zoom', payload: { zoom: 1.25 } },
-      { id: 'zoom-fit-width', payload: undefined },
-    ]);
-  });
-
-  it('מעביר פקודות היסטוריה ושמירה (TitleBar / Quick Access)', async () => {
-    const { ui, calls } = createMockSuperDocUi(allKnownCommands);
-    const adapter = createCommandAdapter(ui);
-
-    await adapter.run('undo');
-    await adapter.run('redo');
-
-    expect(calls.map((c) => c.id)).toEqual(['undo', 'redo']);
-  });
-
-  it('מעדכן מאזינים באופן ריאקטיבי בעת שינוי מצב הפקודה (State Observation)', () => {
-    const { ui, stateUpdaters } = createMockSuperDocUi(allKnownCommands);
-    const adapter = createCommandAdapter(ui);
-
-    const boldStates: boolean[] = [];
-    const stopObserve = adapter.observe('bold', (state) => {
-      boldStates.push(state.active);
+/** התאמות בפורמט "נתיב:שורה", כדי שכשל יצביע למקום ולא רק לכלל. */
+function hits(pattern: RegExp): string[] {
+  const found: string[] = [];
+  for (const { path, text } of sources) {
+    text.split('\n').forEach((line, index) => {
+      if (pattern.test(line)) found.push(`${path}:${index + 1}`);
     });
+  }
+  return found;
+}
 
-    // שינוי מצב bold ל-active
-    stateUpdaters['bold']({ active: true });
-    expect(boldStates).toContain(true);
+describe('מזהי הפקודות שפקדי ה-Ribbon מבקשים', () => {
+  it('יש קבצי מקור לבדוק', () => {
+    expect(sources.length).toBeGreaterThan(0);
+  });
 
-    stopObserve();
+  it('כל `useCommand` מבקש מזהה שנמצא ב-registry', () => {
+    // המזהים ב-registry מאומתים מול הקטלוג האמיתי של המנוע
+    // (tests/contract/superdoc-commands.test.ts). מזהה שמוקלד שגוי באתר
+    // הקריאה אינו מגיע לשם, ולכן היה מייצר פקד שנראה תקין ולא עושה כלום.
+    const requested = new Set<string>();
+    for (const { text } of sources) {
+      for (const match of text.matchAll(/useCommand\(\s*'([^']+)'/g)) requested.add(match[1]);
+    }
+
+    expect(requested.size).toBeGreaterThan(0);
+    const unknown = [...requested].filter((id) => !COMMAND_IDS.includes(id as never));
+    expect(unknown).toEqual([]);
+  });
+});
+
+describe('חוזה ה-payload באתרי הקריאה', () => {
+  it('אין פקד שבונה payload לפי שם השדה של הפקודה', () => {
+    // הרגרסיה שהקובץ הזה לא תפס: `fontFamily`, `fontSize`, `color` ו-`zoom`
+    // אינם מפתחות שהמנוע מפרק (`unwrapScalar` מכיר `value`, `alignment`,
+    // `lineHeight`, `style` — לא אותם), ולכן payload כזה נכשל סגור. בניית
+    // ה-payload היא ב-engine/payloads.ts ונבדקת מול המנוע עצמו.
+    expect(hits(/\.run\(\s*\{\s*(fontFamily|fontSize|color|zoom)\b/)).toEqual([]);
+    expect(hits(/run\(\s*'[^']+'\s*,\s*\{\s*(fontFamily|fontSize|color|zoom)\b/)).toEqual([]);
+  });
+});
+
+describe('createCommandAdapter', () => {
+  it('מעביר את ה-payload למנוע בלי לשנות אותו', () => {
+    // זה כל מה שהאדפטר מבטיח לגבי payload, וזו הסיבה שעיצוב ה-payload חייב
+    // להיות במקום אחד למעלה: אין שכבה שמתקנת אותו בדרך.
+    const calls: Array<{ id: string; payload?: unknown }> = [];
+    const ui = {
+      commands: {
+        has: () => true,
+        get: () => ({
+          getState: (): CommandState => ({
+            enabled: true,
+            active: false,
+            supported: true,
+            source: 'builtin',
+          }),
+          observe: () => () => {},
+        }),
+        async executeAsync(id: string, payload?: unknown): Promise<CommandExecutionResult> {
+          calls.push({ id, payload });
+          return true;
+        },
+      },
+    } as unknown as BorrowedSuperDocUI;
+
+    const adapter = createCommandAdapter(ui);
+    const payload = { value: '#0055FF' };
+    void adapter.run('text-color', payload);
+    void adapter.run('bold');
+
+    expect(calls[0].payload).toBe(payload);
+    expect(calls[1].payload).toBeUndefined();
   });
 });

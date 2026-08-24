@@ -89,6 +89,7 @@ import AboutDialog from './ui/panels/AboutDialog.vue';
 
 import { createCommandAdapter, type CommandAdapter, type CommandOutcome } from './engine/command-adapter';
 import { COMMAND_ADAPTER, COMMAND_REPORTER } from './composables/keys';
+import { zoomPayload } from './engine/payloads';
 import {
   createSearchAdapter,
   idleSearchState,
@@ -495,9 +496,20 @@ async function onReplaceAllText(replacement: string): Promise<void> {
   reportReplace(await searchAdapter?.replaceAll(replacement), `הוחלפו ${matches} מופעים`);
 }
 
+/**
+ * חוזה הזום: `run('zoom', <אחוזים>)` — 100 הוא 100%, ו-`zoomPayload` בונה את
+ * הצורה שהמנוע מקבל. `{ zoom: level / 100 }` שהיה כאן נדחה ב-
+ * `instanceCommandPayloadIsValid` (הוא דורש `typeof payload === 'number'`
+ * אחרי הנרמול) — התווית בשורת המצב התחדשה, והמסמך לא זז.
+ *
+ * הגבולות של הסרגל אינם קשיחים אלא `min`/`max` מ-`ui.zoom.getSnapshot()`;
+ * ה-StatusBar עדיין מגביל 50–200 בעצמו.
+ */
 function onZoomChange(level: number): void {
+  const payload = zoomPayload(level);
+  if (payload === null) return;
   zoomLevel.value = level;
-  void commandAdapter.value?.run('zoom', { zoom: level / 100 });
+  void commandAdapter.value?.run('zoom', payload);
 }
 
 function onInsertCitation(): void {
