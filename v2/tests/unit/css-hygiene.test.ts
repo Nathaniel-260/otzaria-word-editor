@@ -94,6 +94,14 @@ describe('סלקטורים בגלובלים', () => {
     return false;
   }
 
+  /**
+   * מחלקות שה-DOM שלהן שייך למנוע ולא לנו. `.superdoc` הוא ה-wrapper שהמנוע
+   * מרנדר, והכלל היחיד שנוגע בו — מרכוז העמוד ב-shell.css — מתועד שם במלואו.
+   * ההחרגה מפורשת ולא „עוברת בטעות” מפני ש-'superdoc' מופיע גם כשם החבילה
+   * ב-import: בלעדיה הבדיקה הייתה מאשרת אותו מסיבה לא נכונה.
+   */
+  const ENGINE_OWNED = new Set(['superdoc']);
+
   it('כל מחלקה בסלקטור קיימת בקומפוננטה או בקוד', () => {
     // רק הגלובלים: סגנונות scoped בתוך .vue הם של הקומפוננטה עצמה, ושם
     // הסלקטור והתבנית יושבים באותו קובץ ומתוחזקים יחד.
@@ -101,12 +109,15 @@ describe('סלקטורים בגלובלים', () => {
     const dead: string[] = [];
 
     for (const sheet of STYLE_SHEETS) {
-      const css = CONTENT.get(sheet) ?? '';
-      // הסלקטור בלבד — מה שלפני '{'. בלעדיו גם ערכי הצהרות נסרקים.
+      // הערות מוסרות תחילה: הן יושבות לפני '{' ולכן נקראות כחלק מהסלקטור.
+      // הערה שמזכירה מחלקה של המנוע (`superdoc__layers`) דיווחה עליה כמחלקה
+      // מדומה, וזו הייתה בדיקה שנכשלת על תיעוד.
+      const css = (CONTENT.get(sheet) ?? '').replace(/\/\*[\s\S]*?\*\//g, ' ');
       for (const block of css.matchAll(/(?:^|\})([^{}]*)\{/g)) {
         for (const cls of block[1].matchAll(/\.(-?[_a-zA-Z][\w-]*)/g)) {
           const name = cls[1];
-          if (componentSource.includes(name) || isComposed(name)) continue;
+          if (ENGINE_OWNED.has(name) || isComposed(name)) continue;
+          if (componentSource.includes(name)) continue;
           dead.push(`${name} (${short(sheet)})`);
         }
       }
