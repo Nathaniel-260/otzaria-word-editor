@@ -299,14 +299,45 @@ describe('buildCitationText', () => {
   });
 });
 
+/** מסמך שחושף `insert` ומדווח עליו ביכולות בדיוק כפי שהמנוע מדווח. */
+function citationHost(options: { insert?: boolean; reported?: boolean } = {}) {
+  const { insert = true, reported = true } = options;
+  return {
+    activeEditor: {
+      doc: {
+        ...(insert ? { insert: () => ({ success: true }) } : {}),
+        capabilities: { get: () => ({ operations: { insert: { available: reported } } }) },
+      },
+    },
+  } as never;
+}
+
 describe('canInsertText', () => {
-  it('דורשת doc.insert ולא רק מסמך פתוח', () => {
-    expect(canInsertText(null)).toBe(false);
-    expect(canInsertText({ activeEditor: null })).toBe(false);
-    expect(canInsertText({ activeEditor: { doc: {} } })).toBe(false);
-    expect(canInsertText({ activeEditor: { doc: { insert: () => ({ success: true }) } } })).toBe(
-      true,
-    );
+  it('דורשת doc.insert ולא רק מסמך פתוח', async () => {
+    await expect(canInsertText(null)).resolves.toBe(false);
+    await expect(canInsertText({ activeEditor: null })).resolves.toBe(false);
+    await expect(canInsertText({ activeEditor: { doc: {} } })).resolves.toBe(false);
+    await expect(canInsertText(citationHost())).resolves.toBe(true);
+  });
+
+  it('נכשלת סגור כשהמנוע מדווח שהפעולה אינה זמינה', async () => {
+    // מסמך במצב שאין בו הכנסה (עבודה משותפת, מצב מעקב) חושף את הפונקציה
+    // ומדווח `available: false`. הפקד חייב להיות מנוטרל.
+    await expect(canInsertText(citationHost({ reported: false }))).resolves.toBe(false);
+  });
+
+  it('נכשלת סגור כשאין בכלל יכולות לשאול', async () => {
+    // גרסה שאינה חושפת `capabilities` היא „המסמך עדיין נטען” מבחינת הדוח, ולכן
+    // התשובה `false` — ולא „אולי כן”.
+    const host = { activeEditor: { doc: { insert: () => ({ success: true }) } } } as never;
+    await expect(canInsertText(host)).resolves.toBe(false);
+  });
+
+  it('אינה מסתפקת בקטלוג: פעולה מוכרזת בלי מימוש אינה זמינה', async () => {
+    // מפת ה-`operations` נבנית מקטלוג הפעולות, ולכן גרסה שהסירה את המימוש
+    // ועודה מכריזה על `insert` הייתה מחזירה „זמין” לפקד שאין לו למה לקרוא.
+    // זו הבדיקה ששומרת על בדיקת הנוכחות שלפני שאלת היכולות.
+    await expect(canInsertText(citationHost({ insert: false }))).resolves.toBe(false);
   });
 });
 

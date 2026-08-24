@@ -15,6 +15,10 @@ import type { SuperDoc } from 'superdoc';
 import { call, isPermissionDenied, hostErrorCode } from './otzaria-client';
 import { readDocSelection, type SelectionDocumentApi } from '../engine/doc-selection';
 import {
+  readDocCapabilities,
+  type CapabilitiesDocumentApi,
+} from '../engine/doc-capabilities';
+import {
   receiptFailureText,
   thrownText,
   type DocReceipt,
@@ -233,10 +237,12 @@ export function buildCitationText(selection: ReaderSelection | null | undefined)
 }
 
 /**
- * הצורה שנצרכת מ-`doc`: ההכנסה עצמה, והבחירה שקובעת לאן. מוגדרת כאן ולא
- * מיובאת מהמנוע — ההסבר המלא ב-engine/document-api.ts.
+ * הצורה שנצרכת מ-`doc`: ההכנסה עצמה, הבחירה שקובעת לאן, והיכולות שנשאלות
+ * לפניה. מוגדרת כאן ולא מיובאת מהמנוע — ההסבר המלא ב-engine/document-api.ts.
+ * `CapabilitiesDocumentApi` מורש ולא משוכפל: בלעדיו TypeScript דוחה את המסירה
+ * ל-`readDocCapabilities` כטיפוס חלש שאין לו שדה משותף.
  */
-interface CitationDocumentApi extends SelectionDocumentApi {
+interface CitationDocumentApi extends SelectionDocumentApi, CapabilitiesDocumentApi {
   insert?: (input: {
     value: string;
     type: 'text';
@@ -254,9 +260,25 @@ export type CitationTarget = SuperDoc | CitationHost | null | undefined;
 /** לאן הציטוט נכנס בפועל. הקורא בממשק אומר את זה למשתמש. */
 export type CitationPlacement = 'at-cursor' | 'document-end';
 
-/** האם יש למי להכניס ציטוט. נבדק בפקד, כדי שלא ייראה פעיל בלי מסמך. */
-export function canInsertText(host: CitationTarget): boolean {
-  return typeof (host as CitationHost | null | undefined)?.activeEditor?.doc?.insert === 'function';
+/**
+ * האם יש למי להכניס ציטוט. נבדק בפקד, כדי שלא ייראה פעיל בלי מסמך.
+ *
+ * שתי בדיקות ולא אחת, ולא בכפל: זמינות הפעולה נשאלת דרך מרחב השאלות המשותף
+ * (`canInsertText` ב-engine/doc-capabilities.ts), כדי שלא תהיה כאן תשובה שנייה
+ * לאותה שאלה — אבל **נוכחות** `doc.insert` נבדקת לפניה. מפת ה-`operations` של
+ * המנוע נבנית מקטלוג הפעולות, ולכן גרסה שהסירה את המימוש ועודה מכריזה על
+ * הפעולה בקטלוג הייתה מחזירה „זמין” לפקד שאין לו למה לקרוא. אותו לקח בדיוק
+ * כמו ב-engine/page-break.ts, ושם בדיקה תפסה את הסרתה.
+ *
+ * א-סינכרונית מפני ש-`capabilities.get()` א-סינכרוני, ולעולם אינה זורקת —
+ * נכשלת סגור, כי „אולי כן” הוא בדיוק הכפתור המת.
+ */
+export async function canInsertText(host: CitationTarget): Promise<boolean> {
+  const insert = (host as CitationHost | null | undefined)?.activeEditor?.doc?.insert;
+  if (typeof insert !== 'function') return false;
+
+  const report = await readDocCapabilities(host);
+  return report.can('canInsertText');
 }
 
 /**

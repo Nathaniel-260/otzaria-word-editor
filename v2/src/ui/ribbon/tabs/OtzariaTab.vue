@@ -71,7 +71,7 @@
  * הזמינות נקבעת כאן ולא ב-`App.vue`, מאותו טעם כמו ב-ReferencesTab: כפתור
  * שאינו יכול לעבוד צריך להיראות כך לפני הלחיצה, לא אחריה.
  */
-import { computed, inject, shallowRef } from 'vue';
+import { computed, inject, shallowRef, watch } from 'vue';
 import type { SuperDoc } from 'superdoc';
 import RibbonGroup from '../common/RibbonGroup.vue';
 import RibbonButton from '../common/RibbonButton.vue';
@@ -127,11 +127,28 @@ const canSearch = computed(() => sdkAvailable && superdoc.value !== null);
 
 /**
  * הציטוט נכנס למסמך דרך `doc.insert`, ולכן השאלה היא האם ה-Document API של
- * המסמך הפתוח חושף אותו — ולא האם יש מסמך. בדיקה ישירה ולא דרך
- * `doc.capabilities`: `insert` אינו פעולה במרחב השאלות של engine/doc-capabilities.ts,
- * והוא נמצא על הפאסדה עצמה.
+ * המסמך הפתוח חושף אותו ומדווח אותו כזמין — ולא האם יש מסמך. התשובה נשאלת
+ * במודול (`canInsertText`), ששואל את מרחב השאלות המשותף.
+ *
+ * `shallowRef` ולא `computed`, כי הקריאה למנוע א-סינכרונית. ראו ReferencesTab:
+ * `generation` הוא מה שמונע מתשובה של מסמך קודם לדרוס את התשובה של המסמך
+ * הנוכחי, ו-`false` בזמן ההמתנה הוא הכשל הסגור — כפתור שנראה זמין לפני
+ * שהתשובה חזרה הוא בדיוק הכפתור המת.
  */
-const canInsertCitation = computed(() => sdkAvailable && canInsertText(superdoc.value));
+const canInsertCitation = shallowRef(false);
+
+let generation = 0;
+
+watch(
+  superdoc,
+  async (host) => {
+    const mine = ++generation;
+    canInsertCitation.value = false;
+    const allowed = sdkAvailable && (await canInsertText(host));
+    if (mine === generation) canInsertCitation.value = allowed;
+  },
+  { immediate: true }
+);
 
 const citationTooltip = computed(() => {
   if (!sdkAvailable) return OUTSIDE_OTZARIA;

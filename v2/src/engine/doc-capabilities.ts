@@ -76,6 +76,9 @@ const CAPABILITY_SPECS = {
   // הפניות והוספה
   canInsertFootnote: { operation: 'footnotes.insert' },
   canSetPageBreakBefore: { operation: 'format.paragraph.setFlowOptions' },
+  // `insert` ולא `create.text`: הכנסת טקסט היא פעולת הליבה של הפאסדה
+  // (`memberPath: 'insert'` בקטלוג), אחותה של `delete`, ולא אחת מ-`create.*`.
+  canInsertText: { operation: 'insert' },
   canInsertImage: { operation: 'create.image' },
   canInsertLink: { operation: 'hyperlinks.insert' },
   canInsertSectionBreak: { operation: 'create.sectionBreak' },
