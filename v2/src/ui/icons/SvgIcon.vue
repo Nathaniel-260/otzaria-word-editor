@@ -1,6 +1,11 @@
 <template>
+  <!--
+    ה-span מוסתר מקוראי מסך: האייקון דקורטיבי בלבד, והשם הנגיש של הפקד מגיע
+    מה-`title`/`aria-label` של הכפתור שעוטף אותו. בלי זה הכפתור נקרא פעמיים.
+  -->
   <span
     class="svg-icon"
+    aria-hidden="true"
     :style="{ width: `${size}px`, height: `${size}px` }"
     v-html="svgContent"
   />
@@ -20,6 +25,12 @@ const props = withDefaults(
   }
 );
 
+/**
+ * `v-html` כאן אינו נתיב הזרקה: הערכים הם מחרוזות SVG קבועות מ-icons.ts,
+ * שנקבעות בזמן קומפילציה ואינן נגזרות מקלט משתמש או מתוכן המסמך. שם שאינו
+ * מוכר נותן מחרוזת ריקה ולא נזרק — tests/unit/icons.test.ts סורק את קובצי
+ * ה-Vue ומאמת שכל שם שבשימוש קיים, כדי שכפתור לא יישאר בלי אייקון בשקט.
+ */
 const svgContent = computed(() => ICONS[props.name] || '');
 </script>
 

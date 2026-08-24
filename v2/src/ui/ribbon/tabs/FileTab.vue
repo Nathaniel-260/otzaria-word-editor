@@ -5,14 +5,14 @@
       :launcher="false"
     >
       <RibbonButton
-        icon="word"
+        icon="newDoc"
         label="מסמך חדש"
         variant="large"
         tooltip="יצירת מסמך Word ריק חדש"
         @click="$emit('new-doc')"
       />
       <RibbonButton
-        icon="search"
+        icon="folder"
         label="פתח קובץ"
         variant="large"
         tooltip="פתיחת מסמך Word (.docx) מהמחשב"
@@ -47,7 +47,7 @@
       :launcher="false"
     >
       <RibbonButton
-        icon="saveAs"
+        icon="export"
         label="ייצוא ל-Word"
         variant="large"
         tooltip="הורדת קובץ .docx תואם Microsoft Word"
