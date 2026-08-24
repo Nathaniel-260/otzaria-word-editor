@@ -87,6 +87,8 @@ import { createCommandAdapter, type CommandAdapter } from './engine/command-adap
 import { createEditorSwap, type EditorSwap } from './sessions/editor-swap';
 import { createSaveCoordinator, type SaveCoordinator, type SaveSnapshot } from './sessions/save-coordinator';
 import { createEditor } from './engine/create-editor';
+import { applyHebrewDocumentDefaults } from './engine/document-defaults';
+import type { SuperDoc } from 'superdoc';
 import { exportDocx, docxFileName } from './engine/export';
 import { downloadBlob } from './host/download';
 import {
@@ -177,6 +179,27 @@ function initSaveCoordinator(): SaveCoordinator {
   });
 }
 
+/**
+ * כיווניות עברית למסמך חדש. ההחלה עצמה ב-engine/document-defaults.ts; כאן רק
+ * הדיווח — כשל שקט הוא בדיוק מה שהחזיר מסמך חדש ל-LTR בלי שאף אחד ידע.
+ *
+ * `data-document-direction` על שורש ה-HTML הוא מה שאפשר לראות מבחוץ:
+ * שער `check:rtl` נשען עליו, ובלוג של אוצריא הוא מפריד בין „לא הוחל” ל„הוחל
+ * ולא נראה”.
+ */
+async function applyNewDocumentDirection(superdoc: SuperDoc): Promise<void> {
+  const report = await applyHebrewDocumentDefaults(superdoc);
+
+  if (report.failures.length === 0) {
+    document.documentElement.dataset.documentDirection = 'rtl';
+    return;
+  }
+
+  delete document.documentElement.dataset.documentDirection;
+  console.warn('[otzaria-word] כיווניות המסמך החדש לא הוחלה במלואה:', report.failures.join('; '));
+  setStatus(`המסמך נפתח, אך כיווניות עברית לא הוחלה: ${report.failures[0]}`, true);
+}
+
 async function openDocument(file?: UserFile): Promise<boolean> {
   if (!swap) return false;
   isOpening.value = true;
@@ -215,9 +238,7 @@ async function openDocument(file?: UserFile): Promise<boolean> {
     });
   } else {
     void forgetLastDocument();
-    // מסמך חדש — ברירת מחדל: כיווניות עברית מימין לשמאל ויישור לימין
-    void adapter.run('direction-rtl');
-    void adapter.run('text-align', { alignment: 'right' });
+    await applyNewDocumentDirection(editor.superdoc);
   }
 
   // האזנה למצב Undo/Redo

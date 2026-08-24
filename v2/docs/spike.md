@@ -198,6 +198,26 @@ Windows (§5). גודל ה־`.otzplugin` **כן** נמדד (4.32MB, ראו הט�
   לאתחל את התוסף”, מילה במילה כמו אצל המשתמש; בלי latch ובלי אירוע, עם RPC חי →
   עלה בשחזור (475ms). מונע ב־CDP ולא ב־`--dump-dom`: ברגע שהמנוע עולה אירוע
   ה־load אינו מגיע והדפדפן נתלה, ו־`--virtual-time-budget` נתקע מול ה־workers.
+  **עדכון 24.8.2026:** המעטפת הנוכחית נכשלת פתוח — היא מרכיבה את Vue ופותחת
+  מסמך ריק בלי להמתין ל־boot, וכשל משאיר רק את ערכת הנושא של ברירת המחדל — ולכן
+  הסימן הקודם („כפתור הפתיחה נפתח”) התחיל להתקיים גם בבקרה, כלומר השער הפסיק
+  למדוד. מעכשיו נמדדת התוצאה עצמה: `data-boot` על שורש ה־HTML
+  (`event` / `recovered` / `failed`, ראו src/main.ts), והבקרה חייבת להגיע
+  ל־`failed`. זו גם הבחנה שהסימן הקודם לא ידע לעשות — תפיסה ב־latch מול שחזור
+  ב־RPC.
+- **מסמך חדש נפתח מימין לשמאל (24.8.2026).** הניסיון הראשון עשה זאת בפקודות
+  ה־Ribbon (`direction-rtl`, `text-align`) מיד אחרי פתיחת המסמך; נמדד ב־CDP על
+  ה־dist שהן מחזירות `{"ok":false,"reason":"selection-required"}` — פקודות פסקה
+  מנותבות לפי הבחירה, ולמסמך שנפתח כרגע אין עוד סמן — והכשל נבלע ב־`void`.
+  במקום זאת שלוש שכבות דרך ה־Document API הציבורי
+  (`superdoc.activeEditor.doc`), שאינו דורש בחירה: `styles.apply` על
+  `docDefaults` בערוץ הפסקה (`w:pPrDefault/w:bidi` — זו השכבה שקובעת לכל פסקה
+  שתיווצר), `sections.setSectionDirection` (`w:sectPr/w:bidi`) ו־
+  `format.paragraph.setDirection` על הפסקה שהמסמך נפתח איתה. נמדד אחרי ההחלה:
+  `sectionDirection: "rtl"`, `props: {bidi: true}`. `alignmentPolicy: 'preserve'`
+  ולא `'matchDirection'` — האחרון נמדד כותב `alignment: 'left'` בפסקה RTL, יישור
+  פיזי לשמאל. השער: `npm run check:rtl`
+  ([../scripts/rtl-check.mjs](../scripts/rtl-check.mjs)).
 - **הגופן הארוז נטען מ־`file://`, וההתאמה לשם „Segoe UI” עובדת.** נארז
   **Selawik** — התחליף המטרי ש־Microsoft שחררה ל־Segoe UI תחת OFL 1.1
   (`fsType = 0`). `@font-face` מוזרק בזמן ריצה (`src/styles/fonts.ts`) ולא דרך

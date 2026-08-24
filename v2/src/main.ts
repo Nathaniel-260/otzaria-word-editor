@@ -36,15 +36,25 @@ async function main(): Promise<void> {
   const app = createApp(App);
   app.mount('#app');
 
+  // תוצאת האתחול, על שורש ה-HTML: 'event' — האירוע נתפס ב-latch; 'recovered' —
+  // האירוע אבד והמצב שוחזר ב-RPC; 'failed' — שניהם כשלו, והממשק עולה עם ערכת
+  // הנושא של ברירת המחדל.
+  //
+  // זה לא קוסמטי ולא רק אבחון: זהו הסימן היחיד מבחוץ למה שקרה באתחול. הממשק
+  // עולה בכל שלושת המצבים (כשל אתחול אינו מקפיא אותו יותר), ולכן „הכפתור
+  // נפתח” הפסיק להיות עדות — ושער `check:boot` נשען מעכשיו על התכונה הזאת.
+  const root = document.documentElement;
   try {
     const info = await bootPromise;
     applyTheme(info.theme);
     onThemeChanged(applyTheme);
+    root.dataset.boot = info.source === 'recovered' ? 'recovered' : 'event';
 
     if (info.source === 'recovered') {
       console.warn('[otzaria-word] plugin.boot אבד; מצב האתחול שוחזר ב-RPC');
     }
   } catch (error) {
+    root.dataset.boot = 'failed';
     console.error('[otzaria-word] כשל באתחול ערכת הנושא של אוצריא:', error);
   }
 }

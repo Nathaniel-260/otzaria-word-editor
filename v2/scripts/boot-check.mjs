@@ -8,10 +8,19 @@
  *
  * שלושה מצבים, כולם על ה-dist האמיתי מ-file://, עם Host-דמה שמוזרק לפני app.js:
  *
- *   1. ה-latch + boot מוקדם            → התוסף עולה.
- *   2. בלי latch + boot מוקדם + RPC מת → הכשל המקורי, מילה במילה. הבקרה: בלעדיה
- *                                        אין הוכחה שה-latch הוא מה שמציל.
- *   3. בלי latch + בלי boot + RPC חי    → התוסף עולה בשחזור RPC.
+ *   1. ה-latch + boot מוקדם            → האירוע נתפס  (`data-boot="event"`).
+ *   2. בלי latch + boot מוקדם + RPC מת → האתחול נכשל  (`data-boot="failed"`).
+ *                                        הבקרה: בלעדיה אין הוכחה שה-latch הוא
+ *                                        מה שמציל.
+ *   3. בלי latch + בלי boot + RPC חי    → שחזור ב-RPC  (`data-boot="recovered"`).
+ *
+ * מה מסמן את התוצאה, ולמה זה השתנה: הגרסה הראשונה של השער בדקה אם הכפתור
+ * „פתיחת קובץ Word” נפתח, מפני שאז כשל אתחול הקפיא את הממשק. המעטפת הנוכחית
+ * נכשלת פתוח — היא מרכיבה את Vue ופותחת מסמך ריק בלי להמתין ל-boot, וכשל
+ * משאיר רק את ערכת הנושא של ברירת המחדל — ולכן הכפתור נפתח **בכל שלושת
+ * המצבים**, כולל בבקרה. שער שהבקרה שלו עוברת אינו מודד כלום. מעכשיו נמדדת
+ * התוצאה עצמה, `data-boot` על שורש ה-HTML (src/main.ts), שגם מפרידה בין תפיסה
+ * ב-latch לשחזור ב-RPC — הבחנה שהסימן הקודם לא ידע לעשות.
  *
  * מונע דרך CDP ולא ב-`--dump-dom`: ברגע שהמנוע עולה, אירוע ה-load אינו מגיע
  * (נמדד — הדפדפן נתלה), ו-`--virtual-time-budget` נתקע מול ה-workers.
@@ -87,46 +96,42 @@ const CASES = [
   {
     name: 'ה-latch + boot מוקדם',
     body: withLatch(stub({ firesBoot: true, answersRpc: false })),
-    expect: 'booted',
+    expect: 'event',
   },
   {
     name: 'בקרה: בלי latch, RPC מת',
     body: withoutLatch(stub({ firesBoot: true, answersRpc: false })),
-    expect: 'timeout',
+    expect: 'failed',
   },
   {
     name: 'שחזור: בלי latch ובלי boot, RPC חי',
     body: withoutLatch(stub({ firesBoot: false, answersRpc: true })),
-    expect: 'booted',
+    expect: 'recovered',
   },
 ];
 
 /**
- * מצב התוסף.
- *
- * הסימן ל„עלה” הוא כפתור „פתיחת קובץ Word” שנפתח — המעטפת פותחת אותו בשורה
- * שאחרי ה-boot בדיוק, והוא אינו תלוי בנוסח ההודעות. שורת המצב נקראת רק לתיעוד:
- * היא ממשיכה להתחלף (מסמך שנטען, „טרם נשמר”), ולכן היא סימן גרוע — נמדד, גרסה
- * ראשונה של השער נכשלה בדיוק על זה.
+ * מצב התוסף. `boot` הוא התוצאה שהמעטפת מצהירה עליה; שורת המצב נקראת רק
+ * לתיעוד — היא ממשיכה להתחלף (מסמך שנטען, „טרם נשמר”) ולכן היא סימן גרוע.
  */
 async function probe(cdp) {
   return (
     (await cdp.evaluate(`(function () {
-      var open = document.getElementById('open');
+      // הדף עשוי להיות בעיצומה של הניווט: אין עוד documentElement, ולא
+      // כדאי להכשיל את השער על תזמון.
+      var root = document.documentElement;
       var status = document.getElementById('status');
       return {
-        booted: !!open && open.disabled === false,
+        boot: root ? root.getAttribute('data-boot') : null,
         status: status ? status.textContent : null
       };
-    })()`)) ?? { booted: false, status: null }
+    })()`)) ?? { boot: null, status: null }
   );
 }
 
-function classify({ booted, status }) {
-  if (booted) return 'booted';
-  if (status?.includes('לא סיימה לאתחל')) return 'timeout';
-  if (status?.includes('ממתין')) return 'waiting';
-  return 'unknown';
+/** `pending` הוא מצב ביניים: ה-boot טרם הוכרע, וממתינים עד ה-deadline. */
+function classify({ boot }) {
+  return boot ?? 'pending';
 }
 
 let failures = 0;
@@ -135,7 +140,7 @@ for (const [index, testCase] of CASES.entries()) {
   const path = join(DIST, 'boot-check-tmp.html');
   writeFileSync(path, testCase.body);
 
-  let outcome = 'unknown';
+  let outcome = 'pending';
   let status = null;
   let page;
   try {
@@ -145,8 +150,7 @@ for (const [index, testCase] of CASES.entries()) {
       const reading = await probe(page.cdp);
       status = reading.status;
       outcome = classify(reading);
-      // 'waiting' ו-'unknown' הם מצבי ביניים; ממתינים להכרעה.
-      if (outcome === 'booted' || outcome === 'timeout') break;
+      if (outcome !== 'pending') break;
       await sleep(200);
     }
   } catch (error) {
@@ -165,9 +169,10 @@ for (const [index, testCase] of CASES.entries()) {
 
 if (failures) {
   console.error(
-    'שער האתחול נכשל. אם הבקרה עלתה בכל זאת — הבדיקה אינה מודדת כלום ויש לתקן ' +
-      'אותה; אם מצב 1 או 3 לא עלה — התוסף יחזור להיתקע אצל המשתמש.',
+    'שער האתחול נכשל. אם הבקרה הצליחה לאתחל בכל זאת — הבדיקה אינה מודדת כלום ' +
+      'ויש לתקן אותה; אם מצב 1 או 3 לא אותחל — התוסף יאבד את ערכת הנושא של ' +
+      'אוצריא, ובגרסה שתחזיר המתנה ל-boot הוא ייתקע כמו קודם.',
   );
   process.exit(1);
 }
-console.log('שער האתחול עבר: boot מוקדם נתפס ב-latch, ובהיעדרו השחזור ב-RPC מרים את התוסף.');
+console.log('שער האתחול עבר: boot מוקדם נתפס ב-latch, ובהיעדרו השחזור ב-RPC מאתחל את התוסף.');

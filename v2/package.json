@@ -13,7 +13,8 @@
     "check:dist": "node scripts/check-dist.mjs",
     "check:boot": "node scripts/boot-check.mjs",
     "check:fonts": "node scripts/font-check.mjs",
-    "verify": "npm run typecheck && npm run test && npm run build && npm run check:dist && npm run check:boot && npm run check:fonts",
+    "check:rtl": "node scripts/rtl-check.mjs",
+    "verify": "npm run typecheck && npm run test && npm run build && npm run check:dist && npm run check:boot && npm run check:fonts && npm run check:rtl",
     "preview": "vite preview"
   },
   "dependencies": {
