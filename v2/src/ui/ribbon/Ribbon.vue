@@ -2,25 +2,44 @@
   <div class="word-ribbon-container">
     <!-- סרגל הלשוניות -->
     <div class="word-tab-bar">
-      <button
-        v-for="tab in TABS"
-        :key="tab.id"
-        type="button"
-        class="word-tab-btn"
-        :class="[
-          { active: activeTabId === tab.id },
-          tab.className || ''
-        ]"
-        @click="selectTab(tab.id)"
-        @dblclick="toggleCollapsed"
+      <!-- ה-tablist עוטף את הלשוניות בלבד: הצאצאים של role="tablist" חייבים
+           להיות role="tab", וכפתור הכיווץ אינו לשונית -->
+      <div
+        class="word-tab-strip"
+        role="tablist"
+        aria-label="לשוניות הרצועה"
+        aria-orientation="horizontal"
+        @keydown="onTabKeydown"
       >
-        {{ tab.label }}
-      </button>
+        <button
+          v-for="(tab, index) in TABS"
+          :id="ribbonTabId(tab.id)"
+          :key="tab.id"
+          :ref="(el) => registerTabRef(el, index)"
+          type="button"
+          role="tab"
+          class="word-tab-btn"
+          :class="[
+            { active: activeTabId === tab.id },
+            tab.className || ''
+          ]"
+          :aria-selected="activeTabId === tab.id ? 'true' : 'false'"
+          :aria-controls="RIBBON_PANEL_ID"
+          :tabindex="activeTabId === tab.id ? 0 : -1"
+          @click="selectTab(tab.id)"
+          @dblclick="toggleCollapsed"
+        >
+          {{ tab.label }}
+        </button>
+      </div>
 
       <button
         type="button"
         class="word-ribbon-toggle"
         :title="isCollapsed ? 'הצג את הרצועה' : 'כווץ את הרצועה'"
+        :aria-label="isCollapsed ? 'הצג את הרצועה' : 'כווץ את הרצועה'"
+        :aria-expanded="!isCollapsed"
+        :aria-controls="RIBBON_PANEL_ID"
         @click="toggleCollapsed"
       >
         <SvgIcon
@@ -30,10 +49,14 @@
       </button>
     </div>
 
-    <!-- תוכן הלשונית הפעילה בלבד (Mount on active) -->
+    <!-- תוכן הלשונית הפעילה בלבד (Mount on active). פאנל אחד שמתחלף ולא שמונה
+         פאנלים, ולכן aria-labelledby מצביע על הלשונית הפעילה כרגע -->
     <div
       v-show="!isCollapsed"
+      :id="RIBBON_PANEL_ID"
       class="word-ribbon-body"
+      role="tabpanel"
+      :aria-labelledby="ribbonTabId(activeTabId)"
     >
       <FileTab
         v-if="activeTabId === 'file'"
@@ -69,7 +92,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref, type ComponentPublicInstance } from 'vue';
+import { RIBBON_PANEL_ID, nextTabIndex, ribbonTabId } from './aria';
 import SvgIcon from '../icons/SvgIcon.vue';
 import HomeTab from './tabs/HomeTab.vue';
 import FileTab from './tabs/FileTab.vue';
@@ -116,11 +140,32 @@ defineEmits<{
   (e: 'open-library'): void;
 }>();
 
+/** רק הלשונית הפעילה נמצאת ב-tab order, ולכן החצים צריכים להזיז מיקוד בעצמם. */
+const tabButtons = ref<Array<HTMLButtonElement | null>>([]);
+
+function registerTabRef(el: Element | ComponentPublicInstance | null, index: number): void {
+  tabButtons.value[index] = el instanceof HTMLButtonElement ? el : null;
+}
+
 function selectTab(id: string): void {
   activeTabId.value = id;
   if (isCollapsed.value) {
     isCollapsed.value = false;
   }
+}
+
+/** הפעלה אוטומטית: החץ מעביר מיקוד **ומחליף** לשונית, כמו ברצועה של Word. */
+function onTabKeydown(event: KeyboardEvent): void {
+  const current = TABS.findIndex((tab) => tab.id === activeTabId.value);
+  // 'rtl' קבוע: המעטפת של התוסף היא dir="rtl" (index.html), והפונקציה תומכת
+  // בשני הכיוונים כדי שאפשר יהיה למדוד את שניהם.
+  const next = nextTabIndex(event.key, current, TABS.length, 'rtl');
+  if (next === null) return;
+
+  // בלי זה החצים גם גוללים את סרגל הלשוניות שגלילתו auto.
+  event.preventDefault();
+  selectTab(TABS[next].id);
+  tabButtons.value[next]?.focus();
 }
 
 function toggleCollapsed(): void {

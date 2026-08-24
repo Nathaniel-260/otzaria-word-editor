@@ -8,7 +8,7 @@
     ]"
     :disabled="disabled"
     :title="computedTitle"
-    :aria-pressed="active ? 'true' : 'false'"
+    :aria-pressed="ariaPressed"
     @pointerdown.prevent
     @click="$emit('click', $event)"
   >
@@ -26,7 +26,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, getCurrentInstance } from 'vue';
+import { isToggleButton } from '../aria';
 import SvgIcon from '../../icons/SvgIcon.vue';
 
 const props = withDefaults(
@@ -49,6 +50,16 @@ const props = withDefaults(
 defineEmits<{
   (e: 'click', event: MouseEvent): void;
 }>();
+
+// נמדד פעם אחת ב-setup, לא בכל render: אתר קריאה אינו מוסיף או מסיר את הקישור
+// ל-active בזמן ריצה. ההסבר למה vnode.props ולא props — ב-isToggleButton.
+const isToggle = isToggleButton(getCurrentInstance()?.vnode.props);
+
+/** undefined מסיר את התכונה: כפתור פעולה אינו מתג, ואינו מדווח מצוב. */
+const ariaPressed = computed<'true' | 'false' | undefined>(() => {
+  if (!isToggle) return undefined;
+  return props.active ? 'true' : 'false';
+});
 
 const iconSize = computed(() => {
   if (props.variant === 'large') return 32;

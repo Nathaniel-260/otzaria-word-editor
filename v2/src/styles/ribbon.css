@@ -18,12 +18,21 @@
   background: var(--color-surface-container-high);
   height: var(--tabbar-height);
   border-block-end: 1px solid var(--color-outline-variant);
+}
+
+/* ה-tablist עצמו (ראו Ribbon.vue). הגלילה יושבת כאן ולא על הסרגל, כדי שכפתור
+   הכיווץ יישאר נראה גם כשהלשוניות נגללות. */
+.word-tab-strip {
+  display: flex;
+  align-self: stretch;
+  align-items: flex-end;
   gap: 2px;
+  min-width: 0;
   overflow-x: auto;
   scrollbar-width: none;
 }
 
-.word-tab-bar::-webkit-scrollbar {
+.word-tab-strip::-webkit-scrollbar {
   display: none;
 }
 
@@ -251,6 +260,17 @@
   height: 24px;
   padding: 0;
   border-radius: var(--radius-xs);
+}
+
+/* @pointerdown.prevent על פקדי הרצועה שומר את הבחירה בעורך, ובמחיר הזה הכפתור
+   גם אינו מקבל מיקוד בלחיצה — כלומר המקלדת היא הדרך היחידה למקד אותו, וטבעת
+   המיקוד חייבת להישאר נראית. offset שלילי ולא חיובי: לרצועה יש overflow משלה,
+   וטבעת מחוץ לגבול הכפתור נחתכת בה. */
+.word-btn:focus-visible,
+.word-tab-btn:focus-visible,
+.word-ribbon-toggle:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
 }
 
 /* מפריד פנימי עדין */
