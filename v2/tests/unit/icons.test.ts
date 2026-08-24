@@ -372,13 +372,13 @@ const MINOR_MIN = 0.5;
  * הדומיננטית, בטווח רחב יותר — כדי שאייקון שהתכווץ לכתם לא יעבור בשקט.
  *
  * ארבעת ה-chevron-ים הם 60%x33%, ו-`replace` (`arrow_swap`, שני חצים) הוא
- * 60%x69.75% — בכולם גם המידה הדומיננטית מתחת ל-70%, כי חץ אינו ממלא את הגריד.
- * `link` (81%x40%) ו-`ruler` (40%x80%) הם אלכסונים דקים — שרשרת וסרגל — ורק
- * המידה הקטנה שלהם צריכה החרגה.
+ * 60%x69.75% — בכולם גם המידה הדומיננטית מתחת ל-70%, כי חץ אינו ממלא את הגריד
+ * באף אחד מהצירים. מי שרק המידה הקטנה שלו נופלת שייך ל-MINOR_EXEMPT ולא לכאן.
  *
  * הרשימה סגורה במכוון: כל תוספת אליה היא החלטה עיצובית שצריכה להיות מוסברת
  * כאן, ולא דרך לעקוף כשל בבדיקה. הבדיקה „כל שם ברשימות ההחרגה באמת זקוק
- * להחרגה” אוכפת גם את הכיוון ההפוך.
+ * להחרגה” אוכפת גם את הכיוון ההפוך — אבל היא בודקת כל רשימה מול מה שהרשימה
+ * מרפה, ולכן שם שיושב ברשימה הרחבה מדי אינו נתפס בה. זו הסיבה להפרדה.
  */
 const FLAT_ICONS = new Set([
   'chevronDown',
@@ -386,21 +386,25 @@ const FLAT_ICONS = new Set([
   'chevronLeft',
   'chevronRight',
   'replace',
-  'link',
-  'ruler',
 ]);
 const FLAT_DOMINANT_MIN = 0.55;
 
 /**
- * אייקוני גליף: הצורה שלהם היא אות, ורוחבה נקבע בטיפוגרפיה ולא בגריד. `bold`
- * הוא ה-B של Fluent, ויוצא 47.5% רוחב מול מינימום 50% — למתוח אותו ל-50%
- * פירושו לעוות את האות. המידה הדומיננטית שלו כן נבדקת, בטווח המלא.
+ * החרגה של המידה הקטנה **בלבד**: הצורה צרה בציר אחד מסיבה שאינה תלויה בגריד,
+ * אבל בציר השני היא ממלאת אותו כרגיל — ולכן המידה הדומיננטית שלה נבדקת בטווח
+ * המלא, 70%–85%, בלי הנחה.
  *
- * הרשימה סגורה במכוון, כמו FLAT_ICONS. `italic` (65%) ו-`underline` (50%)
- * עוברים בלעדיה, ולכן הם אינם כאן — ההחרגה מכסה את מה שנמדד ולא את מה
- * שאולי יימדד.
+ * - `bold` (47.5%x70%) הוא ה-B של Fluent. רוחב האות נקבע בטיפוגרפיה, ולמתוח
+ *   אותו ל-50% פירושו לעוות אותה. `italic` (65%) ו-`underline` (50%) עוברים
+ *   בלעדיה, ולכן אינם כאן.
+ * - `link` (81%x40%) ו-`ruler` (40%x80%) הם אלכסונים דקים — שרשרת וסרגל —
+ *   שהמידה הקטנה שלהם 40% מעצם הצורה.
+ *
+ * `link` ו-`ruler` היו ב-FLAT_ICONS, וזה הוריד להם גם את רצפת המידה
+ * הדומיננטית מ-70% ל-55% — הקלה שאף אחד מהם לא ביקש ולא צריך (81% ו-80%).
+ * הרשימה סגורה במכוון, כמו FLAT_ICONS.
  */
-const GLYPH_ICONS = new Set(['bold']);
+const MINOR_EXEMPT = new Set(['bold', 'link', 'ruler']);
 
 describe('גריד האייקונים', () => {
   it('הספרייה אינה ריקה, וכל שם מפנה ל-SVG', () => {
@@ -529,12 +533,12 @@ describe('משקל אופטי', () => {
       const dominant = Math.max(w, h);
       const minor = Math.min(w, h);
       const flat = FLAT_ICONS.has(name);
-      const glyph = GLYPH_ICONS.has(name);
+      const minorExempt = MINOR_EXEMPT.has(name);
       const min = flat ? FLAT_DOMINANT_MIN : DOMINANT_MIN;
       const detail = `${name}: ${(w * 100).toFixed(0)}%x${(h * 100).toFixed(0)}%`;
       if (dominant < min - 0.001 || dominant > DOMINANT_MAX + 0.001) {
         bad.push(`${detail} — מידה דומיננטית ${(dominant * 100).toFixed(0)}% מחוץ לטווח`);
-      } else if (!flat && !glyph && minor < MINOR_MIN - 0.001) {
+      } else if (!flat && !minorExempt && minor < MINOR_MIN - 0.001) {
         bad.push(`${detail} — מידה קטנה ${(minor * 100).toFixed(0)}% מתחת למינימום`);
       }
     }
@@ -543,7 +547,7 @@ describe('משקל אופטי', () => {
 
   it('רשימות ההחרגה אינן מכילות שמות שאינם קיימים', () => {
     expect([...FLAT_ICONS].filter((n) => !(n in ICONS))).toEqual([]);
-    expect([...GLYPH_ICONS].filter((n) => !(n in ICONS))).toEqual([]);
+    expect([...MINOR_EXEMPT].filter((n) => !(n in ICONS))).toEqual([]);
   });
 
   it('כל שם ברשימות ההחרגה באמת זקוק להחרגה', () => {
@@ -563,8 +567,8 @@ describe('משקל אופטי', () => {
         needless.push(`${name} ב-FLAT_ICONS`);
       }
     }
-    for (const name of GLYPH_ICONS) {
-      if (ratio(name).minor >= MINOR_MIN - 0.001) needless.push(`${name} ב-GLYPH_ICONS`);
+    for (const name of MINOR_EXEMPT) {
+      if (ratio(name).minor >= MINOR_MIN - 0.001) needless.push(`${name} ב-MINOR_EXEMPT`);
     }
     expect(needless).toEqual([]);
   });
