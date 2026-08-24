@@ -8,31 +8,16 @@
     </div>
     <div class="word-group-footer">
       <span class="word-group-title">{{ title }}</span>
-      <!--
-      <button
-        v-if="launcher"
-        type="button"
-        class="word-group-launcher"
-        :title="`${title} - אפשרויות מתקדמות`"
-        @pointerdown.prevent
-        @click="$emit('launch')"
-      >
-        <SvgIcon
-          name="launcher"
-          :size="10"
-        />
-      </button>
-      -->
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-// import SvgIcon from '../../icons/SvgIcon.vue';
-
 withDefaults(
   defineProps<{
     title: string;
+    /* מנוטרל בכוונה: כפתור ה-launcher הוסר, וה-prop נשאר רק כדי שאתרי הקריאה
+       בלשוניות שעוד מעבירים :launcher ימשיכו לעבור typecheck. */
     launcher?: boolean;
     columnFlow?: boolean;
   }>(),
@@ -41,8 +26,4 @@ withDefaults(
     columnFlow: false,
   }
 );
-
-defineEmits<{
-  (e: 'launch'): void;
-}>();
 </script>

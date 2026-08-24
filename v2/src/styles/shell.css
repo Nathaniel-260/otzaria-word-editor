@@ -45,21 +45,6 @@ body {
   border-block-end: 1px solid var(--color-outline);
 }
 
-.topbar__title {
-  font-size: 16px;
-  font-weight: 600;
-}
-
-.toolbar {
-  display: flex;
-  flex-shrink: 0;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
-  padding: 8px 16px;
-  border-block-end: 1px solid var(--color-outline);
-}
-
 button {
   /* לא inherit: ולידציית העיצוב דורשת ש-font-family יהיה var(--font-*) ואין לה
      חריג למילות מפתח. */

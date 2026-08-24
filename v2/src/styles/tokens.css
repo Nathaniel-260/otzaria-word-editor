@@ -33,13 +33,10 @@
      במצב כהה, ולכן הוא נשאר קריא בשני המצבים. */
   --color-primary-filled-hover: #1656a3;
 
-  /* טוקנים ייעודיים לממשק — נגזרים ישירות מצבע הנושא של אוצריא (--color-primary) */
+  /* טוקנים ייעודיים לממשק — נגזרים ישירות מצבע הנושא של אוצריא (--color-primary).
+     כאן רק טוקנים שיש להם צרכן: tests/unit/css-hygiene.test.ts מודד את זה. */
   --word-blue: var(--color-primary);
   --word-blue-dark: var(--color-primary-filled-hover);
-  --word-blue-light: var(--color-secondary);
-  --word-tab-active-border: var(--color-primary);
-  --word-ribbon-bg: var(--color-surface);
-  --word-ribbon-border: var(--color-outline-variant);
   /* שלושת מצבי הפקד ברצועה, כל אחד בדרגה משלו */
   --word-btn-hover: var(--color-primary-hover);
   --word-btn-active: var(--color-primary-subtle);
@@ -60,7 +57,6 @@
   --radius-xs: 3px;
   --radius-sm: 4px;
   --radius-md: 8px;
-  --radius-lg: 12px;
   --radius-pill: 999px;
 
   /* גבהים */
