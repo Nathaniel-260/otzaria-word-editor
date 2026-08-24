@@ -65,15 +65,19 @@
   z-index: 2;
 }
 
+/* פס ההדגשה של הלשונית הפעילה — **מתחת** ללשונית, כמו ב-Word, ולא מעליה.
+   `bottom: 0` נופל בדיוק על קו ההפרדה של סרגל הלשוניות: ל-`.word-tab-btn` יש
+   `margin-bottom: -1px`, ולכן הקצה התחתון של הלשונית יושב על ה-border של
+   `.word-tab-bar`. הפס מחליף שם את הקו האפור בקו הצבע. */
 .word-tab-btn.active::after {
   content: '';
   position: absolute;
-  top: 0;
+  bottom: 0;
   left: 0;
   right: 0;
   height: 2px;
   background: var(--color-primary);
-  border-radius: 2px 2px 0 0;
+  border-radius: 0 0 2px 2px;
 }
 
 .word-tab-btn.otzaria-tab {
