@@ -1,0 +1,276 @@
+/**
+ * גלריית הסגנונות ובורר הצבעים — שני הפקדים המורכבים ביותר ברצועה.
+ *
+ * שניהם מקבלים את מה שהם מציגים מהמנוע: הגלריה את הקטלוג של המסמך הפתוח
+ * (`STYLE_GALLERY`), והבורר את הצבע שהמנוע מדווח על הבחירה. הרשימה הקשיחה
+ * שהייתה בגלריה לא ידעה מה יש במסמך, ו„ללא צבע” שלח מחרוזת ריקה — שהמנוע דוחה
+ * סגור, כלומר כפתור שנראה כאילו הוא מנקה ואינו מנקה.
+ *
+ * מה שנמדד כאן הוא מה שדורש רינדור: הכרטיסים שנבנו מהקטלוג, הכרטיס המסומן
+ * (כולל בחירה מעורבת, שבה **אין** כרטיס מסומן), כפתורי הגלילה שמופיעים רק
+ * כשיש לאן לגלול, וה-payload שיוצא מהשבב.
+ */
+import { describe, expect, it, vi } from 'vitest';
+import ColorPickerPopover from '../../src/ui/ribbon/common/ColorPickerPopover.vue';
+import StyleGallery from '../../src/ui/ribbon/common/StyleGallery.vue';
+import { GALLERY_SCROLL_STEP_PX, type StyleGalleryState } from '../../src/engine/style-gallery';
+import { autoUnmount, clickOutside, mountUi, settle } from './harness';
+
+autoUnmount();
+
+/** מצב גלריה כפי שהמנוע מדווח אותו למסמך פתוח. */
+function documentGallery(
+  activeId: string | null,
+  ids: readonly string[] = ['Normal', 'Heading1', 'MyStyle'],
+): StyleGalleryState {
+  return {
+    items: ids.map((id) => ({
+      id,
+      label: id === 'MyStyle' ? 'סגנון של המסמך' : id,
+      previewText: 'AaBbCc',
+      previewStyle: {},
+    })),
+    activeId,
+    fromDocument: true,
+  };
+}
+
+/**
+ * jsdom אינו מודד פריסה: `scrollWidth` ו-`clientWidth` הם 0, ולכן גלריה נראית
+ * שם תמיד כמי שנכנסת כולה. המידות נמסרות במפורש כדי למדוד את ההחלטה עצמה.
+ */
+function fakeMetrics(
+  element: HTMLElement,
+  metrics: { scrollLeft: number; scrollWidth: number; clientWidth: number },
+): void {
+  for (const [key, value] of Object.entries(metrics)) {
+    Object.defineProperty(element, key, { value, configurable: true });
+  }
+}
+
+describe('StyleGallery', () => {
+  it('בלי גלריה מהמנוע — הרשימה הבנויה, בתוויות עבריות', async () => {
+    // רשת הביטחון: רצועה שעולה לפני שנפתח מסמך צריכה גלריה עובדת.
+    const harness = mountUi(StyleGallery);
+    await settle();
+
+    expect(harness.wrapper.findAll('.style-card').map((card) => card.attributes('title'))).toEqual([
+      'רגיל',
+      'ללא מרווח',
+      'כותרת 1',
+      'כותרת 2',
+      'כותרת משנה',
+      'ציטוט',
+    ]);
+  });
+
+  it('הכרטיסים מגיעים מהקטלוג של המסמך, כולל סגנון שאינו מובנה', async () => {
+    const harness = mountUi(StyleGallery, { styleGallery: documentGallery('Heading1') });
+    await settle();
+
+    const cards = harness.wrapper.findAll('.style-card');
+    expect(cards.map((card) => card.attributes('title'))).toEqual([
+      'Normal',
+      'Heading1',
+      'סגנון של המסמך',
+    ]);
+    expect(cards.map((card) => card.attributes('aria-pressed'))).toEqual([
+      'false',
+      'true',
+      'false',
+    ]);
+  });
+
+  it('בחירה מעורבת — אין כרטיס מסומן', async () => {
+    // המנוע מחזיר `null`, ו-Word מציג גלריה בלי בחירה. הסגנון של הפסקה
+    // הראשונה כאילו הוא של כולן היה שקר.
+    const harness = mountUi(StyleGallery, { styleGallery: documentGallery(null) });
+    await settle();
+
+    expect(
+      harness.wrapper.findAll('.style-card').map((card) => card.attributes('aria-pressed')),
+    ).toEqual(['false', 'false', 'false']);
+  });
+
+  it('בלי גלריה מהמסמך, ה-prop של הפקודה קובע את הכרטיס הפעיל', async () => {
+    const harness = mountUi(StyleGallery, { props: { currentStyle: 'Heading2' } });
+    await settle();
+
+    const pressed = harness.wrapper
+      .findAll('.style-card')
+      .filter((card) => card.attributes('aria-pressed') === 'true');
+    expect(pressed).toHaveLength(1);
+    expect(pressed[0].attributes('title')).toBe('כותרת 2');
+  });
+
+  it('לחיצה פולטת את מזהה הסגנון — לא את התווית', async () => {
+    const harness = mountUi(StyleGallery, { styleGallery: documentGallery('Normal') });
+    await settle();
+
+    await harness.wrapper.findAll('.style-card')[2].trigger('click');
+    expect(harness.wrapper.emitted('select-style')).toEqual([['MyStyle']]);
+  });
+
+  it('בלי בחירה במסמך כל הכרטיסים מנוטרלים', async () => {
+    // `linked-style` נכשל בלי בחירה, וגלריה שנראית פעילה מזמינה לחיצה סרק.
+    const harness = mountUi(StyleGallery, { props: { disabled: true } });
+    await settle();
+
+    for (const card of harness.wrapper.findAll('.style-card')) {
+      expect(card.attributes('disabled')).toBeDefined();
+    }
+  });
+
+  it('כפתורי הגלילה מופיעים רק כשיש לאן לגלול', async () => {
+    const harness = mountUi(StyleGallery);
+    await settle();
+
+    // גלריה שנכנסת כולה: אין כפתורים בכלל.
+    expect(harness.wrapper.findAll('.nav-btn')).toHaveLength(0);
+
+    const scroller = harness.wrapper.find('.style-cards-scroll');
+    fakeMetrics(scroller.element as HTMLElement, {
+      scrollLeft: 0,
+      scrollWidth: 600,
+      clientWidth: 300,
+    });
+    await scroller.trigger('scroll');
+    await settle();
+
+    // בקצה ההתחלה יש רק „הבאים”.
+    expect(harness.wrapper.findAll('.nav-btn').map((button) => button.attributes('aria-label'))).toEqual([
+      'הסגנונות הבאים',
+    ]);
+
+    fakeMetrics(scroller.element as HTMLElement, {
+      scrollLeft: -150,
+      scrollWidth: 600,
+      clientWidth: 300,
+    });
+    await scroller.trigger('scroll');
+    await settle();
+
+    expect(harness.wrapper.findAll('.nav-btn').map((button) => button.attributes('aria-label'))).toEqual([
+      'הסגנונות הקודמים',
+      'הסגנונות הבאים',
+    ]);
+  });
+
+  it('הגלילה ב-RTL זזה לכיוון החזותי הנכון', async () => {
+    const harness = mountUi(StyleGallery);
+    await settle();
+
+    const scroller = harness.wrapper.find('.style-cards-scroll');
+    const element = scroller.element as HTMLElement;
+    // jsdom אינו מממש `scrollBy`, ולכן הוא מוזרק — מה שנמדד הוא הארגומנט.
+    const scrollBy = vi.fn();
+    Object.defineProperty(element, 'scrollBy', { value: scrollBy, configurable: true });
+    fakeMetrics(element, { scrollLeft: -150, scrollWidth: 600, clientWidth: 300 });
+    await scroller.trigger('scroll');
+    await settle();
+
+    await harness.wrapper.find('.nav-btn[aria-label="הסגנונות הבאים"]').trigger('click');
+    await harness.wrapper.find('.nav-btn[aria-label="הסגנונות הקודמים"]').trigger('click');
+
+    // ב-RTL הגלילה קדימה היא לכיוון השלילי — ההיפוך שנשבר בלי שרואים.
+    expect(scrollBy.mock.calls.map((call) => call[0].left)).toEqual([
+      -GALLERY_SCROLL_STEP_PX,
+      GALLERY_SCROLL_STEP_PX,
+    ]);
+  });
+});
+
+describe('ColorPickerPopover', () => {
+  const open = async (harness: ReturnType<typeof mountUi>) => {
+    await harness.wrapper.find('.color-arrow-btn').trigger('click');
+    await settle();
+  };
+
+  it('שבב מהפלטה פולט את הצבע, ובעקבותיו הפופאובר נסגר', async () => {
+    const harness = mountUi(ColorPickerPopover, {
+      props: { icon: 'fontColor', title: 'צבע גופן' },
+    });
+    await open(harness);
+
+    expect(harness.wrapper.find('.color-palette-popover').exists()).toBe(true);
+    await harness.wrapper.find('.color-swatch[title="#c00000"]').trigger('click');
+    await settle();
+
+    expect(harness.wrapper.emitted('change')).toEqual([['#c00000']]);
+    expect(harness.wrapper.emitted('update:modelValue')).toEqual([['#c00000']]);
+    expect(harness.wrapper.find('.color-palette-popover').exists()).toBe(false);
+  });
+
+  it('„ללא צבע” פולט `null` — ולא מחרוזת ריקה', async () => {
+    // זה החוזה של המנוע: `value === null` הוא מסלול הניקוי, ומחרוזת ריקה
+    // נדחית שם במפורש. ה-`modelValue` נשאר מחרוזת כי הוא מזין CSS.
+    const harness = mountUi(ColorPickerPopover, {
+      props: { icon: 'highlight', title: 'צבע סימון', modelValue: '#FFFF00' },
+    });
+    await open(harness);
+
+    await harness.wrapper.find('.palette-clear-btn').trigger('click');
+    await settle();
+
+    expect(harness.wrapper.emitted('change')).toEqual([[null]]);
+    expect(harness.wrapper.emitted('update:modelValue')).toEqual([['']]);
+  });
+
+  it('`allowClear: false` אינו מציע ניקוי', async () => {
+    const harness = mountUi(ColorPickerPopover, {
+      props: { icon: 'fontColor', title: 'צבע גופן', allowClear: false },
+    });
+    await open(harness);
+
+    expect(harness.wrapper.find('.palette-clear-btn').exists()).toBe(false);
+  });
+
+  it('הכפתור הראשי מחיל את הצבע הנוכחי בלי לפתוח את הפלטה', async () => {
+    const harness = mountUi(ColorPickerPopover, {
+      props: { icon: 'fontColor', title: 'צבע גופן', modelValue: '#0055FF' },
+    });
+    await harness.wrapper.find('.color-main-btn').trigger('click');
+    await settle();
+
+    expect(harness.wrapper.emitted('change')).toEqual([['#0055FF']]);
+    expect(harness.wrapper.find('.color-palette-popover').exists()).toBe(false);
+  });
+
+  it('בלי צבע מהמנוע הכפתור הראשי מחיל את ברירת המחדל', async () => {
+    const harness = mountUi(ColorPickerPopover, {
+      props: { icon: 'highlight', title: 'צבע סימון', defaultColor: '#FFFF00' },
+    });
+    await harness.wrapper.find('.color-main-btn').trigger('click');
+
+    expect(harness.wrapper.emitted('change')).toEqual([['#FFFF00']]);
+  });
+
+  it('לחיצה מחוץ לפקד סוגרת את הפלטה', async () => {
+    const harness = mountUi(ColorPickerPopover, {
+      props: { icon: 'fontColor', title: 'צבע גופן' },
+    });
+    await open(harness);
+    expect(harness.wrapper.find('.color-palette-popover').exists()).toBe(true);
+
+    clickOutside();
+    await settle();
+
+    expect(harness.wrapper.find('.color-palette-popover').exists()).toBe(false);
+  });
+
+  it('פקד מנוטרל אינו נפתח ואינו מחיל דבר', async () => {
+    const harness = mountUi(ColorPickerPopover, {
+      props: { icon: 'fontColor', title: 'צבע גופן', disabled: true, modelValue: '#0055FF' },
+    });
+
+    for (const selector of ['.color-main-btn', '.color-arrow-btn']) {
+      const button = harness.wrapper.find(selector);
+      expect(button.attributes('disabled'), selector).toBeDefined();
+      await button.trigger('click');
+    }
+    await settle();
+
+    expect(harness.wrapper.emitted('change')).toBeUndefined();
+    expect(harness.wrapper.find('.color-palette-popover').exists()).toBe(false);
+  });
+});

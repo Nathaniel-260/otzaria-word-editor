@@ -9,6 +9,13 @@
  *
  * הכלל שהבדיקות כאן מקבעות: **מה שלא נמדד אינו מוצג.** התוויות מקבלות „לא
  * ידוע” (`null`) ומחזירות עליו נוסח מצומצם או כלום — לא מספר שנראה אמיתי.
+ *
+ * מה שהיה כאן ואינו כאן יותר, מפני שההרכבה מודדת אותו ישירות
+ * (tests/component/shell-bars.test.ts): „כל פריט מוצג רק אם יש לו ערך”
+ * (v-if בתבנית) הוחלף בשורת מצב שמורכבת עם `null` ויוצאת ריקה; „לכל כפתור יש
+ * @click” ו„אין class=\"active\" קבוע” הוחלפו בלחיצה על כל כפתור ובמדידת
+ * `aria-pressed` לפני ואחרי; ו„הסרגל לוקח min/max מ-props” הוחלף בהרכבה עם
+ * גבולות 25–400, שבה כל הפקדים מכבדים אותם.
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -73,50 +80,13 @@ describe('שורת המצב אינה מציגה נתונים מומצאים', ()
     expect(TEMPLATE).not.toMatch(/מתוך/);
   });
 
-  it('כל פריט מוצג רק אם יש לו ערך', () => {
-    expect(TEMPLATE).toMatch(/v-if="pageText"/);
-    expect(TEMPLATE).toMatch(/v-if="wordText"/);
-  });
-
   it('„עברית” כשפת הגהה הוסרה — אין פיצ׳ר איות מאחוריה', () => {
     expect(STATUSBAR).not.toMatch(/עברית/);
     expect(STATUSBAR).not.toMatch(/language/);
   });
 });
 
-describe('פקדי שורת המצב', () => {
-  /**
-   * כל תג `<button ...>` בתבנית, כולל תכונותיו. המחרוזות מדולגות במפורש:
-   * `:disabled="zoomLevel >= zoomMax"` מכיל `>`, ותג שנחתך עליו היה נראה כמו
-   * כפתור בלי מטפל.
-   */
-  const buttons = [...TEMPLATE.matchAll(/<button(?:"[^"]*"|'[^']*'|[^>])*>/g)].map((m) => m[0]);
-
-  it('נמצאו כפתורים לבדוק', () => {
-    expect(buttons.length).toBeGreaterThan(0);
-  });
-
-  it('לכל כפתור יש @click — אין יותר כפתור מת', () => {
-    // „פריסת הדפסה” היה כפתור בלי מטפל, שנראה דלוק תמיד ולא עשה כלום.
-    expect(buttons.filter((button) => !button.includes('@click'))).toEqual([]);
-  });
-
-  it('אין class="active" קבוע — מצב פעיל נגזר ממצב אמיתי', () => {
-    // `(?<!:)` מפריד `class="..."` מ-`:class="{ active: ... }"` שהוא בדיוק המצב הרצוי.
-    expect(TEMPLATE).not.toMatch(/(?<!:)class="[^"]*\bactive\b/);
-    expect(TEMPLATE).toMatch(/:class="\{ active: isFocusMode \}"/);
-    expect(TEMPLATE).toMatch(/:aria-pressed="isFocusMode"/);
-  });
-});
-
 describe('גבולות הזום', () => {
-  it('הסרגל לוקח min/max מ-props ולא ממספר קשיח', () => {
-    expect(TEMPLATE).toMatch(/:min="zoomMin"/);
-    expect(TEMPLATE).toMatch(/:max="zoomMax"/);
-    expect(TEMPLATE).not.toMatch(/\bmin="\d+"/);
-    expect(TEMPLATE).not.toMatch(/\bmax="\d+"/);
-  });
-
   it('הצעדים וההגבלה עוברים ב-clampZoom של המנוע', () => {
     expect(STATUSBAR).toContain('clampZoom');
     // 50/200 היו מקודדים גם ב-stepZoom, ולא רק בסרגל.

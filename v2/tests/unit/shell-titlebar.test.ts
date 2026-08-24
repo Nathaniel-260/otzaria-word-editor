@@ -15,8 +15,11 @@
  *      (הבלוק ה-scoped) מעצבים את אותה כותרת. הם כבר נפרדו בשקט: 16px מול 12px
  *      ריפוד, ושני צבעי גבול שונים.
  *
- * ההרכבה נעשית על המקור ולא בדפדפן: אין @vue/test-utils במאגר, ותשתית טסטי
- * הקומפוננטות בבעלות אחרת. תבנית הסריקה היא זו של tests/unit/tab-controls.ts.
+ * שתי הבדיקות על הפקדים עצמם (החיפוש שהוא כפתור ולא `input readonly`, והמתג
+ * שהוא `switch` נגיש) **אינן כאן יותר**: הן נמדדות בהרכבה
+ * (tests/component/shell-bars.test.ts), שבודקת גם את מה שסריקה אינה יכולה —
+ * שהמתג מקבל מיקוד ושהלחיצה נפלטת. מה שנשאר כאן הוא החלטות ה-CSS והפריסה,
+ * ושתי טענות היעדר על המקור.
  */
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -44,15 +47,6 @@ const SHELL_CSS = stripComments(readFileSync(join(SRC, 'styles/shell.css'), 'utf
 
 /** התבנית בלבד — עד `</template>`. הסגנונות אינם פקדים. */
 const TEMPLATE = TITLEBAR.slice(0, TITLEBAR.indexOf('</template>'));
-
-/** התג שפותח אלמנט עם המחלקה המבוקשת, כולל תכונותיו. */
-function openingTag(source: string, className: string): string {
-  const match = source.match(
-    new RegExp(`<(\\w+)[^>]*class="[^"]*\\b${className}\\b[^"]*"[^>]*>`),
-  );
-  if (!match) throw new Error(`לא נמצא אלמנט עם המחלקה ${className}`);
-  return match[0];
-}
 
 /**
  * שמות המאפיינים שבלוק ה-CSS של סלקטור מגדיר. הסלקטור נלקח בהתאמה מדויקת
@@ -90,23 +84,6 @@ describe('פקדים אמיתיים בפס הכותרת', () => {
     // שער ה-boot מודד `data-boot` (scripts/boot-check.mjs), ולא את קיום הכפתור.
     expect(TITLEBAR).not.toMatch(/id="open"/);
     expect(TITLEBAR).not.toMatch(/display:\s*none/);
-  });
-
-  it('החיפוש הוא כפתור עם שם נגיש, ולא input readonly', () => {
-    const tag = openingTag(TEMPLATE, 'search-box');
-    expect(tag.startsWith('<button')).toBe(true);
-    expect(tag).toMatch(/aria-label="[^"]+"/);
-    expect(tag).toMatch(/@click="\$emit\('open-find'\)"/);
-    expect(TEMPLATE).not.toMatch(/readonly/);
-  });
-
-  it('מתג השמירה האוטומטית הוא switch נגיש', () => {
-    const tag = openingTag(TEMPLATE, 'autosave-toggle');
-    // `button` הוא מה שנותן פוקוס והפעלה ב-Enter/רווח בלי קוד מקלדת משלנו.
-    expect(tag.startsWith('<button')).toBe(true);
-    expect(tag).toMatch(/role="switch"/);
-    expect(tag).toMatch(/:aria-checked="autosaveEnabled"/);
-    expect(tag).toMatch(/@click="\$emit\('toggle-autosave'\)"/);
   });
 
   it('אין חץ פתיחה מדומה ליד שם המסמך', () => {

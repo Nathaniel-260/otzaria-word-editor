@@ -161,7 +161,7 @@ describe('LinkDialog', () => {
   });
 
   it('כתובת שאינה חוקית — שגיאה מוצגת, והאישור חסום', async () => {
-    const harness = mountUi(LinkDialog, { props: { isOpen: true } });
+    mountUi(LinkDialog, { props: { isOpen: true } });
     await settle();
 
     const href = teleported('#ld-href-input');

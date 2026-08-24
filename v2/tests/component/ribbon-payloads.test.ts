@@ -112,22 +112,21 @@ describe('פסקה', () => {
     const harness = mountUi(HomeTab);
     await settle();
 
-    for (const [title, alignment] of [
+    const buttons = [
       ['יישור לימין (Ctrl+R)', 'right'],
       ['מרכז (Ctrl+E)', 'center'],
       ['יישור לשמאל (Ctrl+L)', 'left'],
       ['יישור לשני הצדדים (Ctrl+J)', 'justify'],
-    ] as const) {
+    ] as const;
+
+    for (const [title] of buttons) {
       await harness.wrapper.find(`button[title="${title}"]`).trigger('click');
     }
     await settle();
 
-    expect(harness.adapter.payloads('text-align')).toEqual([
-      { alignment: 'right' },
-      { alignment: 'center' },
-      { alignment: 'left' },
-      { alignment: 'justify' },
-    ]);
+    expect(harness.adapter.payloads('text-align')).toEqual(
+      buttons.map(([, alignment]) => ({ alignment })),
+    );
     expect(harness.adapter.rejected).toEqual([]);
   });
 

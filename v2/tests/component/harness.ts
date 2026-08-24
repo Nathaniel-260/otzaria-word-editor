@@ -479,6 +479,21 @@ export function mountUi(component: Component, options: HarnessOptions = {}): Har
   };
 }
 
+/**
+ * מספר ה-events שהקומפוננטה **פלטה** — בלי אירועי DOM שרק עברו דרכה.
+ *
+ * @vue/test-utils רושם ב-`emitted()` לא רק `emit` של הקומפוננטה אלא גם כל
+ * אירוע DOM מקורי שעולה לשורש שלה (חיקוי של fallthrough listeners; ראו
+ * `recordEvent` ב-VTU). התוצאה: כל `trigger('click')` מופיע שם כ-`click` —
+ * גם כשנלחץ כפתור שאין לו מטפל בכלל. שער „אין כפתור מת” שסופר אותו היה
+ * מאשר בירוק בדיוק את מה שהוא נבנה לתפוס.
+ */
+export function emittedCount(wrapper: VueWrapper, ignore: readonly string[] = ['click']): number {
+  return Object.entries(wrapper.emitted())
+    .filter(([name]) => !ignore.includes(name))
+    .reduce((total, [, occurrences]) => total + occurrences.length, 0);
+}
+
 /** מפרקת אוטומטית כל הרכבה בסוף בדיקה. נקראת פעם אחת בראש קובץ בדיקה. */
 export function autoUnmount(): void {
   enableAutoUnmount(afterEach);

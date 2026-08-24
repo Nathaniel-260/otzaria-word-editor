@@ -12,9 +12,13 @@
  *
  * כל כפתור נמדד בהרכבה **טרייה**: פופאובר שנפתח בלחיצה קודמת היה משנה את מה
  * שהלחיצה הבאה פוגשת, וכשל כזה היה תלוי בסדר.
+ *
+ * ה-events נספרים דרך `emittedCount` של ה-harness, שמדלג על `click`: VTU רושם
+ * ב-`emitted()` גם אירועי DOM שעברו דרך השורש, ולכן `click` מופיע שם גם על
+ * כפתור מת. „בדיקת הבקרה” שבסוף הקובץ היא מה שמקבע את ההבחנה הזאת.
  */
 import { beforeEach, afterEach, describe, expect, it } from 'vitest';
-import type { DOMWrapper, VueWrapper } from '@vue/test-utils';
+import type { DOMWrapper } from '@vue/test-utils';
 import { defineComponent, h, type Component } from 'vue';
 import RibbonButton from '../../src/ui/ribbon/common/RibbonButton.vue';
 import HomeTab from '../../src/ui/ribbon/tabs/HomeTab.vue';
@@ -28,6 +32,7 @@ import OtzariaTab from '../../src/ui/ribbon/tabs/OtzariaTab.vue';
 import {
   autoUnmount,
   createSuperdocDouble,
+  emittedCount,
   installSystemClipboard,
   mountUi,
   settle,
@@ -59,20 +64,6 @@ function nameOf(button: DOMWrapper<Element>): string {
   );
 }
 
-/**
- * מספר ה-events שהלשונית פלטה, **בלי** `click`.
- *
- * `click` אינו נספר מפני ש-`RibbonButton` פולט אותו מהתבנית שלו בכל לחיצה, גם
- * כשההורה לא קשר לו מטפל — כלומר גם כפתור מת פולט אותו, וספירתו הייתה הופכת
- * את השער הזה לחסר תועלת בדיוק במקרה שהוא נבנה בשבילו. „בדיקת הבקרה” שבסוף
- * הקובץ היא מה שמקבע את זה.
- */
-function meaningfulEmits(wrapper: VueWrapper): number {
-  return Object.entries(wrapper.emitted())
-    .filter(([name]) => name !== 'click')
-    .reduce((total, [, occurrences]) => total + occurrences.length, 0);
-}
-
 interface Probe {
   name: string;
   disabled: boolean;
@@ -99,7 +90,7 @@ async function probe(component: Component, index: number): Promise<Probe & { cou
     commands: harness.adapter.calls.length,
     doc: harness.superdoc.calls.length,
     reports: harness.reports.length,
-    emitted: meaningfulEmits(harness.wrapper),
+    emitted: emittedCount(harness.wrapper),
     html: harness.wrapper.html(),
   };
 
@@ -109,7 +100,7 @@ async function probe(component: Component, index: number): Promise<Probe & { cou
   const effects: string[] = [];
   if (harness.adapter.calls.length > before.commands) effects.push('פקודה');
   if (harness.superdoc.calls.length > before.doc) effects.push('Document API');
-  if (meaningfulEmits(harness.wrapper) > before.emitted) effects.push('event');
+  if (emittedCount(harness.wrapper) > before.emitted) effects.push('event');
   if (harness.reports.length > before.reports) effects.push('דיווח');
   if (harness.wrapper.html() !== before.html) effects.push('DOM');
 
