@@ -10,7 +10,7 @@
  * — או קריאה בחתימה אחרת, כמו `replace(search, replacement)` — נכשלת כאן.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { BorrowedSuperDocUI } from 'superdoc';
 import { REASON_TEXT } from '../../src/engine/command-adapter';
@@ -18,10 +18,14 @@ import {
   createSearchAdapter,
   searchCounterText,
   idleSearchState,
+  replaceControlsVisible,
+  NO_MATCHES_TEXT,
+  NO_QUERY_TEXT,
   REPLACE_UNAVAILABLE_TEXT,
   SEARCH_DEBOUNCE_MS,
   type SearchHost,
   type SearchSlice,
+  type SearchState,
 } from '../../src/engine/search';
 
 /** ה-handle נגזר מהמשטח הציבורי, בדיוק כפי שהמודול הנבדק גוזר אותו. */
@@ -391,42 +395,87 @@ describe('createSearchAdapter — החלפה', () => {
     expect(call?.args).toHaveLength(1);
   });
 
-  it('canReplace: false — אין החלפה, ואין קריאה למנוע', async () => {
-    const double = strictSearchHandle({ slice: { canReplace: false } });
+  it('בלי שאילתה אין החלפה, ואין קריאה למנוע', async () => {
+    const double = strictSearchHandle();
+    const adapter = createSearchAdapter(double.host);
+
+    const outcome = await adapter.replace('אחרי');
+
+    expect(outcome).toEqual({ ok: false, message: NO_QUERY_TEXT, reason: 'no-query' });
+    expect(double.names()).not.toContain('replace');
+  });
+
+  it('שאילתה בלי התאמות מדווחת „אין התאמות” — ולא חוסר בגרסת המנוע', async () => {
+    // זה הבאג עצמו: במסמך ריק, חיפוש מילה שאינה בו החזיר אפס התאמות, והמשתמש
+    // קיבל „החלפת טקסט אינה נתמכת בגרסה הזאת של המנוע”.
+    const double = strictSearchHandle({ onSearch: (query) => ({ query, total: 0, activeIndex: -1 }) });
+    const adapter = createSearchAdapter(double.host);
+
+    adapter.find('מילה שאינה במסמך', 'next');
+    const outcome = await adapter.replace('אחרי');
+
+    expect(outcome).toEqual({ ok: false, message: NO_MATCHES_TEXT, reason: 'no-matches' });
+    expect(double.names()).not.toContain('replace');
+  });
+
+  it('`canReplace: false` עם התאמות **כן** נשלח למנוע — הוא זה שיודע למה', async () => {
+    // הגייט שהיה כאן עצר את הקריאה והמציא לה סיבה. `canReplace` הוא תלוי-מצב,
+    // וכשיש התאמות והוא `false` הסיבה האמיתית יכולה להיות מצב קריאה או החלפה
+    // שאינה מחוברת — והמנוע הוא שמבחין ביניהן.
+    const double = strictSearchHandle({
+      slice: { canReplace: false },
+      onReplace: () => ({ ok: false, reason: 'document-readonly' }),
+    });
     const adapter = createSearchAdapter(double.host);
 
     adapter.find('לפני', 'next');
     const outcome = await adapter.replace('אחרי');
 
-    expect(outcome).toEqual({
-      ok: false,
-      message: REASON_TEXT['replace-unsupported'],
-      reason: 'replace-unsupported',
-    });
-    expect(double.names()).not.toContain('replace');
-  });
-
-  it('canReplace: false נקרא מהמצב, וזה מה שמסתיר את פקדי ההחלפה', () => {
-    const double = strictSearchHandle({ slice: { canReplace: false } });
-    const adapter = createSearchAdapter(double.host);
-
-    // הדיאלוג מרנדר את הפקדים לפי הדגל הזה בלבד (`v-if="canReplace"`).
-    expect(adapter.getState().canReplace).toBe(false);
-    expect(REPLACE_UNAVAILABLE_TEXT).toBe(REASON_TEXT['replace-unsupported']);
-  });
-
-  it('document-readonly של המנוע מדווח כמצב קריאה ולא כ„לא נתמך”', async () => {
-    const double = strictSearchHandle({
-      slice: { canReplace: false, reason: 'document-readonly' },
-    });
-    const adapter = createSearchAdapter(double.host);
-
-    const outcome = await adapter.replace('אחרי');
-
+    expect(double.names()).toContain('replace');
     expect(outcome).toEqual({
       ok: false,
       message: REASON_TEXT['document-readonly'],
       reason: 'document-readonly',
+    });
+  });
+
+  it('`replace-unsupported` אינו קוד שהמנוע פולט, ולכן אינו ברירת מחדל שלנו', async () => {
+    // הוא מוגדר ב-`SUPERDOC_UI_REASONS` ואין לו אתר ייצור אחד ב-2.8.0 (נמדד
+    // על ה-chunk של ה-controller). ההודעה שהדיאלוג מציג אינה טוענת על הגרסה.
+    const chunkDir = join(process.cwd(), 'node_modules/superdoc/dist/chunks');
+    const chunk = readdirSync(chunkDir).find((name) => /^create-super-doc-ui-.*\.es\.js$/.test(name));
+    expect(chunk, 'לא נמצא ה-chunk של controller ה-UI').toBeTruthy();
+    const source = readFileSync(join(chunkDir, chunk!), 'utf8');
+
+    // מופע אחד בלבד: ההגדרה בטבלת ה-reasons. אין קריאה שמחזירה אותו.
+    expect(source.match(/replaceUnsupported/g)).toHaveLength(1);
+    expect(source).not.toContain('SUPERDOC_UI_REASONS.replaceUnsupported');
+
+    expect(REPLACE_UNAVAILABLE_TEXT).not.toBe(REASON_TEXT['replace-unsupported']);
+    expect(REPLACE_UNAVAILABLE_TEXT).not.toContain('גרסה');
+    expect(REPLACE_UNAVAILABLE_TEXT).not.toContain('מנוע');
+  });
+
+  describe('replaceControlsVisible — מה שהדיאלוג מרנדר', () => {
+    const state = (patch: Partial<SearchState>): SearchState => ({
+      ...idleSearchState(),
+      available: true,
+      ...patch,
+    });
+
+    it('אין חיפוש במסמך → אין פקדי החלפה', () => {
+      expect(replaceControlsVisible(state({ available: false, total: 5, canReplace: true }))).toBe(
+        false,
+      );
+    });
+
+    it('אין התאמות → הפקדים נשארים, וזה התיקון של „השדה נעלם בהקלדה”', () => {
+      expect(replaceControlsVisible(state({ total: 0, canReplace: false }))).toBe(true);
+    });
+
+    it('יש התאמות → `canReplace` של המנוע מכריע, כי אז הוא תשובה אמיתית', () => {
+      expect(replaceControlsVisible(state({ total: 5, canReplace: true }))).toBe(true);
+      expect(replaceControlsVisible(state({ total: 5, canReplace: false }))).toBe(false);
     });
   });
 
@@ -463,6 +512,7 @@ describe('createSearchAdapter — החלפה', () => {
     });
     const adapter = createSearchAdapter(double.host);
 
+    adapter.find('לפני', 'next');
     const outcome = await adapter.replace('אחרי');
 
     expect(outcome).toEqual({
@@ -483,6 +533,7 @@ describe('createSearchAdapter — החלפה', () => {
     });
     const adapter = createSearchAdapter(double.host);
 
+    adapter.find('לפני', 'next');
     const first = adapter.replace('אחרי');
     const second = await adapter.replace('אחרי');
 
@@ -491,6 +542,24 @@ describe('createSearchAdapter — החלפה', () => {
 
     settle?.({ ok: true });
     await first;
+  });
+});
+
+describe('המעטפת מחוברת להכרעה הזאת', () => {
+  const APP = readFileSync(join(process.cwd(), 'src/App.vue'), 'utf8');
+
+  it('הדיאלוג מקבל את `replaceControlsVisible` ולא את `canReplace` של המנוע', () => {
+    // החיבור הישיר הוא מה שהעלים את שדה ההחלפה ברגע שהוקלדה מילה שאינה במסמך.
+    expect(APP).toContain('replaceControlsVisible(searchState.value)');
+    expect(APP).toContain(':can-replace="canShowReplace"');
+    expect(APP).not.toContain(':can-replace="searchState.canReplace"');
+  });
+
+  it('„אין התאמות” אינו מגיע לשורת המצב כשגיאה', () => {
+    // `setStatus(..., true)` צובע באדום **ושולח ל-notifyError של אוצריא**.
+    // שאילתה שלא נמצאה היא מידע, ולא תקלה שצריך לדווח עליה.
+    expect(APP).toContain("REPLACE_NOT_AN_ERROR = new Set(['no-matches', 'no-query'])");
+    expect(APP).toContain('REPLACE_NOT_AN_ERROR.has(outcome.reason');
   });
 });
 

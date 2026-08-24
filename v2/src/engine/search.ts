@@ -19,7 +19,7 @@
  * לבדוק את הלוגיקה בלי להרים קומפוננטה.
  */
 import type { BorrowedSuperDocUI } from 'superdoc';
-import { REASON_TEXT, reasonText } from './command-adapter';
+import { reasonText } from './command-adapter';
 
 /** ה-handle של המנוע, כפי שהוא מוצהר על `SuperDocUI.search`. */
 type SearchHandle = BorrowedSuperDocUI['search'];
@@ -38,10 +38,28 @@ export type SearchHost = Pick<BorrowedSuperDocUI, 'search'>;
 export const SEARCH_DEBOUNCE_MS = 250;
 
 /**
- * ההסבר שמוצג כשהמנוע אינו מאפשר החלפה. מתוך הטבלה המשותפת ולא כמחרוזת
- * נוספת, כדי שלא ייווצרו שני נוסחים לאותו כשל.
+ * ההסבר שהדיאלוג מציג במקום פקדי ההחלפה.
+ *
+ * **היה** `REASON_TEXT['replace-unsupported']` — „החלפת טקסט אינה נתמכת בגרסה
+ * הזאת של המנוע”. זה נמדד כשקר: במסמך ריק, חיפוש מילה שאינה בו החזיר אפס
+ * התאמות, הנוסח הזה הופיע ולשונית „החלף” נעלמה; באותו build עם מסמך שבו חמש
+ * התאמות שתי הלשוניות היו שם וכל הכפתורים פעילים. כלומר ההודעה תלתה במנוע
+ * מצב של **המסמך**.
+ *
+ * הנוסח החדש אינו טוען דבר על הגרסה, והוא נכון בשני המצבים שבהם הפקדים
+ * מוסתרים (ראו `replaceControlsVisible`): מסמך שאין בו חיפוש בכלל, ומסמך שיש
+ * בו התאמות והמנוע מדווח שאינו יכול להחליף אותן.
+ *
+ * השם נשאר — הדיאלוג מייבא אותו בשמו הזה — והוא עדיין מדויק: זו ההודעה
+ * שמוצגת כשהחלפה אינה זמינה.
  */
-export const REPLACE_UNAVAILABLE_TEXT = REASON_TEXT['replace-unsupported'];
+export const REPLACE_UNAVAILABLE_TEXT = 'החלפה אינה זמינה במסמך הזה כרגע';
+
+/** מה שמוצג כשיש שאילתה ואין לה התאמות. תשובה, לא שגיאה. */
+export const NO_MATCHES_TEXT = 'אין התאמות להחלפה';
+
+/** מה שמוצג כשמבקשים החלפה בלי שאילתת חיפוש. */
+export const NO_QUERY_TEXT = 'יש להזין טקסט לחיפוש לפני החלפה';
 
 /** המצב הקריא של החיפוש. כולו נגזר מ-`getSnapshot()` של המנוע, ולא מ-state משלנו. */
 export interface SearchState {
@@ -54,7 +72,16 @@ export interface SearchState {
   open: boolean;
   /** האם המנוע חושף חיפוש במסמך הזה. */
   available: boolean;
-  /** האם החלפה יכולה לשנות את המסמך כרגע. `false` = אין להציג את הפקד. */
+  /**
+   * מה שהמנוע מדווח על ההחלפה **בקבוצת ההתאמות הנוכחית**. תלוי-מצב ולא
+   * תלוי-גרסה: נמדד ש-`canReplaceText` במנוע הוא
+   * `shouldReplaceText && Boolean(target) && typeof replace === 'function'`,
+   * ולכן הוא `false` גם כשאין התאמות בכלל.
+   *
+   * **אינו** השאלה „האם להציג את פקדי ההחלפה” — זו `replaceControlsVisible`,
+   * ולהפרדה הזאת יש היסטוריה: הדגל הזה שימש כתשובה לשתי השאלות, ולכן שאילתה
+   * בלי תוצאות הודיעה למשתמש שהמנוע אינו תומך בהחלפה.
+   */
   canReplace: boolean;
   /**
    * החלפה שנשלחה למנוע וטרם הסתיימה. session מבוסס worker מחזיר Promise,
@@ -95,6 +122,25 @@ export function searchCounterText(state: SearchState): string {
   // עדיף על „1 מתוך 12” שאינו נכון.
   if (state.activeIndex < 0) return `${state.total} תוצאות`;
   return `${state.activeIndex + 1} מתוך ${state.total}`;
+}
+
+/**
+ * האם להציג את פקדי ההחלפה בדיאלוג.
+ *
+ * שלושת המצבים שהופרדו כאן היו מצב אחד, ומכאן הבאג: `canReplace` של המנוע
+ * שימש גם כ„הגרסה תומכת”, גם כ„המסמך מרשה” וגם כ„יש מה להחליף”.
+ *
+ *   1. אין חיפוש במסמך הזה → אין גם החלפה, והפקדים מוסתרים עם ההסבר.
+ *   2. יש חיפוש ואין התאמות → הפקדים **נשארים**. שאילתה בלי תוצאות אינה סיבה
+ *      להעלים את שדה ההחלפה מתחת לאצבע של מי שמקליד בו, וההודעה על „אין
+ *      התאמות” מגיעה כשלוחצים.
+ *   3. יש התאמות → זה בדיוק המצב שבו `canReplace` של המנוע הוא תשובה
+ *      אמיתית, ולכן הוא מכריע.
+ */
+export function replaceControlsVisible(state: SearchState): boolean {
+  if (!state.available) return false;
+  if (state.total === 0) return true;
+  return state.canReplace;
 }
 
 export interface SearchAdapter {
@@ -206,10 +252,26 @@ export function createSearchAdapter(ui: SearchHost): SearchAdapter {
     const blocked = unavailable(before);
     if (blocked) return blocked;
 
-    // ה-capability gate של התכנית: `canReplace: false` אומר שהמנוע לא ישנה
-    // את המסמך — במצב קריאה, כשההחלפה אינה ממומשת, או כשקבוצת ההתאמות
-    // נקטעה. שולחים בכל זאת ומקבלים כשל = משתמש שלא מבין מה קרה.
-    if (!before.canReplace) return failure(before.reason ?? 'replace-unsupported');
+    /* ה-gate של §11 נשאר — החלפה אינה תכולה מובטחת — אבל הוא נעצר בדיוק במה
+       שאנחנו יודעים בשם, ולא יותר.
+
+       מה שהיה כאן: `if (!before.canReplace) return failure(before.reason ??
+       'replace-unsupported')`. `canReplace` הוא תלוי-מצב, ה-`reason` של ה-slice
+       הוא `undefined` בכל המצבים האלה, ולכן ברירת המחדל הייתה זו שמדברת —
+       ו-`replace-unsupported` הוא קוד שהמנוע ב-2.8.0 **אינו פולט בכלל**
+       (נמדד: הוא מוגדר ב-`SUPERDOC_UI_REASONS` ואין לו אתר ייצור אחד).
+       כלומר כל חסימה, מכל סיבה, הוצגה כחוסר בגרסת המנוע.
+
+       שני התנאים שנשארו הם השניים שיש להם שם נכון: אין שאילתה, ואין התאמות.
+       בשאר המצבים המנוע הוא שעונה, והתשובה שלו מדויקת ממה שנוכל לנחש —
+       `document-readonly` כשהמסמך לקריאה, `operation-unavailable` כשההחלפה
+       אינה מחוברת, `search-unavailable` כשאין מצע חיפוש. */
+    if (!before.query) {
+      return { ok: false, message: NO_QUERY_TEXT, reason: 'no-query' };
+    }
+    if (before.total === 0) {
+      return { ok: false, message: NO_MATCHES_TEXT, reason: 'no-matches' };
+    }
 
     if (replacing) {
       return { ok: false, message: 'ההחלפה הקודמת עדיין רצה', reason: 'replace-pending' };

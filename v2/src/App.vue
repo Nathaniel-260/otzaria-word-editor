@@ -69,7 +69,7 @@
       :is-open="isFindOpen"
       :initial-mode="findMode"
       :result-text="searchCounter"
-      :can-replace="searchState.canReplace"
+      :can-replace="canShowReplace"
       :is-replacing="searchState.isReplacing"
       @close="closeFindDialog"
       @find="onFindText"
@@ -116,6 +116,7 @@ import { zoomPayload } from './engine/payloads';
 import {
   createSearchAdapter,
   idleSearchState,
+  replaceControlsVisible,
   searchCounterText,
   type SearchAdapter,
   type SearchOutcome,
@@ -209,6 +210,14 @@ const isAboutOpen = ref(false);
  */
 const searchState = ref<SearchState>(idleSearchState());
 const searchCounter = computed(() => searchCounterText(searchState.value));
+
+/**
+ * האם הדיאלוג מציג את פקדי ההחלפה. **לא** `searchState.canReplace`: הדגל ההוא
+ * תלוי בקבוצת ההתאמות הנוכחית, ולכן חיבורו הישיר לכאן העלים את שדה ההחלפה
+ * ברגע שהמשתמש הקליד מילה שאינה במסמך — ובמקומו הופיעה הודעה שהאשימה את גרסת
+ * המנוע. ההכרעה עצמה ב-engine/search.ts, כדי שתהיה נבדקת.
+ */
+const canShowReplace = computed(() => replaceControlsVisible(searchState.value));
 
 /**
  * מה ששורת המצב מציגה. שלושת הערכים היו `ref(1)`, `ref(1)` ו-`ref(0)` שלא
@@ -677,17 +686,27 @@ function onFindQueryChange(query: string): void {
 }
 
 /**
- * החלפה היא capability gate ולא תכולה מובטחת: ב-superdoc@2.8.0 `canReplace`
- * מדווח `true`, אבל נמדד ש-`replace`/`replaceAll` מחזירים
- * `operation-unavailable`. לכן הכשל מגיע לשורת המצב עם ההקשר שהוא כשל של
- * החלפה — לא נבלע, ולא מתחפש להודעת חיפוש.
+ * החלפה היא capability gate ולא תכולה מובטחת: ב-superdoc@2.8.0 נמדד
+ * ש-`replace`/`replaceAll` עשויים להחזיר `operation-unavailable`. לכן הכשל
+ * מגיע לשורת המצב עם ההקשר שהוא כשל של החלפה — לא נבלע, ולא מתחפש להודעת
+ * חיפוש.
+ *
+ * שני מצבים אינם כשל אלא תשובה, ולכן הם אינם אדומים ואינם נשלחים ללוג
+ * השגיאות של אוצריא: „אין התאמות” ו„יש להזין טקסט לחיפוש”. שאילתה שלא נמצאה
+ * היא מידע, ומי שכתב אותה אינו צריך התראת שגיאה עליה.
  */
+const REPLACE_NOT_AN_ERROR = new Set(['no-matches', 'no-query']);
+
 function reportReplace(outcome: SearchOutcome | undefined, success: string): void {
   if (!outcome) {
     setStatus('אין מסמך פתוח להחלפה', true);
     return;
   }
   if (!outcome.ok) {
+    if (REPLACE_NOT_AN_ERROR.has(outcome.reason ?? '')) {
+      setStatus(outcome.message);
+      return;
+    }
     setStatus(`ההחלפה לא בוצעה: ${outcome.message}`, true);
     return;
   }
