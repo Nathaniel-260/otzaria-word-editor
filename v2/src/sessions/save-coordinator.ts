@@ -88,8 +88,23 @@ export const AUTOSAVE_DELAY_MS = 2500;
 
 export interface SaveCoordinator {
   readonly snapshot: SaveSnapshot;
-  /** אחרי עריכה. מתחיל autosave רק אם יש יעד כתיבה. */
+  /** אחרי עריכה. מתחיל autosave רק אם יש יעד כתיבה, והמתג דלוק. */
   markDirty(): void;
+  /**
+   * מתג „שמירה אוטומטית” של המשתמש. ברירת המחדל היא דלוק.
+   *
+   * שלוש ההתנהגויות שנגזרות ממנו, וכולן נבדקות:
+   * 1. **כיבוי מבטל סבב ממתין.** אחרת המשתמש כיבה את המתג וקיבל שמירה שנייה
+   *    אחר כך, בדיוק מהסוג שהוא ביקש שלא יקרה.
+   * 2. **שמירה ידנית עובדת גם כשכבוי.** המתג מכבה את ה-*אוטומטיות*, לא את
+   *    השמירה; `saveNow` אינו מסתכל עליו בכלל.
+   * 3. **הדלקה חוזרת על מסמך מלוכלך מתחילה סבב debounce, לא שמירה מיידית.**
+   *    לחכות לעריכה הבאה היה משאיר מסמך מלוכלך שאיש אינו נוגע בו בלי שמירה
+   *    לנצח — כלומר הדלקת המתג לא הייתה מגנה על שום דבר. שמירה מיידית על
+   *    לחיצת מתג, לעומת זאת, היא ייצוא והעלאה שהמשתמש לא ביקש באותו רגע.
+   *    ההשהיה הרגילה היא המסלול היחיד, ולכן גם אין כאן מסלול שני לבדוק.
+   */
+  setAutosaveEnabled(enabled: boolean): void;
   /** מגדיר את היעד — למשל אחרי פתיחת קובץ עם access: 'readwrite'. */
   adoptTarget(target: { token: string; name: string } | null): void;
   /** מאפס לספירה נקייה — לשימוש בפתיחת מסמך אחר. */
@@ -110,6 +125,11 @@ export function createSaveCoordinator(deps: SaveCoordinatorDeps): SaveCoordinato
   /** ה-epoch שאליו שייך הסבב שרץ. */
   let inFlightEpoch = -1;
   let autosaveTimer: ReturnType<typeof setTimeout> | undefined;
+  /**
+   * מתג המשתמש. `reset` (מעבר מסמך) אינו מאפס אותו בכוונה: זו העדפה של מי
+   * שיושב מול המסך, לא מצב של המסמך.
+   */
+  let autosaveEnabled = true;
   let disposed = false;
   /** מזהה המסמך הנוכחי. כל reset מעלה אותו. */
   let epoch = 0;
@@ -141,6 +161,25 @@ export function createSaveCoordinator(deps: SaveCoordinatorDeps): SaveCoordinato
       clearTimeout(autosaveTimer);
       autosaveTimer = undefined;
     }
+  }
+
+  /**
+   * מתזמן סבב autosave, אם כל התנאים מתקיימים. שלושת המקרים שבהם אין לתזמן:
+   *
+   * - **המתג כבוי.** הבחירה של המשתמש.
+   * - **אין יעד כתיבה.** בלעדיו כל סבב היה פותח „שמור בשם” מעצמו, שתיים
+   *   וחצי שניות אחרי שהמשתמש הפסיק להקליד.
+   * - **המסמך נקי.** אין מה לשמור.
+   */
+  function scheduleAutosave(): void {
+    if (!autosaveEnabled || !targetToken || disposed) return;
+    if (dirtyRevision === savedRevision) return;
+
+    cancelAutosave();
+    autosaveTimer = setTimeout(() => {
+      autosaveTimer = undefined;
+      void saveNow();
+    }, AUTOSAVE_DELAY_MS);
   }
 
   /**
@@ -333,15 +372,17 @@ export function createSaveCoordinator(deps: SaveCoordinatorDeps): SaveCoordinato
     markDirty() {
       dirtyRevision += 1;
       publish();
+      scheduleAutosave();
+    },
 
-      // autosave רק ליעד קיים: בלי יעד כל סבב היה פותח „שמור בשם” מעצמו,
-      // שתיים וחצי שניות אחרי שהמשתמש הפסיק להקליד.
-      if (!targetToken || disposed) return;
-      cancelAutosave();
-      autosaveTimer = setTimeout(() => {
-        autosaveTimer = undefined;
-        void saveNow();
-      }, AUTOSAVE_DELAY_MS);
+    setAutosaveEnabled(enabled) {
+      if (autosaveEnabled === enabled) return;
+      autosaveEnabled = enabled;
+
+      // כיבוי מבטל את הסבב שממתין; הדלקה מתזמנת אותו מחדש אם יש מה לשמור.
+      // ראו את החוזה ב-[SaveCoordinator.setAutosaveEnabled].
+      if (!enabled) cancelAutosave();
+      else scheduleAutosave();
     },
 
     adoptTarget(target) {

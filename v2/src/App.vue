@@ -115,7 +115,13 @@ import {
 } from './host/files';
 import { decideDocumentSwitch, saveShortcut } from './sessions/open-flow';
 import { confirm, notifyError } from './host/otzaria-client';
-import { loadLastDocument, saveLastDocument, forgetLastDocument } from './host/settings';
+import {
+  loadLastDocument,
+  saveLastDocument,
+  forgetLastDocument,
+  loadAutosaveEnabled,
+  saveAutosaveEnabled,
+} from './host/settings';
 
 const editorStackRef = ref<HTMLElement | null>(null);
 
@@ -431,8 +437,16 @@ function onTitleUpdate(newTitle: string): void {
   }
 }
 
+/**
+ * המתג היה דקורטיבי: `autosaveEnabled` נכתב כאן ואיש לא קרא אותו, ו-
+ * SaveCoordinator הריץ autosave על כל `markDirty` — כלומר כיבוי המתג לא כיבה
+ * כלום. שתי השורות שנוספו הן מה שהופך אותו למתג: הבחירה מגיעה למי שמריץ את
+ * ה-autosave, והיא שורדת הפעלות.
+ */
 function toggleAutosave(): void {
   autosaveEnabled.value = !autosaveEnabled.value;
+  save?.setAutosaveEnabled(autosaveEnabled.value);
+  void saveAutosaveEnabled(autosaveEnabled.value);
 }
 
 function toggleFocusMode(): void {
@@ -594,6 +608,13 @@ onMounted(async () => {
 
   if (editorStackRef.value) {
     save = initSaveCoordinator();
+
+    // הבחירה נטענת לפני שנפתח מסמך: העריכה הראשונה עלולה להתחיל סבב autosave,
+    // ואם ההעדפה עוד לא הגיעה הוא היה רץ לפי ברירת המחדל ולא לפי מה שהמשתמש
+    // בחר בהפעלה הקודמת.
+    autosaveEnabled.value = await loadAutosaveEnabled();
+    save.setAutosaveEnabled(autosaveEnabled.value);
+
     swap = createEditorSwap(editorStackRef.value, (host, source) =>
       createEditor({
         container: host,

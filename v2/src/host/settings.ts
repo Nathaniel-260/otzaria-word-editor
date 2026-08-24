@@ -43,6 +43,22 @@ export async function forgetLastDocument(): Promise<void> {
   await tryCall('storage.remove', { key: LAST_DOCUMENT_KEY });
 }
 
+const AUTOSAVE_KEY = 'autosave-enabled';
+
+/**
+ * מתג „שמירה אוטומטית”. ברירת המחדל היא **דלוק**, וכל מה שאינו `false` מפורש
+ * נקרא כדלוק: כשל קריאה או ערך פגום אינם סיבה להשאיר מסמך בלי שמירה
+ * אוטומטית — הכיוון הבטוח כאן הוא לשמור יותר, לא פחות.
+ */
+export async function loadAutosaveEnabled(): Promise<boolean> {
+  const raw = await tryCall<unknown>('storage.get', { key: AUTOSAVE_KEY });
+  return raw !== false;
+}
+
+export async function saveAutosaveEnabled(enabled: boolean): Promise<void> {
+  await tryCall('storage.set', { key: AUTOSAVE_KEY, value: enabled });
+}
+
 /** נשמר בנפרד מ-tryCall כדי שכשל בכתיבה לא ייעלם בשקט בקריאה מפורשת. */
 export async function setSetting(key: string, value: unknown): Promise<void> {
   await call('storage.set', { key, value });

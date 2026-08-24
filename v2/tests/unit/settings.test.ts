@@ -6,7 +6,9 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
   forgetLastDocument,
+  loadAutosaveEnabled,
   loadLastDocument,
+  saveAutosaveEnabled,
   saveLastDocument,
 } from '../../src/host/settings';
 
@@ -89,5 +91,44 @@ describe('saveLastDocument / forgetLastDocument', () => {
     await forgetLastDocument();
 
     expect(call).toHaveBeenCalledWith('storage.remove', { key: 'last-document' });
+  });
+});
+
+/**
+ * המתג „שמירה אוטומטית”. הכיוון הבטוח כאן הוא **דלוק**: כשל קריאה או ערך
+ * פגום אינם סיבה להשאיר מסמך בלי שמירה אוטומטית, ולכן רק `false` מפורש מכבה.
+ */
+describe('loadAutosaveEnabled / saveAutosaveEnabled', () => {
+  it('קורא כיבוי מפורש', async () => {
+    const call = hostReturns(false);
+
+    await expect(loadAutosaveEnabled()).resolves.toBe(false);
+    expect(call).toHaveBeenCalledWith('storage.get', { key: 'autosave-enabled' });
+  });
+
+  it('מפתח שלא נשמר מעולם נקרא כדלוק', async () => {
+    hostReturns(null);
+
+    await expect(loadAutosaveEnabled()).resolves.toBe(true);
+  });
+
+  it('ערך פגום וכשל של ה-Host נקראים כדלוק ולא כשגיאה', async () => {
+    hostReturns('כן');
+    await expect(loadAutosaveEnabled()).resolves.toBe(true);
+
+    // בלי SDK בכלל — הכיוון הבטוח נשמר.
+    delete (window as Partial<Window>).Otzaria;
+    await expect(loadAutosaveEnabled()).resolves.toBe(true);
+  });
+
+  it('שומר את הבחירה', async () => {
+    const call = hostReturns(true);
+
+    await saveAutosaveEnabled(false);
+
+    expect(call).toHaveBeenCalledWith('storage.set', {
+      key: 'autosave-enabled',
+      value: false,
+    });
   });
 });

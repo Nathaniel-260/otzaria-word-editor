@@ -421,6 +421,104 @@ describe('autosave', () => {
   });
 });
 
+/**
+ * המתג „שמירה אוטומטית” בפס הכותרת היה דקורטיבי: הדגל נכתב בממשק, ואיש לא
+ * קרא אותו — כל `markDirty` הריץ autosave. הבדיקות כאן הן החוזה שהופך אותו
+ * למתג, ובראשן זו שהייתה נשברת בלי שאיש ישים לב: **שמירה ידנית חייבת לעבוד
+ * גם כשהמתג כבוי.** המתג מכבה את האוטומטיות, לא את השמירה.
+ */
+describe('מתג השמירה האוטומטית', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  it('כבוי — עריכה אינה מריצה שמירה', async () => {
+    const h = harness();
+    h.coordinator.adoptTarget({ token: 'tok', name: 'a.docx' });
+    h.coordinator.setAutosaveEnabled(false);
+
+    h.coordinator.markDirty();
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS * 4);
+
+    expect(h.exportCount()).toBe(0);
+    expect(h.coordinator.snapshot.isDirty).toBe(true);
+  });
+
+  it('כיבוי בזמן שיש סבב ממתין מבטל אותו', async () => {
+    const h = harness();
+    h.coordinator.adoptTarget({ token: 'tok', name: 'a.docx' });
+    h.coordinator.markDirty();
+
+    // חצי הדרך אל ה-autosave, ואז המשתמש מכבה.
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS - 100);
+    h.coordinator.setAutosaveEnabled(false);
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS * 4);
+
+    expect(h.exportCount()).toBe(0);
+  });
+
+  it('שמירה ידנית עובדת גם כשהמתג כבוי', async () => {
+    const h = harness();
+    h.coordinator.adoptTarget({ token: 'tok', name: 'a.docx' });
+    h.coordinator.setAutosaveEnabled(false);
+    h.coordinator.markDirty();
+
+    await expect(h.coordinator.saveNow()).resolves.toMatchObject({ status: 'saved' });
+    expect(h.exportCount()).toBe(1);
+    expect(h.coordinator.snapshot.isDirty).toBe(false);
+  });
+
+  it('הדלקה חוזרת שומרת מסמך מלוכלך אחרי ההשהיה הרגילה, ולא מיד', async () => {
+    const h = harness();
+    h.coordinator.adoptTarget({ token: 'tok', name: 'a.docx' });
+    h.coordinator.setAutosaveEnabled(false);
+    h.coordinator.markDirty();
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS * 2);
+    expect(h.exportCount()).toBe(0);
+
+    h.coordinator.setAutosaveEnabled(true);
+    // מיד אחרי הלחיצה עוד לא רץ כלום — לחיצה על מתג אינה ייצוא והעלאה.
+    expect(h.exportCount()).toBe(0);
+
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS);
+    expect(h.exportCount()).toBe(1);
+    expect(h.coordinator.snapshot.isDirty).toBe(false);
+  });
+
+  it('הדלקה חוזרת על מסמך נקי אינה מריצה שמירה', async () => {
+    const h = harness();
+    h.coordinator.adoptTarget({ token: 'tok', name: 'a.docx' });
+
+    h.coordinator.setAutosaveEnabled(false);
+    h.coordinator.setAutosaveEnabled(true);
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS * 2);
+
+    expect(h.exportCount()).toBe(0);
+  });
+
+  it('הדלקה חוזרת בלי יעד כתיבה אינה פותחת „שמור בשם” מעצמה', async () => {
+    const h = harness();
+    h.coordinator.setAutosaveEnabled(false);
+    h.coordinator.markDirty();
+    h.coordinator.setAutosaveEnabled(true);
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS * 2);
+
+    expect(h.exportCount()).toBe(0);
+    expect(h.commits).toEqual([]);
+  });
+
+  it('מעבר מסמך אינו מדליק את המתג מחדש — הוא העדפה של המשתמש', async () => {
+    const h = harness();
+    h.coordinator.setAutosaveEnabled(false);
+
+    h.coordinator.reset({ token: 'tok2', name: 'b.docx' });
+    h.coordinator.markDirty();
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS * 4);
+
+    expect(h.exportCount()).toBe(0);
+  });
+});
+
 describe('מצב', () => {
   it('מדווח את שלבי השמירה בסדר', async () => {
     const h = harness();
