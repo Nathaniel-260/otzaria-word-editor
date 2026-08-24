@@ -235,11 +235,20 @@ defineEmits<{
   white-space: nowrap;
 }
 
+/**
+ * שני מצבי המתג צבועים בזוגות on/base מתועדים של M3 — כבוי
+ * `on-surface-variant`/`surface`, דלוק `primary`/`on-primary` — ולא בצבע קבוע.
+ * זו הסיבה שהוא נראה בשני המצבים: M3 מבטיח את הניגוד **בתוך** הזוג, ולכן
+ * הכפתור נשאר מובחן מהמסילה בכל ערכה. מה שהיה כאן, `#ffffff` על
+ * `--color-outline`, היה כפתור לבן על אפור בהיר במצב בהיר — כלומר מתג שלא
+ * רואים אם הוא דלוק. גם המסילה בדרגת ה-`on` היא הבחירה של Word: שם המצב
+ * הכבוי הוא פיל אפור-כהה עם כפתור לבן.
+ */
 .toggle-pill {
   width: 28px;
   height: 16px;
   border-radius: 999px;
-  background: var(--color-outline);
+  background: var(--color-on-surface-variant);
   position: relative;
   transition: background 0.15s ease;
   flex-shrink: 0;
@@ -255,7 +264,7 @@ defineEmits<{
   width: 12px;
   height: 12px;
   border-radius: 50%;
-  background: #ffffff;
+  background: var(--color-surface);
   position: absolute;
   top: 2px;
   inset-inline-start: 2px;
@@ -268,6 +277,7 @@ defineEmits<{
 
 .autosave-toggle.active .toggle-thumb {
   inset-inline-start: 14px;
+  background: var(--color-on-primary);
 }
 
 /* גישה מהירה */
@@ -302,6 +312,17 @@ defineEmits<{
   cursor: default;
 }
 
+/**
+ * שני סמני „שינויים לא שמורים” (הנקודה על כפתור השמירה, והבולט ליד שם המסמך)
+ * ב-`--color-secondary` ולא בכתום קבוע.
+ *
+ * ההכרעה: M3 אינו מגדיר תפקיד לכתום, ולכן `#e67e22` שהיה כאן היה צבע שאינו
+ * זז עם הערכה ואינו מובטח להיראות על שום רקע. `--color-error` נשקל ונדחה —
+ * „טרם נשמר” אינו כשל, וגלולת המצב שממש לידו כן משתמשת ב-error כשהשמירה
+ * נכשלת; אותו צבע לשני הדברים היה מוחק את ההבדל. `--color-secondary` הוא
+ * התפקיד שמדריך העיצוב נוקב בו במפורש עבור „אינדיקטורים”, והוא צבע מילוי
+ * שהערכה מבטיחה את הניגוד שלו מול המשטח.
+ */
 .dirty-badge {
   position: absolute;
   top: 3px;
@@ -309,7 +330,7 @@ defineEmits<{
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #e67e22;
+  background: var(--color-secondary);
 }
 
 /* שם המסמך */
@@ -348,7 +369,7 @@ defineEmits<{
 
 .dirty-indicator {
   font-size: 16px;
-  color: #e67e22;
+  color: var(--color-secondary);
   line-height: 1;
 }
 
@@ -401,13 +422,17 @@ defineEmits<{
   font-size: 11px;
   padding: 2px 8px;
   border-radius: var(--radius-pill);
-  background: var(--color-primary-subtle, rgba(21, 101, 192, 0.08));
+  background: var(--color-primary-subtle);
   color: var(--color-primary);
   white-space: nowrap;
 }
 
+/* הרקע נגזר מ-`error` של הערכה, כמו הטקסט שמעליו. `rgba(176, 0, 32, .1)`
+   שהיה כאן הוא ה-error של *ברירת המחדל* — כלומר במצב כהה הטקסט זז לאדום
+   הבהיר של הערכה והרקע נשאר בורדו הקפוא של המצב הבהיר. ראו --color-error-subtle
+   ב-tokens.css. */
 .save-state-pill.error {
-  background: rgba(176, 0, 32, 0.1);
+  background: var(--color-error-subtle);
   color: var(--color-error);
 }
 </style>

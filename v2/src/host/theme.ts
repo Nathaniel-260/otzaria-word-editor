@@ -98,6 +98,7 @@ export function applyTheme(theme: ThemePayload): void {
     ['--color-primary-subtle', 'primary', 0.12],
     ['--color-primary-selected-hover', 'primary', 0.2],
     ['--color-secondary-subtle', 'secondary', 0.12],
+    ['--color-error-subtle', 'error', 0.12],
   ];
 
   for (const [name, key, alpha] of ALPHA_SHADES) {

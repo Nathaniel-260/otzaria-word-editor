@@ -354,10 +354,14 @@ onUnmounted(() => {
   gap: 2px;
 }
 
+/* המסגרת של המשבצת ב-`--color-outline` ולא בשחור שקוף: משבצת כהה מהפלטה
+   (`#000000`, `#1d1b10`) בלעה מסגרת של שחור-12% ונראתה בלי גבול בכלל, ובמצב
+   כהה גם המשבצות הבהירות איבדו אותה מול הרקע. הצבעים של המשבצות עצמן הם
+   פלטת Office והם **נתון ולא עיצוב** — ראו THEME_COLUMNS/STANDARD_COLORS. */
 .color-swatch {
   width: 14px;
   height: 14px;
-  border: 1px solid rgba(0, 0, 0, 0.12);
+  border: 1px solid var(--color-outline);
   border-radius: 1px;
   cursor: pointer;
   padding: 0;
