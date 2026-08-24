@@ -87,7 +87,7 @@ interface TabDefinition {
 }
 
 const TABS: TabDefinition[] = [
-  { id: 'file', label: 'קובץ', className: 'file-tab' },
+  { id: 'file', label: 'קובץ' },
   { id: 'home', label: 'בית' },
   { id: 'insert', label: 'הוספה' },
   { id: 'layout', label: 'פריסה' },

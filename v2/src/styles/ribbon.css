@@ -62,17 +62,7 @@
   border-radius: 2px 2px 0 0;
 }
 
-.word-tab-btn.file-tab {
-  background: var(--word-blue);
-  color: var(--color-on-primary);
-  font-weight: 600;
-  border-radius: var(--radius-sm);
-  margin-inline-end: 4px;
-}
 
-.word-tab-btn.file-tab:hover {
-  background: var(--word-blue-dark);
-}
 
 .word-tab-btn.otzaria-tab {
   color: var(--color-secondary);
