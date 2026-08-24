@@ -1,0 +1,276 @@
+/* סגנונות עבור ה-Fluent Ribbon של Word */
+
+.word-ribbon-container {
+  display: flex;
+  flex-direction: column;
+  background: var(--word-ribbon-bg);
+  border-block-end: 1px solid var(--word-ribbon-border);
+  flex-shrink: 0;
+  user-select: none;
+  position: relative;
+  z-index: 10;
+}
+
+/* סרגל לשוניות (Tabs Bar) */
+.word-tab-bar {
+  display: flex;
+  align-items: center;
+  padding-inline: 8px;
+  background: var(--word-ribbon-bg);
+  height: var(--tabbar-height);
+  border-block-end: 1px solid transparent;
+  gap: 2px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.word-tab-bar::-webkit-scrollbar {
+  display: none;
+}
+
+.word-tab-btn {
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  color: var(--color-on-surface);
+  font-family: var(--font-main);
+  font-size: var(--font-size-ui);
+  padding: 4px 12px;
+  cursor: pointer;
+  position: relative;
+  transition: background 0.1s ease, color 0.1s ease;
+  white-space: nowrap;
+}
+
+.word-tab-btn:hover {
+  background: var(--word-btn-hover);
+}
+
+.word-tab-btn.active {
+  font-weight: 600;
+  color: var(--word-blue);
+}
+
+.word-tab-btn.active::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 8px;
+  right: 8px;
+  height: 2px;
+  background: var(--word-tab-active-border);
+  border-radius: 2px 2px 0 0;
+}
+
+.word-tab-btn.file-tab {
+  background: var(--word-blue);
+  color: var(--color-on-primary);
+  font-weight: 600;
+  border-radius: var(--radius-sm);
+  margin-inline-end: 4px;
+}
+
+.word-tab-btn.file-tab:hover {
+  background: var(--word-blue-dark);
+}
+
+.word-tab-btn.otzaria-tab {
+  color: var(--color-secondary);
+  font-weight: 600;
+}
+
+.word-tab-btn.otzaria-tab.active {
+  color: var(--color-secondary);
+}
+
+.word-tab-btn.otzaria-tab.active::after {
+  background: var(--color-secondary);
+}
+
+.word-ribbon-toggle {
+  margin-inline-start: auto;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--color-on-surface-variant);
+  cursor: pointer;
+  padding: 4px 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.1s;
+}
+
+.word-ribbon-toggle:hover {
+  background: var(--word-btn-hover);
+}
+
+/* תוכן ה-Ribbon */
+.word-ribbon-body {
+  display: flex;
+  align-items: stretch;
+  padding: 3px 8px 4px;
+  min-height: var(--ribbon-height);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  gap: 0;
+}
+
+.word-ribbon-body::-webkit-scrollbar {
+  height: 4px;
+}
+
+.word-ribbon-body::-webkit-scrollbar-thumb {
+  background: var(--color-outline);
+  border-radius: var(--radius-xs);
+}
+
+.word-ribbon-body.collapsed {
+  display: none;
+}
+
+/* קבוצת פקדים (Group) */
+.word-ribbon-group {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding-inline: 6px;
+  border-inline-end: 1px solid var(--word-group-border);
+  min-width: max-content;
+  position: relative;
+}
+
+.word-ribbon-group:last-child {
+  border-inline-end: none;
+}
+
+.word-group-content {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  flex: 1;
+}
+
+.word-group-content.column-flow {
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  gap: 2px;
+}
+
+.word-group-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.word-group-footer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  padding-top: 1px;
+  height: 15px;
+}
+
+.word-group-title {
+  font-size: var(--font-size-group-title);
+  color: var(--word-group-label-color);
+  text-align: center;
+  white-space: nowrap;
+}
+
+.word-group-launcher {
+  position: absolute;
+  inset-inline-end: -2px;
+  bottom: 0;
+  background: none;
+  border: none;
+  padding: 1px;
+  cursor: pointer;
+  color: var(--color-on-surface-variant);
+  opacity: 0.7;
+  border-radius: var(--radius-xs);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.word-group-launcher:hover {
+  opacity: 1;
+  background: var(--word-btn-hover);
+}
+
+/* כפתורי Ribbon */
+.word-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--color-on-surface);
+  font-family: var(--font-main);
+  font-size: var(--font-size-ribbon-btn);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 3px 6px;
+  transition: background 0.08s ease, border-color 0.08s ease;
+  white-space: nowrap;
+  line-height: 1.2;
+}
+
+.word-btn:hover:not(:disabled) {
+  background: var(--word-btn-hover);
+  border-color: var(--color-outline-variant);
+}
+
+.word-btn:active:not(:disabled),
+.word-btn.active {
+  background: var(--word-btn-active);
+  border-color: var(--word-btn-active-border);
+  color: var(--word-blue);
+}
+
+.word-btn:disabled {
+  opacity: 0.38;
+  cursor: default;
+}
+
+.word-btn.btn-large {
+  flex-direction: column;
+  padding: 4px 8px;
+  min-width: 48px;
+  height: 68px;
+  gap: 2px;
+  justify-content: center;
+}
+
+.word-btn.btn-large .btn-label {
+  font-size: 11px;
+}
+
+.word-btn.btn-small {
+  flex-direction: row;
+  height: 22px;
+  padding: 2px 6px;
+  justify-content: flex-start;
+  gap: 4px;
+  font-size: 11px;
+}
+
+.word-btn.btn-icon-only {
+  width: 24px;
+  height: 22px;
+  padding: 0;
+}
+
+/* מפריד פנימי עדין */
+.word-separator {
+  width: 1px;
+  height: 18px;
+  background: var(--word-group-border);
+  margin-inline: 2px;
+  flex-shrink: 0;
+}

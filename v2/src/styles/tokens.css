@@ -1,9 +1,7 @@
-/* הטוקנים של הממשק.
-   השמות הם אלה שמדריך העיצוב של ה-SDK מחייב, וכולם נדרסים בזמן ריצה מערכת
-   הנושא של אוצריא (host/theme.ts). הערכים כאן הם ברירת מחדל לפיתוח בדפדפן
-   ולרגע שלפני plugin.boot; הגדרת custom property מוחרגת מוולידציית העיצוב
-   (שימוש בצבע מקודד — לא). ראו את ההערה ב-shell.css על מה שנסרק בפועל. */
+/* הטוקנים של הממשק — מותאמים ל-Material 3 של אוצריא ול-Fluent Ribbon של Word.
+   הערכים כאן הם ברירת מחדל לפיתוח ומודרסים בזמן ריצה ע"י applyTheme (host/theme.ts). */
 :root {
+  /* צבעי בסיס M3 */
   --color-primary: #1565c0;
   --color-on-primary: #ffffff;
   --color-secondary: #6750a4;
@@ -13,37 +11,54 @@
   --color-surface: #f8f9fa;
   --color-on-surface: #1a1a2e;
   --color-on-surface-variant: #49454f;
-  --color-surface-container-high: #ece6f0;
-  --color-surface-container-highest: #e0e0e0;
+  --color-surface-container-high: #f3f2f1;
+  --color-surface-container-highest: #edebe9;
   --color-error: #b00020;
   --color-on-error: #ffffff;
   --color-outline: #cbd5e1;
-  --color-primary-subtle: rgba(21, 101, 192, 0.12);
-  --color-secondary-subtle: rgba(103, 80, 164, 0.12);
+  --color-outline-variant: #e1dfdd;
+  --color-primary-subtle: rgba(21, 101, 192, 0.08);
+  --color-secondary-subtle: rgba(103, 80, 164, 0.08);
+  --color-scrim: rgba(0, 0, 0, 0.32);
 
-  /* 'Selawik' מגיע ארוז עם התוסף (styles/fonts.ts) ולכן קיים בכל מערכת הפעלה,
-     אבל אין בו עברית — הוא תופס רק את הטקסט הלטיני. לכן הוא יושב אחרי גופן
-     אוצריא ולפני 'David', שהוא ה-fallback העברי. */
-  --font-main: 'FrankRuhlCLM', 'Selawik', 'David', serif;
+  /* טוקנים ייעודיים ל-Word Fluent UI */
+  --word-blue: #185abd;
+  --word-blue-dark: #103f91;
+  --word-blue-light: #2b88d8;
+  --word-tab-active-border: #185abd;
+  --word-ribbon-bg: var(--color-surface-container-high);
+  --word-ribbon-border: var(--color-outline-variant);
+  --word-btn-hover: rgba(0, 0, 0, 0.05);
+  --word-btn-active: rgba(24, 90, 189, 0.12);
+  --word-btn-active-border: rgba(24, 90, 189, 0.35);
+  --word-group-label-color: var(--color-on-surface-variant);
+  --word-group-border: var(--color-outline-variant);
+
+  /* גופנים */
+  --font-main: 'Segoe UI', 'FrankRuhlCLM', 'Selawik', 'David', Arial, sans-serif;
   --font-size-base: 18px;
   --line-height: 1.5;
+  --font-size-ui: clamp(12px, calc(var(--font-size-base) * 0.78), 16px);
+  --font-size-ribbon-btn: 12px;
+  --font-size-group-title: 11px;
 
-  /* גודל טקסט הממשק נגזר מגודל הגופן שהמשתמש בחר, אבל חסום: --font-size-base
-     הוא גודל גופן *הספר* ויכול להגיע ל-36px, וסרגל כלים בגודל כזה אינו שמיש. */
-  --font-size-ui: clamp(13px, calc(var(--font-size-base) * 0.8), 20px);
-
-  /* מדריך העיצוב קובע את הסקאלה הזאת; אין להשתמש ב-border-radius אחר. */
-  --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 16px;
+  /* רדיוסי צורה M3 */
+  --radius-xs: 3px;
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
   --radius-pill: 999px;
 
-  /* הפס העליון הוא החריג היחיד ליחידות יחסיות — ראו DESIGN_GUIDE.md. */
-  --topbar-height: 56px;
+  /* גבהים */
+  --topbar-height: 48px;
+  --tabbar-height: 32px;
+  --ribbon-height: 96px;
+  --statusbar-height: 24px;
 }
 
 @media (max-width: 600px) {
   :root {
     --topbar-height: 44px;
+    --ribbon-height: auto;
   }
 }
