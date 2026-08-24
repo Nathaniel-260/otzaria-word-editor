@@ -36,6 +36,19 @@ export interface CreateEditorOptions {
   onError?: (error: Error, payload: SuperDocExceptionPayload) => void;
   /** נקרא על כל שינוי במסמך. זה מה שמסמן אותו כלא-שמור. */
   onUpdate?: () => void;
+  /**
+   * מספר עמודי הפריסה, אחרי כל מעבר עימוד.
+   *
+   * זה **המקור היחיד** למספר העמודים: אין getter ציבורי לשאול בו „כמה עמודים
+   * יש”, ו-`doc.info().counts.pages` מתועד כמי שנעדר „when pagination is
+   * inactive or layout hasn't completed”. עמודים אינם ידועים לפני שהפריסה
+   * רצה, ולכן מי שאינו מאזין לזה יכול רק להמציא מספר — וזה מה שקרה: שורת
+   * המצב הציגה „עמוד 1 מתוך 1” על כל מסמך.
+   *
+   * ה-payload של המנוע נושא גם את המופע עצמו; הוא אינו מועבר הלאה — מי
+   * שרושם את ה-callback מחזיק את ה-session ואינו צריך לקבל אותו בחזרה.
+   */
+  onPaginationUpdate?: (totalPages: number) => void;
   /** מעל הזמן הזה הפתיחה נכשלת. ראו OPEN_TIMEOUT_MS. */
   timeoutMs?: number;
 }
@@ -68,7 +81,14 @@ export function exceptionToError(payload: SuperDocExceptionPayload): Error {
 }
 
 export function createEditor(options: CreateEditorOptions): Promise<EditorSession> {
-  const { container, source, onError, onUpdate, timeoutMs = OPEN_TIMEOUT_MS } = options;
+  const {
+    container,
+    source,
+    onError,
+    onUpdate,
+    onPaginationUpdate,
+    timeoutMs = OPEN_TIMEOUT_MS,
+  } = options;
 
   return new Promise((resolve, reject) => {
     let instance: SuperDoc | undefined;
@@ -119,6 +139,11 @@ export function createEditor(options: CreateEditorOptions): Promise<EditorSessio
 
       // כל שינוי במסמך. ה-session מסמן ממנו dirty; אין קריאה ל-DOM.
       onEditorUpdate: onUpdate ? () => onUpdate() : undefined,
+
+      // מספר העמודים, אחרי כל מעבר פריסה. ראו onPaginationUpdate למעלה.
+      onPaginationUpdate: onPaginationUpdate
+        ? ({ totalPages }) => onPaginationUpdate(totalPages)
+        : undefined,
 
       // ה-payload נושא את המופע המוכן. משתמשים בו, ולא ב-closure, כדי לא
       // להישען על סדר ההשמה של הבנאי.

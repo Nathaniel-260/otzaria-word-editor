@@ -31,3 +31,39 @@ export function docTitleWidthCh(title: string): number {
   const length = title.trim().length;
   return Math.min(DOC_TITLE_MAX_CH, Math.max(DOC_TITLE_MIN_CH, length + 1));
 }
+
+/**
+ * תווית העמוד בשורת המצב.
+ *
+ * שלושת המצבים אינם קוסמטיקה אלא שלוש דרגות ידיעה שונות, וזו הסיבה שהתווית
+ * אינה מחרוזת אחת עם מספרים בתוכה:
+ *
+ * - **אין מספר עמודים** — העימוד טרם דיווח. אין מה להציג, ובטח לא „עמוד 1
+ *   מתוך 1” (זה מה שהוצג עד עכשיו, על כל מסמך).
+ * - **יש מספר עמודים ואין עמוד סמן** — `getAnchorRect()` מחזיר `null` כשאין
+ *   בחירה או כשהגיאומטריה עוד לא נפתרה. אז מוצג מספר העמודים בלבד: התכנית
+ *   (§11) מתירה „עמוד פעיל רק אם קיים מקור ציבורי אמין”.
+ * - **שניהם ידועים** — הנוסח המלא, כמו ב-Word.
+ *
+ * עמוד סמן שגדול ממספר העמודים אפשרי לרגע: הסמן זז לפני שמעבר הפריסה הבא
+ * דיווח. הוא מוגבל למספר העמודים, כי „עמוד 4 מתוך 3” נראה כמו באג ולא כמו
+ * מדידה שמתעכבת.
+ */
+export function pageLabel(currentPage: number | null, totalPages: number | null): string {
+  if (totalPages === null || totalPages <= 0) return '';
+  if (currentPage === null || currentPage <= 0) {
+    return totalPages === 1 ? 'עמוד אחד' : `${totalPages} עמודים`;
+  }
+  return `עמוד ${Math.min(currentPage, totalPages)} מתוך ${totalPages}`;
+}
+
+/**
+ * תווית מספר המילים. `null` (טרם נמדד) הוא מחרוזת ריקה ולא „0 מילים” — מסמך
+ * שטרם נספר ומסמך ריק אינם אותו דבר.
+ */
+export function wordCountLabel(words: number | null): string {
+  if (words === null || words < 0) return '';
+  if (words === 0) return 'אין מילים';
+  if (words === 1) return 'מילה אחת';
+  return `${words} מילים`;
+}

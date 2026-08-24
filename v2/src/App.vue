@@ -46,12 +46,15 @@
 
     <!-- שורת מצב תחתונה -->
     <StatusBar
-      :current-page="currentPage"
-      :total-pages="totalPages"
-      :word-count="wordCount"
+      :current-page="docMetrics.currentPage"
+      :total-pages="docMetrics.totalPages"
+      :word-count="docMetrics.words"
       :status-text="statusText"
       :is-error="isStatusError"
-      :zoom-level="zoomLevel"
+      :is-focus-mode="isFocusMode"
+      :zoom-level="zoom.value"
+      :zoom-min="zoom.min"
+      :zoom-max="zoom.max"
       @update:zoom-level="onZoomChange"
       @toggle-focus="toggleFocusMode"
     />
@@ -100,6 +103,15 @@ import {
 import { createEditorSwap, type EditorSwap } from './sessions/editor-swap';
 import { createSaveCoordinator, type SaveCoordinator, type SaveSnapshot } from './sessions/save-coordinator';
 import { createEditor } from './engine/create-editor';
+import {
+  anchorPageIndex,
+  createDocMetrics,
+  emptyDocMetrics,
+  readDocumentInfo,
+  type DocMetrics,
+  type DocMetricsAdapter,
+} from './engine/doc-metrics';
+import { FALLBACK_ZOOM, observeZoom, type ZoomState } from './engine/zoom';
 import { applyHebrewDocumentDefaults } from './engine/document-defaults';
 import type { SuperDoc } from 'superdoc';
 import { exportDocx, docxFileName } from './engine/export';
@@ -155,10 +167,15 @@ const isAboutOpen = ref(false);
 const searchState = ref<SearchState>(idleSearchState());
 const searchCounter = computed(() => searchCounterText(searchState.value));
 
-const currentPage = ref(1);
-const totalPages = ref(1);
-const wordCount = ref(0);
-const zoomLevel = ref(100);
+/**
+ * מה ששורת המצב מציגה. שלושת הערכים היו `ref(1)`, `ref(1)` ו-`ref(0)` שלא
+ * התעדכנו מעולם — „עמוד 1 מתוך 1” ו„0 מילים” על כל מסמך. עכשיו הם מדידה,
+ * ו-`null` בהם פירושו „טרם נמדד” ולא מספר (ראו engine/doc-metrics.ts).
+ */
+const docMetrics = ref<DocMetrics>(emptyDocMetrics());
+
+/** גודל התצוגה והגבולות שהמנוע מתיר. הסרגל לא מקודד אותם יותר. */
+const zoom = ref<ZoomState>({ ...FALLBACK_ZOOM });
 
 const canUndo = ref(false);
 const canRedo = ref(false);
@@ -175,6 +192,8 @@ const saveSnapshot = ref<SaveSnapshot>({
 let swap: EditorSwap | null = null;
 let save: SaveCoordinator | null = null;
 let searchAdapter: SearchAdapter | null = null;
+/** מודד את המסמך הפתוח. מוחלף בכל מעבר מסמך, כמו אדפטר החיפוש. */
+let metrics: DocMetricsAdapter | null = null;
 
 const saveStateMessage = computed(() => {
   const state = saveSnapshot.value.state;
@@ -284,6 +303,45 @@ async function openDocument(file?: UserFile): Promise<boolean> {
     })
   );
 
+  /**
+   * מודד המסמך שייך ל-session: `doc` הוא של המופע הפתוח, ו-`getAnchorRect`
+   * קורא את הגיאומטריה של ה-controller שלו. `sessionMetrics` המקומי ולא
+   * `metrics` בפירוק — אחרת סגירת המסמך הקודם הייתה מפרקת את המודד של המסמך
+   * שנפתח אחריו (אותה מלכודת כמו באדפטר החיפוש).
+   */
+  const sessionMetrics = createDocMetrics({
+    readInfo: () => readDocumentInfo(editor.superdoc),
+    readAnchorPageIndex: () => anchorPageIndex(editor.ui),
+    onChange: (next) => {
+      docMetrics.value = next;
+    },
+  });
+  metrics = sessionMetrics;
+  docMetrics.value = sessionMetrics.getState();
+  editor.onDispose(() => {
+    sessionMetrics.dispose();
+    if (metrics === sessionMetrics) {
+      metrics = null;
+      docMetrics.value = emptyDocMetrics();
+    }
+  });
+
+  // עמוד הסמן מגיע מהבחירה, ולכן הוא נקרא כשהיא זזה. בלי ההאזנה המספר היה
+  // נכון רק ברגע שהמסמך נפתח.
+  editor.onDispose(editor.ui.selection.observe(() => sessionMetrics.noteSelectionChanged()));
+
+  // גודל התצוגה: `observe` יורה מיד ואז על כל שינוי — כולל שינוי שלא בא
+  // מאיתנו (התאמה לרוחב החלון), שאחרת היה משאיר את התווית על ערך שגוי.
+  editor.onDispose(
+    observeZoom(editor.ui, (state) => {
+      zoom.value = state;
+    })
+  );
+
+  // מדידה ראשונה, בלי להמתין לעריכה: מסמך שנפתח צריך להציג את מספר המילים
+  // שלו. אם הפאסדה עוד לא מוכנה, הניסיון החוזר תלוי במעבר הפריסה הראשון.
+  sessionMetrics.measureNow();
+
   const sessionSearch = createSearchAdapter(editor.ui);
   searchAdapter = sessionSearch;
   searchState.value = sessionSearch.getState();
@@ -301,7 +359,13 @@ async function openDocument(file?: UserFile): Promise<boolean> {
   });
 
   title.value = file ? file.name.replace(/\.docx$/i, '') : 'מסמך חדש';
-  setStatus(`${title.value} — נטען ב-${Math.round(performance.now() - startedAt)} מילישניות`);
+  // זמן הטעינה הוא מדידת פיתוח ולא הודעה למשתמש: „נטען ב-473 מילישניות” תפס
+  // את שורת המצב עד ההודעה הבאה. הוא נשמר — הוא מה שמסביר פתיחה איטית —
+  // בלוג של אוצריא, במקום שבו מסתכלים על מדידות.
+  console.info(
+    `[otzaria-word] ${title.value} נטען ב-${Math.round(performance.now() - startedAt)} מילישניות`
+  );
+  setStatus('');
 
   if (file && file.access !== 'readwrite') {
     setStatus(`${title.value} — פתוח לקריאה; „שמור” יבקש מקום חדש`);
@@ -531,13 +595,14 @@ async function onReplaceAllText(replacement: string): Promise<void> {
  * `instanceCommandPayloadIsValid` (הוא דורש `typeof payload === 'number'`
  * אחרי הנרמול) — התווית בשורת המצב התחדשה, והמסמך לא זז.
  *
- * הגבולות של הסרגל אינם קשיחים אלא `min`/`max` מ-`ui.zoom.getSnapshot()`;
- * ה-StatusBar עדיין מגביל 50–200 בעצמו.
+ * הגבולות אינם קשיחים אלא `min`/`max` מ-`ui.zoom.getSnapshot()` (engine/zoom.ts),
+ * וההגבלה נעשית ב-StatusBar לפי מה שהמנוע דיווח. הערך המוצג אינו נכתב כאן
+ * אלא מגיע מ-`observeZoom`: כך התווית משקפת את מה שהמסמך באמת בו, גם כשהזום
+ * השתנה ממקור אחר וגם כשהפקודה נדחתה.
  */
 function onZoomChange(level: number): void {
   const payload = zoomPayload(level);
   if (payload === null) return;
-  zoomLevel.value = level;
   void commandAdapter.value?.run('zoom', payload);
 }
 
@@ -620,7 +685,13 @@ onMounted(async () => {
         container: host,
         source,
         onError: (err) => console.error('[otzaria-word] שגיאת מנוע:', err),
-        onUpdate: () => save?.markDirty(),
+        onUpdate: () => {
+          save?.markDirty();
+          metrics?.noteDocumentChanged();
+        },
+        // ה-callback נרשם פעם אחת, כאן, ולכן הוא מפנה למודד הנוכחי ולא
+        // ל-session מסוים — בדיוק כמו `save?.markDirty()` שמעליו.
+        onPaginationUpdate: (totalPages) => metrics?.notePaginationUpdate(totalPages),
       })
     );
 

@@ -5,29 +5,30 @@
     role="status"
     :class="{ 'status--error': isError }"
   >
-    <!-- צד ימין (RTL): נתוני מסמך -->
+    <!-- צד ימין (RTL): נתוני מסמך. כל פריט מוצג רק אם נמדד — ראו shell-format. -->
     <div class="statusbar-start">
       <div
+        v-if="pageText"
         class="status-item"
-        title="מספר עמוד"
+        title="עמודי המסמך"
       >
-        <span>עמוד {{ currentPage }} מתוך {{ totalPages }}</span>
+        <span>{{ pageText }}</span>
       </div>
-      <div class="status-divider" />
       <div
+        v-if="pageText && wordText"
+        class="status-divider"
+      />
+      <div
+        v-if="wordText"
         class="status-item"
         title="מספר מילים במסמך"
       >
-        <span>{{ wordCount }} מילים</span>
+        <span>{{ wordText }}</span>
       </div>
-      <div class="status-divider" />
       <div
-        class="status-item"
-        title="שפת הגהה"
-      >
-        <span>{{ language }}</span>
-      </div>
-      <div class="status-divider" />
+        v-if="(pageText || wordText) && statusText"
+        class="status-divider"
+      />
       <div
         v-if="statusText"
         class="status-item status-message"
@@ -37,13 +38,14 @@
       </div>
     </div>
 
-    <!-- צד שמאל (RTL): מצבי תצוגה ובקרת זום -->
+    <!-- צד שמאל (RTL): מצב תצוגה ובקרת זום -->
     <div class="statusbar-end">
-      <!-- מצבי תצוגה -->
       <div class="view-mode-buttons">
         <button
           type="button"
           class="sb-icon-btn"
+          :class="{ active: isFocusMode }"
+          :aria-pressed="isFocusMode"
           title="מצב מיקוד"
           @pointerdown.prevent
           @click="$emit('toggle-focus')"
@@ -53,47 +55,40 @@
             :size="13"
           />
         </button>
-        <button
-          type="button"
-          class="sb-icon-btn active"
-          title="פריסת הדפסה"
-        >
-          <SvgIcon
-            name="paperSize"
-            :size="13"
-          />
-        </button>
       </div>
 
       <div class="status-divider" />
 
-      <!-- בקרת זום (Zoom Slider) -->
+      <!-- בקרת זום. הגבולות מגיעים מהמנוע ואינם מקודדים כאן. -->
       <div class="zoom-controls">
         <button
           type="button"
           class="zoom-step-btn"
           title="הקטן תצוגה"
+          :disabled="zoomLevel <= zoomMin"
           @pointerdown.prevent
-          @click="stepZoom(-10)"
+          @click="stepZoom(-ZOOM_STEP)"
         >
           -
         </button>
         <input
           type="range"
-          min="50"
-          max="200"
-          step="5"
+          :min="zoomMin"
+          :max="zoomMax"
+          :step="ZOOM_STEP"
           :value="zoomLevel"
           class="zoom-slider"
           title="שינוי גודל תצוגה"
+          aria-label="גודל תצוגה באחוזים"
           @input="onZoomSliderChange"
         >
         <button
           type="button"
           class="zoom-step-btn"
           title="הגדל תצוגה"
+          :disabled="zoomLevel >= zoomMax"
           @pointerdown.prevent
-          @click="stepZoom(10)"
+          @click="stepZoom(ZOOM_STEP)"
         >
           +
         </button>
@@ -112,26 +107,39 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue';
 import SvgIcon from '../icons/SvgIcon.vue';
+import { pageLabel, wordCountLabel } from '../../composables/shell-format';
+import { clampZoom, FALLBACK_ZOOM } from '../../engine/zoom';
+
+/** צעד הזום של לחצני ± ושל הסרגל, באחוזים. */
+const ZOOM_STEP = 10;
 
 const props = withDefaults(
   defineProps<{
-    currentPage?: number;
-    totalPages?: number;
-    wordCount?: number;
-    language?: string;
+    /** עמוד הסמן, מבוסס 1. `null` = אין מקור אמין, ואז מוצג מספר העמודים בלבד. */
+    currentPage?: number | null;
+    /** מספר עמודי הפריסה. `null` = העימוד טרם דיווח. */
+    totalPages?: number | null;
+    /** מספר המילים. `null` = טרם נמדד; 0 הוא מסמך ריק, וזה לא אותו דבר. */
+    wordCount?: number | null;
     statusText?: string;
     isError?: boolean;
+    isFocusMode?: boolean;
     zoomLevel?: number;
+    zoomMin?: number;
+    zoomMax?: number;
   }>(),
   {
-    currentPage: 1,
-    totalPages: 1,
-    wordCount: 0,
-    language: 'עברית',
+    currentPage: null,
+    totalPages: null,
+    wordCount: null,
     statusText: '',
     isError: false,
-    zoomLevel: 100,
+    isFocusMode: false,
+    zoomLevel: FALLBACK_ZOOM.value,
+    zoomMin: FALLBACK_ZOOM.min,
+    zoomMax: FALLBACK_ZOOM.max,
   }
 );
 
@@ -140,18 +148,23 @@ const emit = defineEmits<{
   (e: 'toggle-focus'): void;
 }>();
 
+const pageText = computed(() => pageLabel(props.currentPage, props.totalPages));
+const wordText = computed(() => wordCountLabel(props.wordCount));
+
+function emitZoom(value: number): void {
+  emit('update:zoomLevel', clampZoom(value, props.zoomMin, props.zoomMax));
+}
+
 function onZoomSliderChange(event: Event): void {
-  const val = parseInt((event.target as HTMLInputElement).value, 10) || 100;
-  emit('update:zoomLevel', val);
+  emitZoom(Number.parseInt((event.target as HTMLInputElement).value, 10));
 }
 
 function stepZoom(delta: number): void {
-  const next = Math.min(200, Math.max(50, props.zoomLevel + delta));
-  emit('update:zoomLevel', next);
+  emitZoom(props.zoomLevel + delta);
 }
 
 function resetZoom(): void {
-  emit('update:zoomLevel', 100);
+  emitZoom(FALLBACK_ZOOM.value);
 }
 </script>
 
@@ -247,8 +260,13 @@ function resetZoom(): void {
   cursor: pointer;
 }
 
-.zoom-step-btn:hover {
+.zoom-step-btn:hover:not(:disabled) {
   color: var(--color-on-surface);
+}
+
+.zoom-step-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
 }
 
 .zoom-slider {

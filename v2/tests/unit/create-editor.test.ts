@@ -14,6 +14,7 @@ interface FakeConfig {
   workerUrls?: unknown;
   modules?: unknown;
   onEditorUpdate?: () => void;
+  onPaginationUpdate?: (params: { totalPages: number; superdoc: FakeSuperDoc }) => void;
   onReady: (params: { superdoc: FakeSuperDoc }) => void;
   onException: (payload: unknown) => void;
 }
@@ -92,6 +93,23 @@ describe('createEditor', () => {
 
     createEditor({ container: document.createElement('div') });
     expect(lastInstance()!.config.onEditorUpdate).toBeUndefined();
+  });
+
+  it('מחבר את onPaginationUpdate ומעביר את מספר העמודים בלבד', () => {
+    // זה המקור **היחיד** למספר העמודים: אין getter ציבורי לשאול בו. בלי
+    // החיבור הזה שורת המצב יכולה רק להמציא מספר, וזה מה שהיא עשתה.
+    const onPaginationUpdate = vi.fn();
+    createEditor({ container: document.createElement('div'), onPaginationUpdate });
+    const withHook = lastInstance()!;
+
+    withHook.config.onPaginationUpdate?.({ totalPages: 24, superdoc: withHook });
+
+    // המופע שב-payload אינו מועבר הלאה: מי שרשם את ה-callback מחזיק את ה-session.
+    expect(onPaginationUpdate).toHaveBeenCalledTimes(1);
+    expect(onPaginationUpdate).toHaveBeenCalledWith(24);
+
+    createEditor({ container: document.createElement('div') });
+    expect(lastInstance()!.config.onPaginationUpdate).toBeUndefined();
   });
 
   it('מכבה את דיאלוג הסיסמה המובנה', () => {
