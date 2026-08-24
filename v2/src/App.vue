@@ -88,7 +88,8 @@ import FindReplaceDialog from './ui/panels/FindReplaceDialog.vue';
 import AboutDialog from './ui/panels/AboutDialog.vue';
 
 import { createCommandAdapter, type CommandAdapter, type CommandOutcome } from './engine/command-adapter';
-import { COMMAND_ADAPTER, COMMAND_REPORTER } from './composables/keys';
+import { COMMAND_ADAPTER, COMMAND_REPORTER, FONT_OPTIONS } from './composables/keys';
+import { fallbackFontOptions, observeFontOptions, type FontOptions } from './engine/font-options';
 import { zoomPayload } from './engine/payloads';
 import {
   createSearchAdapter,
@@ -122,6 +123,14 @@ const editorStackRef = ref<HTMLElement | null>(null);
 
 const commandAdapter = shallowRef<CommandAdapter | null>(null);
 provide(COMMAND_ADAPTER, commandAdapter);
+
+/**
+ * אפשרויות הגופן של המסמך הפתוח. מסופקות מכאן ולא נקראות בקומפוננטה, כי
+ * `ui.fonts` הוא handle של ה-session — מסמך חדש מביא רשימה חדשה, ורק מי שמנהל
+ * את ה-session יודע מתי. הקומפוננטה רואה מפתח צר (`FONT_OPTIONS`) ולא את `ui`.
+ */
+const fontOptions = shallowRef<FontOptions>(fallbackFontOptions());
+provide(FONT_OPTIONS, fontOptions);
 
 const title = ref('מסמך חדש');
 const isOpening = ref(false);
@@ -263,6 +272,14 @@ async function openDocument(file?: UserFile): Promise<boolean> {
   // החיפוש שייך ל-session: ה-handle הוא של ה-controller של המופע, ומסמך חדש
   // מקבל אדפטר חדש. ה-`session` המקומי ולא `searchAdapter` בפירוק — אחרת
   // סגירת המסמך הקודם הייתה מפרקת את האדפטר של המסמך שנפתח אחריו.
+  // `observe` יורה מיד עם ה-snapshot ואז על כל שינוי: המנוע פותר את גופני
+  // המסמך אחרי שהוא נפתח, ובלי האזנה הבורר היה קופא על הרשימה של הרגע הראשון.
+  editor.onDispose(
+    observeFontOptions(editor.ui, (options) => {
+      fontOptions.value = options;
+    })
+  );
+
   const sessionSearch = createSearchAdapter(editor.ui);
   searchAdapter = sessionSearch;
   searchState.value = sessionSearch.getState();

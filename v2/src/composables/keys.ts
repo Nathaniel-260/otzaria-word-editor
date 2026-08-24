@@ -7,6 +7,7 @@
  */
 import type { InjectionKey, Ref } from 'vue';
 import type { CommandAdapter, CommandOutcome } from '../engine/command-adapter';
+import type { FontOptions } from '../engine/font-options';
 
 /** האדפטר של ה-session הפעיל. `null` עד שיש מסמך פתוח. */
 export const COMMAND_ADAPTER: InjectionKey<Ref<CommandAdapter | null>> = Symbol('commandAdapter');
@@ -21,3 +22,12 @@ export const COMMAND_REPORTER: InjectionKey<CommandReporter> = Symbol('commandRe
 
 /** מקבלת את תוצאת הפקודה. נקראת גם בהצלחה, כדי שנוכל לנקות הודעה קודמת. */
 export type CommandReporter = (outcome: CommandOutcome, commandId: string) => void;
+
+/**
+ * אפשרויות הגופן של המסמך הפתוח (`ui.fonts` דרך engine/font-options.ts).
+ *
+ * מפתח **צר** בכוונה, ולא ה-`ui` הגולמי: התכנית (§4) קובעת שכל מה שקומפוננטה
+ * רואה עובר דרך שכבה שאפשר לבדוק. `ui` בקומפוננטה היה פותח לה את כל 20
+ * ה-handles של ה-controller, כולל מסלולי mutation שאין להם קשר לבורר גופן.
+ */
+export const FONT_OPTIONS: InjectionKey<Ref<FontOptions>> = Symbol('fontOptions');

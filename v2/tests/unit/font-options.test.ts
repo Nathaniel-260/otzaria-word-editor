@@ -1,0 +1,164 @@
+/**
+ * אפשרויות הגופן. מה שנבדק כאן הוא הדבר שהיה שבור: הרשימה הייתה קשיחה, ולכן
+ * גופן שהמסמך משתמש בו ולא ניחשנו מראש לא היה בבורר בכלל.
+ *
+ * וגם הכיוון ההפוך — הגופן הארוז שלנו וגופני העברית של אוצריא אינם מוכרים
+ * למנוע (הם מותקנים אחרי שהוא בנה את הרשימה שלו), ולכן מיזוג שנשען על המנוע
+ * לבדו היה מוחק אותם.
+ */
+import { describe, it, expect, vi } from 'vitest';
+import type { FontFamilyOption } from 'superdoc/ui';
+import {
+  LATIN_FONT_FAMILIES,
+  OTZARIA_FONT_FAMILIES,
+  fallbackFontOptions,
+  mergeFontFamilies,
+  mergeFontSizes,
+  observeFontOptions,
+  readFontOptions,
+  type FontOptionsSource,
+  type FontsSliceLike,
+} from '../../src/engine/font-options';
+
+const values = (options: readonly { value: string }[]) => options.map((option) => option.value);
+
+describe('mergeFontFamilies', () => {
+  it('הגופנים שלנו ראשונים, גם כשהמנוע מציע אחרים', () => {
+    const merged = mergeFontFamilies([{ value: 'Verdana', label: 'Verdana' }]);
+    expect(values(merged).slice(0, OTZARIA_FONT_FAMILIES.length)).toEqual(
+      values(OTZARIA_FONT_FAMILIES),
+    );
+    expect(values(merged)).toContain('Verdana');
+  });
+
+  it('גופני המסמך מגיעים מהמנוע, אחרי שלנו ולפני זנב הלטינית', () => {
+    const merged = values(mergeFontFamilies([{ value: 'Cambria', label: 'Cambria' }]));
+    expect(merged.indexOf('Cambria')).toBeGreaterThan(merged.indexOf('Assistant'));
+    expect(merged.indexOf('Cambria')).toBeLessThan(merged.indexOf('Arial'));
+  });
+
+  it('אין כפילות, וההשוואה חסרת רגישות לאותיות כמו במנוע', () => {
+    const merged = values(
+      mergeFontFamilies([
+        { value: 'assistant', label: 'assistant' },
+        { value: 'ARIAL', label: 'ARIAL' },
+      ]),
+    );
+    expect(merged.filter((value) => value.toLowerCase() === 'assistant')).toHaveLength(1);
+    expect(merged.filter((value) => value.toLowerCase() === 'arial')).toHaveLength(1);
+  });
+
+  it('התווית שלנו מנצחת — „David” ולא „TaameyDavidCLM”', () => {
+    const merged = mergeFontFamilies([{ value: 'TaameyDavidCLM', label: 'TaameyDavidCLM' }]);
+    expect(merged.find((option) => option.value === 'TaameyDavidCLM')?.label).toBe('David');
+  });
+
+  it('לכל אפשרות יש previewFamily, כדי שהבורר יציג כל שם בגופן שלו', () => {
+    const merged = mergeFontFamilies([{ value: 'Verdana', label: 'Verdana' }]);
+    expect(merged.every((option) => Boolean(option.previewFamily))).toBe(true);
+  });
+
+  it('שורה פגומה מהמנוע נדחית ואינה מפילה את הרשימה', () => {
+    const broken = [
+      { value: '', label: 'ריק' },
+      { value: '   ', label: 'רווחים' },
+      null,
+    ] as unknown as readonly FontFamilyOption[];
+    expect(values(mergeFontFamilies(broken))).toEqual(
+      values([...OTZARIA_FONT_FAMILIES, ...LATIN_FONT_FAMILIES]),
+    );
+  });
+});
+
+describe('mergeFontSizes', () => {
+  it('גדלים ממוינים כמספרים ולא כמחרוזות', () => {
+    // מיון לקסיקוגרפי היה מציב את 8 אחרי 72.
+    const merged = values(mergeFontSizes([{ value: '72', label: '72' }])).map(Number);
+    expect(merged).toEqual([...merged].sort((a, b) => a - b));
+    expect(merged[0]).toBe(8);
+  });
+
+  it('גודל שהמנוע מציע ואינו בסולם Word מתווסף במקומו', () => {
+    const merged = values(mergeFontSizes([{ value: '10.5', label: '10.5' }]));
+    expect(merged).toContain('10.5');
+    expect(merged.indexOf('10.5')).toBe(merged.indexOf('11') - 1);
+  });
+
+  it('אין כפילות של אותו מספר בכתיב אחר', () => {
+    const merged = values(mergeFontSizes([{ value: '12.0', label: '12.0' }]));
+    expect(merged.filter((value) => Number.parseFloat(value) === 12)).toHaveLength(1);
+  });
+});
+
+describe('readFontOptions', () => {
+  it('קורא מ-ui.fonts', () => {
+    const ui: FontOptionsSource = {
+      fonts: {
+        getFamilyOptions: () => [{ value: 'Cambria', label: 'Cambria' }],
+        getSizeOptions: () => [{ value: '13', label: '13' }],
+      },
+    };
+    expect(values(readFontOptions(ui).families)).toContain('Cambria');
+    expect(values(readFontOptions(ui).sizes)).toContain('13');
+  });
+
+  it('מנוע בלי fonts נופל לרשימה שלנו ולא לרשימה ריקה', () => {
+    expect(readFontOptions({})).toEqual(fallbackFontOptions());
+    expect(readFontOptions(null)).toEqual(fallbackFontOptions());
+    expect(fallbackFontOptions().families.length).toBeGreaterThan(0);
+  });
+
+  it('קריאה שזורקת אינה מפילה את הבורר', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const ui: FontOptionsSource = {
+      fonts: {
+        getFamilyOptions: () => {
+          throw new Error('המנוע לא מוכן');
+        },
+      },
+    };
+    expect(values(readFontOptions(ui).families)).toEqual(values(fallbackFontOptions().families));
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+});
+
+describe('observeFontOptions', () => {
+  it('כל דיווח של המנוע מתורגם לאפשרויות ממוזגות', () => {
+    // מחזיק ולא משתנה מקומי: TS מצמצם `let` שמשויך רק בתוך callback ל-null.
+    const captured: { emit: ((slice: FontsSliceLike) => void) | null } = { emit: null };
+    const dispose = vi.fn();
+    const ui: FontOptionsSource = {
+      fonts: {
+        observe: (listener) => {
+          captured.emit = listener;
+          listener({ options: [{ value: 'Aptos', label: 'Aptos' }], sizeOptions: [] });
+          return dispose;
+        },
+      },
+    };
+
+    const seen: string[][] = [];
+    const stop = observeFontOptions(ui, (options) => seen.push([...values(options.families)]));
+
+    // המנוע פותר את גופני המסמך אחרי הפתיחה; בלי ההאזנה הבורר היה קופא על
+    // הרשימה של הרגע הראשון.
+    captured.emit?.({ options: [{ value: 'Cambria', label: 'Cambria' }], sizeOptions: [] });
+
+    expect(seen).toHaveLength(2);
+    expect(seen[0]).toContain('Aptos');
+    expect(seen[1]).toContain('Cambria');
+    expect(seen[1]).toContain('Assistant');
+
+    stop();
+    expect(dispose).toHaveBeenCalled();
+  });
+
+  it('מנוע בלי observe מדווח פעם אחת ומחזיר disposer', () => {
+    const seen: number[] = [];
+    const stop = observeFontOptions({}, (options) => seen.push(options.families.length));
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toBeGreaterThan(0);
+    expect(() => stop()).not.toThrow();
+  });
+});

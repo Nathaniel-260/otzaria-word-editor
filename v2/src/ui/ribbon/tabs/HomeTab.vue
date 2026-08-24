@@ -49,16 +49,20 @@
     >
       <!-- שורה עליונה: גופן, גודל, הגדל/הקטן, נקה -->
       <div class="word-group-row">
+        <!--
+          `:model-value` ולא `v-model`: הערך המוצג הוא computed שמקורו במנוע,
+          ואין לפקד רשות לכתוב אליו. מה שהמשתמש בוחר עובר בפקודה, וחוזר משם.
+        -->
         <RibbonSelect
-          v-model="selectedFontFamily"
-          :options="FONT_FAMILIES"
+          :model-value="selectedFontFamily"
+          :options="familySelectOptions"
           width="130px"
           title="גופן"
           @update:model-value="onFontFamilyChange"
         />
         <RibbonSelect
-          v-model="selectedFontSize"
-          :options="FONT_SIZES"
+          :model-value="selectedFontSize"
+          :options="sizeSelectOptions"
           width="50px"
           title="גודל גופן"
           @update:model-value="onFontSizeChange"
@@ -138,14 +142,14 @@
         <div class="word-separator" />
 
         <ColorPickerPopover
-          v-model="highlightColor"
+          :model-value="highlightColor"
           icon="highlight"
           title="צבע סימון טקסט"
           default-color="#FFFF00"
           @change="onHighlightChange"
         />
         <ColorPickerPopover
-          v-model="textColor"
+          :model-value="textColor"
           icon="fontColor"
           title="צבע גופן"
           default-color="#000000"
@@ -252,8 +256,8 @@
         <div class="word-separator" />
 
         <RibbonSelect
-          v-model="selectedLineSpacing"
-          :options="SPACING_OPTIONS"
+          :model-value="selectedLineSpacing"
+          :options="spacingSelectOptions"
           width="48px"
           title="מרווח בין שורות"
           @update:model-value="onLineSpacingChange"
@@ -309,21 +313,27 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import RibbonGroup from '../common/RibbonGroup.vue';
 import RibbonButton from '../common/RibbonButton.vue';
 import RibbonSelect, { type SelectOption } from '../common/RibbonSelect.vue';
 import ColorPickerPopover from '../common/ColorPickerPopover.vue';
 import StyleGallery from '../common/StyleGallery.vue';
 import { useCommand } from '../../../composables/useCommand';
+import { useFontOptions } from '../../../composables/useFontOptions';
 import {
+  DEFAULT_FONT_SIZE_PT,
+  DEFAULT_LINE_HEIGHT,
   alignmentPayload,
   colorPayload,
   fontFamilyPayload,
   fontSizePayload,
   grownFontSize,
   lineHeightPayload,
+  parseColor,
+  parseFontFamily,
   parseFontSizePt,
+  parseLineHeight,
   shrunkFontSize,
   stylePayload,
   type ParagraphAlignment,
@@ -334,26 +344,6 @@ defineEmits<{
   (e: 'open-replace'): void;
 }>();
 
-// רשימות גופנים וגדלים
-const FONT_FAMILIES: SelectOption[] = [
-  // Assistant נארז עם התוסף (styles/fonts.ts) ולכן זמין בכל פלטפורמה; השאר
-  // תלויים במה שמותקן במערכת או במה שאוצריא מזריקה.
-  { value: 'Assistant', label: 'Assistant' },
-  { value: 'Segoe UI', label: 'Segoe UI' },
-  { value: 'Aptos', label: 'Aptos' },
-  { value: 'FrankRuhlCLM', label: 'Frank Ruhl' },
-  { value: 'TaameyDavidCLM', label: 'David' },
-  { value: 'Times New Roman', label: 'Times New Roman' },
-  { value: 'Arial', label: 'Arial' },
-  { value: 'Rubik', label: 'Rubik' },
-  { value: 'Shofar', label: 'Shofar' },
-  { value: 'NotoRashiHebrew', label: 'Rashi' },
-];
-
-const FONT_SIZES: SelectOption[] = [
-  '8', '9', '10', '11', '12', '14', '16', '18', '20', '24', '28', '36', '48', '72'
-].map(s => ({ value: s, label: s }));
-
 const SPACING_OPTIONS: SelectOption[] = [
   { value: '1.0', label: '1.0' },
   { value: '1.15', label: '1.15' },
@@ -362,6 +352,12 @@ const SPACING_OPTIONS: SelectOption[] = [
   { value: '2.5', label: '2.5' },
   { value: '3.0', label: '3.0' },
 ];
+
+/**
+ * מה שהבורר מציג לפני שהמנוע דיווח על גופן. Assistant הוא הגופן הארוז, כלומר
+ * היחיד שבטוח קיים בכל פלטפורמה.
+ */
+const DEFAULT_FONT_FAMILY = 'Assistant';
 
 // פקודות SuperDoc
 const boldCmd = useCommand('bold');
@@ -387,11 +383,93 @@ const alignCmd = useCommand('text-align');
 const lineSpacingCmd = useCommand('line-height');
 const styleCmd = useCommand('linked-style');
 
-const selectedFontFamily = ref('FrankRuhlCLM');
-const selectedFontSize = ref('12');
-const selectedLineSpacing = ref('1.5');
-const textColor = ref('#000000');
-const highlightColor = ref('');
+/**
+ * אפשרויות הגופן מהמנוע (`ui.fonts`), ממוזגות עם שלנו. ראו
+ * engine/font-options.ts — הרשימה הקשיחה שהייתה כאן לא ידעה מה יש במסמך.
+ */
+const { families: fontFamilyOptions, sizes: fontSizeOptions } = useFontOptions();
+
+/**
+ * `CommandState.value` הוא המקור לערך שהבורר מציג — לא ref מקומי. עד עכשיו
+ * שלושת הבוררים היו refs שאותחלו לערך קשיח ולעולם לא התעדכנו: לחיצה על טקסט
+ * ב-20pt השאירה „12” בתיבה, ו-`growFontSize` חישב מהמספר השגוי הזה.
+ */
+const engineFamily = computed(() => parseFontFamily(fontFamilyCmd.value.value));
+const engineSize = computed(() => parseFontSizePt(fontSizeCmd.value.value));
+const engineLineHeight = computed(() => parseLineHeight(lineSpacingCmd.value.value));
+const engineTextColor = computed(() => parseColor(fontColorCmd.value.value));
+const engineHighlight = computed(() => parseColor(highlightCmd.value.value));
+
+/**
+ * מה שהמנוע דיווח לאחרונה, או מה שבחרנו אחרון.
+ *
+ * למה בכלל נדרש זיכרון כזה: המנוע מדווח `undefined` בשני מצבים שונים — בחירה
+ * עם יותר מערך אחד, ורגע שבו הוא עוד לא פתר את הבחירה. הבורר הוא **פקד**, ולא
+ * דוח; לרוקן אותו בכל תנועת סמן היה גרוע יותר מלהציג את הערך האחרון שכן ידענו.
+ * הערך מתעדכן גם מבחירת המשתמש, כדי שהתיבה תגיב מיד ולא רק אחרי שהמנוע ידווח.
+ */
+const lastFamily = ref(DEFAULT_FONT_FAMILY);
+const lastSize = ref(DEFAULT_FONT_SIZE_PT);
+const lastLineHeight = ref(DEFAULT_LINE_HEIGHT);
+
+watch(engineFamily, (value) => {
+  if (value) lastFamily.value = value;
+});
+watch(engineSize, (value) => {
+  if (value) lastSize.value = value;
+});
+watch(engineLineHeight, (value) => {
+  if (value) lastLineHeight.value = value;
+});
+
+const selectedFontFamily = computed(() => engineFamily.value ?? lastFamily.value);
+const currentSize = computed(() => engineSize.value ?? lastSize.value);
+const currentLineHeight = computed(() => engineLineHeight.value ?? lastLineHeight.value);
+
+/** „12” ולא „12.0”, אבל „20.5” נשמר — המנוע מדווח חצאי נקודות. */
+const selectedFontSize = computed(() => String(currentSize.value));
+
+/** „1.5” ולא „1.50”, כדי שהערך יתאים לאפשרות בבורר. */
+const selectedLineSpacing = computed(() => currentLineHeight.value.toFixed(2).replace(/0$/, ''));
+
+/** צבע הפקד תמיד משקף את המסמך; ברירת המחדל היא מה שהכפתור יחיל בלחיצה. */
+const textColor = computed(() => engineTextColor.value ?? '');
+const highlightColor = computed(() => engineHighlight.value ?? '');
+
+/**
+ * הערך הנוכחי חייב להיות אחת האפשרויות, אחרת `<select>` מציג את הראשונה
+ * ומשקר. גופן או גודל שאינם ברשימה (מסמך שנכתב בגופן שהמנוע לא הציע, טקסט
+ * ב-20.5pt) מתווספים בראשה — בדיוק מה ש-Word עושה.
+ */
+function withCurrent(
+  options: readonly SelectOption[],
+  current: string,
+): readonly SelectOption[] {
+  if (current === '' || options.some((option) => option.value === current)) return options;
+  return [{ value: current, label: current, preview: current }, ...options];
+}
+
+const familySelectOptions = computed(() =>
+  withCurrent(
+    fontFamilyOptions.value.map((option) => ({
+      value: option.value,
+      label: option.label,
+      preview: option.previewFamily,
+    })),
+    selectedFontFamily.value,
+  ),
+);
+
+const sizeSelectOptions = computed(() =>
+  withCurrent(
+    fontSizeOptions.value.map((option) => ({ value: option.value, label: option.label })),
+    selectedFontSize.value,
+  ),
+);
+
+const spacingSelectOptions = computed(() =>
+  withCurrent(SPACING_OPTIONS, selectedLineSpacing.value),
+);
 
 // כל ה-payloads נבנים ב-engine/payloads.ts, ולא כליטרל כאן: מה שנשלח לפקודה
 // הוא חוזה מול ולידטור בתוך המנוע, והוולידטור נכשל **סגור**. ראו את הטבלה
@@ -399,14 +477,14 @@ const highlightColor = ref('');
 function onFontFamilyChange(font: string): void {
   const payload = fontFamilyPayload(font);
   if (payload === null) return;
-  selectedFontFamily.value = payload;
+  lastFamily.value = payload;
   void fontFamilyCmd.run(payload);
 }
 
 function applyFontSize(pt: number): void {
   const payload = fontSizePayload(pt);
   if (payload === null) return;
-  selectedFontSize.value = String(payload);
+  lastSize.value = payload;
   void fontSizeCmd.run(payload);
 }
 
@@ -415,13 +493,13 @@ function onFontSizeChange(size: string): void {
   if (pt !== null) applyFontSize(pt);
 }
 
-/** על סולם הגדלים של Word, ולא ב-+2 עיוור. */
+/** הגדל/הקטן עובדים על **הערך מהמנוע**, על סולם הגדלים של Word. */
 function growFontSize(): void {
-  applyFontSize(grownFontSize(parseFontSizePt(selectedFontSize.value) ?? 12));
+  applyFontSize(grownFontSize(currentSize.value));
 }
 
 function shrinkFontSize(): void {
-  applyFontSize(shrunkFontSize(parseFontSizePt(selectedFontSize.value) ?? 12));
+  applyFontSize(shrunkFontSize(currentSize.value));
 }
 
 function onTextColorChange(color: string | null): void {
@@ -433,9 +511,11 @@ function onHighlightChange(color: string | null): void {
 }
 
 function onLineSpacingChange(val: string): void {
-  const payload = lineHeightPayload(parseFloat(val));
+  const multiplier = parseLineHeight(val);
+  if (multiplier === null) return;
+  const payload = lineHeightPayload(multiplier);
   if (payload === null) return;
-  selectedLineSpacing.value = val;
+  lastLineHeight.value = multiplier;
   void lineSpacingCmd.run(payload);
 }
 

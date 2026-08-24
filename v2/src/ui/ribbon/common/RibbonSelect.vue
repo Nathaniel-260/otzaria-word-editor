@@ -14,6 +14,7 @@
         v-for="opt in options"
         :key="opt.value"
         :value="opt.value"
+        :style="opt.preview ? { fontFamily: opt.preview } : undefined"
       >
         {{ opt.label }}
       </option>
@@ -32,12 +33,19 @@ import SvgIcon from '../../icons/SvgIcon.vue';
 export interface SelectOption {
   value: string;
   label: string;
+  /**
+   * מה שהאפשרות תוצג בו — `font-family` של CSS. כך בורר הגופן מציג כל שם
+   * בגופן עצמו, כמו ב-Word, וגם עונה על השאלה „האם הגופן הזה בכלל קיים כאן”
+   * לפני שהמשתמש בוחר בו.
+   */
+  preview?: string;
 }
 
 withDefaults(
   defineProps<{
     modelValue?: string;
-    options: SelectOption[];
+    /** `readonly` — האפשרויות מגיעות מהמנוע, ואין לפקד רשות לשנות אותן. */
+    options: readonly SelectOption[];
     width?: string;
     disabled?: boolean;
     title?: string;
