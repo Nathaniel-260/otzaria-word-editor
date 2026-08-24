@@ -122,6 +122,18 @@ async function probe(
   return { name, disabled, effects, count: buttons.length };
 }
 
+/**
+ * תקרת זמן לבדיקות שרצות דרך `probeAll`. ברירת המחדל של vitest, 5 שניות,
+ * מכוונת לבדיקה שעושה דבר אחד — וכאן בדיקה אחת מרכיבה את הלשונית מחדש לכל
+ * כפתור, כלומר „בית” היא כשלושים הרכבות של קומפוננטה בת 24KB ב-jsdom.
+ *
+ * נמדד על המכונה הזאת: 2.2 שניות ל„בית”, כלומר מרווח של פי שניים בלבד מול
+ * 5 שניות — ומכונה איטית פי שניים תפיל את הבדיקה על עומס ולא על הקוד. התקרה
+ * מורמת כאן, על הבדיקות שסוקרות לשונית שלמה, ולא גלובלית: 53 קובצי הבדיקה
+ * האחרים ממשיכים להיות מוגנים ב-5 שניות, וזה מה שתופס בדיקה שנתקעת באמת.
+ */
+const PROBE_TIMEOUT = 20_000;
+
 /** סוקרת את כל הכפתורים בלשונית, כל אחד בהרכבה נפרדת. */
 async function probeAll(
   component: Component,
@@ -147,7 +159,7 @@ afterEach(() => {
 
 describe('אין כפתור מת באף לשונית', () => {
   for (const tab of TABS) {
-    it(`„${tab.name}”: כל כפתור מנוטרל, או שלחיצה עליו עושה משהו`, async () => {
+    it(`„${tab.name}”: כל כפתור מנוטרל, או שלחיצה עליו עושה משהו`, { timeout: PROBE_TIMEOUT }, async () => {
       const probes = await probeAll(tab.component, tab.props);
 
       expect(probes.length, 'נמצאו כפתורים לבדוק').toBeGreaterThan(0);
@@ -184,7 +196,7 @@ describe('הפקדים שמנוטרלים בכוונה', () => {
   };
 
   for (const tab of TABS) {
-    it(`„${tab.name}”: רק הפקדים שאין להם API נשארים מנוטרלים`, async () => {
+    it(`„${tab.name}”: רק הפקדים שאין להם API נשארים מנוטרלים`, { timeout: PROBE_TIMEOUT }, async () => {
       const probes = await probeAll(tab.component, tab.props);
       const disabled = probes.filter((item) => item.disabled).map((item) => item.name);
       expect(disabled).toEqual(EXPECTED_DISABLED[tab.name]);
