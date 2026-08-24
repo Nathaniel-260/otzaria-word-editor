@@ -8,6 +8,8 @@
  * ribbon-commands.test.ts) אישר בירוק payloads שהצד השני דוחה.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
+import type { DocReceipt } from '../../src/engine/document-api';
+import type { SelectionInfoLike } from '../../src/engine/doc-selection';
 import {
   READER_PERMISSIONS,
   buildCitationText,
@@ -310,8 +312,8 @@ describe('canInsertText', () => {
 
 /** מסמך מדומה: `insert` שמאמת את הקלט, ובחירה שאפשר להחליף. */
 function fakeDoc(options: {
-  insert?: (input: unknown) => unknown;
-  selection?: unknown;
+  insert?: (input: unknown) => DocReceipt | Promise<DocReceipt>;
+  selection?: SelectionInfoLike;
 } = {}) {
   const insert = vi.fn(options.insert ?? (() => ({ success: true })));
   const current = vi.fn(async () => options.selection);

@@ -11,9 +11,10 @@
  *   2. לכל פקד יש חיווט של `disabled` — כלומר מישהו החליט מתי הוא זמין.
  *   3. אין `shortcut` בלשוניות האלה, כל עוד אין קיצור רשום בפועל.
  *
- * ההיקף הוא שלוש הלשוניות שהתקלה הייתה בהן. הרחבה לכל הלשוניות היא הצעד הבא,
- * והיא צריכה לקרות ביחד עם מי שמחזיק אותן — שער אדום שאינו בבעלות מי שמתקן
- * אותו סתם חוסם.
+ * ההיקף הוא הלשוניות שהתקלה הייתה בהן. הרחבה לכל הלשוניות היא הצעד הבא, והיא
+ * צריכה לקרות ביחד עם מי שמחזיק אותן — שער אדום שאינו בבעלות מי שמתקן אותו
+ * סתם חוסם. „אוצריא” נוספה כאן בגל שחיווט אותה, ובדיוק מהטעם הזה: ששת
+ * הכפתורים שלה עברו את השער, וכך הוא מגן עליהם מכאן והלאה.
  */
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -22,7 +23,12 @@ import { join } from 'node:path';
 /** vitest רץ מ-v2/, ולכן src/ נמצא ביחס ל-cwd. */
 const TABS = join(process.cwd(), 'src/ui/ribbon/tabs');
 
-const FILES = ['LayoutTab.vue', 'ReferencesTab.vue', 'ReviewTab.vue'] as const;
+const FILES = [
+  'LayoutTab.vue',
+  'ReferencesTab.vue',
+  'ReviewTab.vue',
+  'OtzariaTab.vue',
+] as const;
 
 const SOURCES = new Map(FILES.map((file) => [file, readFileSync(join(TABS, file), 'utf8')]));
 
@@ -36,7 +42,7 @@ function labelOf(control: string): string {
   return control.match(/label="([^"]*)"/)?.[1] ?? control.slice(0, 60);
 }
 
-describe('פקדי הלשוניות פריסה, הפניות וסקירה', () => {
+describe('פקדי הלשוניות פריסה, הפניות, סקירה ואוצריא', () => {
   it('נמצאו פקדים לבדוק בכל שלוש הלשוניות', () => {
     for (const file of FILES) {
       expect(controls(SOURCES.get(file)!).length, file).toBeGreaterThan(0);
@@ -74,6 +80,32 @@ describe('פקדי הלשוניות פריסה, הפניות וסקירה', () =
       }
     }
     expect(fake).toEqual([]);
+  });
+
+  it('שלושת פקדי „אוצריא” קוראים ל-SDK ולא מסתפקים בהודעת סטטוס', () => {
+    // ההודעות שהיו כאן („פותח את ספריית אוצריא...”) תיארו פעולה שלא קרתה.
+    const tab = SOURCES.get('OtzariaTab.vue')!;
+    for (const event of ['insert-citation', 'search-otzaria', 'open-library']) {
+      expect(tab, event).toContain(`$emit('${event}')`);
+    }
+    const app = readFileSync(join(process.cwd(), 'src/App.vue'), 'utf8');
+    expect(app).toContain('insertCitation(');
+    expect(app).toContain('openSearchTab(');
+    expect(app).toContain('openLibrary()');
+  });
+
+  it('„סגנון תורני” מסומן „לא זמין” ואינו מבטיח פעולה שאין לה API', () => {
+    // §12: „פקד שאין לו API ציבורי אמין מסומן „לא זמין בגרסה זו”; לא מממשים
+    // אותו דרך XML ידני”. במנוע 2.8.0 אין פעולה שיוצרת סגנון פסקה בשם.
+    const tab = SOURCES.get('OtzariaTab.vue')!;
+    for (const label of ['חידוש', 'קושיא', 'תירוץ']) {
+      const control = controls(tab).find((candidate) => labelOf(candidate) === label);
+      expect(control, label).toBeDefined();
+      expect(control!, label).toContain(':disabled="true"');
+      expect(control!, label).toContain('TORAH_STYLE_UNAVAILABLE');
+      // התיאור הישן („החלת סגנון פסקת קושיא”) הבטיח פעולה שלא קיימת.
+      expect(control!, label).not.toContain('החלת סגנון');
+    }
   });
 
   it('„סקירה” מציעה גם דחייה של כל השינויים, ולא רק קבלה', () => {

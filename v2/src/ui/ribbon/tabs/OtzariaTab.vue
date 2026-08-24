@@ -31,7 +31,7 @@
       />
     </RibbonGroup>
 
-    <!-- תבניות תורניות -->
+    <!-- תבניות תורניות. ראו ההסבר ב-script: אין למנוע דרך ציבורית ליצור סגנון. -->
     <RibbonGroup
       title="סגנון תורני"
       :launcher="false"
@@ -40,17 +40,20 @@
         <RibbonButton
           label="חידוש"
           variant="small"
-          tooltip="החלת סגנון פסקת חידוש"
+          :tooltip="TORAH_STYLE_UNAVAILABLE"
+          :disabled="true"
         />
         <RibbonButton
           label="קושיא"
           variant="small"
-          tooltip="החלת סגנון פסקת קושיא"
+          :tooltip="TORAH_STYLE_UNAVAILABLE"
+          :disabled="true"
         />
         <RibbonButton
           label="תירוץ"
           variant="small"
-          tooltip="החלת סגנון פסקת תירוץ"
+          :tooltip="TORAH_STYLE_UNAVAILABLE"
+          :disabled="true"
         />
       </div>
     </RibbonGroup>
@@ -85,6 +88,27 @@ defineEmits<{
 const superdoc = inject(ACTIVE_SUPERDOC, shallowRef<SuperDoc | null>(null));
 
 const OUTSIDE_OTZARIA = 'זמין רק כשהעורך פועל בתוך אוצריא';
+
+/**
+ * „חידוש”, „קושיא” ו„תירוץ” היו שלושה כפתורים בלי `@click` — כלומר שלושה
+ * כפתורים שנראים עובדים ואינם עושים כלום. הם מסומנים מעכשיו „לא זמין”, כפי
+ * ש-§12 בתכנית דורשת, ולא מומשו — כי אין למנוע דרך ציבורית לממש אותם:
+ *
+ * - `doc.styles.apply` מקבל `target: { scope: 'docDefaults' }` **בלבד**, כלומר
+ *   הוא משנה את ברירת המחדל של המסמך כולו. הוא אינו יוצר סגנון בשם.
+ * - `doc.styles.paragraph.setStyle` מחיל סגנון **קיים** לפי `styleId`, או אחד
+ *   מארבעה תפקידים סמנטיים (`defaultParagraph`, `heading`, `title`,
+ *   `subtitle`). אין בהם „חידוש”.
+ * - בקטלוג הפעולות של המנוע (2.8.0) אין שום פעולה שיוצרת סגנון: `styles.*`
+ *   הוא `apply`, `getCatalog` ושלושת ה-`paragraph.*`.
+ *
+ * ולכן אין למה לחווט: `linked-style` עם מזהה שאינו קיים במסמך פשוט נכשל,
+ * ומיפוי „קושיא” אל סגנון בנוי כמו Heading 2 היה כפתור שעושה משהו אחר ממה
+ * שכתוב עליו. המשך אמיתי הוא הוספת הסגנונות לקטלוג ה-docx — פעולה אחרת
+ * לגמרי, שאין לה מסלול ציבורי ואין לעשות אותה ב-XML ידני (§12).
+ */
+const TORAH_STYLE_UNAVAILABLE =
+  'סגנונות תורניים יתווספו בשלב הבא — אין למנוע דרך ציבורית ליצור סגנון פסקה חדש במסמך';
 
 /**
  * האם ה-SDK של אוצריא קיים. נקרא פעם אחת ב-setup ולא כערך reactive: הרצועה
