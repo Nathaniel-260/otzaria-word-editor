@@ -126,3 +126,196 @@ describe('סלקטורים בגלובלים', () => {
     expect([...new Set(dead)]).toEqual([]);
   });
 });
+
+/* ------------------------------------------------------------------ */
+/* שלושת מצבי הפקד                                                    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * ההגדרות של tokens.css כמפה, כדי שאפשר יהיה לפתור שרשרת של `var()`.
+ * `--word-btn-active: var(--color-primary-subtle)` ו-
+ * `--word-btn-active: rgba(21, 101, 192, 0.12)` הם אותו צבע בפועל, ושער
+ * שמשווה מחרוזות גולמיות היה מפספס את אחת משתי הצורות.
+ */
+function tokenTable(): Map<string, string> {
+  const css = CONTENT.get(join(SRC, 'styles/tokens.css')) ?? '';
+  const table = new Map<string, string>();
+  for (const m of css.matchAll(/^\s*(--[\w-]+)\s*:\s*([^;]+);/gm)) table.set(m[1], m[2].trim());
+  return table;
+}
+
+/** פותרת `var(--x)` עד לערך ממשי. מחזירה null על טוקן שאינו מוגדר או על מעגל. */
+function resolveToken(name: string, table: Map<string, string>): string | null {
+  const seen = new Set<string>();
+  let value = table.get(name) ?? null;
+  while (value !== null) {
+    const ref = /^var\(\s*(--[\w-]+)\s*\)$/.exec(value);
+    if (!ref) return value;
+    if (seen.has(ref[1])) return null;
+    seen.add(ref[1]);
+    value = table.get(ref[1]) ?? null;
+  }
+  return null;
+}
+
+describe('שלושת מצבי הפקד ברצועה', () => {
+  /**
+   * hover, דלוק, ודלוק+עכבר. זו ההבחנה המרכזית ברצועה של Word, וכששתיים מהן
+   * נגזרות לאותו ערך הפקד הדלוק נראה בדיוק כמו פקד שהעכבר עובר מעליו —
+   * הבאג המקורי כאן. מוטציה שהחזירה אותו (`--word-btn-active` שקיבל את הערך
+   * של `--word-btn-hover`) עברה 146 בדיקות בירוק: הבדיקות שהיו מדדו טוקן
+   * מיותם וסלקטור מת, ולא שוויון ערכים.
+   *
+   * הגזירה המקבילה בזמן ריצה נמדדת ב-theme.test.ts — הטוקנים כאן הם ברירת
+   * המחדל שלפני `plugin.boot`, ו-`applyTheme` דורס אותם. שני המקומות חייבים
+   * שער, כי כל אחד מהם לבדו הוא מסלול שלם שהמשתמש רואה.
+   */
+  const STATES = ['--word-btn-hover', '--word-btn-active', '--word-btn-active-hover'] as const;
+
+  it('כל אחד מהשלושה מוגדר ונפתר לערך ממשי', () => {
+    // בלי זה השער למטה היה עובר בירוק על שלוש פעמים null.
+    const table = tokenTable();
+    const unresolved = STATES.filter((name) => resolveToken(name, table) === null);
+    expect(unresolved).toEqual([]);
+  });
+
+  it('שלושת המצבים נבדלים זה מזה בערך שנפתר', () => {
+    const table = tokenTable();
+    const resolved = STATES.map((name) => `${name} = ${resolveToken(name, table)}`);
+    const values = STATES.map((name) => resolveToken(name, table));
+    expect(new Set(values).size, resolved.join(' | ')).toBe(STATES.length);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* צבע קשיח                                                           */
+/* ------------------------------------------------------------------ */
+
+/**
+ * ולידציית העיצוב של אוצריא פוסלת צבע hex, `rgb()` או שם צבע באנגלית בתוך
+ * CSS ודורשת `var(--color-*)`, והסיבה אינה פורמלית: המשתמש מחליף ערכת צבעים
+ * ומצב כהה/בהיר בכל רגע, וצבע שאינו זז איתם נשאר על הרקע הלא נכון. זה נמדד
+ * שלוש פעמים באותה סריקה — `#ffffff` על כפתור בצבע primary במצב כהה,
+ * `rgba(176, 0, 32, .1)` קפוא לצד `color: var(--color-error)` דינמי באותו
+ * כלל, ו-`#ffffff` על `--color-outline` במצב בהיר.
+ *
+ * הסריקה על **ערכי הצהרות** ולא על הטקסט: `white-space: nowrap` הוא שם
+ * מאפיין, ו-`var(--word-blue)` הוא שם טוקן — שניהם היו נתפסים בחיפוש מחרוזת
+ * ומכשילים את השער מהסיבה הלא נכונה.
+ */
+const NAMED_COLORS = [
+  'white', 'black', 'red', 'green', 'blue', 'gray', 'grey', 'silver', 'orange', 'yellow',
+  'purple', 'navy', 'teal', 'aqua', 'lime', 'maroon', 'olive', 'fuchsia', 'brown', 'pink',
+  'gold', 'ivory', 'beige', 'tan', 'cyan', 'magenta', 'rebeccapurple', 'darkgray', 'lightgray',
+];
+
+interface Declaration {
+  file: string;
+  property: string;
+  value: string;
+}
+
+/** ההצהרות של גלובל או של בלוק `<style>` — אחרי הסרת הערות. */
+function declarations(file: string): Declaration[] {
+  const source = CONTENT.get(file) ?? '';
+  const css = file.endsWith('.css')
+    ? source
+    : [...source.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/g)].map((m) => m[1]).join('\n');
+  const clean = css.replace(/\/\*[\s\S]*?\*\//g, ' ');
+  return [...clean.matchAll(/([-\w]+)\s*:\s*([^;{}]+)[;}]/g)].map((m) => ({
+    file,
+    property: m[1],
+    value: m[2].trim(),
+  }));
+}
+
+/** הצבעים הקשיחים בערך הצהרה. שמות טוקנים מוסרים לפני חיפוש שם צבע. */
+function hardcodedColors(value: string): string[] {
+  const withoutTokens = value.replace(/--[\w-]+/g, '');
+  const found = [
+    ...withoutTokens.matchAll(/#[0-9a-fA-F]{3,8}\b/g),
+    ...withoutTokens.matchAll(/\b(?:rgb|rgba|hsl|hsla)\([^)]*\)/g),
+  ].map((m) => m[0]);
+  for (const name of NAMED_COLORS) {
+    if (new RegExp(`\\b${name}\\b`, 'i').test(withoutTokens)) found.push(name);
+  }
+  return found;
+}
+
+/**
+ * שתי החרגות, ושתיהן מנוסחות כחוק ולא כרשימת קבצים — רשימה הייתה גדלה בשקט:
+ *
+ * 1. **הגדרות הטוקנים ב-tokens.css.** מדריך העיצוב מחייב ברירות מחדל ל-color
+ *    roles לפני `plugin.boot`, ובלעדיהן התוסף חשוף כמה מילישניות בלי צבע
+ *    בכלל. זה המקום היחיד בפרויקט שבו hex הוא הדבר הנכון, ולכן ההחרגה מוגבלת
+ *    לו ולהגדרות של custom properties בתוכו.
+ * 2. **צל בשחור שקוף.** `box-shadow: ... rgba(0, 0, 0, α)` הוא הדפוס של
+ *    המדריך עצמו (ראו „פאנל Overlay צף” ו„פופאובר ממוקם”), והוא ניטרלי: שחור
+ *    בשקיפות נמוכה מכהה את מה שמתחתיו בשני המצבים. צל בכל צבע **אחר** אינו
+ *    מוחרג — הוא צבע מותג שקפא בצל.
+ *
+ * הפלטה של בורר הצבעים אינה נזכרת כאן במכוון: `THEME_COLUMNS`/
+ * `STANDARD_COLORS` הם נתונים ב-`<script>` ולא CSS, ולכן הסריקה אינה נוגעת
+ * בהם מלכתחילה. הם פלטת Office — הצבע *הוא* המידע, ואין לו לזוז עם הערכה.
+ */
+const TOKENS_CSS = join(SRC, 'styles/tokens.css');
+const NEUTRAL_SHADOW = /^rgba\(\s*0\s*,\s*0\s*,\s*0\s*,\s*(?:0?\.\d+|0|1)\s*\)$/;
+
+function isAllowed(declaration: Declaration, color: string): boolean {
+  if (declaration.file === TOKENS_CSS && declaration.property.startsWith('--')) return true;
+  const isShadow = declaration.property === 'box-shadow' || declaration.property === 'text-shadow';
+  return isShadow && NEUTRAL_SHADOW.test(color);
+}
+
+describe('צבע קשיח ב-CSS', () => {
+  const SCANNED = [...STYLE_SHEETS, ...ALL_FILES.filter((f) => f.endsWith('.vue'))];
+
+  it('הסריקה אכן קוראת הצהרות (הגנה מפני regex שהפסיק להתאים)', () => {
+    // שער שאינו מודד כלום עובר בירוק על כל מוטציה, וזו בדיוק התקלה שהשער הזה
+    // נבנה בגללה.
+    const all = SCANNED.flatMap(declarations);
+    expect(all.length).toBeGreaterThan(400);
+    expect(all.some((d) => d.property === 'background' && d.value.includes('var(--color-'))).toBe(
+      true,
+    );
+    // ההחרגות עצמן חייבות להיות בשימוש, אחרת הן טענה על העבר.
+    const tokenDefaults = declarations(TOKENS_CSS).filter(
+      (d) => d.property.startsWith('--') && hardcodedColors(d.value).length > 0,
+    );
+    expect(tokenDefaults.length).toBeGreaterThan(10);
+  });
+
+  it('אין צבע קשיח מחוץ לשתי ההחרגות', () => {
+    const offenders: string[] = [];
+    for (const file of SCANNED) {
+      for (const declaration of declarations(file)) {
+        for (const color of hardcodedColors(declaration.value)) {
+          if (isAllowed(declaration, color)) continue;
+          offenders.push(`${short(file)} — ${declaration.property}: ${declaration.value}`);
+        }
+      }
+    }
+    expect([...new Set(offenders)]).toEqual([]);
+  });
+
+  it('הגלאי מזהה את שלושת הצבעים שנמדדו בפועל', () => {
+    // בלי זה אין הוכחה שהשער היה אדום על מה שהוא נבנה בגללו.
+    expect(hardcodedColors('#ffffff')).toEqual(['#ffffff']);
+    expect(hardcodedColors('rgba(176, 0, 32, 0.1)')).toEqual(['rgba(176, 0, 32, 0.1)']);
+    expect(hardcodedColors('#e67e22')).toEqual(['#e67e22']);
+    // ומה שאסור לו להיות אדום: שם מאפיין, שם טוקן, ומילת מפתח.
+    expect(hardcodedColors('nowrap')).toEqual([]);
+    expect(hardcodedColors('var(--word-blue)')).toEqual([]);
+    expect(hardcodedColors('1px solid var(--color-outline)')).toEqual([]);
+    expect(hardcodedColors('transparent')).toEqual([]);
+    expect(hardcodedColors('currentColor')).toEqual([]);
+  });
+
+  it('צל שאינו שחור ניטרלי אינו מוחרג', () => {
+    const shadow = { file: 'x.css', property: 'box-shadow', value: '0 1px 4px #1565c0' };
+    expect(isAllowed(shadow, '#1565c0')).toBe(false);
+    expect(isAllowed({ ...shadow, value: '0 1px 4px rgba(0, 0, 0, 0.08)' }, 'rgba(0, 0, 0, 0.08)')).toBe(
+      true,
+    );
+  });
+});

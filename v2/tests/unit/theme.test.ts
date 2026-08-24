@@ -86,8 +86,25 @@ describe('applyTheme', () => {
 
     expect(cssVar('--color-primary-hover')).toBe('rgba(21, 101, 192, 0.08)');
     expect(cssVar('--color-primary-selected-hover')).toBe('rgba(21, 101, 192, 0.2)');
-    expect(cssVar('--color-primary-hover')).not.toBe(cssVar('--color-primary-subtle'));
-    expect(cssVar('--color-primary-selected-hover')).not.toBe(cssVar('--color-primary-subtle'));
+
+    // שלושתן ולא רק שתיים: hover ודלוק+עכבר לא נבדקו זו מול זו, ושתיהן
+    // נגזרות מאותו צבע בסיס — כלומר alpha אחד שהועתק בטעות היה משאיר את
+    // הפקד הדלוק והפקד שהעכבר מעליו זהים, וזה הבאג המקורי. הבדיקה על
+    // *קבוצה* ולא על צמדים, כדי שהוספת דרגה רביעית תיכנס לכאן ולא תעקוף.
+    const shades = [
+      cssVar('--color-primary-hover'),
+      cssVar('--color-primary-subtle'),
+      cssVar('--color-primary-selected-hover'),
+    ];
+    expect(new Set(shades).size, shades.join(' | ')).toBe(3);
+  });
+
+  it('גוזר רקע שגיאה עדין מ-error של הערכה', () => {
+    // הרקע של גלולת „שגיאה בשמירה” היה rgba קפוא לצד `color: var(--color-error)`
+    // דינמי באותו כלל — כלומר במצב כהה הטקסט זז והרקע נשאר.
+    applyTheme(FULL);
+
+    expect(cssVar('--color-error-subtle')).toBe('rgba(255, 180, 171, 0.12)');
   });
 
   it('גוזר את ה-hover של כפתור ממולא לכיוון צבע הטקסט של המצב', () => {
