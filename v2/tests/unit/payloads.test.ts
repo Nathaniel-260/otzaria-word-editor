@@ -14,11 +14,14 @@ import {
   imageMimeForFileName,
   imagePayload,
   isEmbeddableImageSrc,
+  linkPayload,
+  normalizeLinkHref,
   parseColor,
   parseFontFamily,
   parseFontSizePt,
   parseLineHeight,
   shrunkFontSize,
+  LINK_SCHEMES,
 } from '../../src/engine/payloads';
 
 describe('parseFontSizePt', () => {
@@ -205,5 +208,92 @@ describe('imagePayload', () => {
     expect(imagePayload({ src: '' })).toBeNull();
     expect(imagePayload({ src: 'http://127.0.0.1:1/i' })).toBeNull();
     expect(imagePayload({ src: 'data:image/webp;base64,UklGRg==' })).toBeNull();
+  });
+});
+
+describe('normalizeLinkHref', () => {
+  it('http, https ו-mailto מותרים', () => {
+    expect(normalizeLinkHref('https://otzaria.org/a')).toBe('https://otzaria.org/a');
+    expect(normalizeLinkHref('http://127.0.0.1:8080/a')).toBe('http://127.0.0.1:8080/a');
+    expect(normalizeLinkHref('mailto:info@otzaria.org')).toBe('mailto:info@otzaria.org');
+  });
+
+  it('javascript: נדחה — זו בעיית אבטחה ולא כתובת חסרת טעם', () => {
+    // הקישור נשמר במסמך, והמסמך נפתח אצל מישהו אחר. `javascript:` שם הוא
+    // הרצת קוד בהקשר שלו.
+    expect(normalizeLinkHref('javascript:alert(1)')).toBeNull();
+    expect(normalizeLinkHref('JavaScript:alert(1)')).toBeNull();
+    // `new URL` משמיט תווי בקרה בפרסור, ולכן הצורה הזאת מתפרשת כ-javascript:
+    // ובדיקת תחילית על המחרוזת הגולמית הייתה מאשרת אותה.
+    expect(normalizeLinkHref('java\nscript:alert(1)')).toBeNull();
+    expect(normalizeLinkHref('java\tscript:alert(1)')).toBeNull();
+    expect(normalizeLinkHref('  javascript:alert(1)')).toBeNull();
+  });
+
+  it('סכימות נוספות שאינן ברשימת ההיתר נדחות', () => {
+    expect(normalizeLinkHref('data:text/html,<script>x</script>')).toBeNull();
+    expect(normalizeLinkHref('vbscript:msgbox(1)')).toBeNull();
+    expect(normalizeLinkHref('file:///C:/Users/a/b.txt')).toBeNull();
+    expect(normalizeLinkHref('tel:+972500000000')).toBeNull();
+  });
+
+  it('כתובת ריקה או חסרת סכימה אינה נשלחת למנוע', () => {
+    expect(normalizeLinkHref('')).toBeNull();
+    expect(normalizeLinkHref('   ')).toBeNull();
+    expect(normalizeLinkHref('www.otzaria.org')).toBeNull();
+    expect(normalizeLinkHref('otzaria.org/a')).toBeNull();
+    expect(normalizeLinkHref('/a/b')).toBeNull();
+  });
+
+  it('הצורה המוחזרת קנונית — זו שנבדקה, ולא מה שהוקלד', () => {
+    expect(normalizeLinkHref('  https://otzaria.org  ')).toBe('https://otzaria.org/');
+    expect(normalizeLinkHref('HTTPS://Otzaria.ORG')).toBe('https://otzaria.org/');
+  });
+
+  it('רשימת ההיתר היא רשימת היתר, ולא רשימת שלילה', () => {
+    // אם מישהו יוסיף סכימה, הבדיקה הזאת היא זו שתדרוש ממנו להסביר למה.
+    expect([...LINK_SCHEMES]).toEqual(['http:', 'https:', 'mailto:']);
+  });
+});
+
+describe('linkPayload', () => {
+  it('המפתח הוא href — `url` נבלע בשקט במנוע', () => {
+    expect(linkPayload({ href: 'https://otzaria.org/a' })).toEqual({
+      href: 'https://otzaria.org/a',
+    });
+  });
+
+  it('טקסט להצגה נשלח כשיש, ומנוקה מרווחים', () => {
+    expect(linkPayload({ href: 'https://otzaria.org/a', text: '  אוצריא  ' })).toEqual({
+      href: 'https://otzaria.org/a',
+      text: 'אוצריא',
+    });
+  });
+
+  it('טקסט ריק אינו נשלח — המנוע נופל לכתובת עצמה', () => {
+    expect(linkPayload({ href: 'https://otzaria.org/a', text: '   ' })).toEqual({
+      href: 'https://otzaria.org/a',
+    });
+  });
+
+  it('היעד שנתפס מהבחירה נשלח כמו שהוא', () => {
+    // לא נבנה מחדש: המנוע מכיר שלוש צורות של target, ובנייה מחדש הייתה
+    // מקבעת אצלנו אחת מהן.
+    const target = { kind: 'text', segments: [{ blockId: 'p1', range: { start: 0, end: 4 } }] };
+
+    expect(linkPayload({ href: 'https://otzaria.org', target })).toEqual({
+      href: 'https://otzaria.org/',
+      target,
+    });
+  });
+
+  it('כתובת פסולה מחזירה null ולא payload שייכשל סגור', () => {
+    expect(linkPayload({ href: '' })).toBeNull();
+    expect(linkPayload({ href: 'javascript:alert(1)' })).toBeNull();
+    expect(linkPayload({ href: 'www.otzaria.org' })).toBeNull();
+    // גם עם טקסט ויעד תקינים: הכתובת היא מה שקובע.
+    expect(
+      linkPayload({ href: 'not a url', text: 'אוצריא', target: { kind: 'text', segments: [] } }),
+    ).toBeNull();
   });
 });

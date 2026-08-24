@@ -49,9 +49,9 @@
         icon="link"
         label="קישור"
         variant="large"
-        tooltip="הוספת היפר-קישור"
+        tooltip="הוספת היפר-קישור לכתובת אינטרנט או לדואר"
         :disabled="!linkCmd.enabled.value"
-        @click="linkCmd.run()"
+        @click="onOpenLinkDialog"
       />
     </RibbonGroup>
 
@@ -69,6 +69,14 @@
         @click="tocCmd.run()"
       />
     </RibbonGroup>
+
+    <LinkDialog
+      :is-open="linkDialogOpen"
+      :has-range="linkSelection.hasRange"
+      :selected-text="linkSelection.text"
+      @close="linkDialogOpen = false"
+      @submit="onSubmitLink"
+    />
   </div>
 </template>
 
@@ -88,6 +96,15 @@
  * תחתונה מקבל `in: resolveActiveHeaderFooterSlot(story)`. קריאה ישירה הייתה
  * מחייבת אותנו לשחזר את החישוב הזה, ולטעות בו בשקט.
  *
+ * ## הקישור, והסיבה שיש דיאלוג
+ *
+ * `executeLinkCommand` דורש `href`, ולכן `linkCmd.run()` בלי payload נכשל סגור.
+ * הדיאלוג הוא מה שמספק אותו — אבל הוא גם מה שמכניס את הבעיה: ברגע שמקלידים
+ * בשדה, המיקוד אינו בעורך והבחירה החיה של ה-controller אינה `ready`. לכן
+ * הבחירה נתפסת **בלחיצה** ונמסרת חזרה כ-`target`; זה המסלול שהמנוע עצמו בנה
+ * (`readLinkPayloadTarget` נבדק לפני הבחירה החיה, ו-
+ * `linkPayloadHasExplicitTarget` מכריז על הפקודה כמוכנה בלעדיה).
+ *
  * ## המצב הקודם
  *
  * שלושת הפקדים כאן לא עשו כלום: `imageCmd.run()` ו-`linkCmd.run()` נקראו **בלי
@@ -96,13 +113,21 @@
  * אף אחד מהם לא היה מנוטרל ואף אחד לא דיווח כשל — כלומר שלושה כפתורים שנראים
  * עובדים.
  */
-import { computed, inject, ref } from 'vue';
+import { computed, inject, ref, shallowRef } from 'vue';
+import type { SuperDoc } from 'superdoc';
 import RibbonGroup from '../common/RibbonGroup.vue';
 import RibbonButton from '../common/RibbonButton.vue';
 import TablePicker from '../common/TablePicker.vue';
+import LinkDialog from '../../panels/LinkDialog.vue';
 import { useCommand } from '../../../composables/useCommand';
 import { COMMAND_REPORTER, type CommandReporter } from '../../../composables/keys';
-import { imagePayload } from '../../../engine/payloads';
+import { ACTIVE_SUPERDOC } from '../../../engine/document-api';
+import {
+  emptySelectionSnapshot,
+  readDocSelection,
+  type DocSelectionSnapshot,
+} from '../../../engine/doc-selection';
+import { LINK_HREF_HINT, imagePayload, linkPayload } from '../../../engine/payloads';
 import { pickImageFile, readImageAsDataUrl } from '../../../host/files';
 
 /** ברירת המחדל כשאין מדווח — הרכבה חלקית בבדיקות. זהה להתנהגות של `useCommand`. */
@@ -110,6 +135,7 @@ const fallbackReporter: CommandReporter = (outcome, id) => {
   if (!outcome.ok) console.warn(`[otzaria-word] ${id}: ${outcome.message}`);
 };
 
+const superdoc = inject(ACTIVE_SUPERDOC, shallowRef<SuperDoc | null>(null));
 const report = inject(COMMAND_REPORTER, fallbackReporter);
 
 const tableCmd = useCommand('table-insert');
@@ -183,6 +209,48 @@ async function pickImage(): ReturnType<typeof pickImageFile> {
     );
     return null;
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* קישור                                                              */
+/* ------------------------------------------------------------------ */
+
+const linkDialogOpen = ref(false);
+
+/**
+ * הבחירה כפי שהייתה **ברגע הלחיצה**, לא כפי שהיא כשהמשתמש מאשר. הדיאלוג גוזל
+ * את המיקוד מהעורך ברגע שמקלידים בו, ובלי התצלום הזה הקישור היה נכתב על טווח
+ * שאינו קיים או לא נכתב בכלל. `readLinkPayloadTarget` נבדק במנוע לפני הבחירה
+ * החיה בדיוק בשביל המקרה הזה.
+ */
+const linkSelection = shallowRef<DocSelectionSnapshot>(emptySelectionSnapshot());
+
+async function onOpenLinkDialog(): Promise<void> {
+  linkSelection.value = await readDocSelection(superdoc.value, { includeText: true });
+  linkDialogOpen.value = true;
+}
+
+function onSubmitLink(link: { href: string; text: string }): void {
+  const snapshot = linkSelection.value;
+
+  const payload = linkPayload({
+    href: link.href,
+    // עם טווח מסומן המסלול הוא `hyperlinks.wrap`, שמתעלם מ-`text`. שליחתו
+    // הייתה יוצרת ציפייה שהטקסט המסומן יוחלף.
+    text: snapshot.hasRange ? undefined : link.text,
+    target: snapshot.target ?? undefined,
+  });
+
+  if (!payload) {
+    // הדיאלוג אינו מאפשר אישור של כתובת פסולה, ולכן זו הגנה על החוזה ולא
+    // מצב שאפשר להגיע אליו דרך הממשק.
+    report({ ok: false, message: LINK_HREF_HINT, reason: 'invalid-href' }, 'link');
+    return;
+  }
+
+  linkDialogOpen.value = false;
+  // `run` מדווח בעצמו על כשל של הפקודה — אין להוסיף כאן דיווח שני.
+  void linkCmd.run(payload);
 }
 
 function insertPageBreak(): void {

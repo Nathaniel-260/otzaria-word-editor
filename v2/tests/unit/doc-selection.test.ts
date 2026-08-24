@@ -1,0 +1,177 @@
+/**
+ * תפיסת הבחירה לפני שדיאלוג גוזל את המיקוד.
+ *
+ * הבדיקות כאן מכסות בדיוק את המצבים שהופכים כפתור לשבור בשקט: מסמך שעדיין
+ * נטען, מנוע בגרסה שאינה חושפת `selection`, קריאה שזורקת, ותשובה שאינה
+ * אובייקט. בכל אחד מהם התשובה חייבת להיות „אין בחירה” ולא זריקה — פקד ברצועה
+ * שזורק מפיל את רינדור הרצועה כולה.
+ */
+import { describe, expect, it, vi } from 'vitest';
+import {
+  emptySelectionSnapshot,
+  readDocSelection,
+  type SelectionDocumentApi,
+  type SelectionInfoLike,
+} from '../../src/engine/doc-selection';
+
+/**
+ * מופע כפול: רק המשטח ש-`readDocSelection` נוגע בו. `current` מתקבל כ-`unknown`
+ * בכוונה — חלק מהבדיקות מוסרות לו תשובות שאינן בחוזה (מחרוזת, מספר), וזה בדיוק
+ * מה שהן בודקות.
+ */
+function hostWith(current: unknown) {
+  const doc = { selection: { current } } as unknown as SelectionDocumentApi;
+  return { activeEditor: { doc } };
+}
+
+function hostReturning(info: SelectionInfoLike | undefined) {
+  const current = vi.fn(async () => info);
+  return { host: hostWith(current), current };
+}
+
+const RANGE_INFO: SelectionInfoLike = {
+  empty: false,
+  target: { kind: 'text', segments: [{ blockId: 'p7', range: { start: 3, end: 9 } }] },
+  text: 'בראשית',
+};
+
+const CARET_INFO: SelectionInfoLike = {
+  empty: true,
+  target: { kind: 'text', segments: [{ blockId: 'p7', range: { start: 4, end: 4 } }] },
+};
+
+describe('readDocSelection', () => {
+  it('טווח מסומן מדווח hasRange, טקסט ו-blockId', () => {
+    const { host } = hostReturning(RANGE_INFO);
+
+    return expect(readDocSelection(host, { includeText: true })).resolves.toEqual({
+      target: RANGE_INFO.target,
+      text: 'בראשית',
+      hasRange: true,
+      blockId: 'p7',
+      story: null,
+    });
+  });
+
+  it('סמן בלבד אינו טווח — וזה מה שקובע את המסלול במנוע', async () => {
+    // `hasRange: false` = `hyperlinks.insert`, `true` = `hyperlinks.wrap`.
+    const snapshot = await readDocSelection(hostReturning(CARET_INFO).host);
+
+    expect(snapshot.hasRange).toBe(false);
+    expect(snapshot.blockId).toBe('p7');
+    expect(snapshot.text).toBe('');
+  });
+
+  it('מספר קטעים — די באחד עם טווח', async () => {
+    const { host } = hostReturning({
+      target: {
+        kind: 'text',
+        segments: [
+          { blockId: 'p1', range: { start: 5, end: 5 } },
+          { blockId: 'p2', range: { start: 0, end: 4 } },
+        ],
+      },
+    });
+
+    const snapshot = await readDocSelection(host);
+
+    expect(snapshot.hasRange).toBe(true);
+    // ה-blockId הוא של הקטע הראשון — שם הבחירה מתחילה.
+    expect(snapshot.blockId).toBe('p1');
+  });
+
+  it('`includeText` נשלח רק כשהוא מבוקש — החילוץ עולה בביצועים', async () => {
+    const { host, current } = hostReturning(RANGE_INFO);
+
+    await readDocSelection(host);
+    expect(current).toHaveBeenCalledWith(undefined);
+
+    await readDocSelection(host, { includeText: true });
+    expect(current).toHaveBeenLastCalledWith({ includeText: true });
+  });
+
+  it('ה-story נשמר — בלעדיו הקישור נכתב בגוף במקום בכותרת', async () => {
+    const story = { kind: 'story', storyType: 'headerFooterSlot' };
+    const { host } = hostReturning({
+      target: { kind: 'text', segments: [{ blockId: 'h1', range: { start: 0, end: 2 } }], story },
+    });
+
+    await expect(readDocSelection(host)).resolves.toMatchObject({ story });
+  });
+
+  it('בחירה בלי קטעים אינה מוסרת target', async () => {
+    // `{segments: []}` הוא אובייקט, ולכן היה עובר את
+    // `linkPayloadHasExplicitTarget` ואז מייצר רשימת כתובות ריקה — פקודה
+    // שנראית מוכנה ונכשלת סגור.
+    const { host } = hostReturning({ target: { kind: 'text', segments: [] } });
+
+    await expect(readDocSelection(host)).resolves.toEqual(emptySelectionSnapshot());
+  });
+
+  it('target שהוא null אינו מוסר', async () => {
+    const { host } = hostReturning({ empty: true, target: null });
+
+    await expect(readDocSelection(host)).resolves.toEqual(emptySelectionSnapshot());
+  });
+
+  it('קטע בלי blockId אינו נחשב', async () => {
+    const { host } = hostReturning({
+      target: { kind: 'text', segments: [{ range: { start: 0, end: 3 } }] },
+    });
+
+    await expect(readDocSelection(host)).resolves.toEqual(emptySelectionSnapshot());
+  });
+
+  it('אין Document API — „אין בחירה”, לא זריקה', async () => {
+    await expect(readDocSelection(null)).resolves.toEqual(emptySelectionSnapshot());
+    await expect(readDocSelection(undefined)).resolves.toEqual(emptySelectionSnapshot());
+    await expect(readDocSelection({ activeEditor: null })).resolves.toEqual(
+      emptySelectionSnapshot(),
+    );
+    await expect(readDocSelection({ activeEditor: { doc: null } })).resolves.toEqual(
+      emptySelectionSnapshot(),
+    );
+  });
+
+  it('גרסה שאינה חושפת selection אינה מפילה את הפקד', async () => {
+    await expect(readDocSelection({ activeEditor: { doc: {} } })).resolves.toEqual(
+      emptySelectionSnapshot(),
+    );
+    await expect(
+      readDocSelection({ activeEditor: { doc: { selection: {} } } }),
+    ).resolves.toEqual(emptySelectionSnapshot());
+  });
+
+  it('קריאה שזורקת נבלעת לטובת „אין בחירה”, ומדווחת ללוג', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const host = hostWith(
+      vi.fn(async () => {
+        throw new Error('boom');
+      }),
+    );
+
+    await expect(readDocSelection(host)).resolves.toEqual(emptySelectionSnapshot());
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it('תשובה שאינה אובייקט אינה תשובה', async () => {
+    for (const value of [undefined, null, 'ready', 42] as unknown[]) {
+      const host = hostWith(vi.fn(async () => value));
+      await expect(readDocSelection(host)).resolves.toEqual(emptySelectionSnapshot());
+    }
+  });
+
+  it('תשובה סינכרונית מטופלת כמו הבטחה', async () => {
+    // הפאסדה בדפדפן א-סינכרונית, אבל החוזה מצהיר על החזרה סינכרונית.
+    const host = hostWith(vi.fn(() => RANGE_INFO));
+
+    await expect(readDocSelection(host)).resolves.toMatchObject({ blockId: 'p7' });
+  });
+
+  it('`emptySelectionSnapshot` מחזירה מופע חדש בכל קריאה', () => {
+    // קבוע משותף היה מאפשר לצרכן אחד לשנות את התשובה של כולם.
+    expect(emptySelectionSnapshot()).not.toBe(emptySelectionSnapshot());
+    expect(emptySelectionSnapshot()).toEqual(emptySelectionSnapshot());
+  });
+});

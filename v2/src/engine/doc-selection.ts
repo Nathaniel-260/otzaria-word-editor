@@ -1,0 +1,148 @@
+/**
+ * קריאת הבחירה במסמך דרך `doc.selection.current()`.
+ *
+ * ## למה זה נדרש בכלל, ולא מסתמכים על הבחירה החיה
+ *
+ * פקד ברצועה שפותח דיאלוג גוזל את המיקוד מהעורך. פקודות ה-registry שתלויות
+ * בבחירה נשענות על `state.selection` של ה-controller, ו-`commandSelectionIsReady`
+ * מחזיר `false` כשהיא אינה `ready` — כלומר הפקודה עשויה לרוץ על בחירה שכבר
+ * אינה קיימת, או לא לרוץ בכלל. `@pointerdown.prevent` על הכפתור מונע את גזילת
+ * המיקוד בלחיצה עצמה, אבל לא ברגע שהמשתמש מקליד בשדה בתוך הדיאלוג.
+ *
+ * הפתרון שהמנוע עצמו מציע: `executeLinkCommand` בודק `readLinkPayloadTarget`
+ * **לפני** הבחירה החיה, ו-`linkPayloadHasExplicitTarget` הוא מה שמכריז על
+ * הפקודה כמוכנה גם בלי בחירה. כלומר הדרך הנכונה היא לתפוס את היעד ברגע
+ * הלחיצה ולמסור אותו חזרה — וזה מה שהמודול הזה נותן.
+ *
+ * ## תצלום, לא מנוי
+ *
+ * המודול מחזיר מצב ברגע הקריאה ואינו מחזיק מנוי על המנוע. זה מה שהצרכן צריך:
+ * הוא שואל פעם אחת, בלחיצה, ומחזיק את התשובה עד שהמשתמש מאשר או מבטל.
+ *
+ * הצורות מוגדרות כאן ואינן מיובאות מהמנוע — הטיפוסים שלו יושבים תחת
+ * `superdoc/dist/document-api/...` ו-import מנתיב פנימי אסור
+ * (tests/unit/engine-boundaries.test.ts). ההסבר המלא ב-document-api.ts.
+ */
+import type { SuperDoc } from 'superdoc';
+import type { MaybePromise } from './document-api';
+
+/** קטע טקסט בבחירה. כל שדה אופציונלי: זו תשובה של המנוע, לא מבנה שלנו. */
+export interface SelectionSegment {
+  blockId?: string;
+  range?: { start?: number; end?: number };
+}
+
+/** `SelectionInfo` בחלק שנצרך כאן. */
+export interface SelectionInfoLike {
+  empty?: boolean;
+  target?: {
+    kind?: string;
+    segments?: readonly SelectionSegment[];
+    story?: unknown;
+  } | null;
+  selectionTarget?: unknown;
+  text?: string;
+}
+
+export interface SelectionDocumentApi {
+  selection?: {
+    current?: (input?: { includeText?: boolean }) => MaybePromise<SelectionInfoLike | undefined>;
+  };
+}
+
+export interface SelectionHost {
+  activeEditor?: { doc?: SelectionDocumentApi | null } | null;
+}
+
+/** ה-union מאפשר גם את המופע האמיתי וגם כפיל. ההסבר המלא ב-page-setup.ts. */
+export type SelectionTarget = SuperDoc | SelectionHost | null | undefined;
+
+/** תצלום הבחירה ברגע הלחיצה. */
+export interface DocSelectionSnapshot {
+  /**
+   * ה-`TextTarget` כפי שהמנוע החזיר, למסירה חזרה ב-payload. מועבר **כמו
+   * שהוא** ולא נבנה מחדש: `textAddressesFromTarget` מכיר גם `{blockId, range}`
+   * וגם `{segments}` וגם `{kind:'selection', start, end}`, ובנייה מחדש הייתה
+   * מקבעת אצלנו צורה אחת מהשלוש.
+   */
+  target: unknown | null;
+  /** הטקסט המסומן. `''` כשאין בחירה או כשלא התבקש. */
+  text: string;
+  /** האם יש טווח ולא רק סמן. קובע אם הקישור יעטוף טקסט קיים או יכניס חדש. */
+  hasRange: boolean;
+  /** מזהה הפסקה שהבחירה מתחילה בה, או `null`. */
+  blockId: string | null;
+  /** ה-story, כשהבחירה אינה בגוף המסמך (כותרת עליונה/תחתונה). */
+  story: unknown | null;
+}
+
+/** התצלום כשאין בחירה שאפשר לפעול עליה. לא קבוע משותף — כדי שקורא לא ישנה אותו לכולם. */
+export function emptySelectionSnapshot(): DocSelectionSnapshot {
+  return { target: null, text: '', hasRange: false, blockId: null, story: null };
+}
+
+function segmentsOf(info: SelectionInfoLike): readonly SelectionSegment[] {
+  const segments = info.target?.segments;
+  return Array.isArray(segments) ? segments : [];
+}
+
+/**
+ * האם המנוע יתרגם את הקטע לכתובת טקסט שאפשר לעטוף. אותו תנאי בדיוק כמו ב-
+ * `textAddressesFromTarget`, כדי ששני הצדדים לא יגיעו לשתי תשובות שונות.
+ */
+function isWrappableSegment(segment: SelectionSegment | undefined): boolean {
+  if (typeof segment?.blockId !== 'string') return false;
+  const { start, end } = segment.range ?? {};
+  return typeof start === 'number' && typeof end === 'number' && start !== end;
+}
+
+/**
+ * קוראת את הבחירה. לעולם אינה זורקת ולעולם אינה מחזירה `null`: קורא בממשק
+ * צריך תשובה אחת שהוא יכול לבדוק, ולא שלושה מצבים (`null`, זריקה, ריק) שכל
+ * אחד מהם דורש טיפול משלו. „אין בחירה” הוא `hasRange: false` עם `target: null`,
+ * וזה בדיוק מה שהצרכן שואל.
+ *
+ * `includeText` נשלח רק כשהוא מבוקש: החוזה מציין במפורש שחילוץ הטקסט עולה
+ * בביצועים, ולפקד שאינו מציג את הטקסט אין סיבה לשלם עליו.
+ */
+export async function readDocSelection(
+  host: SelectionTarget,
+  options: { includeText?: boolean } = {},
+): Promise<DocSelectionSnapshot> {
+  const current = (host as SelectionHost | null | undefined)?.activeEditor?.doc?.selection?.current;
+  if (typeof current !== 'function') return emptySelectionSnapshot();
+
+  let info: SelectionInfoLike | undefined;
+  try {
+    info = await current(options.includeText ? { includeText: true } : undefined);
+  } catch (error) {
+    // קריאת בחירה שנכשלה אינה סיבה להפיל פקד. ללוג, וממשיכים עם „אין בחירה”.
+    console.warn('[otzaria-word] קריאת הבחירה במסמך נכשלה', error);
+    return emptySelectionSnapshot();
+  }
+
+  if (!info || typeof info !== 'object') return emptySelectionSnapshot();
+
+  const segments = segmentsOf(info);
+  const first = segments.find((segment) => typeof segment?.blockId === 'string');
+
+  return {
+    // `target` נמסר רק כשיש בו קטע שאפשר לפעול עליו. `{segments: []}` היה
+    // עובר את `linkPayloadHasExplicitTarget` (הוא אובייקט) ואז מייצר רשימת
+    // כתובות ריקה — כלומר פקודה שנראית מוכנה ונכשלת סגור.
+    target: first ? (info.target ?? null) : null,
+    text: typeof info.text === 'string' ? info.text : '',
+    // טווח, ולא `empty` של המנוע: `empty` מתייחס לבחירה כולה, ומה שקובע את
+    // המסלול (`hyperlinks.wrap` מול `hyperlinks.insert`) הוא האם יש קטע
+    // שהמנוע יתרגם לכתובת טקסט — כלומר **בדיוק** התנאי של
+    // `textAddressesFromTarget`: `blockId` שהוא string, ו-`start !== end`.
+    //
+    // ה-`blockId` הוא חלק מהתנאי ולא קישוט. בלעדיו קטע עם טווח ובלי `blockId`
+    // היה מדווח `hasRange: true` לצד `target: null` — הדיאלוג היה מסתיר את
+    // שדה הטקסט („הקישור יוחל על הטקסט המסומן”), הפקודה הייתה נשלחת בלי יעד,
+    // ולא היה נכתב כלום. בדיקה תפסה את זה.
+    hasRange: segments.some((segment) => isWrappableSegment(segment)),
+    blockId: first?.blockId ?? null,
+    story: info.target?.story ?? null,
+  };
+}
