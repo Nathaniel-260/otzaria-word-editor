@@ -81,13 +81,17 @@ button:disabled {
 }
 
 /* כל מסמך מקבל host משלו, וכולם באותו מקום: מסמך שנטען יושב מעל הפעיל עד
-   שהוא מוכן. ראו sessions/editor-swap.ts. */
+   שהוא מוכן. ראו sessions/editor-swap.ts.
+
+   אין כאן direction ואין text-align, בכוונה: כיווניות היא חלק ממודל המסמך —
+   docDefaults, המקטע והפסקה, ראו engine/document-defaults.ts ואת שער
+   check:rtl שמודד את שלוש הקבלות של המנוע. כפייה מ-CSS על מיכל הגלילה עשתה
+   שני נזקים: היא דחקה את הדף לקצה הימני והשאירה חצי מסך אפור וריק, והיא דרסה
+   מסמכי LTR שנפתחו מקובץ — שם הכיווניות מגיעה מה-DOCX ולא מאיתנו. */
 .editor-stack__host {
   position: absolute;
   inset: 0;
   overflow: auto;
-  direction: rtl;
-  text-align: right;
 }
 
 /* visibility ולא display: ל-host שנטען חייב להיות box אמיתי, אחרת המנוע מודד

@@ -143,15 +143,14 @@
   position: relative;
 }
 
-.word-ribbon-group.styles-group {
-  flex: 1 1 300px;
-  max-width: 750px;
-  min-width: 240px;
-}
-
 .word-ribbon-group:last-child {
   border-inline-end: none;
 }
+
+/* אין כאן כלל רוחב לקבוצת „סגנונות” (.styles-group), בכוונה: המתיחה שהייתה
+   כאן (flex: 1 1 300px עם max-width: 750px) פרסה אותה על חצי הרצועה והשאירה
+   בתוכה משבצת כרטיס ריקה. כל קבוצה מחבקת את תוכנה. רצועה שנשארת ריקה מצד אחד
+   בלשונית עם מעט קבוצות היא ההתנהגות של Word עצמו — לא חור שצריך למלא. */
 
 .word-group-content {
   display: flex;
