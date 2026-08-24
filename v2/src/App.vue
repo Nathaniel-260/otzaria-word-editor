@@ -128,7 +128,10 @@ import {
   type DocMetricsAdapter,
 } from './engine/doc-metrics';
 import { FALLBACK_ZOOM, observeZoom, type ZoomState } from './engine/zoom';
-import { applyHebrewDocumentDefaults } from './engine/document-defaults';
+import {
+  applyHebrewDocumentDefaults,
+  applyHebrewPaperSize,
+} from './engine/document-defaults';
 import type { SuperDoc } from 'superdoc';
 import { exportDocx, docxFileName } from './engine/export';
 import { downloadBlob } from './host/download';
@@ -303,6 +306,23 @@ async function applyNewDocumentDirection(superdoc: SuperDoc): Promise<void> {
   setStatus(`המסמך נפתח, אך כיווניות עברית לא הוחלה: ${report.failures[0]}`, true);
 }
 
+/**
+ * גודל הדף של מסמך חדש: A4 ולא ה-Letter שהמסמך הריק של המנוע נושא. ההחלה
+ * ב-engine/document-defaults.ts; כאן רק הדיווח.
+ *
+ * דיווח נפרד מזה של הכיווניות, ובכוונה: `data-document-direction` ושער
+ * `check:rtl` מודדים את שלוש שכבות הכיווניות, וכשל בגודל הדף אינו כשל
+ * כיווניות. גם ההודעה כאן אינה מזכירה „כיווניות” — השער סורק את הלוג על המילה
+ * הזאת, וכשל בגודל דף אסור לו להיראות שם ככשל כיווניות.
+ */
+async function applyNewDocumentPaperSize(superdoc: SuperDoc): Promise<void> {
+  const report = await applyHebrewPaperSize(superdoc);
+  if (report.applied) return;
+
+  console.warn('[otzaria-word] גודל הדף של המסמך החדש לא הוגדר ל-A4:', report.failure);
+  setStatus(`המסמך נפתח, אך גודל הדף לא הוגדר ל-A4: ${report.failure}`, true);
+}
+
 async function openDocument(file?: UserFile): Promise<boolean> {
   if (!swap) return false;
   isOpening.value = true;
@@ -428,6 +448,11 @@ async function openDocument(file?: UserFile): Promise<boolean> {
     });
   } else {
     void forgetLastDocument();
+    // גודל הדף לפני הכיווניות: `sections.setPageSetup` כותב את אותו `sectPr`
+    // ש-`setSectionDirection` כותב אליו, וכך הכיווניות היא זו שנכתבת אחרונה.
+    // גם הסדר של ההודעות נגזר מזה — כשל כיווניות הוא החמור, והוא זה שיישאר
+    // בשורת המצב אם שניהם נכשלו.
+    await applyNewDocumentPaperSize(editor.superdoc);
     await applyNewDocumentDirection(editor.superdoc);
   }
 

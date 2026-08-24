@@ -1,5 +1,7 @@
 /**
- * ברירות המחדל של מסמך חדש: כיווניות עברית, מימין לשמאל.
+ * ברירות המחדל של מסמך חדש: כיווניות עברית מימין לשמאל, וגודל דף A4.
+ *
+ * שתי פונקציות ושני דוחות ולא אחד — ההסבר למה אצל `applyHebrewPaperSize`.
  *
  * למה לא דרך פקודות ה-Ribbon, כפי שנעשה קודם: `direction-rtl` ו-`text-align`
  * הן פקודות **פסקה** בקטלוג של ה-controller, והוא מנתב אותן לפי הבחירה הנוכחית.
@@ -28,6 +30,7 @@
  * מי שכתב אותו, ואין לגעת בה.
  */
 import type { SuperDoc } from 'superdoc';
+import { applyPaperSize, type PageSetupTarget } from './page-setup';
 
 /** תוצאת ההחלה. `failures` בעברית — הן מגיעות לשורת המצב. */
 export interface DocumentDefaultsReport {
@@ -172,4 +175,44 @@ export async function applyHebrewDocumentDefaults(
 
 function describe(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * גודל הדף של מסמך חדש. `'a4'` הוא מזהה ב-`PAPER_SIZES`, וכל המידות והקוד
+ * (`w:pgSz/@w:code`) נלקחים משם.
+ */
+export const NEW_DOCUMENT_PAPER_SIZE = 'a4';
+
+/** תוצאת החלת גודל הדף. `failure` בעברית — היא מגיעה לשורת המצב. */
+export interface DocumentPaperSizeReport {
+  applied: boolean;
+  /** תיאור בעברית של הכשל. מחרוזת ריקה כשהוחל. */
+  failure: string;
+}
+
+/**
+ * מחילה A4 על מסמך חדש.
+ *
+ * **למה נדרש**: המסמך הריק של המנוע הוא Letter — נמדד ב-`w:pgSz w:w="12240"
+ * w:h="15840"` ב-blank docx הארוז (ראו הערת הפתיחה של page-setup.ts). למסמך
+ * עברי זה שגוי: A4 הוא התקן בישראל, Word בעברית פותח A4, וזה גם מה שכל מדפסת
+ * כאן טוענת. מסמך שנערך Letter ונדפס A4 יוצא בפריסה אחרת מזו שנראתה על המסך.
+ *
+ * **למה פונקציה ודוח נפרדים ולא שכבה רביעית בדוח הכיווניות**: `App.vue` מצהיר
+ * `data-document-direction="rtl"` על שורש ה-HTML רק כשכל שכבות הכיווניות
+ * הצליחו, ושער `npm run check:rtl` נשען על התכונה הזאת ועל הנוסח „כיווניות”
+ * בלוג. כשל בגודל הדף אינו כשל כיווניות ואסור לו להפיל את השער — ולכן דוח
+ * משלו, הודעה משלו, ובלי המילה „כיווניות” בתוכה.
+ *
+ * ההחלה על **מסמך חדש בלבד**, מאותו טעם כמו הכיווניות: מסמך שנפתח מקובץ נושא
+ * את גודל הדף שמי שכתב אותו בחר, ואין לשנות אותו בגלל שנפתח כאן.
+ *
+ * לעולם אינה זורקת: `applyPaperSize` בולעת גם קבלה שנכשלה וגם זריקה מהמנוע,
+ * ומחזירה אותן כתוצאה.
+ */
+export async function applyHebrewPaperSize(
+  superdoc: PageSetupTarget,
+): Promise<DocumentPaperSizeReport> {
+  const outcome = await applyPaperSize(superdoc, NEW_DOCUMENT_PAPER_SIZE);
+  return outcome.ok ? { applied: true, failure: '' } : { applied: false, failure: outcome.message };
 }
