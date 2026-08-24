@@ -13,14 +13,7 @@ import HomeTab from '../../src/ui/ribbon/tabs/HomeTab.vue';
 import InsertTab from '../../src/ui/ribbon/tabs/InsertTab.vue';
 import LayoutTab from '../../src/ui/ribbon/tabs/LayoutTab.vue';
 import ReferencesTab from '../../src/ui/ribbon/tabs/ReferencesTab.vue';
-import {
-  autoUnmount,
-  createCommandDouble,
-  createSuperdocDouble,
-  installSystemClipboard,
-  mountUi,
-  settle,
-} from './harness';
+import { autoUnmount, buttonByTitle, createCommandDouble, createSuperdocDouble, installSystemClipboard, mountUi, settle } from './harness';
 
 autoUnmount();
 
@@ -45,7 +38,7 @@ describe('כשל של פקודה מנותבת', () => {
     const harness = mountUi(HomeTab, { adapter });
     await settle();
 
-    await harness.wrapper.find('button[title="מודגש (Ctrl+B)"]').trigger('click');
+    await buttonByTitle(harness.wrapper, 'מודגש').trigger('click');
     await settle();
 
     expect(harness.failures()).toEqual([
@@ -60,7 +53,7 @@ describe('כשל של פקודה מנותבת', () => {
     const harness = mountUi(HomeTab);
     await settle();
 
-    await harness.wrapper.find('button[title="נטוי (Ctrl+I)"]').trigger('click');
+    await buttonByTitle(harness.wrapper, 'נטוי').trigger('click');
     await settle();
 
     expect(harness.reports).toEqual([{ commandId: 'italic', outcome: { ok: true } }]);
@@ -73,7 +66,7 @@ describe('פקד מנוטרל', () => {
     const harness = mountUi(HomeTab, { adapter });
     await settle();
 
-    const button = harness.wrapper.find('button[title="מודגש (Ctrl+B)"]');
+    const button = buttonByTitle(harness.wrapper, 'מודגש');
     expect(button.attributes('disabled')).toBeDefined();
 
     await button.trigger('click');
@@ -90,11 +83,8 @@ describe('פקד מנוטרל', () => {
     const harness = mountUi(HomeTab, { adapter: null, superdoc: null });
     await settle();
 
-    for (const title of ['מודגש (Ctrl+B)', 'תבליטים', 'יישור לימין (Ctrl+R)', 'נקה את כל העיצוב']) {
-      expect(
-        harness.wrapper.find(`button[title="${title}"]`).attributes('disabled'),
-        title,
-      ).toBeDefined();
+    for (const title of ['מודגש', 'תבליטים', 'יישור לימין', 'נקה את כל העיצוב']) {
+      expect(buttonByTitle(harness.wrapper, title).attributes('disabled'), title).toBeDefined();
     }
     expect(harness.reports).toEqual([]);
   });
@@ -239,7 +229,7 @@ describe('לוח', () => {
     });
     await settle();
 
-    await harness.wrapper.find('button[title="העתקת הבחירה ללוח (Ctrl+C)"]').trigger('click');
+    await buttonByTitle(harness.wrapper, 'העתקת הבחירה ללוח').trigger('click');
     await settle();
     restore();
 

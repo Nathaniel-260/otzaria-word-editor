@@ -4,11 +4,7 @@
  * הבדיקות, כי היא הייתה בתוך המעטפת שאין עליה כיסוי.
  */
 import { describe, it, expect, vi } from 'vitest';
-import {
-  decideDocumentSwitch,
-  saveShortcut,
-  type SwitchIntent,
-} from '../../src/sessions/open-flow';
+import { decideDocumentSwitch, type SwitchIntent } from '../../src/sessions/open-flow';
 
 function deps(options: {
   dirty?: boolean;
@@ -147,52 +143,5 @@ describe('decideDocumentSwitch עם intent: exit', () => {
 
     expect(h.asked).toEqual(['המסמך לא נשמר', 'לפתוח בלי לשמור?']);
     expect(h.confirm.mock.calls[0]![0].content).toBe('לשמור את חידושים לפני פתיחת מסמך אחר?');
-  });
-});
-
-describe('saveShortcut', () => {
-  const key = (over: Partial<KeyboardEvent> = {}) => ({
-    key: 's',
-    ctrlKey: false,
-    metaKey: false,
-    shiftKey: false,
-    ...over,
-  });
-
-  it('Ctrl+S שומר', () => {
-    expect(saveShortcut(key({ ctrlKey: true }), false)).toEqual({
-      isSaveKey: true,
-      handled: true,
-      saveAs: false,
-    });
-  });
-
-  it('Cmd+Shift+S הוא „שמור בשם”', () => {
-    expect(saveShortcut(key({ metaKey: true, shiftKey: true }), false)).toEqual({
-      isSaveKey: true,
-      handled: true,
-      saveAs: true,
-    });
-  });
-
-  it('בזמן שמירה מיירטים אבל לא מריצים', () => {
-    // הרגרסיה: saveNow היה מצטרף לסבב שרץ, ולכן Ctrl+Shift+S נראה כאילו פתח
-    // „שמור בשם” ובפועל לא פתח שום דיאלוג.
-    expect(saveShortcut(key({ ctrlKey: true, shiftKey: true }), true)).toMatchObject({
-      isSaveKey: true,
-      handled: false,
-    });
-  });
-
-  it('S לבד או צירוף אחר אינם הקיצור', () => {
-    expect(saveShortcut(key(), false).isSaveKey).toBe(false);
-    expect(saveShortcut(key({ key: 'a', ctrlKey: true }), false).isSaveKey).toBe(false);
-  });
-
-  it('אות גדולה נתפסת (Shift משנה את key)', () => {
-    expect(saveShortcut(key({ key: 'S', ctrlKey: true, shiftKey: true }), false)).toMatchObject({
-      isSaveKey: true,
-      saveAs: true,
-    });
   });
 });

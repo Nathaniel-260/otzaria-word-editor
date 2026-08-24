@@ -14,7 +14,7 @@
 import { describe, expect, it } from 'vitest';
 import Ribbon from '../../src/ui/ribbon/Ribbon.vue';
 import { RIBBON_PANEL_ID, ribbonTabId } from '../../src/ui/ribbon/aria';
-import { autoUnmount, mountUi, settle } from './harness';
+import { autoUnmount, buttonByTitle, findButtonByTitle, mountUi, settle } from './harness';
 
 autoUnmount();
 
@@ -84,12 +84,12 @@ describe('סרגל הלשוניות', () => {
     // „Mount on active”: הלשונית נבנית כשלוחצים עליה, וזו הסיבה שפקד יכול
     // לקרוא את זמינות ה-SDK פעם אחת ב-setup.
     const harness = await mountRibbon();
-    expect(harness.wrapper.find('button[title="מודגש (Ctrl+B)"]').exists()).toBe(true);
+    expect(findButtonByTitle(harness.wrapper, 'מודגש')).toBeDefined();
 
     await tabByLabel(harness, 'קובץ').trigger('click');
     await settle();
 
-    expect(harness.wrapper.find('button[title="מודגש (Ctrl+B)"]').exists()).toBe(false);
+    expect(findButtonByTitle(harness.wrapper, 'מודגש')).toBeUndefined();
     expect(harness.wrapper.findAll('[role="tabpanel"]')).toHaveLength(1);
   });
 });
@@ -203,17 +203,13 @@ describe('aria-pressed רק על מתגים', () => {
     // ש-`isToggleButton` קורא את `vnode.props`. כאן זה נמדד על ה-DOM עצמו:
     // עד התיקון קורא מסך הכריז „שמור” ו„מסמך חדש” כמתג כבוי.
     const harness = await mountRibbon();
-    expect(harness.wrapper.find('button[title="מודגש (Ctrl+B)"]').attributes('aria-pressed')).toBe(
-      'false',
-    );
+    expect(buttonByTitle(harness.wrapper, 'מודגש').attributes('aria-pressed')).toBe('false');
 
     await tabByLabel(harness, 'קובץ').trigger('click');
     await settle();
 
-    for (const title of ['שמירת שינויים במסמך (Ctrl+S)', 'יצירת מסמך Word ריק חדש']) {
-      const button = harness.wrapper.find(`button[title="${title}"]`);
-      expect(button.exists(), title).toBe(true);
-      expect(button.attributes('aria-pressed'), title).toBeUndefined();
+    for (const title of ['שמירת שינויים במסמך', 'יצירת מסמך Word ריק חדש']) {
+      expect(buttonByTitle(harness.wrapper, title).attributes('aria-pressed'), title).toBeUndefined();
     }
   });
 
@@ -223,9 +219,7 @@ describe('aria-pressed רק על מתגים', () => {
     harness.adapter.setState('bold', { active: true });
     await settle();
 
-    expect(harness.wrapper.find('button[title="מודגש (Ctrl+B)"]').attributes('aria-pressed')).toBe(
-      'true',
-    );
+    expect(buttonByTitle(harness.wrapper, 'מודגש').attributes('aria-pressed')).toBe('true');
   });
 });
 
@@ -235,7 +229,7 @@ describe('חיווט האירועים ל-App', () => {
     // שנשמט אינו מפיל typecheck — הוא פשוט כפתור שלא עושה כלום.
     const harness = await mountRibbon();
 
-    await harness.wrapper.find('button[title="חיפוש טקסט במסמך (Ctrl+F)"]').trigger('click');
+    await buttonByTitle(harness.wrapper, 'חיפוש טקסט במסמך').trigger('click');
     await tabByLabel(harness, 'קובץ').trigger('click');
     await settle();
     await harness.wrapper.find('button[title="יצירת מסמך Word ריק חדש"]').trigger('click');

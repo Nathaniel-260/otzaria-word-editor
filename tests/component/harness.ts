@@ -37,7 +37,7 @@
  */
 import { afterEach } from 'vitest';
 import { nextTick, ref, shallowRef, type Component, type Ref } from 'vue';
-import { enableAutoUnmount, mount, type VueWrapper } from '@vue/test-utils';
+import { enableAutoUnmount, mount, type DOMWrapper, type VueWrapper } from '@vue/test-utils';
 import type { SuperDoc } from 'superdoc';
 import type { CommandState } from 'superdoc/ui';
 import {
@@ -1231,6 +1231,27 @@ export function mountUi(component: Component, options: HarnessOptions = {}): Har
  * גם כשנלחץ כפתור שאין לו מטפל בכלל. שער „אין כפתור מת” שסופר אותו היה
  * מאשר בירוק בדיוק את מה שהוא נבנה לתפוס.
  */
+/**
+ * כפתור לפי **תחילת** ה-title. הצירוף בסוגריים („מודגש (Ctrl+B)”) הוא תווית
+ * שמתווספת ונגרעת עם הרג'יסטרי של הקיצורים, ולכן הוא אינו מזהה: בדיקה שנעולה
+ * עליו נשברת בכל שינוי בקיצור, גם כשהפקד עצמו לא זז.
+ */
+export function findButtonByTitle(
+  wrapper: VueWrapper,
+  titlePrefix: string,
+): DOMWrapper<Element> | undefined {
+  return wrapper
+    .findAll('button')
+    .find((button) => (button.attributes('title') ?? '').startsWith(titlePrefix));
+}
+
+/** כמו `findButtonByTitle`, ונופלת עם שם הכפתור כשאין כזה. */
+export function buttonByTitle(wrapper: VueWrapper, titlePrefix: string): DOMWrapper<Element> {
+  const button = findButtonByTitle(wrapper, titlePrefix);
+  if (!button) throw new Error(`אין כפתור שה-title שלו מתחיל ב"${titlePrefix}"`);
+  return button;
+}
+
 export function emittedCount(wrapper: VueWrapper, ignore: readonly string[] = ['click']): number {
   return Object.entries(wrapper.emitted())
     .filter(([name]) => !ignore.includes(name))

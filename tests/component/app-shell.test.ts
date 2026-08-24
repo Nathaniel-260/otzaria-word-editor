@@ -267,14 +267,44 @@ describe('שמירה', () => {
     // המטפל יושב על `window`, ולכן זה מה שמעיד שהוא נרשם בפועל.
     await mountShell();
 
-    window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ctrlKey: true }));
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', code: 'KeyS', ctrlKey: true }));
     await settle();
     window.dispatchEvent(
-      new KeyboardEvent('keydown', { key: 's', ctrlKey: true, shiftKey: true }),
+      new KeyboardEvent('keydown', { key: 's', code: 'KeyS', ctrlKey: true, shiftKey: true }),
     );
     await settle();
 
     expect(stub.saveNowCalls.map((call) => call?.forceSaveAs)).toEqual([false, true]);
+  });
+
+  it('Ctrl+S שומר גם בפריסת מקלדת עברית', async () => {
+    // הרגרסיה שהתיקון בא לה: בפריסה עברית הדפדפן מדווח `key: 'ד'`, וההשוואה
+    // הישנה (`event.key === 's'`) פשוט לא תפסה. בעורך לכתיבת חידושי תורה זה
+    // אומר שהשמירה מתה בדיוק כשהמשתמש עשה את מה שהתוסף נועד לו.
+    await mountShell();
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ד', code: 'KeyS', ctrlKey: true }));
+    await settle();
+
+    expect(stub.saveNowCalls).toHaveLength(1);
+  });
+
+  it('Ctrl+P מדפיס גם בפריסה עברית, ו-Ctrl+G אינו נבלע', async () => {
+    await mountShell();
+
+    // `cancelable` נדרש כדי ש-`defaultPrevented` יהיה מדיד. keydown אמיתי
+    // בדפדפן הוא cancelable; אירוע מלאכותי בלי הדגל אינו, ו-preventDefault בו
+    // הוא no-op שקט.
+    const options = { ctrlKey: true, cancelable: true };
+    const print = new KeyboardEvent('keydown', { key: 'פ', code: 'KeyP', ...options });
+    const unknown = new KeyboardEvent('keydown', { key: 'ג', code: 'KeyG', ...options });
+    window.dispatchEvent(print);
+    window.dispatchEvent(unknown);
+    await settle();
+
+    expect(print.defaultPrevented).toBe(true);
+    // צירוף שאינו שלנו נשאר של הדפדפן.
+    expect(unknown.defaultPrevented).toBe(false);
   });
 
   it('שינוי שם המסמך מסמן אותו כלא-שמור', async () => {

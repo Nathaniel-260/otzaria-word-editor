@@ -19,7 +19,7 @@ import InsertTab from '../../src/ui/ribbon/tabs/InsertTab.vue';
 import ReviewTab from '../../src/ui/ribbon/tabs/ReviewTab.vue';
 import ViewTab from '../../src/ui/ribbon/tabs/ViewTab.vue';
 import ColorPickerPopover from '../../src/ui/ribbon/common/ColorPickerPopover.vue';
-import { autoUnmount, createCommandDouble, mountUi, settle } from './harness';
+import { autoUnmount, buttonByTitle, createCommandDouble, mountUi, settle } from './harness';
 
 autoUnmount();
 
@@ -55,8 +55,8 @@ describe('גופן', () => {
     const harness = mountUi(HomeTab, { adapter });
     await settle();
 
-    await harness.wrapper.find('button[title="הגדל גופן (Ctrl+])"]').trigger('click');
-    await harness.wrapper.find('button[title="הקטן גופן (Ctrl+[)"]').trigger('click');
+    await buttonByTitle(harness.wrapper, 'הגדל גופן').trigger('click');
+    await buttonByTitle(harness.wrapper, 'הקטן גופן').trigger('click');
     await settle();
 
     // סולם הגדלים של Word: מעל 20 בא 24, ומתחת ל-20 בא 18.
@@ -113,14 +113,14 @@ describe('פסקה', () => {
     await settle();
 
     const buttons = [
-      ['יישור לימין (Ctrl+R)', 'right'],
-      ['מרכז (Ctrl+E)', 'center'],
-      ['יישור לשמאל (Ctrl+L)', 'left'],
-      ['יישור לשני הצדדים (Ctrl+J)', 'justify'],
+      ['יישור לימין', 'right'],
+      ['מרכז', 'center'],
+      ['יישור לשמאל', 'left'],
+      ['יישור לשני הצדדים', 'justify'],
     ] as const;
 
     for (const [title] of buttons) {
-      await harness.wrapper.find(`button[title="${title}"]`).trigger('click');
+      await buttonByTitle(harness.wrapper, title).trigger('click');
     }
     await settle();
 

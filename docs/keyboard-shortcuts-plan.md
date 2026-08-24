@@ -107,16 +107,26 @@ export interface Shortcut {
 **מטרה:** ששת הקיצורים הקיימים עוברים לרג'יסטרי ומפסיקים למות בפריסה עברית.
 אין קיצור חדש בשלב הזה — רק תשתית והחלפת מנוע ההתאמה.
 
-**קבצים:** `src/ui/shortcuts/{registry,match,dispatch}.ts` (חדשים),
-`src/App.vue`, `src/ui/ribbon/common/RibbonButton.vue`,
-`src/sessions/open-flow.ts` (`saveShortcut` נבלע ברג'יסטרי ונמחק).
+**קבצים:** `src/ui/shortcuts/{registry,match,dispatch,actions}.ts` (חדשים),
+`src/App.vue`, `src/ui/ribbon/common/RibbonButton.vue`, `FileTab.vue`,
+`HomeTab.vue`, `src/sessions/open-flow.ts` (`saveShortcut` נבלע ונמחק).
 
 **מה עושים:**
-1. רג'יסטרי עם שש הרשומות הקיימות בלבד.
+1. רג'יסטרי עם שש הרשומות הקיימות, ועוד שלוש שהדפדפן מטפל בהן (`Ctrl+C/X/V`)
+   ומסומנות `native` — הן מתועדות ומוצגות, ואיננו נוגעים בהן.
 2. `matchShortcut` על `code`.
-3. dispatcher עם מדיניות פוקוס: הרחבת `isTextEntryTarget` ל‑`contenteditable`
-   ול‑`role="textbox"`; דיאלוג מודאלי פתוח חוסם הכול חוץ מ‑`Escape`.
-4. `RibbonButton` שולף תווית מהרג'יסטרי.
+3. dispatcher עם מדיניות פוקוס, ו-`actions.ts` שמחזיק את ההכרעות של המעטפת
+   (ובהן „בזמן שמירה אין שמירה שנייה”, שהייתה `saveShortcut`).
+4. `RibbonButton` מקבל `shortcut-id` מטופס ושולף תווית מהרג'יסטרי.
+5. תשע התוויות שאין להן binding (`Ctrl+B/I/U`, `Ctrl+R/E/L/J`, `Ctrl+]`,
+   `Ctrl+[`) **מוסרות** מהרצועה. הן חוזרות בשלבים 1–2 יחד עם ה-binding שלהן.
+
+**תיקון לתוכנית, מתוך המימוש:** `isTextEntryTarget` **אינו** מורחב לאזור
+העריכה של המנוע. הכלל הנכון הפוך — שדות הטקסט של הממשק שלנו (`input`,
+`textarea`, `select`, `role="textbox"`) חוסמים קיצור מסמך, ואזור המסמך של
+המנוע דווקא לא: שם הקיצורים חייבים לעבוד. בדיקה 15 מבטאת בדיוק את זה. נוסף על
+כך, בדיקת הגבולות (`engine-boundaries`) אוסרת בכלל להזכיר את מאפיין העריכה
+בקוד, ולכן ההבחנה היא על `tagName` ועל `role`.
 
 **טסטים** — `tests/unit/shortcut-match.test.ts`:
 
@@ -157,9 +167,15 @@ export interface Shortcut {
 `tests/component/shortcut-labels.test.ts`:
 
 27. כפתור עם `shortcut-id` מציג ב‑tooltip את התווית מהרג'יסטרי.
-28. `shortcut-id` שאינו קיים ברג'יסטרי מפיל את הבדיקה במקום להציג tooltip חלקי.
+28. `shortcut-id` שאינו קיים ברג'יסטרי נופל ב‑`npm run typecheck`, לא בזמן
+    ריצה: הפרופ מטופס ב‑`ShortcutId` שנגזר מהרשימה. בדיקת החוזה 26 היא הרשת
+    השנייה, למקרה של `shortcut-id` שנכתב בתבנית ולא עבר דרך הפרופ.
+29. אין ברצועה tooltip שמסתיים בצירוף שאינו ברשימה.
 
-**בוצע כאשר:** `npm run verify` ירוק, ו‑28 הבדיקות עוברות.
+**בוצע כאשר:** `npm run verify` ירוק, וכל הבדיקות עוברות.
+
+**הערת סביבה:** `check:boot` מחפש Chrome בנתיב של macOS ונכשל במכונת Windows
+גם על `main` נקי. יש להריץ אותו עם `CHROME=` שמצביע ל‑chrome.exe המקומי.
 
 **קומיט:** `קיצורי מקלדת: רג'יסטרי אחד, והתאמה לפי code במקום key`
 
@@ -198,7 +214,7 @@ export interface Shortcut {
 19. `Ctrl+Shift+8` מדליק ומכבה — הצירוף הוא toggle, לא set.
 20. כל עשרת הצירופים קוראים `preventDefault`.
 
-**בוצע כאשר:** אין יותר תווית ברצועה בלי binding; בדיקת החוזה 25 עוברת.
+**בוצע כאשר:** תשע התוויות שהוסרו בשלב 0 חזרו — הפעם עם binding אמיתי.
 
 **קומיט:** `קיצורי מקלדת: ליבת העריכה — ביטול, עיצוב תו, קישור ומעבר עמוד`
 
@@ -359,6 +375,16 @@ export interface Shortcut {
 ### QA #4 — סופי, לפני ה‑PR
 
 סקירה מלאה של כל הענף מול המסמך הזה.
+
+---
+
+### הערה על הבדיקות הקיימות
+
+חלק מבדיקות הקומפוננטות איתרו כפתורים לפי ה‑tooltip **המלא**, כולל הצירוף
+(`button[title="מודגש (Ctrl+B)"]`). זה הופך כל שינוי בקיצור לשבירה של בדיקה
+שאינה עוסקת בקיצורים כלל. בשלב 0 הן הועברו ל‑`buttonByTitle(wrapper, prefix)`
+ב‑`tests/component/harness.ts`, שמאתר לפי תחילת ה‑title. אין להחזיר את הצורה
+הישנה בשלבים הבאים.
 
 ---
 

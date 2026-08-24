@@ -29,13 +29,18 @@
 import { computed, getCurrentInstance } from 'vue';
 import { isToggleButton } from '../aria';
 import SvgIcon from '../../icons/SvgIcon.vue';
+import { shortcutLabel, type ShortcutId } from '../../shortcuts/registry';
 
 const props = withDefaults(
   defineProps<{
     icon?: string;
     label?: string;
     tooltip?: string;
-    shortcut?: string;
+    /**
+     * מזהה מהרג'יסטרי של הקיצורים, לא מחרוזת חופשית. כך אי אפשר להבטיח
+     * למשתמש „Ctrl+B” שאין לו מאזין: מזהה שאינו ברג'יסטרי נופל בבנייה.
+     */
+    shortcutId?: ShortcutId;
     variant?: 'large' | 'small' | 'icon-only';
     active?: boolean;
     disabled?: boolean;
@@ -69,7 +74,7 @@ const iconSize = computed(() => {
 
 const computedTitle = computed(() => {
   const base = props.tooltip || props.label || '';
-  if (props.shortcut) return `${base} (${props.shortcut})`;
-  return base;
+  if (!props.shortcutId) return base;
+  return `${base} (${shortcutLabel(props.shortcutId)})`;
 });
 </script>
