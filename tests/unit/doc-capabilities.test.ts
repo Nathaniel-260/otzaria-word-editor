@@ -44,6 +44,8 @@ function fullCapabilities() {
       'sections.setTitlePage': { available: true },
       'sections.setOddEvenHeadersFooters': { available: true },
       'headerFooters.refs.setLinkedToPrevious': { available: true },
+      'fields.insert': { available: true },
+      'fields.rebuild': { available: true },
       'comments.create': { available: true },
       'clipboard.serializeSelection': { available: true },
       'clipboard.insert': { available: true },
@@ -214,6 +216,61 @@ describe('readDocCapabilities', () => {
     expect(report.can('canLinkToPrevious')).toBe(false);
     expect(report.can('canSetTitlePage')).toBe(true);
     expect(report.can('canSetOddEvenHeaders')).toBe(true);
+  });
+
+  it('namespace השדות חסר: „מספר עמוד” ו„עדכן שדות” מנוטרלים יחד', async () => {
+    // `fields` הוא namespace שלם, ומנוע שאין בו אותו אינו יודע לא להכניס שדה
+    // ולא לחשב אותו מחדש. שתי השאלות עדיין נפרדות (ראו CAPABILITY_SPECS),
+    // ולכן הבדיקה מוודאת ששתיהן נכבות — ולא שאחת גוררת את השנייה.
+    const raw = fullCapabilities();
+    raw.operations['fields.insert'] = {
+      available: false,
+      reasons: ['NAMESPACE_UNAVAILABLE'],
+    } as never;
+    raw.operations['fields.rebuild'] = {
+      available: false,
+      reasons: ['NAMESPACE_UNAVAILABLE'],
+    } as never;
+
+    const report = await readDocCapabilities(hostWith(() => raw));
+
+    expect(report.can('canInsertField')).toBe(false);
+    expect(report.explain('canInsertField')).toBe('אינו זמין בגרסה זו');
+    expect(report.can('canRebuildFields')).toBe(false);
+  });
+
+  it('מנוע שיודע להכניס שדה ואינו יודע לחשב מחדש: גם ההכנסה מנוטרלת', async () => {
+    // הבדיקה הזאת קיבעה קודם את ההפך — „ההכנסה נשארת פעילה” — מתוך הנחה שאין
+    // לה תלות ב-`rebuild`. יש: `fields.insert` מכניס שדה עם תוצאה **ריקה**,
+    // וה-rebuild הוא שמחשב אותה. בלעדיו המשתמש מקבל דיווח „בוצע” ורואה מקום
+    // ריק במסמך. שדה שאי אפשר לראות אינו פיצ'ר, ולכן הכפתור מנוטרל עם הסבר.
+    const raw = fullCapabilities();
+    raw.operations['fields.rebuild'] = {
+      available: false,
+      reasons: ['OPERATION_UNAVAILABLE'],
+    } as never;
+
+    const report = await readDocCapabilities(hostWith(() => raw));
+
+    expect(report.can('canInsertField')).toBe(false);
+    expect(report.explain('canInsertField')).toBe('הפעולה אינה זמינה בגרסה הזאת של המנוע');
+    expect(report.can('canRebuildFields')).toBe(false);
+  });
+
+  it('מנוע שיודע לחשב מחדש ואינו יודע להכניס: „עדכן שדות” נשאר פעיל', async () => {
+    // זו הסיבה ששתי השאלות נשארו נפרדות אחרי שההכנסה נעשתה תלויה גם ב-rebuild:
+    // הן אינן זהות. מסמך שכבר יש בו שדות עדיין ניתן לעדכון גם כשאי אפשר
+    // להוסיף שדה חדש.
+    const raw = fullCapabilities();
+    raw.operations['fields.insert'] = {
+      available: false,
+      reasons: ['OPERATION_UNAVAILABLE'],
+    } as never;
+
+    const report = await readDocCapabilities(hostWith(() => raw));
+
+    expect(report.can('canInsertField')).toBe(false);
+    expect(report.can('canRebuildFields')).toBe(true);
   });
 
   it('`available` שאינו בדיוק true אינו „כן”', async () => {

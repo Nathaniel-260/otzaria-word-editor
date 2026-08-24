@@ -411,6 +411,23 @@ export function createSuperdocDouble(options: SuperdocDoubleOptions = {}): Super
     footnotes: {
       insert: route('footnotes.insert', () => receipt('footnotes.insert')),
     },
+    /**
+     * המסמך של הכפיל נפתח **בלי** שדות: `fields.list` ריק. זה המצב שהפקדים
+     * נמדדים בו — „אין שדות, לחיצה מכניסה אחד” — ומסמך שכבר יש בו שדות היה
+     * מסתיר את ההבדל בין „הוכנס” ל„היה שם”.
+     */
+    fields: {
+      list: route('fields.list', () => ({ items: [] })),
+      insert: route('fields.insert', () => {
+        const result = receipt('fields.insert');
+        // הקבלה של `fields.insert` נושאת את כתובת השדה שנוצר; היא מה שמאפשר
+        // את ה-rebuild שמחשב את התוצאה מיד אחרי ההכנסה.
+        return result.success
+          ? { ...result, field: { kind: 'field', blockId, occurrenceIndex: 0, nestingDepth: 0 } }
+          : result;
+      }),
+      rebuild: route('fields.rebuild', () => receipt('fields.rebuild')),
+    },
     format: {
       paragraph: {
         setFlowOptions: route('format.paragraph.setFlowOptions', () =>

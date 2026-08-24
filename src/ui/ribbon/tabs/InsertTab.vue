@@ -85,6 +85,21 @@
         :active="headerFooter.oddEven"
         @click="onToggleOddEven"
       />
+      <!--
+        „מספר עמוד” יושב כאן ולא בקבוצה משלו מפני שזה מקומו ב-Word העברי:
+        הוא הפקד הרביעי בקבוצה „כותרת עליונה ותחתונה”, מפני ששם מספרי העמודים
+        חיים בפועל. השדה עצמו נכנס **במקום הסמן** ולא בכותרת התחתונה — אין
+        API ציבורי שמזיז את הסמן ל-story אחר (ראו הערת הכותרות למטה) — וזה מה
+        שה-tooltip אומר.
+      -->
+      <RibbonMenuButton
+        icon="pageNumber"
+        label="מספר עמוד"
+        :tooltip="tip('canInsertField', 'הכנסת שדה מספר עמוד במקום הסמן')"
+        :disabled="!can('canInsertField')"
+        :items="pageNumberItems"
+        @select="onPageNumberAction"
+      />
       <RibbonButton
         icon="link"
         label="קשר לקודם"
@@ -96,7 +111,33 @@
       />
     </RibbonGroup>
 
-    <!-- קבוצה 6: תוכן עניינים -->
+    <!--
+      קבוצה 6: טקסט. ב-Word העברי „תאריך ושעה” יושב בקבוצה „טקסט” של לשונית
+      „הוספה”, בין „חלקים מהירים” ל„אובייקט” — ו„חלקים מהירים” הוא גם המקום
+      שממנו נפתח „שדה…”. „עדכן שדות” אינו פקד ברצועה של Word אלא F9 ותפריט
+      הקשר, ואין לו בית טבעי; הוא ממוקם כאן מפני שזו הקבוצה שהשדות נכנסים
+      ממנה, וכי „עדכן” ליד „הוסף” הוא הצמד שהמשתמש צריך.
+    -->
+    <RibbonGroup title="טקסט">
+      <RibbonButton
+        icon="dateTime"
+        label="תאריך ושעה"
+        variant="large"
+        :tooltip="dateTooltip"
+        :disabled="!can('canInsertField')"
+        @click="onInsertDate"
+      />
+      <RibbonButton
+        icon="updateFields"
+        label="עדכן שדות"
+        variant="large"
+        :tooltip="rebuildTooltip"
+        :disabled="!can('canRebuildFields')"
+        @click="onRebuildFields"
+      />
+    </RibbonGroup>
+
+    <!-- קבוצה 7: תוכן עניינים -->
     <RibbonGroup title="תוכן עניינים">
       <RibbonButton
         icon="toc"
@@ -162,6 +203,15 @@
  * ו-`w:evenAndOddHeaders` נשמרים במסמך, ומתג שמחזיק דגל משלו היה מציג „כבוי”
  * על מסמך שנפתח והדגל בו דלוק.
  *
+ * ## השדות, ולמה אין „עמוד X מתוך Y”
+ *
+ * „מספר עמוד” ו„תאריך ושעה” מכניסים שדה Word אמיתי (`{ PAGE }`,
+ * `{ DATE \@ "dd/MM/yyyy" }`)
+ * ולא טקסט, ולכן הם מתעדכנים בהדפסה ובפתיחה מחדש. „עמוד X מתוך Y” אינו שדה
+ * אלא רצף של טקסט ושני שדות, ואין דרך ציבורית לחשב את ההיסט שבין החלקים —
+ * ולכן התפריט מציע את שני השדות בנפרד. ההנמקה המלאה, כולל מדידת מתגי הפורמט
+ * של התאריך במנוע האמיתי, ב-engine/fields.ts.
+ *
  * ## המצב הקודם
  *
  * שלושת הפקדים כאן לא עשו כלום: `imageCmd.run()` ו-`linkCmd.run()` נקראו **בלי
@@ -207,6 +257,15 @@ import {
   type HeaderFooterKind,
   type HeaderFooterState,
 } from '../../../engine/header-footer';
+import {
+  emptyFieldsState,
+  insertDate,
+  insertPageCount,
+  insertPageNumber,
+  readFieldsState,
+  rebuildAllFields,
+  type FieldsState,
+} from '../../../engine/fields';
 import { LINK_HREF_HINT, imagePayload, linkPayload } from '../../../engine/payloads';
 import { pickImageFile, readImageAsDataUrl } from '../../../host/files';
 
@@ -377,6 +436,12 @@ async function onStartOnNewPage(): Promise<void> {
 
 const capabilities = shallowRef<DocCapabilityReport | null>(null);
 const headerFooter = shallowRef<HeaderFooterState>(emptyHeaderFooterState());
+/**
+ * מספר השדות במסמך. נקרא באותו דור כמו מצב הכותרות ומאותה סיבה — הוא נקרא
+ * מהמסמך ולא מוחזק כדגל מקומי, כדי שמסמך שנפתח וכבר יש בו שדות לא יציג „אין
+ * מה לעדכן”.
+ */
+const fieldsState = shallowRef<FieldsState>(emptyFieldsState());
 
 /**
  * מונה דורות משותף לשתי הקריאות: שתיהן א-סינכרוניות, ומסמך שנפתח אחרי מסמך
@@ -391,14 +456,19 @@ watch(
     const mine = ++headerFooterGeneration;
     capabilities.value = null;
     headerFooter.value = emptyHeaderFooterState();
+    // בלי האיפוס הזה מונה השדות של המסמך הקודם שורד עד שהקריאה חוזרת, וה-
+    // tooltip של „עדכן שדות” מבטיח חישוב מחדש במסמך שאין בו שדה אחד.
+    fieldsState.value = emptyFieldsState();
 
-    const [capabilityReport, state] = await Promise.all([
+    const [capabilityReport, state, fields] = await Promise.all([
       readDocCapabilities(host),
       readHeaderFooterState(host),
+      readFieldsState(host),
     ]);
     if (mine !== headerFooterGeneration) return;
     capabilities.value = capabilityReport;
     headerFooter.value = state;
+    fieldsState.value = fields;
   },
   { immediate: true }
 );
@@ -510,6 +580,71 @@ function onToggleLinkToPrevious(): void {
     'header-footer-link-to-previous',
     setLinkedToPrevious(superdoc.value, !headerFooter.value.linkedToPrevious)
   );
+}
+
+/* ------------------------------------------------------------------ */
+/* שדות                                                                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * שני פריטים ולא „עמוד X מתוך Y” אחד: הצירוף הזה דורש טקסט **בין** שני שדות,
+ * ואין דרך ציבורית לחשב את ההיסט שאחרי השדה הראשון. ה-hint אומר את זה
+ * למשתמש במקום להשאיר אותו לחפש פריט שאינו קיים.
+ */
+const pageNumberItems = [
+  { id: 'page', label: 'מספר עמוד', hint: 'מתעדכן לפי העמוד שהשדה נמצא בו' },
+  {
+    id: 'count',
+    label: 'מספר העמודים במסמך',
+    hint: 'לצירוף „עמוד X מתוך Y” יש להקליד את המילים ולהוסיף את שני השדות',
+  },
+];
+
+/**
+ * ה-tooltip אומר שהשדה מתעדכן, כי זה כל ההבדל בינו לבין הקלדת התאריך, ואומר
+ * את הפורמט במפורש — הוא `dd/MM/yyyy` ולא „הפורמט של המסמך”, כי המתג נשלח
+ * בקוד השדה ונמדד כמפורש במנוע. ראו engine/fields.ts.
+ */
+const dateTooltip = computed(() =>
+  tip('canInsertField', 'הכנסת שדה תאריך שמתעדכן, בפורמט יום/חודש/שנה')
+);
+
+const rebuildTooltip = computed(() =>
+  tip(
+    'canRebuildFields',
+    fieldsState.value.count > 0
+      ? 'חישוב מחדש של כל השדות במסמך, כמו F9 ב-Word'
+      : 'אין במסמך שדות לעדכן'
+  )
+);
+
+/**
+ * מריצה פעולת שדה, מדווחת עליה, וקוראת מחדש את המונה. הקריאה מחדש נדרשת גם
+ * בכשל, מאותו טעם כמו ב-`runHeaderFooter`: מוטציה שנכשלה באמצע משאירה מסמך
+ * שאינו במצב שה-tooltip מתאר.
+ */
+async function runFields(id: string, action: Promise<CommandOutcome>): Promise<void> {
+  report(await action, id);
+  // **קורא** את המונה ואינו מקדם אותו — ראו ההסבר ב-`runHeaderFooter`.
+  const mine = headerFooterGeneration;
+  const fields = await readFieldsState(superdoc.value);
+  if (mine === headerFooterGeneration) fieldsState.value = fields;
+}
+
+function onPageNumberAction(action: string): void {
+  const host = superdoc.value;
+  void runFields(
+    `field-${action === 'count' ? 'numpages' : 'page'}`,
+    action === 'count' ? insertPageCount(host) : insertPageNumber(host)
+  );
+}
+
+function onInsertDate(): void {
+  void runFields('field-date', insertDate(superdoc.value));
+}
+
+function onRebuildFields(): void {
+  void runFields('fields-rebuild', rebuildAllFields(superdoc.value));
 }
 </script>
 

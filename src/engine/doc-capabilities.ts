@@ -61,7 +61,8 @@ const REASON_TEXT: Record<DocCapabilityReasonCode, string> = {
  * דגל ברמת ה-namespace. שאלה עם שניהם דורשת את שניהם.
  */
 interface CapabilitySpec {
-  operation?: string;
+  /** מזהה אחד, או רשימה שכולם נדרשים — יכולת שנשענת על שתי פעולות. */
+  operation?: string | readonly string[];
   global?: 'trackChanges' | 'comments' | 'lists' | 'dryRun' | 'history';
 }
 
@@ -96,6 +97,20 @@ const CAPABILITY_SPECS = {
   canSetTitlePage: { operation: 'sections.setTitlePage' },
   canSetOddEvenHeaders: { operation: 'sections.setOddEvenHeadersFooters' },
   canLinkToPrevious: { operation: 'headerFooters.refs.setLinkedToPrevious' },
+  // שדות. „מספר עמוד” ו„תאריך” דורשים את **שתי** הפעולות ולא רק את ההכנסה:
+  // `fields.insert` מכניס שדה עם תוצאה ריקה, ו-`fields.rebuild` הוא שמחשב
+  // אותה. מנוע שיודע להכניס ואינו יודע לחשב מחדש היה מכניס למסמך שדה בלתי
+  // נראה, מדווח „בוצע”, והמשתמש לא היה רואה כלום — שדה שאי אפשר לראות אינו
+  // פיצ'ר, וכפתור מנוטרל עם הסבר עדיף על הצלחה מדומה. (ההערה הקודמת כאן טענה
+  // שההכנסה „אינה תלויה ב-rebuild”; היא כן — ראו engine/fields.ts.)
+  //
+  // שתי השאלות עדיין נפרדות, כי אינן זהות: מנוע עם `rebuild` בלי `insert`
+  // משאיר את „עדכן שדות” פעיל על שדות שכבר במסמך, ומנטרל רק את ההכנסה.
+  //
+  // `fields.remove` אינו נשאל: אין לו פקד ברצועה — ב-Word מוחקים שדה כמו
+  // שמוחקים טקסט — ושאלה בלי פקד היא הצהרת יכולת שאיש אינו קורא.
+  canInsertField: { operation: ['fields.insert', 'fields.rebuild'] },
+  canRebuildFields: { operation: 'fields.rebuild' },
   // סקירה
   canAddComment: { operation: 'comments.create', global: 'comments' },
   canTrackChanges: { global: 'trackChanges' },
@@ -229,8 +244,10 @@ export async function readDocCapabilities(
     const reasons: DocCapabilityReasonCode[] = [];
     let available = true;
 
-    if (spec.operation) {
-      const entry = raw.operations?.[spec.operation];
+    const operations =
+      typeof spec.operation === 'string' ? [spec.operation] : (spec.operation ?? []);
+    for (const operation of operations) {
+      const entry = raw.operations?.[operation];
       // פעולה שאינה בטבלה כלל = גרסה שאינה מכירה אותה. גם פעולה שכן בטבלה
       // אך לא נתנה סיבה מוכרת מקבלת את הקוד הגנרי, כדי שלא תישאר בלי הסבר.
       if (!entry || entry.available !== true) {
