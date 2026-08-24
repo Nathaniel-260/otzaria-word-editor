@@ -1,10 +1,7 @@
 <template>
   <div class="ribbon-tab-pane insert-tab">
     <!-- קבוצה 1: עמודים -->
-    <RibbonGroup
-      title="עמודים"
-      :launcher="false"
-    >
+    <RibbonGroup title="עמודים">
       <!--
         התווית אינה „מעבר עמוד”: המימוש הוא `w:pageBreakBefore`, שמזיז את כל
         הפסקה לעמוד הבא ואינו מפצל אותה בסמן כמו Word. ההסבר המלא, כולל
@@ -21,10 +18,7 @@
     </RibbonGroup>
 
     <!-- קבוצה 2: טבלאות -->
-    <RibbonGroup
-      title="טבלאות"
-      :launcher="false"
-    >
+    <RibbonGroup title="טבלאות">
       <TablePicker
         :disabled="!tableCmd.enabled.value"
         @select="onInsertTable"
@@ -32,10 +26,7 @@
     </RibbonGroup>
 
     <!-- קבוצה 3: איורים ומדיה -->
-    <RibbonGroup
-      title="איורים"
-      :launcher="false"
-    >
+    <RibbonGroup title="איורים">
       <RibbonButton
         icon="image"
         label="תמונות"
@@ -47,10 +38,7 @@
     </RibbonGroup>
 
     <!-- קבוצה 4: קישורים -->
-    <RibbonGroup
-      title="קישורים"
-      :launcher="false"
-    >
+    <RibbonGroup title="קישורים">
       <RibbonButton
         icon="link"
         label="קישור"
@@ -62,10 +50,7 @@
     </RibbonGroup>
 
     <!-- קבוצה 5: תוכן עניינים -->
-    <RibbonGroup
-      title="תוכן עניינים"
-      :launcher="false"
-    >
+    <RibbonGroup title="תוכן עניינים">
       <RibbonButton
         icon="toc"
         label="תוכן עניינים"

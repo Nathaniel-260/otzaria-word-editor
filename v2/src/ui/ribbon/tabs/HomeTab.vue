@@ -1,10 +1,7 @@
 <template>
   <div class="ribbon-tab-pane home-tab">
     <!-- קבוצה 1: לוח -->
-    <RibbonGroup
-      title="לוח"
-      :launcher="true"
-    >
+    <RibbonGroup title="לוח">
       <RibbonButton
         icon="paste"
         label="הדבק"
@@ -49,7 +46,6 @@
     <RibbonGroup
       title="גופן"
       :column-flow="true"
-      :launcher="true"
     >
       <!-- שורה עליונה: גופן, גודל, הגדל/הקטן, נקה -->
       <div class="word-group-row">
@@ -173,7 +169,6 @@
     <RibbonGroup
       title="פיסקה"
       :column-flow="true"
-      :launcher="true"
     >
       <!-- שורה עליונה: תבליטים, מספור, הזחה, כיווניות, סימני עיצוב -->
       <div class="word-group-row">
@@ -292,7 +287,6 @@
     <RibbonGroup
       title="סגנונות"
       class="styles-group"
-      :launcher="true"
     >
       <!-- `disabled` ולא רק `current-style`: בלי בחירה במסמך הפקודה
            `linked-style` נכשלת, וגלריה שנראית פעילה מזמינה לחיצה שלא תעשה
@@ -305,10 +299,7 @@
     </RibbonGroup>
 
     <!-- קבוצה 5: עריכה -->
-    <RibbonGroup
-      title="עריכה"
-      :launcher="true"
-    >
+    <RibbonGroup title="עריכה">
       <div class="column-items">
         <RibbonButton
           icon="search"

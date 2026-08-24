@@ -1,10 +1,7 @@
 <template>
   <div class="ribbon-tab-pane layout-tab">
     <!-- קבוצה 1: הגדרת עמוד -->
-    <RibbonGroup
-      title="הגדרת עמוד"
-      :launcher="true"
-    >
+    <RibbonGroup title="הגדרת עמוד">
       <RibbonMenuButton
         icon="margins"
         label="שוליים"

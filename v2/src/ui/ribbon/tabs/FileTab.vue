@@ -1,9 +1,6 @@
 <template>
   <div class="ribbon-tab-pane file-tab">
-    <RibbonGroup
-      title="קובץ ומסמך"
-      :launcher="false"
-    >
+    <RibbonGroup title="קובץ ומסמך">
       <RibbonButton
         icon="newDoc"
         label="מסמך חדש"
@@ -20,10 +17,7 @@
       />
     </RibbonGroup>
 
-    <RibbonGroup
-      title="שמירה"
-      :launcher="false"
-    >
+    <RibbonGroup title="שמירה">
       <RibbonButton
         icon="save"
         label="שמור"
@@ -42,10 +36,7 @@
       />
     </RibbonGroup>
 
-    <RibbonGroup
-      title="ייצוא והדפסה"
-      :launcher="false"
-    >
+    <RibbonGroup title="ייצוא והדפסה">
       <RibbonButton
         icon="export"
         label="ייצוא ל-Word"
@@ -63,10 +54,7 @@
       />
     </RibbonGroup>
 
-    <RibbonGroup
-      title="מידע"
-      :launcher="false"
-    >
+    <RibbonGroup title="מידע">
       <RibbonButton
         icon="info"
         label="אודות"

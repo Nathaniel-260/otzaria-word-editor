@@ -1,10 +1,7 @@
 <template>
   <div class="ribbon-tab-pane review-tab">
     <!-- הגהה -->
-    <RibbonGroup
-      title="הגהה"
-      :launcher="false"
-    >
+    <RibbonGroup title="הגהה">
       <RibbonButton
         icon="proofing"
         label="בדיקת איות"
@@ -15,10 +12,7 @@
     </RibbonGroup>
 
     <!-- תגובות -->
-    <RibbonGroup
-      title="תגובות"
-      :launcher="false"
-    >
+    <RibbonGroup title="תגובות">
       <RibbonButton
         icon="comment"
         label="תגובה חדשה"
@@ -29,10 +23,7 @@
     </RibbonGroup>
 
     <!-- מעקב -->
-    <RibbonGroup
-      title="מעקב אחר שינויים"
-      :launcher="false"
-    >
+    <RibbonGroup title="מעקב אחר שינויים">
       <RibbonButton
         icon="trackChanges"
         label="עקוב אחר שינויים"
@@ -45,10 +36,7 @@
     </RibbonGroup>
 
     <!-- שינויים -->
-    <RibbonGroup
-      title="שינויים"
-      :launcher="false"
-    >
+    <RibbonGroup title="שינויים">
       <div class="column-items">
         <RibbonButton
           icon="accept"

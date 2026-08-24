@@ -1,10 +1,7 @@
 <template>
   <div class="ribbon-tab-pane otzaria-tab">
     <!-- שילוב עם אוצריא -->
-    <RibbonGroup
-      title="אוצריא"
-      :launcher="false"
-    >
+    <RibbonGroup title="אוצריא">
       <RibbonButton
         icon="book"
         label="ציטוט מהקורא"
@@ -32,10 +29,7 @@
     </RibbonGroup>
 
     <!-- תבניות תורניות. ראו ההסבר ב-script: אין למנוע דרך ציבורית ליצור סגנון. -->
-    <RibbonGroup
-      title="סגנון תורני"
-      :launcher="false"
-    >
+    <RibbonGroup title="סגנון תורני">
       <div class="column-items">
         <RibbonButton
           label="חידוש"

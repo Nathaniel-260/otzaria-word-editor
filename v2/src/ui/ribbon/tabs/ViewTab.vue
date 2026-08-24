@@ -1,10 +1,7 @@
 <template>
   <div class="ribbon-tab-pane view-tab">
     <!-- תצוגות -->
-    <RibbonGroup
-      title="תצוגות"
-      :launcher="false"
-    >
+    <RibbonGroup title="תצוגות">
       <RibbonButton
         icon="focusMode"
         label="מצב מיקוד"
@@ -15,10 +12,7 @@
     </RibbonGroup>
 
     <!-- הצג -->
-    <RibbonGroup
-      title="הצג"
-      :launcher="false"
-    >
+    <RibbonGroup title="הצג">
       <div class="column-items">
         <RibbonButton
           icon="ruler"
@@ -42,10 +36,7 @@
     </RibbonGroup>
 
     <!-- זום -->
-    <RibbonGroup
-      title="שינוי גודל תצוגה"
-      :launcher="false"
-    >
+    <RibbonGroup title="שינוי גודל תצוגה">
       <!--
         `zoomPayload(100)` ולא `{ zoom: 1 }`: הזום הוא **אחוזים**, ואובייקט
         נדחה עוד לפני `SuperDoc.setZoom`. ראו engine/payloads.ts.

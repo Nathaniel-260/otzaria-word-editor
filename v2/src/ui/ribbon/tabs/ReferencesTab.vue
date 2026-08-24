@@ -1,9 +1,6 @@
 <template>
   <div class="ribbon-tab-pane references-tab">
-    <RibbonGroup
-      title="תוכן עניינים"
-      :launcher="false"
-    >
+    <RibbonGroup title="תוכן עניינים">
       <RibbonButton
         icon="toc"
         label="תוכן עניינים"
@@ -14,10 +11,7 @@
       />
     </RibbonGroup>
 
-    <RibbonGroup
-      title="הערות שוליים"
-      :launcher="true"
-    >
+    <RibbonGroup title="הערות שוליים">
       <RibbonButton
         icon="footnote"
         label="הערת שוליים"

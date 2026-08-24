@@ -13,16 +13,16 @@
 </template>
 
 <script setup lang="ts">
+/* אין כאן `launcher`: כפתור ההרחבה בפינת הקבוצה הוסר מהעיצוב (b2f0635),
+   ה-HTML שלו הוסר (e66dc8f), וה-prop עצמו נשאר אחריו בלי צרכן. הוא הוסר ביחד
+   עם כל אתרי הקריאה שהעבירו אותו — prop שאינו מוצהר נוזל ל-`$attrs` ומרונדר
+   כתכונת DOM על ה-div של הקבוצה. */
 withDefaults(
   defineProps<{
     title: string;
-    /* מנוטרל בכוונה: כפתור ה-launcher הוסר, וה-prop נשאר רק כדי שאתרי הקריאה
-       בלשוניות שעוד מעבירים :launcher ימשיכו לעבור typecheck. */
-    launcher?: boolean;
     columnFlow?: boolean;
   }>(),
   {
-    launcher: true,
     columnFlow: false,
   }
 );
