@@ -8,6 +8,7 @@
 import type { InjectionKey, Ref } from 'vue';
 import type { CommandAdapter, CommandOutcome } from '../engine/command-adapter';
 import type { FontOptions } from '../engine/font-options';
+import type { StyleGalleryState } from '../engine/style-gallery';
 
 /** האדפטר של ה-session הפעיל. `null` עד שיש מסמך פתוח. */
 export const COMMAND_ADAPTER: InjectionKey<Ref<CommandAdapter | null>> = Symbol('commandAdapter');
@@ -31,3 +32,12 @@ export type CommandReporter = (outcome: CommandOutcome, commandId: string) => vo
  * ה-handles של ה-controller, כולל מסלולי mutation שאין להם קשר לבורר גופן.
  */
 export const FONT_OPTIONS: InjectionKey<Ref<FontOptions>> = Symbol('fontOptions');
+
+/**
+ * גלריית הסגנונות של המסמך הפתוח (`ui.styles` דרך engine/style-gallery.ts).
+ *
+ * מפתח נפרד ולא הרחבה של `FONT_OPTIONS`, ומאותו טעם צר: הגלריה היא הקטלוג
+ * **של המסמך**, נפתרת אסינכרונית אחרי הפתיחה, ורק מי שמנהל את ה-session יודע
+ * מתי להירשם ומתי לשחרר. הקומפוננטה רואה מצב קריא בלבד.
+ */
+export const STYLE_GALLERY: InjectionKey<Ref<StyleGalleryState>> = Symbol('styleGallery');

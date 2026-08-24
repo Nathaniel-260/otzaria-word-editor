@@ -3,24 +3,27 @@
     <div
       ref="scrollContainerRef"
       class="style-cards-scroll"
+      role="group"
+      aria-label="סגנונות"
     >
       <button
-        v-for="style in STYLES"
-        :key="style.id"
+        v-for="item in items"
+        :key="item.id"
         type="button"
         class="style-card"
-        :class="{ active: currentStyle === style.id }"
-        :title="style.label"
+        :class="{ active: activeId === item.id }"
+        :title="item.label"
+        :aria-pressed="activeId === item.id"
         @pointerdown.prevent
-        @click="$emit('select-style', style.id)"
+        @click="$emit('select-style', item.id)"
       >
         <span
           class="style-card-preview"
-          :style="style.previewStyle"
+          :style="item.previewStyle"
         >
-          {{ style.previewText }}
+          {{ item.previewText }}
         </span>
-        <span class="style-card-name">{{ style.label }}</span>
+        <span class="style-card-name">{{ item.label }}</span>
       </button>
     </div>
     <div class="gallery-nav-btns">
@@ -55,67 +58,47 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
+import { computed, inject, ref, shallowRef } from 'vue';
 import SvgIcon from '../../icons/SvgIcon.vue';
+import { STYLE_GALLERY } from '../../../composables/keys';
+import { fallbackStyleGallery } from '../../../engine/style-gallery';
 
-interface StyleItem {
-  id: string;
-  label: string;
-  previewText: string;
-  previewStyle: Record<string, string>;
-}
-
-const STYLES: StyleItem[] = [
-  {
-    id: 'Normal',
-    label: 'רגיל',
-    previewText: 'AaBbCc',
-    previewStyle: { fontSize: '13px', color: 'inherit', fontWeight: '400' },
-  },
-  {
-    id: 'NoSpacing',
-    label: 'ללא מרווח',
-    previewText: 'AaBbCc',
-    previewStyle: { fontSize: '13px', color: 'inherit', fontWeight: '400', letterSpacing: '-0.5px' },
-  },
-  {
-    id: 'Heading1',
-    label: 'כותרת 1',
-    previewText: 'כותרת 1',
-    previewStyle: { fontSize: '14px', color: '#2e74b5', fontWeight: '700' },
-  },
-  {
-    id: 'Heading2',
-    label: 'כותרת 2',
-    previewText: 'כותרת 2',
-    previewStyle: { fontSize: '13px', color: '#1f4e78', fontWeight: '600' },
-  },
-  {
-    id: 'Subtitle',
-    label: 'כותרת משנה',
-    previewText: 'ת טקסט',
-    previewStyle: { fontSize: '12px', color: '#595959', fontStyle: 'italic' },
-  },
-  {
-    id: 'Quote',
-    label: 'ציטוט',
-    previewText: 'ציטוט',
-    previewStyle: { fontSize: '12px', color: '#2e74b5', fontStyle: 'italic' },
-  },
-];
-
-withDefaults(
+const props = withDefaults(
   defineProps<{
+    /**
+     * הסגנון שפקודת `linked-style` מדווחת. משמש רק כשאין גלריה מהמסמך —
+     * כשיש, `activeParagraphStyleId` של המנוע מדויק ממנו (הוא יודע להבחין
+     * בבחירה מעורבת).
+     */
     currentStyle?: string;
   }>(),
   {
     currentStyle: 'Normal',
-  }
+  },
 );
 
 defineEmits<{
   (e: 'select-style', styleId: string): void;
 }>();
+
+/**
+ * ברירת המחדל של ה-inject היא רשת הביטחון ולא רשימה ריקה: קומפוננטה שמורכבת
+ * בלי המעטפת (בדיקה, או רצועה שעולה לפני שנפתח מסמך) צריכה גלריה עובדת.
+ * הצורה עם factory (`true`) ולא ערך ישיר — כדי שהרשימה לא תיבנה בכל הרכבה
+ * גם כשהמעטפת כן מספקת את המפתח.
+ */
+const gallery = inject(STYLE_GALLERY, () => shallowRef(fallbackStyleGallery()), true);
+
+const items = computed(() => gallery.value.items);
+
+/**
+ * בחירה מעורבת מחזירה `null` מהמנוע, ואז אין כרטיס מסומן — Word מציג גלריה
+ * בלי בחירה, ולא את הסגנון של הפסקה הראשונה כאילו הוא של כולן. לכן כשהרשימה
+ * מהמסמך, התשובה של המנוע קובעת גם כשהיא `null`.
+ */
+const activeId = computed(() =>
+  gallery.value.fromDocument ? gallery.value.activeId : props.currentStyle,
+);
 
 const scrollContainerRef = ref<HTMLElement | null>(null);
 
@@ -136,9 +119,12 @@ function scrollGallery(direction: 'left' | 'right'): void {
   border-radius: var(--radius-sm);
   padding: 2px;
   height: 68px;
-  width: 100%;
+  /* מהודקת לתוכן. `width: 100%` עם `flex: 1 1 auto` שהיו כאן מתחו אותה על כל
+     מה שהקבוצה נתנה, והשאירו לצד הכרטיסים שטח לבן שנראה כמו משבצת סגנון
+     ריקה — זו התלונה. `0 1 auto` = אינה גדלה, ומצטמצמת כשהרצועה צרה. */
+  flex: 0 1 auto;
+  min-width: 0;
   max-width: 100%;
-  flex: 1 1 auto;
 }
 
 .style-cards-scroll {
@@ -149,6 +135,11 @@ function scrollGallery(direction: 'left' | 'right'): void {
   scrollbar-width: none;
   height: 100%;
   padding-inline: 2px;
+  /* התקרה היא מה שמונע מגלריה של מסמך עשיר בסגנונות לדחוף את שאר הקבוצות
+     מהרצועה: הקטלוג של Word מחזיר לעיתים חמישה-עשר סגנונות מהירים, ולא חמישה.
+     רוחב של כחמישה כרטיסים — ומשם גוללים. */
+  max-width: 340px;
+  min-width: 0;
 }
 
 .style-cards-scroll::-webkit-scrollbar {
@@ -160,7 +151,9 @@ function scrollGallery(direction: 'left' | 'right'): void {
   flex-direction: column;
   align-items: center;
   justify-content: center;
+  flex: 0 0 auto;
   min-width: 62px;
+  max-width: 84px;
   padding: 3px 6px;
   background: var(--color-surface);
   border: 1px solid var(--color-outline-variant);
@@ -168,6 +161,7 @@ function scrollGallery(direction: 'left' | 'right'): void {
   cursor: pointer;
   transition: all 0.08s ease;
   white-space: nowrap;
+  overflow: hidden;
 }
 
 .style-card:hover {
@@ -183,14 +177,20 @@ function scrollGallery(direction: 'left' | 'right'): void {
 
 .style-card-preview {
   display: block;
+  max-width: 100%;
   font-family: var(--font-main);
   line-height: 1.2;
   margin-bottom: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .style-card-name {
+  max-width: 100%;
   font-size: 9px;
   color: var(--color-on-surface-variant);
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .gallery-nav-btns {
