@@ -97,6 +97,14 @@ export interface CommandDoubleOptions {
   unknown?: readonly string[];
   /** פקודות שהמנוע מנתב אך הן נכשלות, לפי `reason` של ה-controller. */
   failures?: Record<string, string>;
+  /**
+   * פקודות שהתשובה שלהן מושהית עד `release(id)`.
+   *
+   * למה זה נדרש: פקד שנשען על „מה שנבחר וטרם נענה” צריך להיבדק גם במצב הזה
+   * בדיוק — בחירה שנייה בזמן שהראשונה באוויר. בלי שליטה על רגע התשובה אין דרך
+   * להעמיד את המצב הזה, וההתנהגות היחידה שנמדדת היא זו של מנוע מיידי.
+   */
+  held?: readonly string[];
 }
 
 export interface CommandDouble extends CommandAdapter {
@@ -112,6 +120,8 @@ export interface CommandDouble extends CommandAdapter {
   payloads(id: string): unknown[];
   /** מעדכנת מצב פקודה ומודיעה למי שמאזין — כמו המנוע כשהבחירה משתנה. */
   setState(id: string, patch: Partial<CommandState>): void;
+  /** משחררת את התשובה המושהית **הראשונה** של הפקודה (FIFO). */
+  release(id: string): void;
   reset(): void;
 }
 
@@ -130,6 +140,8 @@ export function createCommandDouble(options: CommandDoubleOptions = {}): Command
 
   const unknown = new Set(options.unknown ?? []);
   const failures = options.failures ?? {};
+  const held = new Set(options.held ?? []);
+  const waiting = new Map<string, Array<() => void>>();
   const states = new Map<string, CommandState>();
   const listeners = new Map<string, Set<(state: CommandState) => void>>();
 
@@ -203,6 +215,14 @@ export function createCommandDouble(options: CommandDoubleOptions = {}): Command
 
       applied.push({ id, payload });
 
+      if (held.has(id)) {
+        await new Promise<void>((resolve) => {
+          const queue = waiting.get(id) ?? [];
+          queue.push(resolve);
+          waiting.set(id, queue);
+        });
+      }
+
       const failure = failures[id];
       if (failure) return { ok: false, message: reasonText(failure), reason: failure };
       return { ok: true };
@@ -216,6 +236,12 @@ export function createCommandDouble(options: CommandDoubleOptions = {}): Command
       const next: CommandState = { ...stateOf(id), ...patch };
       states.set(id, next);
       for (const listener of listeners.get(id) ?? []) listener(next);
+    },
+
+    release(id) {
+      const next = waiting.get(id)?.shift();
+      if (!next) throw new Error(`אין תשובה מושהית לשחרור עבור ${id}`);
+      next();
     },
 
     reset() {

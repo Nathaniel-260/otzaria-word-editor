@@ -336,7 +336,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, inject, ref, shallowRef, watch } from 'vue';
+import { computed, inject, ref, shallowRef, watch, type Ref } from 'vue';
 import type { SuperDoc } from 'superdoc';
 import RibbonGroup from '../common/RibbonGroup.vue';
 import RibbonButton from '../common/RibbonButton.vue';
@@ -346,6 +346,7 @@ import StyleGallery from '../common/StyleGallery.vue';
 import { useCommand } from '../../../composables/useCommand';
 import { useFontOptions } from '../../../composables/useFontOptions';
 import { COMMAND_REPORTER, type CommandReporter } from '../../../composables/keys';
+import type { CommandOutcome } from '../../../engine/command-adapter';
 import { ACTIVE_SUPERDOC } from '../../../engine/document-api';
 import { readDocCapabilities, type DocCapabilityReport } from '../../../engine/doc-capabilities';
 import {
@@ -438,16 +439,34 @@ const engineTextColor = computed(() => parseColor(fontColorCmd.value.value));
 const engineHighlight = computed(() => parseColor(highlightCmd.value.value));
 
 /**
- * מה שהמנוע דיווח לאחרונה, או מה שבחרנו אחרון.
+ * מה שהמנוע דיווח לאחרונה.
  *
  * למה בכלל נדרש זיכרון כזה: המנוע מדווח `undefined` בשני מצבים שונים — בחירה
  * עם יותר מערך אחד, ורגע שבו הוא עוד לא פתר את הבחירה. הבורר הוא **פקד**, ולא
  * דוח; לרוקן אותו בכל תנועת סמן היה גרוע יותר מלהציג את הערך האחרון שכן ידענו.
- * הערך מתעדכן גם מבחירת המשתמש, כדי שהתיבה תגיב מיד ולא רק אחרי שהמנוע ידווח.
  */
 const lastFamily = ref(DEFAULT_FONT_FAMILY);
 const lastSize = ref(DEFAULT_FONT_SIZE_PT);
 const lastLineHeight = ref(DEFAULT_LINE_HEIGHT);
+
+/**
+ * מה שהמשתמש בחר וטרם קיבל תשובה מהמנוע. `null` = אין בקשה באוויר.
+ *
+ * למה שכבה נפרדת ולא כתיבה לזיכרון שלמעלה, וזה **הבאג שהיה כאן**: הזיכרון
+ * נכתב לפני `run()` ולא הוחזר בכשל, ולכן הבורר הציג גופן שלא הוחל על שום דבר —
+ * אותה תקלה בדיוק שתוקנה בזום, שבה הסרגל הזיז את התווית ורוחב העמוד לא זז.
+ * מסוכן ממנה היה „הגדל גופן”, שמחשב מהערך הזה: שלוש לחיצות על מסמך שדוחה שלחו
+ * 14, 16, 18 — הפקד התרחק מהמסמך בכל לחיצה.
+ *
+ * ההפרדה גם מה שמתקן את המקרה הקשה יותר, שבו למנוע **יש** ערך: כתיבה לזיכרון
+ * לא שינתה שם את הערך המוצג בכלל (המנוע גובר עליו), ולכן לא היה רינדור חוזר —
+ * ו-Vue מסנכרן `<select :value>` רק כשהערך הקשור משתנה. כלומר הבחירה שנדחתה
+ * נשארה על המסך עד לרינדור חוזר מסיבה אחרת לגמרי. עם שכבת ה-`pending` הערך
+ * המוצג משתנה בשני הכיוונים, והסנכרון נקשר לתשובה עצמה.
+ */
+const pendingFamily = ref<string | null>(null);
+const pendingSize = ref<number | null>(null);
+const pendingLineHeight = ref<number | null>(null);
 
 watch(engineFamily, (value) => {
   if (value) lastFamily.value = value;
@@ -459,9 +478,17 @@ watch(engineLineHeight, (value) => {
   if (value) lastLineHeight.value = value;
 });
 
-const selectedFontFamily = computed(() => engineFamily.value ?? lastFamily.value);
-const currentSize = computed(() => engineSize.value ?? lastSize.value);
-const currentLineHeight = computed(() => engineLineHeight.value ?? lastLineHeight.value);
+/**
+ * סדר העדיפויות: מה שנבחר וטרם נענה, אחר כך מה שהמנוע מדווח, ולבסוף האחרון
+ * שידענו. בקשה שנדחתה נעלמת מהשכבה הראשונה, ואז המסמך חוזר להיות מה שמוצג.
+ */
+const selectedFontFamily = computed(
+  () => pendingFamily.value ?? engineFamily.value ?? lastFamily.value,
+);
+const currentSize = computed(() => pendingSize.value ?? engineSize.value ?? lastSize.value);
+const currentLineHeight = computed(
+  () => pendingLineHeight.value ?? engineLineHeight.value ?? lastLineHeight.value,
+);
 
 /** „12” ולא „12.0”, אבל „20.5” נשמר — המנוע מדווח חצאי נקודות. */
 const selectedFontSize = computed(() => String(currentSize.value));
@@ -515,18 +542,41 @@ const spacingSelectOptions = computed(() =>
 // כל ה-payloads נבנים ב-engine/payloads.ts, ולא כליטרל כאן: מה שנשלח לפקודה
 // הוא חוזה מול ולידטור בתוך המנוע, והוולידטור נכשל **סגור**. ראו את הטבלה
 // שם, ואת בדיקת החוזה ב-tests/contract/command-payloads.test.ts.
+/**
+ * שולחת את הבחירה ומחזיקה אותה על המסך עד לתשובה: בהצלחה היא נשמרת כ„אחרון
+ * שידענו”, ובכשל היא נעלמת — כלומר מה שלא קרה במסמך אינו מוצג.
+ *
+ * למה אופטימי ולא „להמתין לתשובה”: הבורר חייב להגיב מיד, והמנוע אינו מדווח
+ * ערך בכלל על בחירה מעורבת — תיבה שממתינה לו הייתה נראית קפואה גם בהצלחה
+ * מלאה.
+ *
+ * הבדיקה `pending.value !== next` לפני העדכון: אם המשתמש בחר שוב בזמן
+ * ההמתנה, הבקשה שבאוויר אינה שלנו יותר, ותשובה מאוחרת אינה אמורה למחוק בחירה
+ * טרייה.
+ */
+async function applyOptimistically<T>(
+  pending: Ref<T | null>,
+  memo: Ref<T>,
+  next: T,
+  run: () => Promise<CommandOutcome>,
+): Promise<void> {
+  pending.value = next;
+  const outcome = await run();
+  if (pending.value !== next) return;
+  if (outcome.ok) memo.value = next;
+  pending.value = null;
+}
+
 function onFontFamilyChange(font: string): void {
   const payload = fontFamilyPayload(font);
   if (payload === null) return;
-  lastFamily.value = payload;
-  void fontFamilyCmd.run(payload);
+  void applyOptimistically(pendingFamily, lastFamily, payload, () => fontFamilyCmd.run(payload));
 }
 
 function applyFontSize(pt: number): void {
   const payload = fontSizePayload(pt);
   if (payload === null) return;
-  lastSize.value = payload;
-  void fontSizeCmd.run(payload);
+  void applyOptimistically(pendingSize, lastSize, payload, () => fontSizeCmd.run(payload));
 }
 
 function onFontSizeChange(size: string): void {
@@ -556,8 +606,9 @@ function onLineSpacingChange(val: string): void {
   if (multiplier === null) return;
   const payload = lineHeightPayload(multiplier);
   if (payload === null) return;
-  lastLineHeight.value = multiplier;
-  void lineSpacingCmd.run(payload);
+  void applyOptimistically(pendingLineHeight, lastLineHeight, multiplier, () =>
+    lineSpacingCmd.run(payload),
+  );
 }
 
 function onAlign(alignment: ParagraphAlignment): void {
