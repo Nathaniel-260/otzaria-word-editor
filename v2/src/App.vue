@@ -93,6 +93,9 @@ import { COMMAND_ADAPTER, COMMAND_REPORTER, FONT_OPTIONS, STYLE_GALLERY } from '
 import { ACTIVE_SUPERDOC } from './engine/document-api';
 import { readDocSelection } from './engine/doc-selection';
 import {
+  buildCitationText,
+  getReaderSelection,
+  insertCitation,
   normalizeSelectedText,
   openLibrary,
   openSearchTab,
@@ -667,8 +670,36 @@ function reportReader(outcome: ReaderResult<unknown>, success = ''): void {
   if (success || isStatusError.value) setStatus(success);
 }
 
-function onInsertCitation(): void {
-  setStatus('ציטוט מאוצריא יוטמע במיקום הסמן');
+/**
+ * ציטוט מהקורא: הבחירה בטאב הטקסט של אוצריא → מלל → הכנסה למסמך.
+ *
+ * „אין בחירה” אינו כשל אלא הוראה, ולכן `isError` כבוי: `reader.getSelection`
+ * מחזיר `null` גם כשאין בחירה וגם כשהטאב הפעיל אינו טאב טקסט (PDF), ובשני
+ * המקרים מה שהמשתמש צריך לשמוע זהה — לסמן קטע בספר.
+ *
+ * ההודעה על הצלחה אומרת **לאן** נכנס הציטוט: בלי סמן במסמך ה-Document API
+ * מוסיף בסופו (זה החוזה), וזה בדיוק סוג הדבר שאין להשתיק.
+ */
+async function onInsertCitation(): Promise<void> {
+  const selection = await getReaderSelection();
+  if (!selection.ok) {
+    reportReader(selection);
+    return;
+  }
+
+  const text = buildCitationText(selection.value);
+  if (!text) {
+    setStatus('אין טקסט מסומן בקורא. סמנו קטע בספר הפתוח באוצריא, וחזרו לכאן');
+    return;
+  }
+
+  const outcome = await insertCitation(activeSuperdoc.value, text);
+  reportReader(
+    outcome,
+    outcome.ok && outcome.value === 'document-end'
+      ? 'הציטוט נוסף בסוף המסמך — לא היה סמן במסמך'
+      : 'הציטוט מאוצריא הוכנס במסמך',
+  );
 }
 
 /**

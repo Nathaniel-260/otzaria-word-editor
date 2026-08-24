@@ -9,7 +9,8 @@
         icon="book"
         label="ציטוט מהקורא"
         variant="large"
-        tooltip="הכנסת הקטע המסומן מהספר הפתוח באוצריא"
+        :tooltip="citationTooltip"
+        :disabled="!canInsertCitation"
         @click="$emit('insert-citation')"
       />
       <RibbonButton
@@ -73,6 +74,7 @@ import RibbonGroup from '../common/RibbonGroup.vue';
 import RibbonButton from '../common/RibbonButton.vue';
 import { ACTIVE_SUPERDOC } from '../../../engine/document-api';
 import { isAvailable } from '../../../host/otzaria-client';
+import { canInsertText } from '../../../host/otzaria-reader';
 
 defineEmits<{
   (e: 'insert-citation'): void;
@@ -98,6 +100,20 @@ const sdkAvailable = isAvailable();
  * כל שינוי בחירה בשביל צביעת כפתור אינו שווה את המחיר.
  */
 const canSearch = computed(() => sdkAvailable && superdoc.value !== null);
+
+/**
+ * הציטוט נכנס למסמך דרך `doc.insert`, ולכן השאלה היא האם ה-Document API של
+ * המסמך הפתוח חושף אותו — ולא האם יש מסמך. בדיקה ישירה ולא דרך
+ * `doc.capabilities`: `insert` אינו פעולה במרחב השאלות של engine/doc-capabilities.ts,
+ * והוא נמצא על הפאסדה עצמה.
+ */
+const canInsertCitation = computed(() => sdkAvailable && canInsertText(superdoc.value));
+
+const citationTooltip = computed(() => {
+  if (!sdkAvailable) return OUTSIDE_OTZARIA;
+  if (!canInsertCitation.value) return 'יש לפתוח מסמך שאפשר לכתוב בו';
+  return 'הכנסת הקטע המסומן בקורא של אוצריא, עם המקור, במיקום הסמן';
+});
 
 const searchTooltip = computed(() => {
   if (!sdkAvailable) return OUTSIDE_OTZARIA;

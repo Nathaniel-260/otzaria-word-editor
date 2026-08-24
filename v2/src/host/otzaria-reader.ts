@@ -11,8 +11,20 @@
  * ההרשאות מוצהרות ב-`public/manifest.json`, ו-tests/unit/manifest.test.ts
  * מקבע שמה שנצרך כאן אכן מוצהר שם.
  */
+import type { SuperDoc } from 'superdoc';
 import { call, isPermissionDenied, hostErrorCode } from './otzaria-client';
-import type { NavigationTarget, OpenSearchTabArgs } from '../types/otzaria_plugin';
+import { readDocSelection, type SelectionDocumentApi } from '../engine/doc-selection';
+import {
+  receiptFailureText,
+  thrownText,
+  type DocReceipt,
+  type MaybePromise,
+} from '../engine/document-api';
+import type {
+  NavigationTarget,
+  OpenSearchTabArgs,
+  ReaderSelection,
+} from '../types/otzaria_plugin';
 
 /**
  * תוצאת פעולה מול הקורא. מטופסת ולא זריקה, מאותו טעם כמו `ImageDataUrlResult`
@@ -132,4 +144,177 @@ export function openLibrary(): Promise<ReaderResult> {
 export function openSearchTab(args: OpenSearchTabArgs): Promise<ReaderResult> {
   const { query, ...rest } = args;
   return callAck('reader.openSearchTab', 'פתיחת החיפוש באוצריא נכשלה', { query, ...rest });
+}
+
+/**
+ * הבחירה הנוכחית בטאב הטקסט של הקורא.
+ *
+ * `null` הוא תשובה תקינה ולא כשל: אין בחירה, או שהטאב הפעיל אינו טאב טקסט
+ * (PDF, למשל). הקורא בממשק מבקש מהמשתמש לסמן, ואינו מציג שגיאה.
+ *
+ * תשובה שאינה אובייקט מתורגמת גם היא ל-`null` — גרסת מארח שתחזיר מחרוזת או
+ * מספר אינה סיבה לזרוק מתוך לחיצה על כפתור.
+ */
+export async function getReaderSelection(): Promise<ReaderResult<ReaderSelection | null>> {
+  let data: unknown;
+  try {
+    data = await call<unknown>('reader.getSelection');
+  } catch (error) {
+    return hostFailure('reader.getSelection', 'קריאת הבחירה מאוצריא נכשלה', error);
+  }
+
+  if (!data || typeof data !== 'object') return { ok: true, value: null };
+  return { ok: true, value: data as ReaderSelection };
+}
+
+/** הראשון מבין המועמדים שיש בו טקסט. `''` אינו „קיים” — הוא בחירה ריקה. */
+function firstText(...candidates: Array<string | null | undefined>): string {
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && candidate.trim() !== '') return candidate;
+  }
+  return '';
+}
+
+/**
+ * הטקסט שמצטטים.
+ *
+ * `sourceSelectedText` לפני `renderedSelectedText`, כי לציטוט תורני נדרש
+ * **טקסט המקור**: מה שהוצג בקורא תלוי בהגדרות התצוגה של מי שסימן — ניקוד
+ * וטעמים מוסרים שם לפי העדפה — ולכן אותה בחירה בדיוק הייתה מייצרת ציטוט אחר
+ * אצל שני משתמשים. הציטוט צריך לשקף את הספר, לא את המסך.
+ *
+ * `text` (השדה הוותיק) הוא הגיבוי היחיד: העוגן המורחב קיים מ-0.9.95 בלבד,
+ * ובגרסה ישנה יותר הוא כל מה שיש.
+ *
+ * בחירה שפרושה על כמה פסקאות מגיעה ב-`sections` (מ-0.9.97), והשדות ברמה
+ * העליונה אינם נושאים אותה במלואה. הפסקאות מחוברות ברווח ולא בשבר שורה:
+ * `insert` עם `type: 'text'` מכניס טקסט לפסקה, ולא נכון להעמיס עליו פירוק
+ * לפסקאות שהוא לא הובטח לעשות.
+ */
+function citationSourceText(selection: ReaderSelection | null | undefined): string {
+  if (!selection || typeof selection !== 'object') return '';
+
+  const sections = Array.isArray(selection.sections) ? selection.sections : [];
+  if (sections.length > 0) {
+    return sections
+      .map((section) => firstText(section?.sourceSelectedText, section?.renderedSelectedText))
+      .filter((text) => text !== '')
+      .join(' ');
+  }
+
+  return firstText(
+    selection.sourceSelectedText,
+    selection.renderedSelectedText,
+    selection.text,
+  );
+}
+
+/**
+ * המלל שנכנס למסמך: הטקסט המצוטט, ואחריו המקור בסוגריים —
+ * `וַיֹּאמֶר אֱלֹהִים (בראשית פרק א)`.
+ *
+ * מצב אחד ולא שלושה: §14.1 בתכנית מבקשת „טקסט בלבד, טקסט + מקור, וציטוט
+ * מעוצב”, ושלושת המצבים דורשים מקום בממשק שיבחר ביניהם (תפריט על הכפתור).
+ * המצב שנבחר הוא זה שנכון כברירת מחדל לכתיבת חידושים — ציטוט בלי מקור אינו
+ * ציטוט — והשניים האחרים הם המשך, לא חוב.
+ *
+ * בלי `currentRef` נכנס הטקסט לבדו: סוגריים ריקים גרועים מציטוט בלי מקור.
+ * מחרוזת ריקה פירושה „אין מה להכניס”, והקורא בממשק הוא שמחליט מה לומר.
+ */
+export function buildCitationText(selection: ReaderSelection | null | undefined): string {
+  const text = normalizeSelectedText(citationSourceText(selection));
+  if (!text) return '';
+
+  const sections = Array.isArray(selection?.sections) ? selection.sections : [];
+  const ref = normalizeSelectedText(
+    firstText(selection?.currentRef, sections[0]?.currentRef),
+  );
+  return ref ? `${text} (${ref})` : text;
+}
+
+/**
+ * הצורה שנצרכת מ-`doc`: ההכנסה עצמה, והבחירה שקובעת לאן. מוגדרת כאן ולא
+ * מיובאת מהמנוע — ההסבר המלא ב-engine/document-api.ts.
+ */
+interface CitationDocumentApi extends SelectionDocumentApi {
+  insert?: (input: {
+    value: string;
+    type: 'text';
+    target?: unknown;
+  }) => MaybePromise<DocReceipt>;
+}
+
+export interface CitationHost {
+  activeEditor?: { doc?: CitationDocumentApi | null } | null;
+}
+
+/** ה-union מאפשר גם את המופע האמיתי וגם כפיל. ההסבר המלא ב-engine/page-setup.ts. */
+export type CitationTarget = SuperDoc | CitationHost | null | undefined;
+
+/** לאן הציטוט נכנס בפועל. הקורא בממשק אומר את זה למשתמש. */
+export type CitationPlacement = 'at-cursor' | 'document-end';
+
+/** האם יש למי להכניס ציטוט. נבדק בפקד, כדי שלא ייראה פעיל בלי מסמך. */
+export function canInsertText(host: CitationTarget): boolean {
+  return typeof (host as CitationHost | null | undefined)?.activeEditor?.doc?.insert === 'function';
+}
+
+/**
+ * מכניסה את הציטוט למסמך דרך ה-Document API הציבורי.
+ *
+ * **המיקום**: החוזה של `insert` קובע ש„בלי `target` ההכנסה נעשית בסוף
+ * המסמך”, וזה כמעט תמיד לא מה שהמשתמש התכוון אליו. לכן היעד נלקח מתצלום
+ * הבחירה במסמך (engine/doc-selection.ts) — אותו מסלול שדיאלוג הקישור משתמש
+ * בו, ומאותו טעם: לחיצה על פקד ברצועה גוזלת את המיקוד מהעורך, והיעד צריך
+ * להיתפס ולהימסר במפורש. כשאין תצלום — למשל מסמך שנפתח ואיש לא הקליק בו —
+ * ההכנסה נעשית בסוף המסמך, וההודעה למשתמש אומרת את זה במקום להשתיק.
+ *
+ * **RTL**: אין קביעת כיווניות כאן, ובכוונה. מסמך חדש נפתח עם `w:bidi`
+ * ב-`docDefaults/w:pPrDefault` (engine/document-defaults.ts), וכל פסקה שנוצרת
+ * בו יורשת אותו; הכנסה לתוך פסקה קיימת יורשת את הכיווניות שלה. מסמך שנפתח
+ * מקובץ נושא את הכיווניות של מי שכתב אותו — לכפות עליה RTL בגלל ציטוט היה
+ * שינוי בעיצוב המסמך של מישהו אחר, ולא הכנסת טקסט.
+ *
+ * לעולם אינה זורקת: פעולות ה-Document API זורקות `INVALID_INPUT` על קלט פסול
+ * במקום להחזיר קבלה, וחריגה מתוך פקד ברצועה מפילה את רינדור הרצועה כולה.
+ */
+export async function insertCitation(
+  host: CitationTarget,
+  text: string,
+): Promise<ReaderResult<CitationPlacement>> {
+  const failedAction = 'הכנסת הציטוט נכשלה';
+  const insert = (host as CitationHost | null | undefined)?.activeEditor?.doc?.insert;
+
+  if (typeof insert !== 'function') {
+    // אותו נוסח שהיכולות מחזירות (§12), כדי שהמשתמש יראה את אותו הסבר בין אם
+    // הפקד מנוטרל ובין אם הוא נלחץ לפני שהמסמך סיים להיטען.
+    return { ok: false, reason: 'command-unsupported', message: `${failedAction}: אינו זמין בגרסה זו` };
+  }
+  if (!text) {
+    return { ok: false, reason: 'empty-text', message: `${failedAction}: אין טקסט להכנסה` };
+  }
+
+  const snapshot = await readDocSelection(host);
+  const placement: CitationPlacement = snapshot.target ? 'at-cursor' : 'document-end';
+
+  let receipt: DocReceipt;
+  try {
+    receipt = await insert({
+      value: text,
+      type: 'text',
+      ...(snapshot.target ? { target: snapshot.target } : {}),
+    });
+  } catch (error) {
+    return { ok: false, reason: 'threw', message: thrownText(failedAction, error) };
+  }
+
+  if (receipt?.success === false) {
+    return {
+      ok: false,
+      reason: receipt.failure?.code ?? 'receipt-failed',
+      message: receiptFailureText(failedAction, receipt),
+    };
+  }
+
+  return { ok: true, value: placement };
 }
