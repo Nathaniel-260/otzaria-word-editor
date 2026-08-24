@@ -5,7 +5,7 @@
  */
 import { describe, it, expect, beforeEach } from 'vitest';
 import type { ThemePayload } from '../../src/types/otzaria_plugin';
-import { applyTheme, hexToRgba } from '../../src/host/theme';
+import { applyTheme, blendHex, hexToRgba } from '../../src/host/theme';
 
 function cssVar(name: string): string {
   return document.documentElement.style.getPropertyValue(name);
@@ -79,6 +79,39 @@ describe('applyTheme', () => {
     expect(cssVar('--color-secondary-subtle')).toBe('rgba(103, 80, 164, 0.12)');
   });
 
+  it('גוזר דרגת hover נפרדת מדרגת המצב הדלוק', () => {
+    // זו הרגרסיה: כששתי הדרגות נגזרו לאותו ערך, ההבדל היחיד ברצועה בין „מודגש
+    // דלוק” ל„העכבר עובר מעל” היה צבע המסגרת — וב-Word זו ההבחנה המרכזית.
+    applyTheme(FULL);
+
+    expect(cssVar('--color-primary-hover')).toBe('rgba(21, 101, 192, 0.08)');
+    expect(cssVar('--color-primary-selected-hover')).toBe('rgba(21, 101, 192, 0.2)');
+    expect(cssVar('--color-primary-hover')).not.toBe(cssVar('--color-primary-subtle'));
+    expect(cssVar('--color-primary-selected-hover')).not.toBe(cssVar('--color-primary-subtle'));
+  });
+
+  it('גוזר את ה-hover של כפתור ממולא לכיוון צבע הטקסט של המצב', () => {
+    // במצב כהה onSurface בהיר, ולכן הגוון יוצא **בהיר** מ-primary; במצב בהיר
+    // הוא יוצא כהה ממנו. זה מה שמחזיק את ההיענות ל-hover נראית בשני המצבים.
+    applyTheme(FULL);
+    expect(cssVar('--color-primary-filled-hover')).toBe('rgb(63, 127, 200)');
+
+    applyTheme({
+      ...FULL,
+      mode: 'light',
+      colorScheme: { ...FULL.colorScheme, onSurface: '#1a1a2e' },
+    } as ThemePayload);
+    expect(cssVar('--color-primary-filled-hover')).toBe('rgb(22, 86, 163)');
+  });
+
+  it('משאיר את ברירת המחדל של ה-hover הממולא כשחסר onSurface', () => {
+    const { onSurface: _omitted, ...rest } = FULL.colorScheme;
+
+    applyTheme({ ...FULL, colorScheme: rest } as ThemePayload);
+
+    expect(cssVar('--color-primary-filled-hover')).toBe('');
+  });
+
   it('מסמן מצב כהה על ה-root ועל ה-body', () => {
     applyTheme(FULL);
 
@@ -103,6 +136,18 @@ describe('applyTheme', () => {
 
     expect(cssVar('--color-primary')).toBe('');
     expect(cssVar('--font-size-base')).toBe('');
+  });
+});
+
+describe('blendHex', () => {
+  it('ממזג שני צבעים לצבע אטום', () => {
+    expect(blendHex('#000000', '#ffffff', 0.5)).toBe('rgb(128, 128, 128)');
+    expect(blendHex('#1565c0', '#1a1a2e', 0)).toBe('rgb(21, 101, 192)');
+  });
+
+  it('מחזיר null כששני הצדדים אינם hex', () => {
+    expect(blendHex('var(--color-primary)', '#ffffff', 0.2)).toBeNull();
+    expect(blendHex('#ffffff', 'currentColor', 0.2)).toBeNull();
   });
 });
 

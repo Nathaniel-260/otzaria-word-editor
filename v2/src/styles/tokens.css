@@ -17,19 +17,33 @@
   --color-on-error: #ffffff;
   --color-outline: #cbd5e1;
   --color-outline-variant: #e1dfdd;
-  --color-primary-subtle: rgba(21, 101, 192, 0.08);
-  --color-secondary-subtle: rgba(103, 80, 164, 0.08);
   --color-scrim: rgba(0, 0, 0, 0.32);
+
+  /* סולם הדרגות שנגזרות מ-primary. שלוש דרגות שקופות ולא אחת: פקד שהעכבר
+     עובר מעליו ופקד דלוק שנראים זהים מוחקים את ההבחנה המרכזית ברצועה של Word.
+     8% ו-12% הם הערכים שמדריך העיצוב נוקב בהם (hover, ו-primary-subtle
+     להדגשה); 20% הוא דלוק+עכבר. host/theme.ts גוזר את כולן מחדש מצבע הנושא,
+     והערכים כאן הם ברירת מחדל תואמת ל-primary שלמעלה. */
+  --color-primary-hover: rgba(21, 101, 192, 0.08);
+  --color-primary-subtle: rgba(21, 101, 192, 0.12);
+  --color-primary-selected-hover: rgba(21, 101, 192, 0.2);
+  --color-secondary-subtle: rgba(103, 80, 164, 0.12);
+  /* אטום ולא שקוף: זהו רקע ה-hover של כפתור ממולא, שכבר צבוע ב-primary.
+     נגזר כ-primary שנדחף אל צבע הטקסט — כלומר כהה יותר במצב בהיר ובהיר יותר
+     במצב כהה, ולכן הוא נשאר קריא בשני המצבים. */
+  --color-primary-filled-hover: #1656a3;
 
   /* טוקנים ייעודיים לממשק — נגזרים ישירות מצבע הנושא של אוצריא (--color-primary) */
   --word-blue: var(--color-primary);
-  --word-blue-dark: var(--color-primary);
+  --word-blue-dark: var(--color-primary-filled-hover);
   --word-blue-light: var(--color-secondary);
   --word-tab-active-border: var(--color-primary);
   --word-ribbon-bg: var(--color-surface);
   --word-ribbon-border: var(--color-outline-variant);
-  --word-btn-hover: var(--color-primary-subtle, rgba(0, 0, 0, 0.05));
-  --word-btn-active: var(--color-primary-subtle, rgba(21, 101, 192, 0.12));
+  /* שלושת מצבי הפקד ברצועה, כל אחד בדרגה משלו */
+  --word-btn-hover: var(--color-primary-hover);
+  --word-btn-active: var(--color-primary-subtle);
+  --word-btn-active-hover: var(--color-primary-selected-hover);
   --word-btn-active-border: var(--color-primary);
   --word-group-label-color: var(--color-on-surface-variant);
   --word-group-border: var(--color-outline-variant);

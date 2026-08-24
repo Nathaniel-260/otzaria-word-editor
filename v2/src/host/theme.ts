@@ -26,8 +26,8 @@ const COLOR_VARS: ReadonlyArray<readonly [string, keyof ColorScheme]> = [
   ['--color-outline', 'outline'],
 ];
 
-/** `#rrggbb` או `#rgb` → rgba(). מחזירה null על כל דבר אחר. */
-export function hexToRgba(hex: string, alpha: number): string | null {
+/** `#rrggbb` או `#rgb` → שלושת הערוצים, או null על כל דבר אחר. */
+function parseHex(hex: string): [number, number, number] | null {
   const value = hex.trim().replace(/^#/, '');
   const full =
     value.length === 3
@@ -39,10 +39,35 @@ export function hexToRgba(hex: string, alpha: number): string | null {
 
   if (!/^[0-9a-f]{6}$/i.test(full)) return null;
 
-  const r = parseInt(full.slice(0, 2), 16);
-  const g = parseInt(full.slice(2, 4), 16);
-  const b = parseInt(full.slice(4, 6), 16);
-  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  return [
+    parseInt(full.slice(0, 2), 16),
+    parseInt(full.slice(2, 4), 16),
+    parseInt(full.slice(4, 6), 16),
+  ];
+}
+
+/** `#rrggbb` או `#rgb` → rgba(). מחזירה null על כל דבר אחר. */
+export function hexToRgba(hex: string, alpha: number): string | null {
+  const rgb = parseHex(hex);
+  if (!rgb) return null;
+  return `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, ${alpha})`;
+}
+
+/**
+ * מיזוג שני צבעי hex לצבע אטום — `base` שנדחף אל `overlay` בשיעור `ratio`.
+ *
+ * למה אטום ולא rgba: הצריכה היחידה היא רקע ה-hover של כפתור ממולא, שכבר צבוע
+ * ב-primary. שכבה שקופה מעליו מתמזגת עם ה-primary שמתחת ובקושי נראית, ולכן כאן
+ * צריך צבע מחושב. הדחיפה היא אל צבע הטקסט של המשטח: במצב בהיר זה כהה יותר,
+ * במצב כהה בהיר יותר — כלומר ההיענות ל-hover נשארת נראית בשני המצבים.
+ */
+export function blendHex(base: string, overlay: string, ratio: number): string | null {
+  const a = parseHex(base);
+  const b = parseHex(overlay);
+  if (!a || !b) return null;
+
+  const mix = (i: number): number => Math.round(a[i] * (1 - ratio) + b[i] * ratio);
+  return `rgb(${mix(0)}, ${mix(1)}, ${mix(2)})`;
 }
 
 export function applyTheme(theme: ThemePayload): void {
@@ -62,13 +87,29 @@ export function applyTheme(theme: ThemePayload): void {
     root.style.setProperty('--color-surface-container-high', colors.surfaceContainerHighest);
   }
 
-  for (const [name, key] of [
-    ['--color-primary-subtle', 'primary'],
-    ['--color-secondary-subtle', 'secondary'],
-  ] as const) {
+  // סולם הדרגות השקופות. שלוש דרגות מ-primary ולא אחת: hover ומצב דלוק שנגזרו
+  // לאותו ערך הם בדיוק הרגרסיה שהייתה כאן — ברצועה של Word ההבחנה בין „הכפתור
+  // דלוק” ל„העכבר עובר מעליו” היא ההבחנה המרכזית, ומסגרת לבדה אינה מספיקה.
+  // 8%/12% הם הערכים של DESIGN_GUIDE.md; 20% הוא דלוק+עכבר, שחייב להעמיק
+  // מעל הדלוק. הגזירה כאן ולא ב-color-mix — ל-WebView2 שאוצריא מריצה לא
+  // מובטחת תמיכה, וגזירה ב-JS היא הדפוס שכל הצבעים כאן כבר עוברים בו.
+  const ALPHA_SHADES: ReadonlyArray<readonly [string, keyof ColorScheme, number]> = [
+    ['--color-primary-hover', 'primary', 0.08],
+    ['--color-primary-subtle', 'primary', 0.12],
+    ['--color-primary-selected-hover', 'primary', 0.2],
+    ['--color-secondary-subtle', 'secondary', 0.12],
+  ];
+
+  for (const [name, key, alpha] of ALPHA_SHADES) {
     const base = colors[key];
-    const subtle = typeof base === 'string' ? hexToRgba(base, 0.12) : null;
-    if (subtle) root.style.setProperty(name, subtle);
+    const shade = typeof base === 'string' ? hexToRgba(base, alpha) : null;
+    if (shade) root.style.setProperty(name, shade);
+  }
+
+  // ה-hover של כפתור ממולא — ראו blendHex.
+  if (typeof colors.primary === 'string' && typeof colors.onSurface === 'string') {
+    const filledHover = blendHex(colors.primary, colors.onSurface, 0.2);
+    if (filledHover) root.style.setProperty('--color-primary-filled-hover', filledHover);
   }
 
   // הגופנים של אוצריא מוזרקים כ-@font-face לפני plugin.boot — אין לארוז אותם.

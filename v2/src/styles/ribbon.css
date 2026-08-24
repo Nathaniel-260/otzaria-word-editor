@@ -224,7 +224,10 @@
   line-height: 1.2;
 }
 
-.word-btn:hover:not(:disabled) {
+/* :not(.active) חובה: הסלקטור עם ה-hover ספציפי יותר מ-.word-btn.active, ובלעדיו
+   פקד דלוק שהעכבר עליו היה מקבל את רקע ה-hover של פקד נייטרלי — כלומר מאבד את
+   הסימן שהוא דלוק בדיוק ברגע שהמשתמש מסתכל עליו. */
+.word-btn:hover:not(:disabled):not(.active) {
   background: var(--word-btn-hover);
   border-color: var(--color-outline-variant);
 }
@@ -234,6 +237,11 @@
   background: var(--word-btn-active);
   border-color: var(--word-btn-active-border);
   color: var(--word-blue);
+}
+
+/* פקד דלוק שהעכבר עליו — מעמיק דרגה מעל הדלוק, ולא מתחלף בדרגת ה-hover */
+.word-btn.active:hover:not(:disabled) {
+  background: var(--word-btn-active-hover);
 }
 
 .word-btn:disabled {
