@@ -111,6 +111,42 @@ function arcPoints(
   return out;
 }
 
+/**
+ * דגימה של עקומת בזייה לפי דה-קסטלז'ו. נדרשת מאותה סיבה שקשת נדגמת: הטופס של
+ * העקומה נמצא *בין* הנקודות שנרשמו ב-`d`, ולא עליהן.
+ *
+ * הדגימה אינה מחליפה את נקודות הבקרה — היא מדידה **שנייה** לצידן. ראו
+ * `walkPath`: לבדיקת החריגה מה-viewBox נכון להיות שמרני ולספור נקודות בקרה,
+ * ולבדיקת יחס המילוי נכון למדוד את הדיו עצמו.
+ */
+function bezierPoints(points: Point[], steps = 48): Point[] {
+  const out: Point[] = [];
+  for (let i = 0; i <= steps; i += 1) {
+    const t = i / steps;
+    let level = points;
+    while (level.length > 1) {
+      const next: Point[] = [];
+      for (let k = 0; k < level.length - 1; k += 1) {
+        next.push({
+          x: level[k]!.x + (level[k + 1]!.x - level[k]!.x) * t,
+          y: level[k]!.y + (level[k + 1]!.y - level[k]!.y) * t,
+        });
+      }
+      level = next;
+    }
+    out.push(level[0]!);
+  }
+  return out;
+}
+
+/**
+ * שיקוף נקודת הבקרה סביב הנקודה הנוכחית. בהיעדר בקרה קודמת המפרט אומר
+ * שהשיקוף הוא הנקודה הנוכחית עצמה — כלומר העקומה יוצאת ממנה ישר.
+ */
+function reflect(last: Point | null, cx: number, cy: number): Point {
+  return last ? { x: 2 * cx - last.x, y: 2 * cy - last.y } : { x: cx, y: cy };
+}
+
 const ARITY: Record<string, number> = {
   M: 2,
   L: 2,
@@ -136,15 +172,22 @@ interface Subpath {
 }
 
 /**
- * נקודות המעטפת של path, מקובצות לתת-נתיבים. נקודות הבקרה של בזייה נכללות
- * בכוונה: הן חוסמות את העקומה מלמעלה, ולכן bounding box שמבוסס עליהן הוא שמרני
- * — הוא עלול לדווח חריגה שאין, אך לא יפספס חריגה שיש.
+ * נקודות המעטפת של path, מקובצות לתת-נתיבים. לעקומות בזייה יש כאן שני מצבים,
+ * כי לשתי הבדיקות שצורכות אותן יש צורך הפוך:
+ *
+ * - ברירת המחדל סופרת את **נקודות הבקרה**. הן חוסמות את העקומה מלמעלה, ולכן
+ *   ה-bounding box שמבוסס עליהן שמרני — הוא עלול לדווח חריגה מה-viewBox שאין,
+ *   אך לא יפספס חריגה שיש. זה מה שבדיקת הגבולות צריכה.
+ * - `sampleCurves` דוגם את העקומה עצמה. בדיקת יחס המילוי אוכפת גם **רצפה**, ושם
+ *   שמרנות היא בדיוק הכיוון הלא נכון: נקודת בקרה שנמצאת מחוץ לדיו מנפחת את
+ *   המעטפת, וכך אייקון קטן מדי עובר בשקט. נמדד: `replace` (`arrow_swap`) הוא
+ *   69.75% דיו אמיתי, ונקודות הבקרה מעגלות אותו ל-70.00% — בדיוק הרצפה.
  *
  * הפירוק לתת-נתיבים נעשה כאן ולא בחיתוך המחרוזת על `M`: `m` היא moveto **יחסי**
  * לסוף התת-נתיב הקודם (כך נכתב משולש האזהרה: `...z m0 3.8...`), ולכן חיתוך
  * טקסטואלי היה מחשב את הקודקודים של כל צורה שנייה והלאה במקום הלא נכון.
  */
-function walkPath(d: string): Subpath[] {
+function walkPath(d: string, sampleCurves = false): Subpath[] {
   const tokens = d.match(/[MmLlHhVvCcSsQqTtAaZz]|[-+]?(?:\d*\.\d+|\d+)/g) ?? [];
   const subs: Subpath[] = [];
   let current: Subpath = { pts: [], straight: true };
@@ -161,6 +204,8 @@ function walkPath(d: string): Subpath[] {
   let startX = 0;
   let startY = 0;
   let i = 0;
+  /** נקודת הבקרה האחרונה, לשיקוף ב-S ו-T (מפרט SVG §9.3.6). */
+  let lastControl: Point | null = null;
 
   while (i < tokens.length) {
     const token = tokens[i]!;
@@ -192,25 +237,41 @@ function walkPath(d: string): Subpath[] {
         cy = ay(a[1]!);
         startX = cx;
         startY = cy;
+        lastControl = null;
         startSubpath();
         push({ x: cx, y: cy });
         // אחרי M נוספים, זוגות נוספים הם L (מפרט SVG §9.3.3).
         cmd = rel ? 'l' : 'L';
         break;
       case 'L':
-      case 'T':
-        cx = ax(a[0]!);
-        cy = ay(a[1]!);
-        // T היא בזייה, ולכן היא מבטלת את „ישר” גם אם הנקודה שנרשמה היא קצה.
-        if (upper === 'T') current.straight = false;
-        push({ x: cx, y: cy });
+      case 'T': {
+        const end = { x: ax(a[0]!), y: ay(a[1]!) };
+        if (upper === 'T') {
+          // T היא בזייה, ולכן היא מבטלת את „ישר” גם אם הנקודה שנרשמה היא קצה.
+          current.straight = false;
+          const control = reflect(lastControl, cx, cy);
+          if (sampleCurves) {
+            for (const point of bezierPoints([{ x: cx, y: cy }, control, end])) push(point);
+          } else {
+            push(control);
+          }
+          lastControl = control;
+        } else {
+          lastControl = null;
+        }
+        cx = end.x;
+        cy = end.y;
+        push(end);
         break;
+      }
       case 'H':
         cx = ax(a[0]!);
+        lastControl = null;
         push({ x: cx, y: cy });
         break;
       case 'V':
         cy = ay(a[0]!);
+        lastControl = null;
         push({ x: cx, y: cy });
         break;
       case 'C':
@@ -218,9 +279,22 @@ function walkPath(d: string): Subpath[] {
       case 'Q': {
         const pairs = upper === 'C' ? [0, 2, 4] : [0, 2];
         current.straight = false;
-        for (const p of pairs) push({ x: ax(a[p]!), y: ay(a[p + 1]!) });
-        cx = ax(a[pairs[pairs.length - 1]!]!);
-        cy = ay(a[pairs[pairs.length - 1]! + 1]!);
+        const nodes = pairs.map((p) => ({ x: ax(a[p]!), y: ay(a[p + 1]!) }));
+        // ב-S וב-Q הבקרה הראשונה אינה נרשמת ב-`d`: היא שיקוף של הבקרה הקודמת
+        // סביב הנקודה הנוכחית. בלי לשחזר אותה הדגימה מתארת עקומה אחרת.
+        const controls: Point[] =
+          upper === 'S'
+            ? [reflect(lastControl, cx, cy), ...nodes.slice(0, -1)]
+            : nodes.slice(0, -1);
+        const end = nodes[nodes.length - 1]!;
+        if (sampleCurves) {
+          for (const point of bezierPoints([{ x: cx, y: cy }, ...controls, end])) push(point);
+        } else {
+          for (const node of nodes) push(node);
+        }
+        lastControl = controls[controls.length - 1] ?? null;
+        cx = end.x;
+        cy = end.y;
         break;
       }
       case 'A': {
@@ -228,6 +302,7 @@ function walkPath(d: string): Subpath[] {
         const ey = ay(a[6]!);
         current.straight = false;
         for (const point of arcPoints(cx, cy, a[0]!, a[1]!, a[2]!, a[3]!, a[4]!, ex, ey)) push(point);
+        lastControl = null;
         cx = ex;
         cy = ey;
         break;
@@ -239,8 +314,8 @@ function walkPath(d: string): Subpath[] {
 }
 
 /** כל נקודות המעטפת, בלי חלוקה לצורות — לבדיקות ה-viewBox ויחס המילוי. */
-function pathPoints(d: string): Point[] {
-  return walkPath(d).flatMap((sub) => sub.pts);
+function pathPoints(d: string, sampleCurves = false): Point[] {
+  return walkPath(d, sampleCurves).flatMap((sub) => sub.pts);
 }
 
 interface Measured {
@@ -251,9 +326,9 @@ interface Measured {
   maxY: number;
 }
 
-function measure(svg: string): Measured {
+function measure(svg: string, sampleCurves = false): Measured {
   const vb = /viewBox="([^"]+)"/.exec(svg);
-  const pts = [...svg.matchAll(/\sd="([^"]+)"/g)].flatMap((m) => pathPoints(m[1]!));
+  const pts = [...svg.matchAll(/\sd="([^"]+)"/g)].flatMap((m) => pathPoints(m[1]!, sampleCurves));
   if (!pts.length) throw new Error('לא נמצא אף path באייקון');
   return {
     viewBox: vb ? vb[1]! : null,
@@ -265,7 +340,10 @@ function measure(svg: string): Measured {
 }
 
 const NAMES = Object.keys(ICONS);
+/** מעטפת שמרנית, כולל נקודות בקרה — לבדיקת החריגה מה-viewBox. */
 const MEASURED = new Map(NAMES.map((name) => [name, measure(ICONS[name]!)]));
+/** הדיו עצמו, בדגימת עקומות — לבדיקות יחס המילוי. ראו `walkPath`. */
+const INK = new Map(NAMES.map((name) => [name, measure(ICONS[name]!, true)]));
 
 /**
  * טווח יחס המילוי: המידה הדומיננטית של ה-bounding box חייבת לתפוס 70%–85%
@@ -273,12 +351,16 @@ const MEASURED = new Map(NAMES.map((name) => [name, measure(ICONS[name]!)]));
  * שבו הסט נמצא בפועל אחרי הנרמול, ולכן אייקון חדש שנופל מחוץ להם הוא אייקון
  * שייראה גדול או קטן מהשכנים שלו באותה שורה.
  *
- * התקרה הייתה 84% כל עוד כל הסט צויר בבית. היא עלתה ל-85% כשלשונית "קובץ"
- * עברה ל-Fluent System Icons, כי הגריד של Fluent מכוון אחרת לפי צורת הגליף:
+ * התקרה הייתה 84% כל עוד כל הסט צויר בבית. היא עלתה ל-85% כשהסט עבר ל-Fluent
+ * System Icons, כי הגריד של Fluent מכוון לפי צורת הגליף ולא לפי ריבוע אחד:
  * `info` (עיגול) יושב 2–18 = 80%, אבל `document_add` (דף עם תג) יושב 2–19
- * לגובה = 85%, ו-`folder_open` מגיע ל-85% רוחב רק בגלל נקודות בקרה של בזייה
- * שהמעטפת סופרת — הדיו עצמו נעצר ב-x=18. שתי חריגות של יחידה אחת, ולא
- * מקום להתרחבות: מעל 85% אין אף אייקון בסט.
+ * לגובה = 85%, ו-`folder_open` 2–18.99 לרוחב = 84.98%. שתיהן דיו אמיתי ולא
+ * שגיאת מדידה — ראו `walkPath`.
+ *
+ * שלושה אייקונים יושבים על התקרה ממש, וכולם עוברים דרך סובלנות העיגול של
+ * 0.001: `clearFormatting` (85.08%, הגבוה בסט), `numberList` (85.02%)
+ * ו-`document_add` (85.00%). כלומר התקרה האפקטיבית היא 85.1%, ומי שקובע אותה
+ * הוא `clearFormatting` — לא `document_add`. אין מרווח להעלאה שקטה נוספת.
  */
 const DOMINANT_MIN = 0.7;
 const DOMINANT_MAX = 0.85;
@@ -289,9 +371,10 @@ const MINOR_MIN = 0.5;
  * הקטנה שלהם נמוכה בכוונה ואין מה לאכוף עליה. הם עדיין נבדקים על המידה
  * הדומיננטית, בטווח רחב יותר — כדי שאייקון שהתכווץ לכתם לא יעבור בשקט.
  *
- * ארבעת ה-chevron-ים הם 60%x33%: chevron הוא חץ, וגם המידה הדומיננטית שלו
- * מתחת ל-70%. `link` (81%x40%) ו-`ruler` (40%x80%) הם אלכסונים דקים — שרשרת
- * וסרגל — ורק המידה הקטנה שלהם צריכה החרגה.
+ * ארבעת ה-chevron-ים הם 60%x33%, ו-`replace` (`arrow_swap`, שני חצים) הוא
+ * 60%x69.75% — בכולם גם המידה הדומיננטית מתחת ל-70%, כי חץ אינו ממלא את הגריד.
+ * `link` (81%x40%) ו-`ruler` (40%x80%) הם אלכסונים דקים — שרשרת וסרגל — ורק
+ * המידה הקטנה שלהם צריכה החרגה.
  *
  * הרשימה סגורה במכוון: כל תוספת אליה היא החלטה עיצובית שצריכה להיות מוסברת
  * כאן, ולא דרך לעקוף כשל בבדיקה. הבדיקה „כל שם ברשימות ההחרגה באמת זקוק
@@ -302,6 +385,7 @@ const FLAT_ICONS = new Set([
   'chevronUp',
   'chevronLeft',
   'chevronRight',
+  'replace',
   'link',
   'ruler',
 ]);
@@ -352,6 +436,15 @@ describe('גבולות ה-viewBox', () => {
       if (parts.length) over.push(`${name}: ${parts.join(', ')}`);
     }
     expect(over).toEqual([]);
+  });
+
+  it('הדגימה של בזייה מודדת את העקומה ולא את נקודות הבקרה', () => {
+    // עקומה מ-(4,10) ל-(16,10) עם שתי בקרות ב-y=2. הטופס מגיע ל-y=4 בלבד —
+    // שלושה רבעים מהדרך אל הבקרות — ולכן ההפרש בין שני המצבים הוא בדיוק מה
+    // שהחביא את `replace` מתחת לרצפה.
+    const d = 'M4 10C4 2 16 2 16 10';
+    expect(Math.min(...pathPoints(d).map((p) => p.y))).toBeCloseTo(2, 2);
+    expect(Math.min(...pathPoints(d, true).map((p) => p.y))).toBeCloseTo(4, 2);
   });
 
   it('הדגימה של קשתות באמת מודדת את טופס הקשת ולא רק את נקודות הקצה', () => {
@@ -430,7 +523,7 @@ describe('משקל אופטי', () => {
   it('יחס המילוי של כל אייקון בטווח המוגדר', () => {
     const bad: string[] = [];
     for (const name of NAMES) {
-      const m = MEASURED.get(name)!;
+      const m = INK.get(name)!;
       const w = (m.maxX - m.minX) / VB_W;
       const h = (m.maxY - m.minY) / VB_H;
       const dominant = Math.max(w, h);
@@ -458,7 +551,7 @@ describe('משקל אופטי', () => {
     // נשאר ברשימה, וההחרגה מכסה אותו לנצח. כך `strikethrough` יצא מ-FLAT_ICONS
     // כשהוא הוחלף בגרסת Fluent שיחס המילוי שלה 70%x70%.
     const ratio = (name: string): { dominant: number; minor: number } => {
-      const m = MEASURED.get(name)!;
+      const m = INK.get(name)!;
       const w = (m.maxX - m.minX) / VB_W;
       const h = (m.maxY - m.minY) / VB_H;
       return { dominant: Math.max(w, h), minor: Math.min(w, h) };
