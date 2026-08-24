@@ -7,10 +7,16 @@
     @keydown.esc="$emit('close')"
   >
     <div class="fr-header">
-      <div class="fr-tabs">
+      <div
+        class="fr-tabs"
+        role="tablist"
+        aria-label="מצב חיפוש"
+      >
         <button
           type="button"
           class="fr-tab"
+          role="tab"
+          :aria-selected="activeMode === 'find'"
           :class="{ active: activeMode === 'find' }"
           @click="mode = 'find'"
         >
@@ -22,6 +28,8 @@
           v-if="canReplace"
           type="button"
           class="fr-tab"
+          role="tab"
+          :aria-selected="activeMode === 'replace'"
           :class="{ active: activeMode === 'replace' }"
           @click="mode = 'replace'"
         >
@@ -32,6 +40,7 @@
         type="button"
         class="fr-close-btn"
         title="סגור (Esc)"
+        aria-label="סגור את חיפוש והחלפה"
         @click="$emit('close')"
       >
         ✕
@@ -53,6 +62,7 @@
             type="text"
             class="fr-input"
             placeholder="הזן מילת חיפוש..."
+            aria-label="טקסט לחיפוש"
             @keydown.enter.exact="findNext"
             @keydown.enter.shift="findPrev"
             @input="onSearchInput"
@@ -60,6 +70,8 @@
           <span
             v-if="resultText"
             class="fr-counter"
+            role="status"
+            aria-live="polite"
           >{{ resultText }}</span>
         </div>
       </div>
@@ -80,12 +92,21 @@
             type="text"
             class="fr-input"
             placeholder="טקסט חלופי..."
+            aria-label="טקסט חלופי"
             :disabled="isReplacing"
             @keydown.enter="doReplace"
           >
         </div>
       </div>
 
+      <!-- הסבר ולא הסתרה בשקט: המשתמש שביקש Ctrl+H צריך לדעת למה אין החלפה. -->
+      <p
+        v-if="!canReplace"
+        class="fr-note"
+        role="note"
+      >
+        {{ REPLACE_UNAVAILABLE_TEXT }}
+      </p>
     </div>
 
     <!-- כפתורי פעולה -->
@@ -145,6 +166,7 @@
  * כלומר מונה תוצאות שהוא קוד מת, אף שהמנוע מספק `total` ו-`activeIndex`.
  */
 import { ref, computed, watch, nextTick } from 'vue';
+import { REPLACE_UNAVAILABLE_TEXT } from '../../engine/search';
 
 const props = withDefaults(
   defineProps<{
@@ -336,6 +358,13 @@ function doReplaceAll(): void {
 .fr-input:focus {
   border-color: var(--word-blue);
   box-shadow: 0 0 0 1px var(--word-blue);
+}
+
+.fr-note {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--color-on-surface-variant);
 }
 
 .fr-counter {
