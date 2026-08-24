@@ -5,6 +5,7 @@
       class="style-cards-scroll"
       role="group"
       aria-label="סגנונות"
+      @scroll.passive="measure"
     >
       <button
         v-for="item in items"
@@ -14,6 +15,7 @@
         :class="{ active: activeId === item.id }"
         :title="item.label"
         :aria-pressed="activeId === item.id"
+        :disabled="disabled"
         @pointerdown.prevent
         @click="$emit('select-style', item.id)"
       >
@@ -26,31 +28,39 @@
         <span class="style-card-name">{{ item.label }}</span>
       </button>
     </div>
-    <div class="gallery-nav-btns">
+
+    <!-- הכפתורים מוצגים רק כשיש לאן לגלול, כמו ב-Word. הם אינם מושבתים עם
+         הגלריה: עיון ברשימה אינו מצריך בחירה במסמך. -->
+    <div
+      v-if="canScrollStart || canScrollEnd"
+      class="gallery-nav-btns"
+    >
       <button
+        v-if="canScrollStart"
         type="button"
         class="nav-btn"
-        title="גלול ימינה"
+        title="הסגנונות הקודמים"
+        aria-label="הסגנונות הקודמים"
         @pointerdown.prevent
-        @click="scrollGallery('right')"
+        @click="scrollToward('start')"
       >
         <SvgIcon
-          name="chevronDown"
+          :name="galleryScrollIcon('start', isRtl)"
           :size="10"
-          style="transform: rotate(90deg);"
         />
       </button>
       <button
+        v-if="canScrollEnd"
         type="button"
         class="nav-btn"
-        title="גלול שמאלה"
+        title="הסגנונות הבאים"
+        aria-label="הסגנונות הבאים"
         @pointerdown.prevent
-        @click="scrollGallery('left')"
+        @click="scrollToward('end')"
       >
         <SvgIcon
-          name="chevronDown"
+          :name="galleryScrollIcon('end', isRtl)"
           :size="10"
-          style="transform: rotate(-90deg);"
         />
       </button>
     </div>
@@ -58,10 +68,17 @@
 </template>
 
 <script setup lang="ts">
-import { computed, inject, ref, shallowRef } from 'vue';
+import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
 import SvgIcon from '../../icons/SvgIcon.vue';
 import { STYLE_GALLERY } from '../../../composables/keys';
-import { fallbackStyleGallery } from '../../../engine/style-gallery';
+import {
+  fallbackStyleGallery,
+  galleryScrollAvailability,
+  galleryScrollDelta,
+  galleryScrollIcon,
+  type GalleryScrollAvailability,
+  type ScrollToward,
+} from '../../../engine/style-gallery';
 
 const props = withDefaults(
   defineProps<{
@@ -71,9 +88,11 @@ const props = withDefaults(
      * בבחירה מעורבת).
      */
     currentStyle?: string;
+    disabled?: boolean;
   }>(),
   {
     currentStyle: 'Normal',
+    disabled: false,
   },
 );
 
@@ -102,11 +121,64 @@ const activeId = computed(() =>
 
 const scrollContainerRef = ref<HTMLElement | null>(null);
 
-function scrollGallery(direction: 'left' | 'right'): void {
-  if (!scrollContainerRef.value) return;
-  const delta = direction === 'left' ? -120 : 120;
-  scrollContainerRef.value.scrollBy({ left: delta, behavior: 'smooth' });
+/**
+ * כיווניות המכולה. ברירת המחדל `true` כי המעטפת כולה `dir="rtl"`, והמדידה
+ * בהרכבה היא מה שמכסה מסמך או משטח שכיווניותם אחרת — הכיוון של הגלילה
+ * ושל החצים תלוי בו.
+ */
+const isRtl = ref(true);
+
+const availability = ref<GalleryScrollAvailability>({
+  canScrollStart: false,
+  canScrollEnd: false,
+});
+const canScrollStart = computed(() => availability.value.canScrollStart);
+const canScrollEnd = computed(() => availability.value.canScrollEnd);
+
+function measure(): void {
+  const element = scrollContainerRef.value;
+  if (!element) return;
+  availability.value = galleryScrollAvailability({
+    scrollLeft: element.scrollLeft,
+    scrollWidth: element.scrollWidth,
+    clientWidth: element.clientWidth,
+  });
 }
+
+function scrollToward(toward: ScrollToward): void {
+  const element = scrollContainerRef.value;
+  if (!element) return;
+  element.scrollBy({ left: galleryScrollDelta(toward, isRtl.value), behavior: 'smooth' });
+}
+
+let observer: ResizeObserver | null = null;
+
+onMounted(() => {
+  const element = scrollContainerRef.value;
+  if (!element) return;
+
+  // רק `ltr` מפורש מבטל את ברירת המחדל: ב-jsdom ובמשטחים שלא פתרו כיווניות
+  // הערך יוצא ריק, ואז ההנחה הנכונה היא הכיווניות של המעטפת.
+  if (globalThis.getComputedStyle?.(element).direction === 'ltr') isRtl.value = false;
+
+  // הרוחב של הרצועה משתנה עם החלון, וגלריה שנכנסה כולה בחלון רחב אינה נכנסת
+  // בצר. בלי המדידה החוזרת הכפתורים היו נקבעים פעם אחת בהרכבה.
+  if (typeof ResizeObserver !== 'undefined') {
+    observer = new ResizeObserver(() => measure());
+    observer.observe(element);
+  }
+
+  measure();
+});
+
+onBeforeUnmount(() => {
+  observer?.disconnect();
+  observer = null;
+});
+
+// הקטלוג נפתר אחרי פתיחת המסמך, ואז הרשימה מתחלפת ורוחבה משתנה. `nextTick`
+// כדי שהמדידה תרוץ על ה-DOM שאחרי הרינדור.
+watch(items, () => void nextTick(measure));
 </script>
 
 <style scoped>
@@ -164,7 +236,7 @@ function scrollGallery(direction: 'left' | 'right'): void {
   overflow: hidden;
 }
 
-.style-card:hover {
+.style-card:hover:not(:disabled) {
   background: var(--word-btn-hover);
   border-color: var(--word-blue);
 }
@@ -173,6 +245,12 @@ function scrollGallery(direction: 'left' | 'right'): void {
   background: var(--word-btn-active);
   border-color: var(--word-blue);
   box-shadow: 0 0 0 1px var(--word-blue);
+}
+
+/* בלי בחירה במסמך הפקודה `linked-style` נכשלת, ולכן הכרטיס נראה כמו מה שהוא. */
+.style-card:disabled {
+  cursor: default;
+  opacity: 0.45;
 }
 
 .style-card-preview {

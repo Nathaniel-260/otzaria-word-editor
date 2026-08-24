@@ -1,10 +1,12 @@
 /**
- * גלריית הסגנונות.
+ * גלריית הסגנונות. מה שנבדק כאן הוא שני דברים שהיו שבורים ואינם נראים בעין:
  *
- * מה שנבדק כאן הוא הדבר שהיה שבור ואינו נראה בעין: הרשימה הייתה קשיחה — שישה
- * מזהים אנגליים עם תוויות שתרגמנו — ולכן הסגנונות של המסמך עצמו, כולל סגנונות
- * מותאמים ושמות עבריים, לא הופיעו בגלריה כלל. הקטלוג נפתר אסינכרונית, ולכן
- * בדיקה שקוראת פעם אחת אינה מוכיחה כלום; המסלול האמיתי נבדק דרך ההרשמה.
+ *   1. הרשימה הייתה קשיחה — שישה מזהים אנגליים עם תוויות שתרגמנו — ולכן
+ *      הסגנונות של המסמך עצמו, כולל סגנונות מותאמים ושמות עבריים, לא הופיעו
+ *      בגלריה כלל. הקטלוג נפתר אסינכרונית, ולכן בדיקה שקוראת פעם אחת אינה
+ *      מוכיחה כלום; המסלול האמיתי נבדק דרך ההרשמה.
+ *   2. כפתורי הגלילה היו הפוכים ב-RTL: `left: +120` נקרא „ימינה” בזמן שבמכולה
+ *      כזאת הוא מחזיר את הרשימה לאחור, ימינה.
  *
  * הכפיל כאן מחזיר `StylesSlice` מלא ומטופס, ולא אובייקט מתירני: כפיל שמאשר כל
  * צורה מאשר גם צורה שהמנוע לא היה מחזיר, ואז הבדיקה ירוקה והתוסף שבור.
@@ -13,8 +15,12 @@ import { describe, expect, it, vi } from 'vitest';
 import type { StyleCatalogItem } from 'superdoc/ui';
 import {
   FALLBACK_STYLES,
+  GALLERY_SCROLL_STEP_PX,
   clampPreviewFontSize,
   fallbackStyleGallery,
+  galleryScrollAvailability,
+  galleryScrollDelta,
+  galleryScrollIcon,
   observeStyleGallery,
   previewStyleFor,
   readStyleGallery,
@@ -409,5 +415,67 @@ describe('תצוגה מקדימה', () => {
     const items = toGalleryItems(HEBREW_GALLERY);
     expect(items.find((item) => item.id === 'Normal')?.previewText).toBe('AaBbCc');
     expect(items.find((item) => item.id === 'Heading1')?.previewText).toBe('כותרת 1');
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* גלילה                                                               */
+/* ------------------------------------------------------------------ */
+
+describe('כיוון הגלילה', () => {
+  it('ב-RTL „הסגנונות הבאים” הם delta שלילי — זה ההיפוך שהיה שבור', () => {
+    expect(galleryScrollDelta('end', true)).toBe(-GALLERY_SCROLL_STEP_PX);
+    expect(galleryScrollDelta('start', true)).toBe(GALLERY_SCROLL_STEP_PX);
+  });
+
+  it('ב-LTR הכיוונים מתהפכים', () => {
+    expect(galleryScrollDelta('end', false)).toBe(GALLERY_SCROLL_STEP_PX);
+    expect(galleryScrollDelta('start', false)).toBe(-GALLERY_SCROLL_STEP_PX);
+  });
+
+  it('החץ תואם את הכיוון שעל המסך', () => {
+    expect(galleryScrollIcon('end', true)).toBe('chevronLeft');
+    expect(galleryScrollIcon('start', true)).toBe('chevronRight');
+    expect(galleryScrollIcon('end', false)).toBe('chevronRight');
+    expect(galleryScrollIcon('start', false)).toBe('chevronLeft');
+  });
+});
+
+describe('זמינות הגלילה', () => {
+  it('גלריה שנכנסת כולה — אין כפתורים', () => {
+    expect(galleryScrollAvailability({ scrollLeft: 0, scrollWidth: 300, clientWidth: 340 })).toEqual({
+      canScrollStart: false,
+      canScrollEnd: false,
+    });
+  });
+
+  it('בתחילת הרשימה אפשר רק קדימה', () => {
+    expect(galleryScrollAvailability({ scrollLeft: 0, scrollWidth: 800, clientWidth: 340 })).toEqual({
+      canScrollStart: false,
+      canScrollEnd: true,
+    });
+  });
+
+  it('ב-RTL ה-scrollLeft שלילי, וזה נמדד לפי המרחק מתחילת הרשימה', () => {
+    expect(
+      galleryScrollAvailability({ scrollLeft: -200, scrollWidth: 800, clientWidth: 340 }),
+    ).toEqual({ canScrollStart: true, canScrollEnd: true });
+
+    // הקצה: 800 - 340 = 460.
+    expect(
+      galleryScrollAvailability({ scrollLeft: -460, scrollWidth: 800, clientWidth: 340 }),
+    ).toEqual({ canScrollStart: true, canScrollEnd: false });
+  });
+
+  it('ב-LTR אותו חשבון עם סימן חיובי', () => {
+    expect(
+      galleryScrollAvailability({ scrollLeft: 460, scrollWidth: 800, clientWidth: 340 }),
+    ).toEqual({ canScrollStart: true, canScrollEnd: false });
+  });
+
+  it('הפרש תת-פיקסלי אינו כפתור', () => {
+    expect(
+      galleryScrollAvailability({ scrollLeft: 0.4, scrollWidth: 340.6, clientWidth: 340 }),
+    ).toEqual({ canScrollStart: false, canScrollEnd: false });
   });
 });

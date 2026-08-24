@@ -24,6 +24,9 @@
  * המנוע ישתנה. `StyleGalleryHost` מרשה `Partial` בכוונה — superdoc עצמו קורא
  * למשטח הזה בהגנה (`this.ui?.styles?.getQuickGallery?.()`), כי הוא אינו קיים
  * בכל מצב עורך.
+ *
+ * גם גאומטריית הגלילה יושבת כאן ולא בקומפוננטה: היפוך הכיוון ב-RTL הוא
+ * חשבון טהור שאי אפשר לראות בעין, ובקומפוננטה הוא היה נבדק רק בדפדפן.
  */
 import type { BorrowedSuperDocUI } from 'superdoc';
 import type { StyleCatalogItem } from 'superdoc/ui';
@@ -309,4 +312,80 @@ export function observeStyleGallery(
     listener(readStyleGallery(ui));
     return () => {};
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* גאומטריית הגלילה                                                    */
+/* ------------------------------------------------------------------ */
+
+/** צעד גלילה אחד — כרטיס וחצי, כדי שתמיד יישאר עוגן במסך. */
+export const GALLERY_SCROLL_STEP_PX = 120;
+
+/** סבילות במידות תת-פיקסליות. בלעדיה כפתור נראה זמין על 0.4 פיקסל גלילה. */
+const EDGE_TOLERANCE_PX = 1;
+
+/** לאן לגלול — ביחס לרשימה ולא למסך. `end` = לעבר הסגנונות הבאים. */
+export type ScrollToward = 'start' | 'end';
+
+/**
+ * ה-delta ל-`scrollBy({ left })`.
+ *
+ * ההיפוך כאן הוא הבאג שהיה: הקוד גלל `left: +120` וקרא לזה „ימינה”, בזמן
+ * שבמכולה RTL `scrollLeft` מתחיל ב-0 בקצה הימני ויורד לשלילי כשגוללים שמאלה.
+ * כלומר `+120` ב-RTL מחזיר **ימינה**, לתחילת הרשימה — הפוך מהתווית. delta
+ * שלילי הוא תמיד „שמאלה על המסך” בשני מודלי ה-scrollLeft שדפדפנים חיים
+ * מיישמים, ולכן החשבון כאן נשען עליו ולא על סימן ה-scrollLeft.
+ */
+export function galleryScrollDelta(
+  toward: ScrollToward,
+  rtl: boolean,
+  step: number = GALLERY_SCROLL_STEP_PX,
+): number {
+  const forward = toward === 'end' ? 1 : -1;
+  return forward * (rtl ? -1 : 1) * step;
+}
+
+/** המידות שהמכולה מדווחת. */
+export interface GalleryScrollMetrics {
+  scrollLeft: number;
+  scrollWidth: number;
+  clientWidth: number;
+}
+
+/** אילו כפתורי גלילה יש להציג. שניהם `false` = הגלריה נכנסת כולה, ואין כפתורים. */
+export interface GalleryScrollAvailability {
+  canScrollStart: boolean;
+  canScrollEnd: boolean;
+}
+
+/**
+ * האם יש לאן לגלול לכל כיוון. כפתור שאין לאן לגלול איתו מוסתר, כמו ב-Word,
+ * ולא מוצג כפעיל ולא עושה כלום.
+ *
+ * המרחק מתחילת הרשימה מחושב כערך מוחלט של `scrollLeft` דווקא: ב-RTL הטווח הוא
+ * `[-(scrollWidth - clientWidth), 0]` וב-LTR הוא `[0, scrollWidth - clientWidth]`,
+ * ולכן אותו חשבון מכסה את שניהם בלי ענף.
+ */
+export function galleryScrollAvailability(
+  metrics: GalleryScrollMetrics,
+): GalleryScrollAvailability {
+  const overflow = metrics.scrollWidth - metrics.clientWidth;
+  if (!Number.isFinite(overflow) || overflow <= EDGE_TOLERANCE_PX) {
+    return { canScrollStart: false, canScrollEnd: false };
+  }
+
+  const fromStart = Math.abs(metrics.scrollLeft);
+  return {
+    canScrollStart: fromStart > EDGE_TOLERANCE_PX,
+    canScrollEnd: fromStart < overflow - EDGE_TOLERANCE_PX,
+  };
+}
+
+/**
+ * האייקון של כפתור הגלילה. ב-RTL „הסגנונות הבאים” נמצאים שמאלה, ולכן החץ
+ * שמאלה — וזו בדיוק הנקודה שבה התוויות והחצים היו הפוכים.
+ */
+export function galleryScrollIcon(toward: ScrollToward, rtl: boolean): 'chevronLeft' | 'chevronRight' {
+  const towardVisualLeft = rtl ? toward === 'end' : toward === 'start';
+  return towardVisualLeft ? 'chevronLeft' : 'chevronRight';
 }

@@ -291,8 +291,12 @@
       class="styles-group"
       :launcher="true"
     >
+      <!-- `disabled` ולא רק `current-style`: בלי בחירה במסמך הפקודה
+           `linked-style` נכשלת, וגלריה שנראית פעילה מזמינה לחיצה שלא תעשה
+           כלום. הדיווח על הכשל עצמו הוא של `useCommand().run()`. -->
       <StyleGallery
         :current-style="String(styleCmd.value.value || 'Normal')"
+        :disabled="!styleCmd.enabled.value"
         @select-style="onApplyStyle"
       />
     </RibbonGroup>
