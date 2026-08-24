@@ -1,14 +1,5 @@
 <template>
   <header class="topbar word-titlebar">
-    <!-- כפתורים נסתרים לשמירה על חוזי בדיקות ה-boot -->
-    <button
-      id="open"
-      type="button"
-      style="display: none;"
-      :disabled="isOpening"
-      @click="$emit('open')"
-    />
-
     <!-- צד ימין (RTL): מותג, שמירה אוטומטית, שמירה מהירה ושם מסמך -->
     <div class="titlebar-start">
       <div
@@ -21,18 +12,26 @@
         />
       </div>
 
-      <!-- מתג שמירה אוטומטית -->
-      <div
+      <!--
+        מתג שמירה אוטומטית. `button` עם `role="switch"` ולא `div` עם `@click`:
+        `div` אינו מקבל פוקוס, אינו מופעל ב-Enter/רווח, וקורא מסך מכריז עליו
+        „שמירה אוטומטית” בלי לומר אם היא פועלת. ה-`button` נותן את שני הראשונים
+        בחינם, ו-`aria-checked` את השלישי.
+      -->
+      <button
+        type="button"
         class="autosave-toggle"
         :class="{ active: autosaveEnabled }"
-        title="שמירה אוטומטית לדיסק"
+        role="switch"
+        :aria-checked="autosaveEnabled"
+        :title="autosaveEnabled ? 'שמירה אוטומטית לדיסק — פועלת' : 'שמירה אוטומטית לדיסק — כבויה'"
         @click="$emit('toggle-autosave')"
       >
         <span class="autosave-label">שמירה אוטומטית</span>
-        <div class="toggle-pill">
-          <div class="toggle-thumb" />
-        </div>
-      </div>
+        <span class="toggle-pill">
+          <span class="toggle-thumb" />
+        </span>
+      </button>
 
       <!-- סרגל גישה מהירה (Quick Access Toolbar) -->
       <div class="quick-access-tools">
@@ -86,7 +85,9 @@
         <input
           :value="title"
           class="doc-title-input"
+          :style="{ width: `${docTitleWidthCh(title)}ch` }"
           spellcheck="false"
+          aria-label="שם המסמך"
           title="לחץ לעריכת שם המסמך"
           @change="$emit('update-title', ($event.target as HTMLInputElement).value)"
         >
@@ -96,18 +97,20 @@
           class="dirty-indicator"
           title="שינויים לא שמורים"
         >•</span>
-        <SvgIcon
-          name="chevronDown"
-          :size="10"
-          class="title-dropdown-icon"
-        />
       </div>
     </div>
 
-    <!-- מרכז: תיבת חיפוש (Search / Tell Me) -->
+    <!--
+      מרכז: חיפוש („Tell Me” ב-Word). `button` ולא `input readonly`: השדה שהיה
+      כאן נראה כמו מקום להקליד בו ולא הגיב להקלדה, וה-`@click` יושב על ה-div
+      העוטף — כלומר המקלדת לא הגיעה אליו בכלל.
+    -->
     <div class="titlebar-center">
-      <div
+      <button
+        type="button"
         class="search-box"
+        aria-label="חיפוש והחלפה במסמך"
+        title="חיפוש והחלפה Ctrl+F"
         @click="$emit('open-find')"
       >
         <SvgIcon
@@ -115,16 +118,11 @@
           :size="14"
           class="search-icon"
         />
-        <input
-          type="text"
-          class="search-input"
-          placeholder="חפש"
-          readonly
-        >
-      </div>
+        <span class="search-placeholder">חפש</span>
+      </button>
     </div>
 
-    <!-- צד שמאל (סיום): פעולות נוספות -->
+    <!-- צד שמאל (סיום): מצב השמירה -->
     <div class="titlebar-end">
       <div
         v-if="saveStateText"
@@ -139,6 +137,7 @@
 
 <script setup lang="ts">
 import SvgIcon from '../icons/SvgIcon.vue';
+import { docTitleWidthCh } from '../../composables/shell-format';
 
 withDefaults(
   defineProps<{
@@ -150,7 +149,6 @@ withDefaults(
     autosaveEnabled?: boolean;
     canUndo?: boolean;
     canRedo?: boolean;
-    isOpening?: boolean;
   }>(),
   {
     title: 'מסמך 1',
@@ -161,7 +159,6 @@ withDefaults(
     autosaveEnabled: true,
     canUndo: true,
     canRedo: true,
-    isOpening: false,
   }
 );
 
@@ -169,7 +166,6 @@ defineEmits<{
   (e: 'save'): void;
   (e: 'undo'): void;
   (e: 'redo'): void;
-  (e: 'open'): void;
   (e: 'open-find'): void;
   (e: 'toggle-autosave'): void;
   (e: 'update-title', newTitle: string): void;
@@ -177,18 +173,24 @@ defineEmits<{
 </script>
 
 <style scoped>
+/**
+ * הכלל היחיד שקובע את הפריסה כאן: **תיבת החיפוש במרכז החלון**, כמו ב-Word.
+ * `justify-content: space-between` שהיה כאן מרכז את התיבה בין הצדדים ולא
+ * בחלון — והצד הימני (מותג, מתג, סרגל מהיר, שם מסמך) רחב פי כמה מגלולת המצב
+ * שמשמאל, ולכן מרכז התיבה נמדד ב-35% מרוחב החלון. שלוש עמודות שבהן שני
+ * הצדדים `minmax(0, 1fr)` נשארות שוות תמיד, ולכן העמודה האמצעית מרוכזת בלי
+ * תלות בתוכן הצדדים ובלי לזוז כששם המסמך מתארך.
+ *
+ * שאר המאפיינים של הפס — גובה, רקע, ריפוד, גבול, gap ויישור אנכי — מוגדרים
+ * ב-`.topbar` שב-styles/shell.css על **אותו אלמנט**, ואינם חוזרים כאן: שתי
+ * הגדרות לאותו מאפיין באותו אלמנט הן שני מקורות אמת שנפרדים בשקט (הם כבר
+ * נפרדו: 12px מול 16px ריפוד, ושני צבעי גבול שונים). `display` הוא החריג
+ * היחיד, ובכוונה — הוא דורס את ה-flex שם לטובת המרכוז.
+ */
 .word-titlebar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  height: var(--topbar-height);
-  padding-inline: 12px;
-  background: var(--color-surface-container-high);
-  border-block-end: 1px solid var(--color-outline-variant);
-  color: var(--color-on-surface);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   user-select: none;
-  gap: 12px;
-  flex-shrink: 0;
 }
 
 .titlebar-start {
@@ -196,6 +198,9 @@ defineEmits<{
   align-items: center;
   gap: 8px;
   min-width: 0;
+  justify-self: start;
+  /* שם ארוך נחתך כאן ולא נדחק לתיבת החיפוש שבמרכז. */
+  overflow: hidden;
 }
 
 .word-app-badge {
@@ -205,14 +210,18 @@ defineEmits<{
   justify-content: center;
 }
 
-/* מתג שמירה אוטומטית */
+/* מתג שמירה אוטומטית. ה-reset נדרש: shell.css נותן ל-button ריפוד, גבול ורקע. */
 .autosave-toggle {
   display: flex;
   align-items: center;
   gap: 6px;
   cursor: pointer;
   padding: 3px 6px;
+  border: 1px solid transparent;
   border-radius: var(--radius-sm);
+  background: none;
+  color: var(--color-on-surface);
+  font-size: inherit;
   transition: background 0.1s;
 }
 
@@ -223,6 +232,7 @@ defineEmits<{
 .autosave-label {
   font-size: 11px;
   color: var(--color-on-surface);
+  white-space: nowrap;
 }
 
 .toggle-pill {
@@ -232,8 +242,15 @@ defineEmits<{
   background: var(--color-outline);
   position: relative;
   transition: background 0.15s ease;
+  flex-shrink: 0;
 }
 
+/**
+ * הכפתור נע על `inset-inline-start` ולא ב-`translateX`: `translateX(-12px)`
+ * שהיה כאן הוא תנועה שמאלה בשתי הכיווניות, ולכן ב-LTR הוא יצא מהפיל. הכלל
+ * ההגיוני חוסך גם את הכלל הכפול ל-[dir="rtl"] שהיה כאן זהה לו בדיוק.
+ * 14px = 28 (הפיל) − 12 (הכפתור) − 2 (הריפוד בצד השני).
+ */
 .toggle-thumb {
   width: 12px;
   height: 12px;
@@ -242,7 +259,7 @@ defineEmits<{
   position: absolute;
   top: 2px;
   inset-inline-start: 2px;
-  transition: transform 0.15s ease;
+  transition: inset-inline-start 0.15s ease;
 }
 
 .autosave-toggle.active .toggle-pill {
@@ -250,11 +267,7 @@ defineEmits<{
 }
 
 .autosave-toggle.active .toggle-thumb {
-  transform: translateX(-12px);
-}
-
-[dir="rtl"] .autosave-toggle.active .toggle-thumb {
-  transform: translateX(-12px);
+  inset-inline-start: 14px;
 }
 
 /* גישה מהירה */
@@ -307,13 +320,14 @@ defineEmits<{
   padding: 3px 8px;
   border-radius: var(--radius-sm);
   transition: background 0.1s;
-  cursor: pointer;
+  min-width: 0;
 }
 
 .doc-title-wrapper:hover {
   background: var(--word-btn-hover);
 }
 
+/* הרוחב נקבע בתבנית לפי אורך השם — ראו composables/shell-format.ts. */
 .doc-title-input {
   background: transparent;
   border: none;
@@ -322,13 +336,14 @@ defineEmits<{
   font-size: 13px;
   font-weight: 600;
   outline: none;
-  width: 110px;
   text-align: start;
+  min-width: 0;
 }
 
 .app-suffix {
   font-size: 12px;
   color: var(--color-on-surface-variant);
+  white-space: nowrap;
 }
 
 .dirty-indicator {
@@ -337,13 +352,9 @@ defineEmits<{
   line-height: 1;
 }
 
-.title-dropdown-icon {
-  color: var(--color-on-surface-variant);
-}
-
 /* מרכז: חיפוש */
 .titlebar-center {
-  flex: 0 1 360px;
+  justify-self: center;
   display: flex;
   justify-content: center;
 }
@@ -356,37 +367,34 @@ defineEmits<{
   border: 1px solid var(--color-outline-variant);
   border-radius: var(--radius-md);
   padding: 4px 12px;
-  width: 100%;
-  max-width: 320px;
-  cursor: pointer;
-  transition: all 0.1s;
+  width: 320px;
+  max-width: 100%;
+  cursor: text;
+  color: var(--color-on-surface-variant);
+  font-family: var(--font-main);
+  font-size: 12px;
+  transition: border-color 0.1s, box-shadow 0.1s;
 }
 
 .search-box:hover {
-  background: var(--color-surface);
   border-color: var(--word-blue);
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
 }
 
 .search-icon {
   color: var(--color-on-surface-variant);
+  flex-shrink: 0;
 }
 
-.search-input {
-  background: transparent;
-  border: none;
-  color: var(--color-on-surface);
-  font-family: var(--font-main);
-  font-size: 12px;
-  outline: none;
-  width: 100%;
-  cursor: pointer;
+.search-placeholder {
+  color: var(--color-on-surface-variant);
 }
 
 .titlebar-end {
   display: flex;
   align-items: center;
   gap: 8px;
+  justify-self: end;
 }
 
 .save-state-pill {
@@ -395,6 +403,7 @@ defineEmits<{
   border-radius: var(--radius-pill);
   background: var(--color-primary-subtle, rgba(21, 101, 192, 0.08));
   color: var(--color-primary);
+  white-space: nowrap;
 }
 
 .save-state-pill.error {

@@ -1,0 +1,167 @@
+/**
+ * פס הכותרת.
+ *
+ * שלוש התקלות שהבדיקות כאן שומרות עליהן אינן מפילות כלום ואינן נראות ב-
+ * typecheck — הן נראות רק בעין, ורק אם מסתכלים:
+ *
+ *   1. **פקד שאינו פקד.** תיבת החיפוש הייתה `input readonly` שנראה כמו מקום
+ *      להקליד בו, וה-`@click` יושב על ה-`div` העוטף — כלומר המקלדת לא הגיעה
+ *      אליו. מתג השמירה האוטומטית היה `div` בלי `role`, בלי פוקוס ובלי הכרזה
+ *      אם הוא דלוק.
+ *   2. **תנועה שאינה הגיונית.** `translateX(-12px)` על כפתור המתג הוא תנועה
+ *      שמאלה בשתי הכיווניות, ולכן ב-LTR הוא יצא מהפיל. הכלל היה גם משוכפל
+ *      ל-`[dir="rtl"]` באותם ערכים בדיוק.
+ *   3. **שני מקורות אמת לאותו אלמנט.** `.topbar` (shell.css) ו-`.word-titlebar`
+ *      (הבלוק ה-scoped) מעצבים את אותה כותרת. הם כבר נפרדו בשקט: 16px מול 12px
+ *      ריפוד, ושני צבעי גבול שונים.
+ *
+ * ההרכבה נעשית על המקור ולא בדפדפן: אין @vue/test-utils במאגר, ותשתית טסטי
+ * הקומפוננטות בבעלות אחרת. תבנית הסריקה היא זו של tests/unit/tab-controls.ts.
+ */
+import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import {
+  DOC_TITLE_MAX_CH,
+  DOC_TITLE_MIN_CH,
+  docTitleWidthCh,
+} from '../../src/composables/shell-format';
+
+/** vitest רץ מ-v2/, ולכן src/ נמצא ביחס ל-cwd. */
+const SRC = join(process.cwd(), 'src');
+
+/**
+ * ההערות מוסרות לפני הסריקה: התיעוד בקומפוננטה מסביר במפורש מה **היה** שם
+ * („`input readonly`”, „הכלל הכפול ל-[dir=\"rtl\"]”), וההסבר הזה אינו הפרה.
+ * בלי ההסרה כל בדיקה שמחפשת היעדר הייתה מוצאת את התיעוד של עצמה.
+ */
+function stripComments(source: string): string {
+  return source.replace(/<!--[\s\S]*?-->/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
+}
+
+const TITLEBAR = stripComments(readFileSync(join(SRC, 'ui/shell/TitleBar.vue'), 'utf8'));
+const SHELL_CSS = stripComments(readFileSync(join(SRC, 'styles/shell.css'), 'utf8'));
+
+/** התבנית בלבד — עד `</template>`. הסגנונות אינם פקדים. */
+const TEMPLATE = TITLEBAR.slice(0, TITLEBAR.indexOf('</template>'));
+
+/** התג שפותח אלמנט עם המחלקה המבוקשת, כולל תכונותיו. */
+function openingTag(source: string, className: string): string {
+  const match = source.match(
+    new RegExp(`<(\\w+)[^>]*class="[^"]*\\b${className}\\b[^"]*"[^>]*>`),
+  );
+  if (!match) throw new Error(`לא נמצא אלמנט עם המחלקה ${className}`);
+  return match[0];
+}
+
+/**
+ * שמות המאפיינים שבלוק ה-CSS של סלקטור מגדיר. הסלקטור נלקח בהתאמה מדויקת
+ * (`^` על תחילת שורה) כדי שכלל צר יותר עם אותו שם לא ייספר.
+ */
+function declaredProperties(css: string, selector: string): string[] {
+  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const block = css.match(new RegExp(`^${escaped}\\s*\\{([^}]*)\\}`, 'm'));
+  if (!block) throw new Error(`לא נמצא בלוק לסלקטור ${selector}`);
+  return [...block[1].matchAll(/^\s*([a-z-]+)\s*:/gm)].map((m) => m[1]);
+}
+
+describe('רוחב שדה שם המסמך', () => {
+  it('גדל עם השם', () => {
+    expect(docTitleWidthCh('חידושים')).toBeLessThan(docTitleWidthCh('חידושים על מסכת בבא מציעא'));
+  });
+
+  it('שם ארוך נעצר בתקרה, ושם קצר ברצפה', () => {
+    expect(docTitleWidthCh('א'.repeat(200))).toBe(DOC_TITLE_MAX_CH);
+    expect(docTitleWidthCh('א')).toBe(DOC_TITLE_MIN_CH);
+    expect(docTitleWidthCh('')).toBe(DOC_TITLE_MIN_CH);
+  });
+
+  it('רוחב קשיח בפיקסלים אינו חוזר לשדה', () => {
+    // `width: 110px` חתך „חידושים על מסכת בבא מציעא” אחרי שש אותיות.
+    const block = TITLEBAR.match(/\.doc-title-input\s*\{[^}]*\}/)?.[0] ?? '';
+    // `min-width` אינו „רוחב קשיח” — הוא מה שמאפשר לשדה להיצמד לגריד.
+    expect(block).not.toMatch(/(?<![-\w])width\s*:/);
+    expect(TEMPLATE).toContain('docTitleWidthCh(title)');
+  });
+});
+
+describe('פקדים אמיתיים בפס הכותרת', () => {
+  it('אין יותר כפתור נסתר #open', () => {
+    // שער ה-boot מודד `data-boot` (scripts/boot-check.mjs), ולא את קיום הכפתור.
+    expect(TITLEBAR).not.toMatch(/id="open"/);
+    expect(TITLEBAR).not.toMatch(/display:\s*none/);
+  });
+
+  it('החיפוש הוא כפתור עם שם נגיש, ולא input readonly', () => {
+    const tag = openingTag(TEMPLATE, 'search-box');
+    expect(tag.startsWith('<button')).toBe(true);
+    expect(tag).toMatch(/aria-label="[^"]+"/);
+    expect(tag).toMatch(/@click="\$emit\('open-find'\)"/);
+    expect(TEMPLATE).not.toMatch(/readonly/);
+  });
+
+  it('מתג השמירה האוטומטית הוא switch נגיש', () => {
+    const tag = openingTag(TEMPLATE, 'autosave-toggle');
+    // `button` הוא מה שנותן פוקוס והפעלה ב-Enter/רווח בלי קוד מקלדת משלנו.
+    expect(tag.startsWith('<button')).toBe(true);
+    expect(tag).toMatch(/role="switch"/);
+    expect(tag).toMatch(/:aria-checked="autosaveEnabled"/);
+    expect(tag).toMatch(/@click="\$emit\('toggle-autosave'\)"/);
+  });
+
+  it('אין חץ פתיחה מדומה ליד שם המסמך', () => {
+    // הוא רמז על תפריט שלא היה קיים.
+    expect(TITLEBAR).not.toMatch(/title-dropdown-icon/);
+  });
+});
+
+describe('תנועת המתג', () => {
+  it('התנועה לוגית, ולכן נכונה בשתי הכיווניות', () => {
+    const active = TITLEBAR.match(/\.autosave-toggle\.active \.toggle-thumb\s*\{[^}]*\}/)?.[0] ?? '';
+    expect(active).toMatch(/inset-inline-start/);
+    expect(active).not.toMatch(/translateX/);
+  });
+
+  it('אין כלל [dir="rtl"] כפול למתג', () => {
+    expect(TITLEBAR).not.toMatch(/\[dir="rtl"\][^{]*\.toggle-thumb/);
+  });
+
+  it('הכפתור נשאר בתוך הפיל', () => {
+    const pill = TITLEBAR.match(/\.toggle-pill\s*\{[^}]*\}/)?.[0] ?? '';
+    const thumb = TITLEBAR.match(/\.toggle-thumb\s*\{[^}]*\}/)?.[0] ?? '';
+    const active = TITLEBAR.match(/\.autosave-toggle\.active \.toggle-thumb\s*\{[^}]*\}/)?.[0] ?? '';
+
+    const pillWidth = Number(pill.match(/width:\s*(\d+)px/)?.[1]);
+    const thumbWidth = Number(thumb.match(/width:\s*(\d+)px/)?.[1]);
+    const offset = Number(thumb.match(/inset-inline-start:\s*(\d+)px/)?.[1]);
+    const travel = Number(active.match(/inset-inline-start:\s*(\d+)px/)?.[1]);
+
+    expect(travel + thumbWidth + offset).toBe(pillWidth);
+  });
+});
+
+describe('פריסת הפס', () => {
+  it('המרכז הוא עמודה בגריד סימטרי, ולא שארית של space-between', () => {
+    const bar = TITLEBAR.match(/\.word-titlebar\s*\{[^}]*\}/)?.[0] ?? '';
+    expect(bar).toMatch(/display:\s*grid/);
+    // שני הצדדים באותה יחידה — זה מה שמשאיר את העמודה האמצעית במרכז החלון
+    // בלי תלות ברוחב הצדדים.
+    const columns = bar.match(/grid-template-columns:\s*([^;]+);/)?.[1] ?? '';
+    const [start, , end] = columns.trim().split(/\s+(?![^(]*\))/);
+    expect(start).toBe(end);
+    expect(bar).not.toMatch(/justify-content/);
+  });
+
+  it('הבלוק ה-scoped אינו מגדיר מחדש מה ש-.topbar כבר מגדיר', () => {
+    // display הוא החריג המכוון: grid דורס את ה-flex לטובת המרכוז.
+    const shared = declaredProperties(TITLEBAR, '.word-titlebar').filter((property) =>
+      declaredProperties(SHELL_CSS, '.topbar').includes(property),
+    );
+    expect(shared).toEqual(['display']);
+  });
+
+  it('.topbar נשאר ב-shell.css — ולידציית העיצוב מחריגה אותו בשם הזה', () => {
+    expect(SHELL_CSS).toMatch(/^\.topbar\s*\{/m);
+    expect(TEMPLATE).toMatch(/class="topbar word-titlebar"/);
+  });
+});
