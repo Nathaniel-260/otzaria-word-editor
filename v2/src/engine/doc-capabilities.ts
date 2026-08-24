@@ -73,6 +73,11 @@ const CAPABILITY_SPECS = {
   canSetSectionDirection: { operation: 'sections.setSectionDirection' },
   canSetSectionBreak: { operation: 'sections.setBreakType' },
   canSetPageBorders: { operation: 'sections.setPageBorders' },
+  // גופן. `format.vertAlign` הוא alias ציבורי של `format.apply` על מפתח אחד
+  // ב-`InlineRunPatch`, והוא `OperationId` בקטלוג — ולכן הוא נשאל כמו כל פעולה
+  // אחרת. ראו engine/vert-align.ts: אין לו פקודה ב-registry של ה-controller,
+  // והמסלול היחיד אליו הוא ה-Document API.
+  canSetVertAlign: { operation: 'format.vertAlign' },
   // הפניות והוספה
   canInsertFootnote: { operation: 'footnotes.insert' },
   canSetPageBreakBefore: { operation: 'format.paragraph.setFlowOptions' },

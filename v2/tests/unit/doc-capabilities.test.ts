@@ -31,6 +31,7 @@ function fullCapabilities() {
       'sections.setSectionDirection': { available: true },
       'sections.setBreakType': { available: true },
       'sections.setPageBorders': { available: true },
+      'format.vertAlign': { available: true },
       'footnotes.insert': { available: true },
       'format.paragraph.setFlowOptions': { available: true },
       insert: { available: true },

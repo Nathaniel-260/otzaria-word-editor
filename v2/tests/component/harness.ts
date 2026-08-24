@@ -343,6 +343,19 @@ export function createSuperdocDouble(options: SuperdocDoubleOptions = {}): Super
       : [],
   };
 
+  /**
+   * ה-`SelectionTarget` — מודל אחר מ-`TextTarget` שמעל, ולא כינוי שלו: החוזה
+   * קובע ש-`target` הוא ה-`TextTarget` לצריכה של תגובות, ו-`selectionTarget`
+   * הוא „the public selection-target model the write APIs consume directly”.
+   * `format.*` מקבל את השני, ולכן כפיל שמחזיר רק את הראשון היה מודד פקד
+   * שנכשל סגור על „יש לסמן טקסט”.
+   */
+  const selectionEnvelope = {
+    kind: 'selection',
+    start: { kind: 'text', blockId, offset: 0 },
+    end: { kind: 'text', blockId, offset: selectionText.length || 4 },
+  };
+
   const clipboardPayload = {
     source: 'superdoc',
     items: [{ type: 'text/plain', kind: 'string', data: selectionText || 'טקסט' }],
@@ -374,11 +387,15 @@ export function createSuperdocDouble(options: SuperdocDoubleOptions = {}): Super
           receipt('format.paragraph.setFlowOptions'),
         ),
       },
+      vertAlign: route('format.vertAlign', () => receipt('format.vertAlign')),
     },
     selection: {
       current: route('selection.current', () => ({
         empty: !hasRange,
         target: selectionTarget,
+        // נמסר רק כשיש טווח: המנוע מקרין `null` כשאין מה להקרין, וכתיבה
+        // דורשת טווח.
+        selectionTarget: hasRange ? selectionEnvelope : null,
         text: selectionText,
       })),
     },

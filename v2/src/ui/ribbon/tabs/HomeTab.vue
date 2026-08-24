@@ -134,14 +134,16 @@
         <RibbonButton
           icon="subscript"
           variant="icon-only"
-          tooltip="כתב תחתי (אינו נתמך במנוע הנוכחי)"
-          :disabled="true"
+          :tooltip="vertAlignTooltip('subscript')"
+          :disabled="!canSetVertAlign"
+          @click="onVertAlign('subscript')"
         />
         <RibbonButton
           icon="superscript"
           variant="icon-only"
-          tooltip="כתב עליון (אינו נתמך במנוע הנוכחי)"
-          :disabled="true"
+          :tooltip="vertAlignTooltip('superscript')"
+          :disabled="!canSetVertAlign"
+          @click="onVertAlign('superscript')"
         />
 
         <div class="word-separator" />
@@ -355,6 +357,12 @@ import {
   pasteFromClipboard,
   selectWholeDocument,
 } from '../../../engine/clipboard';
+import {
+  readVertAlignSupport,
+  toggleVertAlign,
+  type VertAlignKind,
+  type VertAlignSupport,
+} from '../../../engine/vert-align';
 import {
   DEFAULT_FONT_SIZE_PT,
   DEFAULT_LINE_HEIGHT,
@@ -711,6 +719,54 @@ async function doPaste(): Promise<void> {
 
 async function doSelectAll(): Promise<void> {
   report(await selectWholeDocument(superdoc.value), 'select-all');
+}
+
+/* ------------------------------------------------------------------ */
+/* כתב עליון וכתב תחתי                                                 */
+/* ------------------------------------------------------------------ */
+
+/**
+ * שני הפקדים היו `:disabled="true"` קשיח עם tooltip שהאשים את המנוע („אינו
+ * נתמך במנוע הנוכחי”). הטענה לא הייתה נכונה: `format.vertAlign` הוא פעולה
+ * ציבורית בקטלוג, ומה שחסר היה פקודה ברצועה. הם עוברים מעכשיו ב-Document API,
+ * בדיוק כמו פעולות הלוח שמעל — ההסבר המלא, כולל למה אין כאן חיווי „דלוק”,
+ * ב-engine/vert-align.ts.
+ *
+ * זמינות נפרדת מזו של הלוח: היא נשענת גם על נוכחות `doc.format.vertAlign`
+ * בפאסדה ולא רק על מפת היכולות, וזו בדיקה שהדוח הכללי אינו עושה.
+ */
+const vertAlign = shallowRef<VertAlignSupport>({ available: false, explanation: 'המסמך עדיין נטען' });
+
+/** ראו למעלה: תשובה של מסמך קודם לא תדרוס את הנוכחי. */
+let vertAlignGeneration = 0;
+
+watch(
+  superdoc,
+  async (host) => {
+    const mine = ++vertAlignGeneration;
+    vertAlign.value = { available: false, explanation: 'המסמך עדיין נטען' };
+    const support = await readVertAlignSupport(host);
+    if (mine === vertAlignGeneration) vertAlign.value = support;
+  },
+  { immediate: true }
+);
+
+const canSetVertAlign = computed(() => vertAlign.value.available);
+
+const VERT_ALIGN_TEXT: Record<VertAlignKind, string> = {
+  // התווית אומרת בדיוק מה הלחיצה עושה: היא מחילה על **הטקסט המסומן**, והיא
+  // מכבה בלחיצה שנייה. שני הדברים הם ההתנהגות שנמדדה, ולא הבטחה.
+  superscript: 'הרמת הטקסט המסומן לכתב עליון; לחיצה נוספת מחזירה אותו לשורה',
+  subscript: 'הנמכת הטקסט המסומן לכתב תחתי; לחיצה נוספת מחזירה אותו לשורה',
+};
+
+function vertAlignTooltip(kind: VertAlignKind): string {
+  if (canSetVertAlign.value) return VERT_ALIGN_TEXT[kind];
+  return vertAlign.value.explanation || 'המסמך עדיין נטען';
+}
+
+async function onVertAlign(kind: VertAlignKind): Promise<void> {
+  report(await toggleVertAlign(superdoc.value, kind), `vert-align-${kind}`);
 }
 </script>
 
