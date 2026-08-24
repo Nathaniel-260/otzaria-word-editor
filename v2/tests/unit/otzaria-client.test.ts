@@ -159,9 +159,10 @@ describe('on', () => {
 });
 
 describe('ה-latch ב-index.html', () => {
-  // הנרמול הוא מה שמפעיל את הבדיקה הראשונה בכלל: index.html נשמר ב-CRLF,
-  // וההשוואה שם מצפה למפריד שורה יחיד בתוך קריאת ה-addEventListener. בלעדיו
-  // הבדיקה נכשלה תמיד — כלומר שער הסדר של ה-latch לא היה שמור בפועל.
+  // הנרמול אינו מתקן כשל: במאגר עצמו index.html הוא LF, ובלעדיו הבדיקה
+  // עוברת. הוא הגנה על checkout ב-Windows עם `core.autocrlf=true`, שם
+  // ההשוואה למטה — שמצפה למפריד שורה יחיד בתוך קריאת ה-addEventListener —
+  // הייתה נכשלת על סימן שאינו בקובץ שנשמר.
   const html = readFileSync(join(process.cwd(), 'index.html'), 'utf8').replace(/\r\n/g, '\n');
 
   it('נרשם ל-plugin.boot בתוך ה-head, לפני סקריפט התוסף', () => {
