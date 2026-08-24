@@ -283,12 +283,16 @@ function onTab(event: KeyboardEvent): void {
   justify-content: flex-end;
 }
 
+/* הטקסט על הכפתור הממולא הוא `--color-on-primary` ולא לבן קבוע: זה בדיוק
+   התפקיד שלו ב-M3 („טקסט/אייקון בתוך אלמנטים בצבע primary”), והוא מגיע
+   מהערכה. `#ffffff` שהיה כאן נמדד במצב כהה כלבן על כחול-בהיר — כמעט בלתי
+   קריא, כי שם ה-primary עצמו בהיר וה-onPrimary שלו כהה. */
 .about-btn {
   padding: 4px 16px;
   font-size: 12px;
   font-family: var(--font-main);
   background: var(--word-blue);
-  color: #ffffff;
+  color: var(--color-on-primary);
   border: none;
   border-radius: var(--radius-xs);
   cursor: pointer;

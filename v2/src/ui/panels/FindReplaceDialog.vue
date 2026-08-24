@@ -404,9 +404,13 @@ function doReplaceAll(): void {
   border-color: var(--word-blue);
 }
 
+/* הטקסט על הכפתור הממולא הוא `--color-on-primary` ולא לבן קבוע: זה בדיוק
+   התפקיד שלו ב-M3 („טקסט/אייקון בתוך אלמנטים בצבע primary”), והוא מגיע
+   מהערכה. `#ffffff` שהיה כאן נמדד במצב כהה כלבן על כחול-בהיר — כמעט בלתי
+   קריא, כי שם ה-primary עצמו בהיר וה-onPrimary שלו כהה. */
 .fr-btn-primary {
   background: var(--word-blue);
-  color: #ffffff;
+  color: var(--color-on-primary);
   border-color: var(--word-blue);
 }
 
