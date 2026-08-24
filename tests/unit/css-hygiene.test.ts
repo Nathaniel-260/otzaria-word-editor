@@ -18,7 +18,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
-/** vitest רץ מ-v2/, ולכן src/ נמצא ביחס ל-cwd. */
+/** vitest רץ משורש המאגר, ולכן src/ נמצא ביחס ל-cwd. */
 const SRC = join(process.cwd(), 'src');
 
 function walk(dir: string, out: string[] = []): string[] {

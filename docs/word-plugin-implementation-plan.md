@@ -57,7 +57,7 @@
   [תשובת המפתחים ב־GitHub](https://github.com/superdoc/docx-editor/issues/3927#issuecomment-5383145303).
   הוא אינו שער עבודה.
   התוסף נשאר AGPL-3.0, שומר הודעות רישוי ומפרסם את המקור הזהה לבינארי.
-- `src/` הישן נשאר תקין ולא משתנה עד להחלפה הסופית. כל העבודה החדשה ב־`v2/`.
+- `src/` הישן נשאר תקין ולא משתנה עד להחלפה הסופית. כל העבודה החדשה בקוד החדש.
 - אין `contentEditable`, `document.execCommand`, מודל HTML מקביל, Mammoth או
   יצואן OOXML ידני בקוד החדש.
 - אין שמירת Blob/base64 ב־`storage`. ה־storage של אוצריא משמש רק להגדרות,
@@ -172,7 +172,7 @@ disabled. `table-fix` אינו נתמך ואינו מוצג.
 ### מבנה קבצים יעד
 
 ```text
-v2/
+.
 ├── docs/
 │   ├── spike.md
 │   ├── spike-windows.md
@@ -250,14 +250,14 @@ v2/
 
 מטרה: להוכיח שהמנוע וה־workers פועלים מתוסף ארוז לפני בניית Ribbon.
 
-> **בוצע חלקית.** התוצאות המלאות: [`v2/docs/spike.md`](../v2/docs/spike.md).
+> **בוצע חלקית.** התוצאות המלאות: [`docs/spike.md`](spike.md).
 > 0.1 ו־0.2 עברו, ו־0.4 נמדד ב־Chrome/macOS. **0.3 — שער A — לא עבר:** אין בו
 > חוסם ידוע, אבל הוא לא הורץ על תוסף ארוז ב־Windows/WebView2.
 
 ### 0.1 תיקון חוזה SuperDoc
 
 - [x] להסיר `createSuperDocUI` ואת הטיפוס הבעלים `SuperDocUI` מ־
-  `v2/src/engine/create-editor.ts`.
+  `src/engine/create-editor.ts`.
 - [x] ב־`onReady`, להשתמש במופע המוכן וב־`readySuperDoc.ui`.
       החתימה בפועל: `onReady?: (params: SuperDocReadyPayload) => void`, כלומר
       `({ superdoc }) => superdoc.ui`.
@@ -278,7 +278,7 @@ v2/
 
 - [x] ליצור `tests/contract/superdoc-commands.test.ts`.
 - [x] לרשום רק command IDs שהממשק באמת משתמש בהם — 47 מזהים ב־
-      `v2/src/engine/capabilities.ts`, מחולקים לפי תחום.
+      `src/engine/capabilities.ts`, מחולקים לפי תחום.
 - [x] לכל מזהה לבדוק `ui.commands.has(id)`. **תיקון לתכנית:** `has` לבדו אינו
       מספיק — הוא מחזיר `true` גם ל־`table-fix`. ההבחנה היא `state.source`:
       `'unsupported'` מול `'builtin'`. וזה גם מייתר את ההמתנה ל־`onReady`:
@@ -299,7 +299,7 @@ v2/
 
 **מצב: השער לא עבר. אין חוסם ידוע; לא הורץ על Windows.** כל המדידות להלן הן
 ב־Google Chrome headless על macOS, על `dist` מוגשת ישירות — לא בתוסף ארוז ולא
-ב־WebView2. התיעוד: [`v2/docs/spike-windows.md`](../v2/docs/spike-windows.md).
+ב־WebView2. התיעוד: [`docs/spike-windows.md`](spike-windows.md).
 
 מנוע ה־DOCX יוצר את ה־worker שלו כ־`new Worker(url, { type: 'module' })` בכל
 מקומות הקריאה. השילובים נמדדו על האריזה האמיתית ב־Chromium:
@@ -334,7 +334,7 @@ v2/
 
 ### 0.4 גודל וביצועים — שער B
 
-נמדד על macOS ב־Chromium (מלא: `v2/docs/spike.md` §4):
+נמדד על macOS ב־Chromium (מלא: `docs/spike.md` §4):
 
 | מה | ערך |
 |---|---|
@@ -486,7 +486,7 @@ Otzaria.call('fs.revokePluginFile', { token })
 - [ ] Windows, macOS ו־Linux; mobile לפני הכרזת תמיכה mobile.
 - [ ] `flutter analyze` וכל בדיקות plugin SDK עוברות במאגר אוצריא.
 
-לאחר המיזוג, מעדכנים את `v2/src/types/otzaria_plugin.d.ts` מהמקור ואת
+לאחר המיזוג, מעדכנים את `src/types/otzaria_plugin.d.ts` מהמקור ואת
 `minAppVersion` לגרסת אוצריא הראשונה שמכילה את ה־API. אין לנחש מספר גרסה.
 
 ---
@@ -548,8 +548,8 @@ interface DocumentSession {
 
 אין bytes בתוך האובייקט המתמיד. בזמן ריצה בלבד מותר לשמור Blob זמני.
 
-> מומש ב־`v2/src/sessions/save-coordinator.ts` ובמעטפת. מה שנשאר פתוח מסומן
-> להלן, ובדיקות ידניות ב־`v2/docs/spike-windows.md`.
+> מומש ב־`src/sessions/save-coordinator.ts` ובמעטפת. מה שנשאר פתוח מסומן
+> להלן, ובדיקות ידניות ב־`docs/spike-windows.md`.
 
 ### 9.2 פתיחה
 
@@ -825,7 +825,7 @@ interface DocumentSession {
 
 ### 17.1 Fixtures
 
-ליצור 10–15 מסמכים סינתטיים או מורשים ב־`v2/docs/fixtures/`; אין להכניס מסמכים
+ליצור 10–15 מסמכים סינתטיים או מורשים ב־`docs/fixtures/`; אין להכניס מסמכים
 פרטיים או ספרים מוגנים. כל fixture מתעד מה הוא בודק ומה צפוי להישמר.
 
 הכיסוי המינימלי:
@@ -887,7 +887,7 @@ interface DocumentSession {
 - [ ] `minAppVersion` תואם ל־SDK write API.
 - [ ] permissions מינימליות ומוסברות למשתמש.
 - [ ] אין source maps עם נתיבים מקומיים או fixtures פרטיים.
-- [ ] release workflow בונה מ־`v2/` בלבד ומצרף checksum.
+- [ ] release workflow בונה מהשורש ומצרף checksum.
 - [ ] רק עכשיו מחליפים את נתיב הבנייה הישן; `src/` נשמר tag אחד לפחות ל־rollback.
 
 ---

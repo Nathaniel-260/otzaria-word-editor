@@ -8,7 +8,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
-// vitest רץ עם root=v2, ולכן cwd הוא שורש הפרויקט.
+// vitest רץ משורש המאגר, ולכן cwd הוא השורש.
 const SRC = join(process.cwd(), 'src');
 
 function sourceFiles(dir = SRC): string[] {

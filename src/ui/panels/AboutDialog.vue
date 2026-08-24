@@ -91,14 +91,14 @@
  * ל-`import` של package.json מסלול נקי כאן (`resolveJsonModule` ב-tsconfig
  * ו-`define` ב-vite.config.ts הם שינויי תשתית שנוגעים בשערי הבנייה, ואינם
  * שווים את זה בשביל שני מספרים) — אבל הם קבועים בשם, ומקור האמת מתועד:
- * `version` ו-`dependencies.superdoc` ב-v2/package.json. הדריפט עצמו נתפס
+ * `version` ו-`dependencies.superdoc` ב-package.json. הדריפט עצמו נתפס
  * בבדיקה: tests/component/dialogs.test.ts משווה את המוצג לקבצי החבילה, ולכן
  * שדרוג גרסה שישכח את הדיאלוג ייפול אדום.
  */
 import { nextTick, ref, watch } from 'vue';
 import SvgIcon from '../icons/SvgIcon.vue';
 
-/** ראו ההסבר למעלה: מקור האמת הוא v2/package.json. */
+/** ראו ההסבר למעלה: מקור האמת הוא package.json. */
 const APP_VERSION = '2.0.0';
 const ENGINE_VERSION = '2.8.0';
 

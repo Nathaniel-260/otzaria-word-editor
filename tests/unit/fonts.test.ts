@@ -8,7 +8,7 @@ import {
   installBundledFonts,
 } from '../../src/styles/fonts';
 
-/** vitest רץ מ-v2/, ולכן public/ נמצא ביחס ל-cwd. */
+/** vitest רץ משורש המאגר, ולכן public/ נמצא ביחס ל-cwd. */
 const FONT_DIR = join(process.cwd(), 'public', 'fonts');
 
 /**

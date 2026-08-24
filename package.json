@@ -1,8 +1,8 @@
 {
-  "name": "otzaria-word-editor-v2",
+  "name": "otzaria-word-editor",
   "private": true,
   "version": "2.0.0",
-  "description": "עורך Word לאוצריא על מנוע SuperDoc v2",
+  "description": "עורך Word לאוצריא על מנוע SuperDoc",
   "license": "AGPL-3.0-only",
   "scripts": {
     "dev": "vite",

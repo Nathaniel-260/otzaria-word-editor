@@ -16,7 +16,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { READER_PERMISSIONS } from '../../src/host/otzaria-reader';
 
-/** vitest רץ מ-v2/, ולכן public/ נמצא ביחס ל-cwd. */
+/** vitest רץ משורש המאגר, ולכן public/ נמצא ביחס ל-cwd. */
 const manifest = JSON.parse(
   readFileSync(join(process.cwd(), 'public/manifest.json'), 'utf8'),
 ) as { permissions?: string[]; minAppVersion?: string };

@@ -574,7 +574,7 @@ describe('משקל אופטי', () => {
   });
 });
 
-// vitest רץ עם root=v2, ולכן cwd הוא שורש הפרויקט (כמו ב-engine-boundaries).
+// vitest רץ משורש המאגר, ולכן cwd הוא השורש (כמו ב-engine-boundaries).
 const SRC = join(process.cwd(), 'src');
 
 function vueFiles(dir = SRC): string[] {

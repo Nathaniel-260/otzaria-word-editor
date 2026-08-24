@@ -1,37 +1,28 @@
-# בנייה, אריזה ופרסום של תוסף v2 (מנוע SuperDoc).
+# בנייה, אריזה ופרסום של התוסף.
 #
 # שני ערוצים באותה ריצה:
 #   • ערוץ dev  — בכל קומיט ל-main נבנה .otzplugin ומתעדכן ב-Release
 #                 הקבוע `v2-dev` (prerelease), כדי שתמיד יש קובץ להורדה.
-#   • ערוץ יציב — כשהגרסה ב-v2/public/manifest.json עולה ואין עדיין Release
+#   • ערוץ יציב — כשהגרסה ב-public/manifest.json עולה ואין עדיין Release
 #                 בשם v<גרסה>, נוצר Release אמיתי, ואם הסודות מוגדרים גם
 #                 מתבצע פרסום לחנות otzaria.org דרך ה-action הרשמי.
-#
-# ה-Release של v1 (תג v*) מטופל ב-release.yml ולא נוגעים בו כאן.
-name: Release v2
+name: Release
 
 on:
   push:
     branches: [main]
-    paths:
-      - 'v2/**'
-      - '.github/workflows/release-v2.yml'
   workflow_dispatch:
 
 permissions:
   contents: write
 
 concurrency:
-  group: release-v2-${{ github.ref }}
+  group: release-${{ github.ref }}
   cancel-in-progress: true
-
-defaults:
-  run:
-    working-directory: v2
 
 jobs:
   release:
-    name: Validate, package & release (v2)
+    name: Validate, package & release
     runs-on: ubuntu-latest
     # ברמת ה-job כדי שה-`if` של שלב הפרסום יוכל לקרוא אותם: הקשר secrets
     # אינו זמין ב-if, ו-env של שלב אינו נראה ל-if של אותו שלב עצמו.
@@ -48,7 +39,7 @@ jobs:
         with:
           node-version: '20'
           cache: npm
-          cache-dependency-path: v2/package-lock.json
+          cache-dependency-path: package-lock.json
 
       - name: Install dependencies
         run: npm ci
@@ -59,7 +50,7 @@ jobs:
       - name: Test
         run: npm test
 
-      - name: Build (Vite -> v2/dist)
+      - name: Build (Vite -> dist)
         run: npm run build
 
       - name: Check dist
@@ -86,7 +77,7 @@ jobs:
           set -euo pipefail
           version="$(node -p "require('./public/manifest.json').version")"
           if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "גרסה לא תקינה ב-v2/public/manifest.json: '$version' (מצופה X.Y.Z)" >&2
+            echo "גרסה לא תקינה ב-public/manifest.json: '$version' (מצופה X.Y.Z)" >&2
             exit 1
           fi
           echo "version=$version"        >> "$GITHUB_OUTPUT"
@@ -115,7 +106,7 @@ jobs:
       - name: Validate against the live Otzaria SDK spec
         uses: Otzaria/otzaria-plugin-validator@v1
         with:
-          path: v2/dist
+          path: dist
           publish: 'false'
           fail-on-warnings: 'true'
 
@@ -125,9 +116,9 @@ jobs:
         id: pack
         run: |
           set -euo pipefail
-          mkdir -p ../out
-          dev="$PWD/../out/otzaria-word-editor-v2-dev.otzplugin"
-          tagged="$PWD/../out/otzaria-word-editor-v${{ steps.meta.outputs.version }}.otzplugin"
+          mkdir -p out
+          dev="$PWD/out/otzaria-word-editor-v2-dev.otzplugin"
+          tagged="$PWD/out/otzaria-word-editor-v${{ steps.meta.outputs.version }}.otzplugin"
           (cd dist && zip -r -q -X "$dev" . -x '*-tmp.html' -x '*.map')
           cp "$dev" "$tagged"
           sha="$(sha256sum "$dev" | cut -d' ' -f1)"
@@ -195,7 +186,7 @@ jobs:
         if: ${{ steps.release_check.outputs.exists == 'false' && env.OTZARIA_USER != '' && env.OTZARIA_PASSWORD != '' }}
         uses: Otzaria/otzaria-plugin-validator@v1
         with:
-          path: v2/dist
+          path: dist
           otzaria-user: ${{ secrets.OTZARIA_USER }}
           otzaria-password: ${{ secrets.OTZARIA_PASSWORD }}
 

@@ -22,7 +22,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pageLabel, wordCountLabel } from '../../src/composables/shell-format';
 
-/** vitest רץ מ-v2/, ולכן src/ נמצא ביחס ל-cwd. */
+/** vitest רץ משורש המאגר, ולכן src/ נמצא ביחס ל-cwd. */
 const SRC = join(process.cwd(), 'src');
 
 /** ההערות מוסרות: התיעוד מסביר מה **היה** שם, וההסבר אינו הפרה. */

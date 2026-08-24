@@ -241,7 +241,7 @@ describe('LinkDialog', () => {
 });
 
 describe('AboutDialog', () => {
-  /** vitest רץ מ-v2/, ולכן package.json נמצא ביחס ל-cwd. */
+  /** vitest רץ משורש המאגר, ולכן package.json נמצא ביחס ל-cwd. */
   const pkg = JSON.parse(readFileSync(join(process.cwd(), 'package.json'), 'utf8')) as {
     version: string;
     dependencies: Record<string, string>;

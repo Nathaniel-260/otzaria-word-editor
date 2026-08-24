@@ -3,7 +3,7 @@
  *
  * ## מה היה כאן
  *
- * `onPrint()` היה `window.print()` בשורה אחת, ובכל `v2/src` וב-`v2/index.html`
+ * `onPrint()` היה `window.print()` בשורה אחת, ובכל `src/` וב-`index.html`
  * לא היה אף `@media print` ואף `@page`. כלומר הכפתור הדפיס את **הממשק**: נמדד
  * ב-CDP (`Emulation.setEmulatedMedia: print` + `Page.printToPDF`) על ה-dist
  * הארוז שהפלט מכיל את פס הכותרת עם הלוגו, את שמונה לשוניות הרצועה, את גלריית

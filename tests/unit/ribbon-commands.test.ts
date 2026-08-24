@@ -21,7 +21,7 @@ import type { CommandExecutionResult, CommandState } from 'superdoc/ui';
 import { createCommandAdapter } from '../../src/engine/command-adapter';
 import { COMMAND_IDS } from '../../src/engine/capabilities';
 
-// vitest רץ עם root=v2, ולכן cwd הוא שורש הפרויקט.
+// vitest רץ משורש המאגר, ולכן cwd הוא השורש.
 const SRC = join(process.cwd(), 'src');
 
 function sourceFiles(dir = SRC): string[] {

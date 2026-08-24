@@ -23,7 +23,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-/** vitest רץ מ-v2/, ולכן src/ נמצא ביחס ל-cwd. */
+/** vitest רץ משורש המאגר, ולכן src/ נמצא ביחס ל-cwd. */
 const TABS = join(process.cwd(), 'src/ui/ribbon/tabs');
 
 const FILES = [

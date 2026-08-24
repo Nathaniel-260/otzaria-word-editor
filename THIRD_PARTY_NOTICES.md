@@ -266,7 +266,7 @@ MDL2 היא הספרייה של Office UI Fabric שיצאה משימוש, System
 | vue (ו-`@vue/*`) | 3.5.41 | MIT |
 | pinia | 3.0.4 | MIT |
 
-הרשימה נמדדת מהפלט, לא מהצהרה: `grep '@license' v2/dist/assets/app.js` מציג את
+הרשימה נמדדת מהפלט, לא מהצהרה: `grep '@license' dist/assets/app.js` מציג את
 מה שנארז בפועל. אם תיווסף תלות עם רישיון שאינו MIT/BSD/ISC — יש לתעד אותה כאן
 לפני פרסום.
 
