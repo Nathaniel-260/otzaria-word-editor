@@ -1,16 +1,55 @@
 import { describe, expect, it } from 'vitest';
-import { existsSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   BUNDLED_FAMILIES,
   BUNDLED_FILES,
-  UNICODE_RANGE,
   bundledFontFaceCss,
   installBundledFonts,
 } from '../../src/styles/fonts';
 
 /** vitest רץ מ-v2/, ולכן public/ נמצא ביחס ל-cwd. */
 const FONT_DIR = join(process.cwd(), 'public', 'fonts');
+
+/**
+ * האם ה-cmap של קובץ ה-TTF ממפה מתו מהבלוק העברי (U+0590-05FF)? נקרא ישירות
+ * מהטבלאות ולא דרך ספרייה: הבדיקה צריכה להעיד על הבייטים שנארזים בפועל.
+ * נתמכים פורמט 4 (BMP) ופורמט 12, שני הפורמטים שגופני Google Fonts מוציאים.
+ */
+function hasHebrewCmap(font: Buffer): boolean {
+  const numTables = font.readUInt16BE(4);
+  let cmapOffset = 0;
+  for (let i = 0; i < numTables; i++) {
+    const record = 12 + i * 16;
+    if (font.toString('ascii', record, record + 4) === 'cmap') {
+      cmapOffset = font.readUInt32BE(record + 8);
+      break;
+    }
+  }
+  if (!cmapOffset) return false;
+
+  const numSubtables = font.readUInt16BE(cmapOffset + 2);
+  for (let i = 0; i < numSubtables; i++) {
+    const sub = cmapOffset + font.readUInt32BE(cmapOffset + 4 + i * 8 + 4);
+    const format = font.readUInt16BE(sub);
+    if (format === 4) {
+      const segCount = font.readUInt16BE(sub + 6) / 2;
+      for (let s = 0; s < segCount; s++) {
+        const end = font.readUInt16BE(sub + 14 + s * 2);
+        const start = font.readUInt16BE(sub + 16 + segCount * 2 + s * 2);
+        if (start <= 0x5d0 && 0x5d0 <= end) return true;
+      }
+    } else if (format === 12) {
+      const nGroups = font.readUInt32BE(sub + 12);
+      for (let g = 0; g < nGroups; g++) {
+        const start = font.readUInt32BE(sub + 16 + g * 12);
+        const end = font.readUInt32BE(sub + 20 + g * 12);
+        if (start <= 0x5d0 && 0x5d0 <= end) return true;
+      }
+    }
+  }
+  return false;
+}
 
 describe('bundledFontFaceCss', () => {
   it('מצהיר על כל משקל בכל שם', () => {
@@ -26,11 +65,10 @@ describe('bundledFontFaceCss', () => {
     }
   });
 
-  it('מצהיר על „Segoe UI” כשם התאמה — בלעדיו מסמך Word לא מקבל את המטריקות', () => {
-    // זו כל הסיבה שהגופן נארז. הסרת השם הזה הופכת את האריזה לחסרת תועלת
-    // למסמכים, ומשאירה רק את הטקסט הלטיני של הממשק.
-    expect(BUNDLED_FAMILIES).toContain('Segoe UI');
-    expect(BUNDLED_FAMILIES).toContain('Selawik');
+  it('מצהיר על „Assistant” — השם שבו --font-main קורא לגופן', () => {
+    // אי-התאמה בין השם כאן לשם ב-tokens.css פירושה גופן ארוז שאף אחד לא
+    // מבקש, כלומר ממשק שנופל לגופן המערכת.
+    expect(BUNDLED_FAMILIES).toEqual(['Assistant']);
   });
 
   it('אותו קובץ משרת את שני השמות', () => {
@@ -50,25 +88,21 @@ describe('bundledFontFaceCss', () => {
     expect(css).toContain('font-display:swap');
   });
 
-  it('מצהיר unicode-range שאינו כולל את הבלוק העברי', () => {
-    // בלי זה, השם „Segoe UI” נחטף גם לעברית — וב-Windows, שבו Segoe UI האמיתי
-    // מותקן ויש בו עברית, טקסט עברי במסמך היה מפסיק לקבל אותו.
-    const css = bundledFontFaceCss();
-    expect(css).toContain(`unicode-range:${UNICODE_RANGE}`);
-
-    const ranges = UNICODE_RANGE.split(',').map((part) => part.trim());
-    const covers = (code: number) =>
-      ranges.some((range) => {
-        const [from, to] = range.replace('U+', '').split('-');
-        return code >= parseInt(from!, 16) && code <= parseInt(to ?? from!, 16);
-      });
-
-    expect(covers(0x41)).toBe(true); // A
-    expect(covers(0x5d0)).toBe(false); // א
-    expect(covers(0x5b0)).toBe(false); // שווא
+  it('אינו מצהיר unicode-range — Assistant מכסה גם עברית וגם לטינית', () => {
+    // הגופן הקודם (Selawik) חייב טווחים, מפני שהוא הוצהר גם בשם „Segoe UI”
+    // ואין בו עברית. Assistant מוצהר בשמו בלבד ומכסה את שני הכתבים, ולכן טווח
+    // כאן היה רק מונע ממתווים שיש בגופן לקבל אותו.
+    expect(bundledFontFaceCss()).not.toContain('unicode-range');
   });
 
-  it('אינו מצהיר על נטוי — Selawik אינו מספק פנים כזאת', () => {
+  it('מכסה בפועל את הבלוק העברי', () => {
+    // זו הסיבה להחלפה: העברית — כמעט כל מה שייכתב בתוסף — חייבת לבוא מהגופן
+    // הארוז ולא מ-fallback שרירותי של המערכת.
+    const font = readFileSync(join(FONT_DIR, 'Assistant-Regular.ttf'));
+    expect(hasHebrewCmap(font)).toBe(true);
+  });
+
+  it('אינו מצהיר על נטוי — האריזה כוללת רק פנים זקופות', () => {
     // הצהרת italic שמצביעה על הפנים הרגילה הייתה מונעת מהדפדפן להטות אותה
     // סינתטית, כלומר טקסט נטוי היה נראה זקוף.
     expect(bundledFontFaceCss()).not.toContain('italic');
@@ -95,7 +129,7 @@ describe('installBundledFonts', () => {
 
     const styles = doc.head.querySelectorAll('style');
     expect(styles).toHaveLength(1);
-    expect(styles[0]!.textContent).toContain("font-family:'Selawik'");
+    expect(styles[0]!.textContent).toContain("font-family:'Assistant'");
   });
 
   it('אידמפוטנטי — קריאה שנייה אינה מכפילה את ההצהרות', () => {
@@ -127,6 +161,6 @@ describe('הקבצים שנארזים', () => {
 
   it('נוסח ה-OFL נארז לצד הגופן', () => {
     // סעיף 2 ב-OFL: אין להפיץ את הגופן בלי נוסח הרישיון.
-    expect(existsSync(join(process.cwd(), 'public/third-party/SELAWIK-LICENSE.txt'))).toBe(true);
+    expect(existsSync(join(process.cwd(), 'public/third-party/ASSISTANT-LICENSE.txt'))).toBe(true);
   });
 });

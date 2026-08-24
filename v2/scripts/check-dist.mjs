@@ -135,7 +135,12 @@ for (const rel of ENGINE_BEARING_FILES) {
  *
  * רישיון ה-OFL מחייב שנוסח הרישיון יופץ עם הגופן, ולכן גם הוא נבדק.
  */
-const FONT_FILES = ['selawk.ttf', 'selawksb.ttf', 'selawkb.ttf'];
+const FONT_FILES = [
+  'Assistant-Regular.ttf',
+  'Assistant-Medium.ttf',
+  'Assistant-SemiBold.ttf',
+  'Assistant-Bold.ttf',
+];
 const appJsPath = join(DIST, 'assets/app.js');
 const appJs = existsSync(appJsPath) ? readFileSync(appJsPath, 'utf8') : '';
 
@@ -146,8 +151,8 @@ for (const file of FONT_FILES) {
   }
 }
 
-if (!existsSync(join(DIST, 'third-party/SELAWIK-LICENSE.txt'))) {
-  errors.push('חסר third-party/SELAWIK-LICENSE.txt — ה-OFL מחייב להפיץ את הרישיון עם הגופן');
+if (!existsSync(join(DIST, 'third-party/ASSISTANT-LICENSE.txt'))) {
+  errors.push('חסר third-party/ASSISTANT-LICENSE.txt — ה-OFL מחייב להפיץ את הרישיון עם הגופן');
 }
 
 // שערי הבדיקה כותבים דפי HTML זמניים לתוך dist (scripts/font-check.html

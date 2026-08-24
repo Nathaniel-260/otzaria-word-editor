@@ -324,6 +324,9 @@ defineEmits<{
 
 // רשימות גופנים וגדלים
 const FONT_FAMILIES: SelectOption[] = [
+  // Assistant נארז עם התוסף (styles/fonts.ts) ולכן זמין בכל פלטפורמה; השאר
+  // תלויים במה שמותקן במערכת או במה שאוצריא מזריקה.
+  { value: 'Assistant', label: 'Assistant' },
   { value: 'Segoe UI', label: 'Segoe UI' },
   { value: 'Aptos', label: 'Aptos' },
   { value: 'FrankRuhlCLM', label: 'Frank Ruhl' },

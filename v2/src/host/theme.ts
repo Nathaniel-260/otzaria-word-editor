@@ -72,14 +72,14 @@ export function applyTheme(theme: ThemePayload): void {
   }
 
   // הגופנים של אוצריא מוזרקים כ-@font-face לפני plugin.boot — אין לארוז אותם.
-  // מה שכן ארוז הוא 'Selawik' (styles/fonts.ts), והוא יושב **אחרי** בחירת
-  // המשתמש: הבחירה שלו קודמת. אין בו עברית, ולכן הוא תופס בפועל רק טקסט לטיני
-  // בממשק; 'David' ו-serif נשארים בסוף השרשרת בשביל העברית.
+  // מה שכן ארוז הוא 'Assistant' (styles/fonts.ts), והוא יושב **אחרי** בחירת
+  // המשתמש: הבחירה שלו קודמת. יש בו עברית, ולכן משם והלאה השרשרת כבר לא
+  // תלויה במערכת; 'David' ו-serif נשארים בסוף בשביל מה שאין בו.
   const typography = theme.typography;
   if (typography?.fontFamily) {
     root.style.setProperty(
       '--font-main',
-      `'${typography.fontFamily}', 'Selawik', 'David', serif`,
+      `'${typography.fontFamily}', 'Assistant', 'David', serif`,
     );
   }
   if (typeof typography?.fontSize === 'number' && typography.fontSize > 0) {

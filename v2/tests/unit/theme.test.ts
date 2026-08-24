@@ -62,14 +62,14 @@ describe('applyTheme', () => {
   });
 
   it('בחירת המשתמש קודמת לגופן הארוז, והארוז קודם ל-fallback', () => {
-    // הסדר הוא ההתנהגות: אם 'Selawik' יעלה לפני בחירת המשתמש, הבחירה שלו
-    // בהגדרות אוצריא תפסיק להשפיע על הממשק. ו-'David' חייב להישאר אחרון, כי
-    // ב-Selawik אין עברית והוא זה שיתפוס אותה.
+    // הסדר הוא ההתנהגות: אם 'Assistant' יעלה לפני בחירת המשתמש, הבחירה שלו
+    // בהגדרות אוצריא תפסיק להשפיע על הממשק. 'David' נשאר אחרון כ-fallback
+    // למתווים שאין גם בגופן הארוז.
     applyTheme(FULL);
 
     const chain = cssVar('--font-main');
-    expect(chain.indexOf('FrankRuhlCLM')).toBeLessThan(chain.indexOf('Selawik'));
-    expect(chain.indexOf('Selawik')).toBeLessThan(chain.indexOf('David'));
+    expect(chain.indexOf('FrankRuhlCLM')).toBeLessThan(chain.indexOf('Assistant'));
+    expect(chain.indexOf('Assistant')).toBeLessThan(chain.indexOf('David'));
   });
 
   it('גוזר את גוני ה-subtle מהצבעים', () => {

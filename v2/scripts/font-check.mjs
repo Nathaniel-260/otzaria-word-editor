@@ -7,9 +7,8 @@
  *
  * מה שנמדד, ולמה דווקא זה: `document.fonts.check()` **אינו עדות** — נמדד שהוא
  * מחזיר `true` גם בדף בלי שום `@font-face`, על מכונה שאין בה את הגופן. מה
- * שמפריד הוא רוחב טקסט על canvas מול serif. ורוחב תחת השם `Segoe UI` הוא מה
- * שמוכיח שההתאמה עובדת: זה שם שאין לו קובץ ב-macOS, ואם הוא מודד אחרת מ-serif
- * — הגליפים באו מהקובץ הארוז.
+ * שמפריד הוא רוחב טקסט על canvas מול serif — בלטינית וגם בעברית, מפני
+ * ש-Assistant מכסה את שניהם ועברית היא כמעט כל מה שייכתב בתוסף הזה.
  *
  *   npm run build && npm run check:fonts
  */
@@ -27,14 +26,12 @@ if (!existsSync(INDEX)) {
 }
 requireChrome();
 
-/** שני השמות ושלושת המשקלים. אין נטוי: Selawik אינו מספק פנים כזאת. */
+/** ארבעת המשקלים שנארזים. אין נטוי: האריזה כוללת רק פנים זקופות. */
 const SPECS = [
-  '400 16px "Selawik"',
-  '600 16px "Selawik"',
-  '700 16px "Selawik"',
-  '400 16px "Segoe UI"',
-  '600 16px "Segoe UI"',
-  '700 16px "Segoe UI"',
+  '400 16px "Assistant"',
+  '500 16px "Assistant"',
+  '600 16px "Assistant"',
+  '700 16px "Assistant"',
 ];
 
 const PROBE = `(async function () {
@@ -47,28 +44,36 @@ const PROBE = `(async function () {
   var results = [];
   for (var s = 0; s < specs.length; s++) {
     try {
-      // טקסט לטיני בכוונה: אין בגופן עברית, ובקשה לעברית לא תטען אותו.
-      var faces = await document.fonts.load(specs[s], 'ABC');
+      // לטינית ועברית יחד: הגופן מכסה את שניהם, ובקשה למתו שאינו בגופן
+      // לא הייתה טוענת אותו.
+      var faces = await document.fonts.load(specs[s], 'ABC \u05d0\u05d1\u05d2');
       results.push({ spec: specs[s], loaded: faces.length });
     } catch (e) {
       results.push({ spec: specs[s], error: String(e) });
     }
   }
 
-  function width(family) {
+  function width(family, text) {
     var c = document.createElement('canvas').getContext('2d');
     c.font = '40px ' + family;
-    return c.measureText('Handgloves Wgm').width;
+    return c.measureText(text).width;
   }
+  var LATIN = 'Handgloves Wgm';
+  var HEBREW = '\u05d0\u05d5\u05e6\u05e8\u05d9\u05d0 \u05e2\u05d5\u05e8\u05da';
 
   return {
     injected: true,
     origin: location.protocol,
     results: results,
-    fontsSize: document.fonts.size,
-    widthSelawik: width('"Selawik", serif'),
-    widthSegoeAlias: width('"Segoe UI", serif'),
-    widthSerif: width('serif')
+    ours: (function () {
+      var n = 0;
+      document.fonts.forEach(function (face) { if (face.family === 'Assistant') n++; });
+      return n;
+    })(),
+    widthLatin: width('"Assistant", serif', LATIN),
+    widthLatinSerif: width('serif', LATIN),
+    widthHebrew: width('"Assistant", serif', HEBREW),
+    widthHebrewSerif: width('serif', HEBREW)
   };
 })()`;
 
@@ -91,25 +96,28 @@ if (!report?.injected) {
       errors.push(`הפנים ${result.spec} לא נטענה (${result.error ?? `loaded=${result.loaded}`})`);
     }
   }
-  if (report.fontsSize !== SPECS.length) {
-    errors.push(`document.fonts מכיל ${report.fontsSize} פנים, צפוי ${SPECS.length}`);
+  // נספרות רק הפנים שלנו: SuperDoc רושם פנים משלו
+  // (`__superdoc_core_symbols__`), והן אינן ענייננו. פנים שלנו בכפל פירושה
+  // הזרקה שרצה פעמיים.
+  if (report.ours !== SPECS.length) {
+    errors.push(`document.fonts מכיל ${report.ours} פנים של Assistant, צפוי ${SPECS.length}`);
   }
-  if (report.widthSelawik === report.widthSerif) {
-    errors.push('רוחב הטקסט ב-Selawik זהה ל-serif — הקובץ לא נטען בפועל');
+  if (report.widthLatin === report.widthLatinSerif) {
+    errors.push('רוחב הטקסט הלטיני ב-Assistant זהה ל-serif — הקובץ לא נטען בפועל');
   }
-  if (report.widthSegoeAlias === report.widthSerif) {
-    errors.push('רוחב הטקסט תחת „Segoe UI” זהה ל-serif — ההתאמה אינה עובדת');
+  if (report.widthHebrew === report.widthHebrewSerif) {
+    errors.push('רוחב הטקסט העברי ב-Assistant זהה ל-serif — העברית לא באה מהגופן הארוז');
   }
 }
 
 console.log(
-  `origin=${report?.origin ?? '?'} fonts=${report?.fontsSize ?? 0} ` +
-    `Selawik=${report?.widthSelawik}px Segoe-alias=${report?.widthSegoeAlias}px ` +
-    `serif=${report?.widthSerif}px`,
+  `origin=${report?.origin ?? '?'} faces=${report?.ours ?? 0} ` +
+    `latin=${report?.widthLatin}px (serif ${report?.widthLatinSerif}px) ` +
+    `hebrew=${report?.widthHebrew}px (serif ${report?.widthHebrewSerif}px)`,
 );
 
 if (errors.length) {
   for (const error of errors) console.error(`שגיאה: ${error}`);
   process.exit(1);
 }
-console.log('שער הגופן עבר: הגופן הארוז נטען מ-file:// בשני השמות ובכל המשקלים.');
+console.log('שער הגופן עבר: הגופן הארוז נטען מ-file:// בכל המשקלים, בלטינית ובעברית.');
