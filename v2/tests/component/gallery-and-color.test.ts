@@ -366,6 +366,141 @@ describe('RibbonMenuButton', () => {
 });
 
 describe('TablePicker', () => {
+  /** פותחת את הבורר ומחזירה את הגריד. */
+  async function openGrid(harness: ReturnType<typeof mountUi>) {
+    await harness.wrapper.find('button').trigger('click');
+    await settle();
+    return harness.wrapper.find('[role="grid"]');
+  }
+
+  it('הגריד הוא פקד עם סמנטיקה, ולא מאה div ריקים', async () => {
+    // זה מה שהיה: `<div class="grid-cell" @click>` ×100, בלי role, בלי שם
+    // ובלי דרך להגיע אליו במקלדת.
+    const harness = mountUi(TablePicker);
+    const grid = await openGrid(harness);
+
+    expect(grid.attributes('aria-label')).toBe('בחירת מידות הטבלה');
+    expect(harness.wrapper.findAll('[role="row"]')).toHaveLength(10);
+
+    const cells = harness.wrapper.findAll('[role="gridcell"]');
+    expect(cells).toHaveLength(100);
+    expect(cells[0].attributes('aria-label')).toBe('עמודה אחת על שורה אחת');
+    expect(cells[12].attributes('aria-label')).toBe('3 עמודות על 2 שורות');
+
+    const header = harness.wrapper.find('.table-picker-header');
+    expect(header.attributes('role')).toBe('status');
+    expect(header.attributes('aria-live')).toBe('polite');
+  });
+
+  it('נקודת Tab אחת לכל הגריד, ולא אחת לכל תא', async () => {
+    const harness = mountUi(TablePicker);
+    const grid = await openGrid(harness);
+
+    expect(grid.attributes('tabindex')).toBe('0');
+    for (const cell of harness.wrapper.findAll('[role="gridcell"]')) {
+      expect(cell.attributes('tabindex')).toBeUndefined();
+    }
+  });
+
+  it('כניסה במקלדת מעמידה את הסמן על 1×1, כדי שיהיה מה לאשר', async () => {
+    const harness = mountUi(TablePicker);
+    const grid = await openGrid(harness);
+    expect(harness.wrapper.find('.table-picker-header').text()).toBe('הוסף טבלה');
+
+    (grid.element as HTMLElement).focus();
+    await settle();
+
+    expect(grid.attributes('aria-activedescendant')).toBe('table-picker-cell-1-1');
+    expect(harness.wrapper.find('.table-picker-header').text()).toBe('טבלה 1 × 1');
+    expect(
+      harness.wrapper.findAll('[aria-selected="true"]'),
+      'בדיוק תא אחת מסומן',
+    ).toHaveLength(1);
+  });
+
+  it('החצים משנים מידות, ו-ArrowLeft מוסיף עמודה — הכיוון החזותי ב-RTL', async () => {
+    const harness = mountUi(TablePicker);
+    const grid = await openGrid(harness);
+    (grid.element as HTMLElement).focus();
+    await settle();
+
+    await grid.trigger('keydown', { key: 'ArrowLeft' });
+    await grid.trigger('keydown', { key: 'ArrowLeft' });
+    await grid.trigger('keydown', { key: 'ArrowDown' });
+
+    expect(harness.wrapper.find('.table-picker-header').text()).toBe('טבלה 3 × 2');
+    expect(grid.attributes('aria-activedescendant')).toBe('table-picker-cell-2-3');
+    expect(harness.wrapper.findAll('[aria-selected="true"]')).toHaveLength(6);
+
+    // ArrowRight חוזר, כמו בסרגל הלשוניות.
+    await grid.trigger('keydown', { key: 'ArrowRight' });
+    expect(harness.wrapper.find('.table-picker-header').text()).toBe('טבלה 2 × 2');
+  });
+
+  it('הניווט אינו יוצא מהגריד לשום כיוון', async () => {
+    const harness = mountUi(TablePicker);
+    const grid = await openGrid(harness);
+    (grid.element as HTMLElement).focus();
+    await settle();
+
+    for (let step = 0; step < 4; step += 1) {
+      await grid.trigger('keydown', { key: 'ArrowUp' });
+      await grid.trigger('keydown', { key: 'ArrowRight' });
+    }
+    expect(harness.wrapper.find('.table-picker-header').text()).toBe('טבלה 1 × 1');
+
+    for (let step = 0; step < 14; step += 1) {
+      await grid.trigger('keydown', { key: 'ArrowDown' });
+      await grid.trigger('keydown', { key: 'ArrowLeft' });
+    }
+    expect(harness.wrapper.find('.table-picker-header').text()).toBe('טבלה 10 × 10');
+  });
+
+  it('Enter ורווח מאשרים את המידות שנבחרו במקלדת', async () => {
+    for (const key of ['Enter', ' ']) {
+      const harness = mountUi(TablePicker);
+      const grid = await openGrid(harness);
+      (grid.element as HTMLElement).focus();
+      await settle();
+
+      await grid.trigger('keydown', { key: 'ArrowLeft' });
+      await grid.trigger('keydown', { key: 'ArrowDown' });
+      await grid.trigger('keydown', { key });
+      await settle();
+
+      expect(harness.wrapper.emitted('select'), key).toEqual([[{ rows: 2, cols: 2 }]]);
+      expect(harness.wrapper.find('[role="grid"]').exists(), key).toBe(false);
+      harness.wrapper.unmount();
+    }
+  });
+
+  it('Escape סוגר ומחזיר את המיקוד לכפתור', async () => {
+    const harness = mountUi(TablePicker);
+    const grid = await openGrid(harness);
+    (grid.element as HTMLElement).focus();
+    await settle();
+
+    await grid.trigger('keydown', { key: 'Escape' });
+    await settle();
+
+    expect(harness.wrapper.find('[role="grid"]').exists()).toBe(false);
+    expect(harness.wrapper.emitted('select')).toBeUndefined();
+    expect(document.activeElement).toBe(harness.wrapper.find('button').element);
+  });
+
+  it('עכבר שחלף על הגריד אינו מוחק את בחירת המקלדת', async () => {
+    const harness = mountUi(TablePicker);
+    const grid = await openGrid(harness);
+    (grid.element as HTMLElement).focus();
+    await settle();
+
+    await grid.trigger('keydown', { key: 'ArrowDown' });
+    await grid.trigger('mouseleave');
+    await settle();
+
+    expect(harness.wrapper.find('.table-picker-header').text()).toBe('טבלה 1 × 2');
+  });
+
   it('הכותרת מדווחת את המידות שמעל הסמן, ובחירה פולטת אותן', async () => {
     const harness = mountUi(TablePicker);
     await harness.wrapper.find('button').trigger('click');
