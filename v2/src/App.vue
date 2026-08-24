@@ -1,7 +1,12 @@
 <template>
   <div
     class="word-app-shell"
-    :class="{ 'focus-mode': isFocusMode }"
+    :class="[
+      { 'focus-mode': isFocusMode },
+      isFocusMode && revealed ? `reveal-${revealed}` : '',
+    ]"
+    @pointermove="onPointerMove"
+    @pointerleave="revealed = null"
   >
     <!-- פס עליון -->
     <TitleBar
@@ -153,6 +158,7 @@ import {
   loadAutosaveEnabled,
   saveAutosaveEnabled,
 } from './host/settings';
+import { revealZone, type RevealZone } from './composables/focus-mode';
 
 const editorStackRef = ref<HTMLElement | null>(null);
 
@@ -189,6 +195,7 @@ const autosaveEnabled = ref(true);
 const statusText = ref('');
 const isStatusError = ref(false);
 const isFocusMode = ref(false);
+const revealed = ref<RevealZone>(null);
 
 const isFindOpen = ref(false);
 const findMode = ref<'find' | 'replace'>('find');
@@ -587,6 +594,19 @@ function toggleAutosave(): void {
 
 function toggleFocusMode(): void {
   isFocusMode.value = !isFocusMode.value;
+  // יציאה ממצב מיקוד מאפסת את החשיפה: אחרת המחלקה נשארת והפסים מקבלים
+  // opacity מיותר ברגע שחוזרים למצב הרגיל.
+  if (!isFocusMode.value) revealed.value = null;
+}
+
+/**
+ * במצב מיקוד הפסים מוסתרים, ומתגלים כשהמצביע מתקרב לקצה. הקצה ולא כל המעטפת:
+ * `:hover` על השורש החזיר את כולם בכל תנועה בחלון, כלומר המצב לא הסתיר כלום.
+ * ההחלטה עצמה ב-composables/focus-mode.ts, כדי שתהיה נבדקת.
+ */
+function onPointerMove(event: PointerEvent): void {
+  if (!isFocusMode.value) return;
+  revealed.value = revealZone(event.clientY, window.innerHeight);
 }
 
 /**
@@ -884,9 +904,11 @@ async function resolveLastDocument(): Promise<UserFile | undefined> {
   transition: opacity 0.3s ease;
 }
 
-.word-app-shell.focus-mode:hover :deep(.word-titlebar),
-.word-app-shell.focus-mode:hover :deep(.word-ribbon-container),
-.word-app-shell.focus-mode:hover :deep(.word-statusbar) {
+/* החשיפה לפי קצה, ולא `:hover` על השורש: השורש הוא כל החלון, ולכן כל תנועת
+   עכבר החזירה את שלושת הפסים — ומצב המיקוד לא הסתיר כלום. */
+.word-app-shell.focus-mode.reveal-top :deep(.word-titlebar),
+.word-app-shell.focus-mode.reveal-top :deep(.word-ribbon-container),
+.word-app-shell.focus-mode.reveal-bottom :deep(.word-statusbar) {
   opacity: 1;
   pointer-events: auto;
 }
