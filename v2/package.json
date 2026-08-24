@@ -14,7 +14,8 @@
     "check:boot": "node scripts/boot-check.mjs",
     "check:fonts": "node scripts/font-check.mjs",
     "check:rtl": "node scripts/rtl-check.mjs",
-    "verify": "npm run typecheck && npm run test && npm run build && npm run check:dist && npm run check:boot && npm run check:fonts && npm run check:rtl",
+    "check:sdk": "node scripts/sdk-sync-check.mjs",
+    "verify": "npm run typecheck && npm run test && npm run build && npm run check:dist && npm run check:boot && npm run check:fonts && npm run check:rtl && npm run check:sdk",
     "preview": "vite preview"
   },
   "dependencies": {
