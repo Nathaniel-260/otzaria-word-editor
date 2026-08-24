@@ -15,8 +15,11 @@ export type CommandOutcome = { ok: true } | { ok: false; message: string; reason
  * ה-reason של ה-controller — למה הפקודה חסומה. `Record` ולא `Partial<Record>`
  * בכוונה: מזהה חדש בגרסת superdoc עתידית יפיל את ה-typecheck במקום להגיע
  * למשתמש כהודעה גנרית.
+ *
+ * מיוצאת מפני ששכבת החיפוש (engine/search.ts) מתרגמת את אותם reasons; שתי
+ * טבלאות היו נותנות שני נוסחים עבריים לאותו כשל.
  */
-const REASON_TEXT: Record<SuperDocUIReason, string> = {
+export const REASON_TEXT: Record<SuperDocUIReason, string> = {
   'not-ready': 'המסמך עדיין נטען',
   'document-api-unavailable': 'המסמך עדיין נטען',
   'document-readonly': 'המסמך פתוח לקריאה בלבד',
@@ -64,7 +67,7 @@ function isReceipt(
   return typeof result === 'object' && result !== null;
 }
 
-function reasonText(reason: string | undefined): string {
+export function reasonText(reason: string | undefined): string {
   if (!reason) return 'הפעולה נכשלה';
   return REASON_TEXT[reason as SuperDocUIReason] ?? `הפעולה נכשלה (${reason})`;
 }

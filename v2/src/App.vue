@@ -62,8 +62,12 @@
     <FindReplaceDialog
       :is-open="isFindOpen"
       :initial-mode="findMode"
-      @close="isFindOpen = false"
+      :result-text="searchCounter"
+      :can-replace="searchState.canReplace"
+      :is-replacing="searchState.isReplacing"
+      @close="closeFindDialog"
       @find="onFindText"
+      @query-change="onFindQueryChange"
       @replace="onReplaceText"
       @replace-all="onReplaceAllText"
     />
@@ -84,6 +88,14 @@ import FindReplaceDialog from './ui/panels/FindReplaceDialog.vue';
 import AboutDialog from './ui/panels/AboutDialog.vue';
 
 import { createCommandAdapter, type CommandAdapter } from './engine/command-adapter';
+import {
+  createSearchAdapter,
+  idleSearchState,
+  searchCounterText,
+  type SearchAdapter,
+  type SearchOutcome,
+  type SearchState,
+} from './engine/search';
 import { createEditorSwap, type EditorSwap } from './sessions/editor-swap';
 import { createSaveCoordinator, type SaveCoordinator, type SaveSnapshot } from './sessions/save-coordinator';
 import { createEditor } from './engine/create-editor';
@@ -120,6 +132,14 @@ const isFindOpen = ref(false);
 const findMode = ref<'find' | 'replace'>('find');
 const isAboutOpen = ref(false);
 
+/**
+ * מצב החיפוש כפי שהמנוע מדווח עליו. הדיאלוג נשען עליו למונה התוצאות ולשאלה
+ * אם להציג פקדי החלפה — ולא על state מקומי משלו, שהיה יכול להראות „3 מתוך 12”
+ * על מסמך שהחיפוש בו כלל לא רץ.
+ */
+const searchState = ref<SearchState>(idleSearchState());
+const searchCounter = computed(() => searchCounterText(searchState.value));
+
 const currentPage = ref(1);
 const totalPages = ref(1);
 const wordCount = ref(0);
@@ -139,6 +159,7 @@ const saveSnapshot = ref<SaveSnapshot>({
 
 let swap: EditorSwap | null = null;
 let save: SaveCoordinator | null = null;
+let searchAdapter: SearchAdapter | null = null;
 
 const saveStateMessage = computed(() => {
   const state = saveSnapshot.value.state;
@@ -220,6 +241,25 @@ async function openDocument(file?: UserFile): Promise<boolean> {
   const editor = outcome.session;
   const adapter = createCommandAdapter(editor.ui);
   commandAdapter.value = adapter;
+
+  // החיפוש שייך ל-session: ה-handle הוא של ה-controller של המופע, ומסמך חדש
+  // מקבל אדפטר חדש. ה-`session` המקומי ולא `searchAdapter` בפירוק — אחרת
+  // סגירת המסמך הקודם הייתה מפרקת את האדפטר של המסמך שנפתח אחריו.
+  const sessionSearch = createSearchAdapter(editor.ui);
+  searchAdapter = sessionSearch;
+  searchState.value = sessionSearch.getState();
+  editor.onDispose(
+    sessionSearch.subscribe((state) => {
+      searchState.value = state;
+    })
+  );
+  editor.onDispose(() => {
+    sessionSearch.dispose();
+    if (searchAdapter === sessionSearch) {
+      searchAdapter = null;
+      searchState.value = idleSearchState();
+    }
+  });
 
   title.value = file ? file.name.replace(/\.docx$/i, '') : 'מסמך חדש';
   setStatus(`${title.value} — נטען ב-${Math.round(performance.now() - startedAt)} מילישניות`);
@@ -366,42 +406,76 @@ function toggleFocusMode(): void {
   isFocusMode.value = !isFocusMode.value;
 }
 
+/**
+ * הדיאלוג הוא שלנו ולא ה-surface המובנה של המנוע
+ * (`modules: { surfaces: { findReplace: true } }`) — החלטה, לא שכחה: המנוע רץ
+ * כאן ב-`ui: false`, הממשק כולו עברי ומימין לשמאל, ואילו ה-surface המובנה הוא
+ * חלון באנגלית בעיצוב של SuperDoc שאין דרך ציבורית לתרגם או לעצב. הפעולות
+ * עצמן כן עוברות דרך `ui.search` — אותה שכבה שה-surface הזה נשען עליה — ולכן
+ * אין כאן מימוש חיפוש מקביל.
+ */
 function openFindDialog(mode: 'find' | 'replace'): void {
   findMode.value = mode;
   isFindOpen.value = true;
+  // פתיחת הדיאלוג פותחת session במנוע; בלעדיו `search` נכשל סגור.
+  reportSearch(searchAdapter?.open());
 }
 
-function onFindText(query: string, _dir: 'next' | 'prev'): void {
-  const ui = swap?.current?.ui;
-  if (ui && 'search' in ui) {
-    try {
-      (ui as any).search?.find?.(query);
-    } catch {
-      // search fallback
-    }
-  }
+function closeFindDialog(): void {
+  isFindOpen.value = false;
+  // סגירה מנקה את ההדגשות במסמך. בלעדיה הן נשארות אחרי שהדיאלוג נעלם.
+  searchAdapter?.close();
 }
 
-function onReplaceText(search: string, replace: string): void {
-  const ui = swap?.current?.ui;
-  if (ui && 'search' in ui) {
-    try {
-      (ui as any).search?.replace?.(search, replace);
-    } catch {
-      // replace fallback
-    }
+/** התוצאה של כל פעולת חיפוש עוברת כאן: כשל לשורת המצב, הצלחה למונה. */
+function reportSearch(outcome: SearchOutcome | undefined): void {
+  if (!outcome) {
+    setStatus('אין מסמך פתוח לחיפוש', true);
+    return;
   }
+  if (!outcome.ok) {
+    setStatus(outcome.message, true);
+    return;
+  }
+  searchState.value = outcome.snapshot;
 }
 
-function onReplaceAllText(search: string, replace: string): void {
-  const ui = swap?.current?.ui;
-  if (ui && 'search' in ui) {
-    try {
-      (ui as any).search?.replaceAll?.(search, replace);
-    } catch {
-      // replace all fallback
-    }
+function onFindText(query: string, direction: 'next' | 'prev'): void {
+  reportSearch(searchAdapter?.find(query, direction));
+}
+
+/** הקלדה בשדה החיפוש. ההשקטה עצמה באדפטר, כדי שתהיה נבדקת. */
+function onFindQueryChange(query: string): void {
+  searchAdapter?.findDebounced(query, reportSearch);
+}
+
+/**
+ * החלפה היא capability gate ולא תכולה מובטחת: ב-superdoc@2.8.0 `canReplace`
+ * מדווח `true`, אבל נמדד ש-`replace`/`replaceAll` מחזירים
+ * `operation-unavailable`. לכן הכשל מגיע לשורת המצב עם ההקשר שהוא כשל של
+ * החלפה — לא נבלע, ולא מתחפש להודעת חיפוש.
+ */
+function reportReplace(outcome: SearchOutcome | undefined, success: string): void {
+  if (!outcome) {
+    setStatus('אין מסמך פתוח להחלפה', true);
+    return;
   }
+  if (!outcome.ok) {
+    setStatus(`ההחלפה לא בוצעה: ${outcome.message}`, true);
+    return;
+  }
+  searchState.value = outcome.snapshot;
+  setStatus(success);
+}
+
+async function onReplaceText(replacement: string): Promise<void> {
+  reportReplace(await searchAdapter?.replace(replacement), 'המופע הוחלף');
+}
+
+async function onReplaceAllText(replacement: string): Promise<void> {
+  // נקרא לפני הפעולה: אחריה קבוצת ההתאמות כבר התרוקנה.
+  const matches = searchAdapter?.getState().total ?? 0;
+  reportReplace(await searchAdapter?.replaceAll(replacement), `הוחלפו ${matches} מופעים`);
 }
 
 function onZoomChange(level: number): void {
@@ -421,11 +495,22 @@ function onOpenLibrary(): void {
   setStatus('פותח את ספריית אוצריא...');
 }
 
+/**
+ * האם הפוקוס בשדה טקסט של הממשק שלנו (שם המסמך, שדות החיפוש). התכנית אוסרת
+ * לדרוס שם קיצור שאינו עריכת מסמך: Ctrl+F בתוך שדה הוא קיצור של השדה.
+ * הבדיקה על `tagName` בלבד — אזור המסמך של המנוע אינו `input`, ולכן קיצורי
+ * המסמך ממשיכים לעבוד כשהסמן בתוכו.
+ */
+function isTextEntryTarget(event: KeyboardEvent): boolean {
+  const tag = (event.target as HTMLElement | null)?.tagName;
+  return tag === 'INPUT' || tag === 'TEXTAREA';
+}
+
 // קיצורי מקלדת
 function onKeyDown(event: KeyboardEvent): void {
   if (event.key === 'Escape') {
     if (isFindOpen.value) {
-      isFindOpen.value = false;
+      closeFindDialog();
       event.preventDefault();
     }
     if (isAboutOpen.value) {
@@ -445,12 +530,15 @@ function onKeyDown(event: KeyboardEvent): void {
         }
       }
     } else if (event.key === 'f' || event.key === 'F') {
+      if (isTextEntryTarget(event)) return;
       event.preventDefault();
       openFindDialog('find');
     } else if (event.key === 'h' || event.key === 'H') {
+      if (isTextEntryTarget(event)) return;
       event.preventDefault();
       openFindDialog('replace');
     } else if (event.key === 'p' || event.key === 'P') {
+      if (isTextEntryTarget(event)) return;
       event.preventDefault();
       onPrint();
     }
@@ -485,6 +573,8 @@ onMounted(async () => {
 
 onUnmounted(() => {
   window.removeEventListener('keydown', onKeyDown);
+  // חיפוש-בזמן-הקלדה שממתין ירוץ אחרי הפירוק על handle של controller מפורק.
+  searchAdapter?.dispose();
 });
 
 async function resolveLastDocument(): Promise<UserFile | undefined> {

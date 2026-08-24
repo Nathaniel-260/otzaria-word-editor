@@ -11,15 +11,18 @@
         <button
           type="button"
           class="fr-tab"
-          :class="{ active: mode === 'find' }"
+          :class="{ active: activeMode === 'find' }"
           @click="mode = 'find'"
         >
           חפש
         </button>
+        <!-- capability gate: `canReplace: false` = המנוע לא ישנה את המסמך, ולכן
+             אין לשונית להחלפה. ההסבר מוצג במקומה ולא מסתיר את הכשל. -->
         <button
+          v-if="canReplace"
           type="button"
           class="fr-tab"
-          :class="{ active: mode === 'replace' }"
+          :class="{ active: activeMode === 'replace' }"
           @click="mode = 'replace'"
         >
           החלף
@@ -63,7 +66,7 @@
 
       <!-- שורת החלפה (אם מצב החלפה פעיל) -->
       <div
-        v-if="mode === 'replace'"
+        v-if="activeMode === 'replace'"
         class="fr-input-row"
       >
         <label
@@ -77,10 +80,12 @@
             type="text"
             class="fr-input"
             placeholder="טקסט חלופי..."
+            :disabled="isReplacing"
             @keydown.enter="doReplace"
           >
         </div>
       </div>
+
     </div>
 
     <!-- כפתורי פעולה -->
@@ -102,19 +107,19 @@
         מצא קודם
       </button>
       <button
-        v-if="mode === 'replace'"
+        v-if="activeMode === 'replace'"
         type="button"
         class="fr-btn"
-        :disabled="!searchQuery"
+        :disabled="!searchQuery || isReplacing"
         @click="doReplace"
       >
         החלף
       </button>
       <button
-        v-if="mode === 'replace'"
+        v-if="activeMode === 'replace'"
         type="button"
         class="fr-btn"
-        :disabled="!searchQuery"
+        :disabled="!searchQuery || isReplacing"
         @click="doReplaceAll"
       >
         החלף הכל
@@ -131,31 +136,58 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, nextTick } from 'vue';
+/**
+ * הדיאלוג מציג בלבד: הוא אינו קורא למנוע ואינו מחזיק מצב חיפוש. מונה
+ * התוצאות, זמינות ההחלפה וההשקטה של חיפוש-בזמן-הקלדה מגיעים מ-engine/search.ts
+ * דרך App.vue, כי שם הם נבדקים — ולא בקומפוננטה, שאין לה כאן תשתית בדיקה.
+ *
+ * מה שהיה כאן קודם: `resultText` שהוא ref מקומי שרק נמחק ואף פעם לא נכתב,
+ * כלומר מונה תוצאות שהוא קוד מת, אף שהמנוע מספק `total` ו-`activeIndex`.
+ */
+import { ref, computed, watch, nextTick } from 'vue';
 
 const props = withDefaults(
   defineProps<{
     isOpen?: boolean;
     initialMode?: 'find' | 'replace';
+    /** „3 מתוך 12” / „אין תוצאות”, מחושב מהמצב של המנוע. */
+    resultText?: string;
+    /** האם המנוע יכול להחליט כרגע. `false` = אין להציג את פקדי ההחלפה. */
+    canReplace?: boolean;
+    /** החלפה שנשלחה למנוע וטרם הסתיימה. */
+    isReplacing?: boolean;
   }>(),
   {
     isOpen: false,
     initialMode: 'find',
+    resultText: '',
+    canReplace: false,
+    isReplacing: false,
   }
 );
 
 const emit = defineEmits<{
   (e: 'close'): void;
   (e: 'find', query: string, direction: 'next' | 'prev'): void;
-  (e: 'replace', search: string, replace: string): void;
-  (e: 'replace-all', search: string, replace: string): void;
+  /** הקלדה בשדה החיפוש. ההשקטה באדפטר ולא כאן. */
+  (e: 'query-change', query: string): void;
+  /** טקסט ההחלפה בלבד — `SearchHandle.replace(replacement)` מקבל ארגומנט אחד. */
+  (e: 'replace', replacement: string): void;
+  (e: 'replace-all', replacement: string): void;
 }>();
 
 const mode = ref<'find' | 'replace'>(props.initialMode);
 const searchQuery = ref('');
 const replaceQuery = ref('');
-const resultText = ref('');
 const searchInputRef = ref<HTMLInputElement | null>(null);
+
+/**
+ * המצב שמוצג בפועל. Ctrl+H מבקש „החלף” גם כשהמנוע אינו מאפשר החלפה, ואז
+ * הדיאלוג נשאר במצב חיפוש עם ההסבר — ולא מציג פקדים שיכשלו.
+ */
+const activeMode = computed<'find' | 'replace'>(() =>
+  props.canReplace ? mode.value : 'find'
+);
 
 watch(
   () => props.initialMode,
@@ -177,10 +209,7 @@ watch(
 );
 
 function onSearchInput(): void {
-  resultText.value = '';
-  if (searchQuery.value) {
-    emit('find', searchQuery.value, 'next');
-  }
+  emit('query-change', searchQuery.value);
 }
 
 function findNext(): void {
@@ -195,12 +224,12 @@ function findPrev(): void {
 
 function doReplace(): void {
   if (!searchQuery.value) return;
-  emit('replace', searchQuery.value, replaceQuery.value);
+  emit('replace', replaceQuery.value);
 }
 
 function doReplaceAll(): void {
   if (!searchQuery.value) return;
-  emit('replace-all', searchQuery.value, replaceQuery.value);
+  emit('replace-all', replaceQuery.value);
 }
 </script>
 
