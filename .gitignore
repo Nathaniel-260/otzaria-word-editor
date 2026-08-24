@@ -1,5 +1,5 @@
-.build-stage/
-*.otzplugin
-!*v[0-9]*.otzplugin
+node_modules/
+dist/
+*.local
 .DS_Store
 Thumbs.db
