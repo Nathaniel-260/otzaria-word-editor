@@ -91,6 +91,13 @@ import AboutDialog from './ui/panels/AboutDialog.vue';
 import { createCommandAdapter, type CommandAdapter, type CommandOutcome } from './engine/command-adapter';
 import { COMMAND_ADAPTER, COMMAND_REPORTER, FONT_OPTIONS, STYLE_GALLERY } from './composables/keys';
 import { ACTIVE_SUPERDOC } from './engine/document-api';
+import { readDocSelection } from './engine/doc-selection';
+import {
+  normalizeSelectedText,
+  openLibrary,
+  openSearchTab,
+  type ReaderResult,
+} from './host/otzaria-reader';
 import {
   fallbackStyleGallery,
   observeStyleGallery,
@@ -643,16 +650,44 @@ function onZoomChange(level: number): void {
   void commandAdapter.value?.run('zoom', payload);
 }
 
+/**
+ * דיווח לפקדי לשונית „אוצריא”.
+ *
+ * הצלחה אינה מכריזה על עצמה: התוצאה הנראית של „פתח ספרייה” ושל „חיפוש
+ * באוצריא” היא מסך שמתחלף, והודעה שמתארת אותו היא בדיוק מה שהיה כאן קודם —
+ * שלוש הודעות סטטוס („פותח חיפוש באוצריא...”) שתיארו פעולה שלא קרתה. מה
+ * שההצלחה כן עושה הוא לנקות שגיאה קודמת שנשארה על המסך.
+ */
+function reportReader(outcome: ReaderResult<unknown>, success = ''): void {
+  if (!outcome.ok) {
+    setStatus(outcome.message, true);
+    console.warn(`[otzaria-word] אוצריא: ${outcome.message} (${outcome.reason})`);
+    return;
+  }
+  if (success || isStatusError.value) setStatus(success);
+}
+
 function onInsertCitation(): void {
   setStatus('ציטוט מאוצריא יוטמע במיקום הסמן');
 }
 
-function onSearchOtzaria(): void {
-  setStatus('פותח חיפוש באוצריא...');
+/**
+ * השאילתה היא הטקסט המסומן במסמך — זה מה שהמשתמש רוצה לחפש כשהוא כותב חידוש
+ * ומבקש את המקור. בלי בחירה אין שאילתה, ואוצריא דוחה `query` ריק; לכן ההודעה
+ * מבקשת לסמן, ואינה שגיאה (`isError` כבוי — היא הוראה, לא כשל).
+ */
+async function onSearchOtzaria(): Promise<void> {
+  const selection = await readDocSelection(activeSuperdoc.value, { includeText: true });
+  const query = normalizeSelectedText(selection.text);
+  if (!query) {
+    setStatus('סמנו במסמך את הטקסט לחיפוש, ואז לחצו „חיפוש באוצריא”');
+    return;
+  }
+  reportReader(await openSearchTab({ query }));
 }
 
-function onOpenLibrary(): void {
-  setStatus('פותח את ספריית אוצריא...');
+async function onOpenLibrary(): Promise<void> {
+  reportReader(await openLibrary());
 }
 
 /**

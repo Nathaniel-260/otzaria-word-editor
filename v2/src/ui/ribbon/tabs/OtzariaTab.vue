@@ -16,14 +16,16 @@
         icon="search"
         label="חיפוש באוצריא"
         variant="large"
-        tooltip="חיפוש מקורות בכל ספריות אוצריא"
+        :tooltip="searchTooltip"
+        :disabled="!canSearch"
         @click="$emit('search-otzaria')"
       />
       <RibbonButton
         icon="otzaria"
         label="פתח ספרייה"
         variant="large"
-        tooltip="פתיחת ספריית הספרים של אוצריא"
+        :tooltip="sdkAvailable ? 'פתיחת ספריית הספרים של אוצריא' : OUTSIDE_OTZARIA"
+        :disabled="!sdkAvailable"
         @click="$emit('open-library')"
       />
     </RibbonGroup>
@@ -55,14 +57,53 @@
 </template>
 
 <script setup lang="ts">
+/**
+ * „אוצריא” — הלשונית שמחברת את העורך לקורא.
+ *
+ * שלושת הכפתורים כאן פלטו event, ו-`App.vue` ענה עליו בהודעת סטטוס שמתארת
+ * פעולה שלא קרתה („פותח את ספריית אוצריא...”). הפעולה עצמה עוברת עכשיו
+ * ב-host/otzaria-reader.ts, וההודעה מגיעה רק כשיש מה לדווח.
+ *
+ * הזמינות נקבעת כאן ולא ב-`App.vue`, מאותו טעם כמו ב-ReferencesTab: כפתור
+ * שאינו יכול לעבוד צריך להיראות כך לפני הלחיצה, לא אחריה.
+ */
+import { computed, inject, shallowRef } from 'vue';
+import type { SuperDoc } from 'superdoc';
 import RibbonGroup from '../common/RibbonGroup.vue';
 import RibbonButton from '../common/RibbonButton.vue';
+import { ACTIVE_SUPERDOC } from '../../../engine/document-api';
+import { isAvailable } from '../../../host/otzaria-client';
 
 defineEmits<{
   (e: 'insert-citation'): void;
   (e: 'search-otzaria'): void;
   (e: 'open-library'): void;
 }>();
+
+const superdoc = inject(ACTIVE_SUPERDOC, shallowRef<SuperDoc | null>(null));
+
+const OUTSIDE_OTZARIA = 'זמין רק כשהעורך פועל בתוך אוצריא';
+
+/**
+ * האם ה-SDK של אוצריא קיים. נקרא פעם אחת ב-setup ולא כערך reactive: הרצועה
+ * היא „mount on active” (ראו Ribbon.vue) — הלשונית נבנית רק כשהמשתמש לוחץ
+ * עליה, כלומר הרבה אחרי ה-boot, ובאותו רגע התשובה סופית. מחוץ לאוצריא
+ * הכפתורים מנוטרלים במקום להיכשל בלחיצה.
+ */
+const sdkAvailable = isAvailable();
+
+/**
+ * השאילתה של „חיפוש באוצריא” היא הטקסט המסומן במסמך, ולכן בלי מסמך פתוח אין
+ * מה לחפש. הבחירה עצמה נקראת ברגע הלחיצה (ראו `onSearchOtzaria`) — מנוי על
+ * כל שינוי בחירה בשביל צביעת כפתור אינו שווה את המחיר.
+ */
+const canSearch = computed(() => sdkAvailable && superdoc.value !== null);
+
+const searchTooltip = computed(() => {
+  if (!sdkAvailable) return OUTSIDE_OTZARIA;
+  if (superdoc.value === null) return 'יש לפתוח מסמך ולסמן בו את הטקסט לחיפוש';
+  return 'חיפוש הטקסט המסומן במסמך בכל ספריות אוצריא';
+});
 </script>
 
 <style scoped>

@@ -112,6 +112,34 @@ describe('call', () => {
 
     await expect(client.tryCall('ui.showMessage')).resolves.toBeNull();
   });
+
+  it('נושאת את הקוד של אוצריא ולא רק את ההודעה', async () => {
+    // ההודעה היא טקסט חופשי ואינה מבטיחה להזכיר את הקוד; זיהוי „ההרשאה
+    // חסרה” לפי חיפוש מחרוזת בה תלוי בנוסח שאוצריא בחרה.
+    const client = await freshClient();
+    window.Otzaria = {
+      call: vi.fn(async () => ({
+        success: false,
+        data: null,
+        error: { code: 'error.permission_denied', message: 'no' },
+      })),
+    } as never;
+
+    const error = await client.call('navigation.goTo').catch((e: unknown) => e);
+
+    expect(client.hostErrorCode(error)).toBe('error.permission_denied');
+    expect(client.isPermissionDenied(error)).toBe(true);
+    expect((error as { method?: string }).method).toBe('navigation.goTo');
+  });
+
+  it('שגיאה שאינה מאוצריא אינה מקבלת קוד', async () => {
+    const client = await freshClient();
+
+    expect(client.hostErrorCode(new Error('משהו אחר'))).toBeNull();
+    expect(client.isPermissionDenied(new Error('משהו אחר'))).toBe(false);
+    // הגיבוי לפי ההודעה נשמר, כי host/files.ts נשען עליו.
+    expect(client.isPermissionDenied(new Error('error.permission_denied: no'))).toBe(true);
+  });
 });
 
 describe('on', () => {

@@ -24,11 +24,53 @@ export function isAvailable(): boolean {
   return Boolean((window as Partial<Window>).Otzaria);
 }
 
+/**
+ * שגיאה שחזרה מאוצריא, עם ה-`code` שלה לצד ההודעה.
+ *
+ * למה נדרש: ה-envelope של ה-SDK מפריד בין `code` (`error.permission_denied`)
+ * ל-`message`, וההודעה היא טקסט חופשי שאינו מבטיח להזכיר את הקוד. בלי הקוד,
+ * זיהוי „ההרשאה חסרה” נעשה בחיפוש מחרוזת בהודעה — כלומר תלוי בנוסח שאוצריא
+ * בחרה, ומשתנה בלי התראה. ההודעה נשארת בדיוק כשהייתה, ולכן קוד שבודק אותה
+ * (`host/files.ts`) ממשיך לעבוד כפי שעבד.
+ */
+export class HostCallError extends Error {
+  constructor(
+    message: string,
+    readonly code: string | null,
+    readonly method: string,
+  ) {
+    super(message);
+    this.name = 'HostCallError';
+  }
+}
+
+/** הקוד שאוצריא נתנה, או `null` כשהשגיאה לא באה ממנה. */
+export function hostErrorCode(error: unknown): string | null {
+  return error instanceof HostCallError ? error.code : null;
+}
+
+/**
+ * האם הכשל הוא הרשאה חסרה.
+ *
+ * `endsWith` ולא השוואה מדויקת: התיעוד כותב `error.permission_denied` בגוף
+ * הטקסט ו-`permission_denied` בטבלת ה-RPC bridge, ושתי הצורות חוזרות בשטח.
+ * ההודעה נבדקת כגיבוי, למקרה שהשגיאה נוצרה במסלול שאינו `call`.
+ */
+export function isPermissionDenied(error: unknown): boolean {
+  const code = hostErrorCode(error);
+  if (code) return code.endsWith('permission_denied');
+  return error instanceof Error && error.message.includes('permission_denied');
+}
+
 /** קריאה ל-Host API. זורקת שגיאה עם ההודעה שהגיעה מאוצריא. */
 export async function call<T>(method: string, payload?: Record<string, unknown>): Promise<T> {
   const res = await bridge().call<T>(method, payload);
   if (!res.success) {
-    throw new Error(res.error?.message ?? `הקריאה ל-${method} נכשלה`);
+    throw new HostCallError(
+      res.error?.message ?? `הקריאה ל-${method} נכשלה`,
+      res.error?.code ?? null,
+      method,
+    );
   }
   return res.data as T;
 }
