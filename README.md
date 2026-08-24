@@ -55,7 +55,7 @@ npm run verify    # typecheck, טסטים, build, ושערי dist / boot / fonts
 
 הבחירה ב‑AGPL נובעת מהמנוע: [SuperDoc](https://www.superdoc.dev/) מופץ תחת AGPL‑3.0, ולכן גם התוסף חייב להיות AGPL.
 
-אייקוני הרצועה הם היוצא מן הכלל היחיד לכיוון השני: 65 מתוך 68 האייקונים
+אייקוני הרצועה הם היוצא מן הכלל היחיד לכיוון השני: 65 מתוך 72 האייקונים
 ב‑`src/ui/icons/icons.ts` הם ה‑path data המקורי של
 [Fluent System Icons](https://github.com/microsoft/fluentui-system-icons) של Microsoft,
 שמופצים תחת **MIT**. ה‑MIT מתיר שילוב ב‑AGPL, ומחייב שנוסח הרישיון והקרדיט יופצו עם כל

@@ -49,7 +49,54 @@
       />
     </RibbonGroup>
 
-    <!-- קבוצה 5: תוכן עניינים -->
+    <!-- קבוצה 5: כותרת עליונה ותחתונה -->
+    <RibbonGroup title="כותרת עליונה ותחתונה">
+      <RibbonMenuButton
+        icon="header"
+        label="כותרת עליונה"
+        :tooltip="headerTooltip"
+        :disabled="!can('canEditHeaderFooter')"
+        :items="headerItems"
+        @select="onHeaderAction"
+      />
+      <RibbonMenuButton
+        icon="footer"
+        label="כותרת תחתונה"
+        :tooltip="footerTooltip"
+        :disabled="!can('canEditHeaderFooter')"
+        :items="footerItems"
+        @select="onFooterAction"
+      />
+      <RibbonButton
+        icon="firstPageHeader"
+        label="שונה בעמוד ראשון"
+        variant="large"
+        :tooltip="tip('canSetTitlePage', 'לעמוד הראשון תהיה כותרת משלו')"
+        :disabled="!can('canSetTitlePage')"
+        :active="headerFooter.titlePage"
+        @click="onToggleTitlePage"
+      />
+      <RibbonButton
+        icon="oddEvenPages"
+        label="שונה בעמודים זוגיים ואי-זוגיים"
+        variant="large"
+        :tooltip="tip('canSetOddEvenHeaders', 'כותרת אחת לעמודים הזוגיים ואחרת לאי-זוגיים')"
+        :disabled="!can('canSetOddEvenHeaders')"
+        :active="headerFooter.oddEven"
+        @click="onToggleOddEven"
+      />
+      <RibbonButton
+        icon="link"
+        label="קשר לקודם"
+        variant="large"
+        :tooltip="linkToPreviousTooltip"
+        :disabled="!can('canLinkToPrevious') || headerFooter.sectionCount < 2"
+        :active="headerFooter.linkedToPrevious"
+        @click="onToggleLinkToPrevious"
+      />
+    </RibbonGroup>
+
+    <!-- קבוצה 6: תוכן עניינים -->
     <RibbonGroup title="תוכן עניינים">
       <RibbonButton
         icon="toc"
@@ -103,6 +150,18 @@
  * בעמוד חדש”. ההנמקה המלאה, כולל שתי החלופות שנדחו ומה שנמצא בצינור הקלט
  * הפנימי של המנוע, ב-engine/page-break.ts.
  *
+ * ## הכותרת העליונה והתחתונה, ומה הפקד **אינו** עושה
+ *
+ * ב-Word „ערוך כותרת עליונה” מוודא שיש חלק כותרת **ומעביר אליו את הסמן**.
+ * השני אינו אפשרי כאן: `doc.selection` הוא קריאה בלבד, ואין פעולה ציבורית
+ * שמזיזה את המיקוד ל-story אחר. לכן הפקד יוצר כותרת ריקה, וה-tooltip אומר
+ * במפורש שהכניסה אליה נעשית בלחיצה כפולה על אזור הכותרת — כמו ב-Word. ההנמקה
+ * המלאה ב-engine/header-footer.ts.
+ *
+ * שלושת המתגים מציגים את המצב האמיתי של המסמך ולא מצב מקומי: `w:titlePg`
+ * ו-`w:evenAndOddHeaders` נשמרים במסמך, ומתג שמחזיק דגל משלו היה מציג „כבוי”
+ * על מסמך שנפתח והדגל בו דלוק.
+ *
  * ## המצב הקודם
  *
  * שלושת הפקדים כאן לא עשו כלום: `imageCmd.run()` ו-`linkCmd.run()` נקראו **בלי
@@ -115,10 +174,12 @@ import { computed, inject, ref, shallowRef, watch } from 'vue';
 import type { SuperDoc } from 'superdoc';
 import RibbonGroup from '../common/RibbonGroup.vue';
 import RibbonButton from '../common/RibbonButton.vue';
+import RibbonMenuButton from '../common/RibbonMenuButton.vue';
 import TablePicker from '../common/TablePicker.vue';
 import LinkDialog from '../../panels/LinkDialog.vue';
 import { useCommand } from '../../../composables/useCommand';
 import { COMMAND_REPORTER, type CommandReporter } from '../../../composables/keys';
+import type { CommandOutcome } from '../../../engine/command-adapter';
 import { ACTIVE_SUPERDOC } from '../../../engine/document-api';
 import {
   emptySelectionSnapshot,
@@ -130,6 +191,22 @@ import {
   startParagraphOnNewPage,
   type PageBreakSupport,
 } from '../../../engine/page-break';
+import {
+  readDocCapabilities,
+  type DocCapabilityQuestion,
+  type DocCapabilityReport,
+} from '../../../engine/doc-capabilities';
+import {
+  emptyHeaderFooterState,
+  ensureHeaderFooter,
+  readHeaderFooterState,
+  removeHeaderFooter,
+  setDifferentFirstPage,
+  setDifferentOddEvenPages,
+  setLinkedToPrevious,
+  type HeaderFooterKind,
+  type HeaderFooterState,
+} from '../../../engine/header-footer';
 import { LINK_HREF_HINT, imagePayload, linkPayload } from '../../../engine/payloads';
 import { pickImageFile, readImageAsDataUrl } from '../../../host/files';
 
@@ -292,6 +369,147 @@ const pageBreakTooltip = computed(() =>
 
 async function onStartOnNewPage(): Promise<void> {
   report(await startParagraphOnNewPage(superdoc.value), 'page-break-before');
+}
+
+/* ------------------------------------------------------------------ */
+/* כותרת עליונה ותחתונה                                                */
+/* ------------------------------------------------------------------ */
+
+const capabilities = shallowRef<DocCapabilityReport | null>(null);
+const headerFooter = shallowRef<HeaderFooterState>(emptyHeaderFooterState());
+
+/**
+ * מונה דורות משותף לשתי הקריאות: שתיהן א-סינכרוניות, ומסמך שנפתח אחרי מסמך
+ * אחר עשוי להשיב לפניו. בלי המונה התשובה של המסמך הקודם הייתה דורסת את זו של
+ * הנוכחי. אותה תבנית כמו `pageBreakGeneration` שמעל.
+ */
+let headerFooterGeneration = 0;
+
+watch(
+  superdoc,
+  async (host) => {
+    const mine = ++headerFooterGeneration;
+    capabilities.value = null;
+    headerFooter.value = emptyHeaderFooterState();
+
+    const [capabilityReport, state] = await Promise.all([
+      readDocCapabilities(host),
+      readHeaderFooterState(host),
+    ]);
+    if (mine !== headerFooterGeneration) return;
+    capabilities.value = capabilityReport;
+    headerFooter.value = state;
+  },
+  { immediate: true }
+);
+
+/** עד שהיכולות נקראו — הכול מנוטרל. „אולי כן” הוא בדיוק הכפתור המת. */
+function can(question: DocCapabilityQuestion): boolean {
+  return capabilities.value?.can(question) ?? false;
+}
+
+function tip(question: DocCapabilityQuestion, enabledText: string): string {
+  const explanation = capabilities.value?.explain(question);
+  return can(question) ? enabledText : explanation || 'המסמך עדיין נטען';
+}
+
+const headerItems = [
+  { id: 'edit', label: 'עריכת כותרת עליונה', hint: 'יוצר כותרת ריקה אם עדיין אין' },
+  { id: 'remove', label: 'הסרת כותרת עליונה', hint: 'מוחק את הכותרת מכל המסמך' },
+];
+
+const footerItems = [
+  { id: 'edit', label: 'עריכת כותרת תחתונה', hint: 'יוצר כותרת ריקה אם עדיין אין' },
+  { id: 'remove', label: 'הסרת כותרת תחתונה', hint: 'מוחק את הכותרת מכל המסמך' },
+];
+
+/**
+ * ה-tooltip אומר מה באמת יקרה: הכותרת נוצרת, והכניסה אליה היא לחיצה כפולה.
+ * הבטחה ש„הסמן יעבור לכותרת” הייתה תיאור של פעולה שאין לה API.
+ */
+const headerTooltip = computed(() =>
+  tip(
+    'canEditHeaderFooter',
+    headerFooter.value.hasHeader
+      ? 'למסמך יש כותרת עליונה. לחיצה כפולה על אזור הכותרת פותחת אותה לעריכה'
+      : 'יצירת כותרת עליונה ריקה. לעריכתה — לחיצה כפולה על אזור הכותרת'
+  )
+);
+
+const footerTooltip = computed(() =>
+  tip(
+    'canEditHeaderFooter',
+    headerFooter.value.hasFooter
+      ? 'למסמך יש כותרת תחתונה. לחיצה כפולה על אזור הכותרת פותחת אותה לעריכה'
+      : 'יצירת כותרת תחתונה ריקה. לעריכתה — לחיצה כפולה על אזור הכותרת'
+  )
+);
+
+/**
+ * „קשר לקודם” נוגע רק במקטעים שאחרי הראשון, ולמסמך בעל מקטע יחיד אין קודם —
+ * ולכן הפקד מנוטרל שם, כמו ב-Word. הוא אינו פקד מת: ה-API קיים והוא נדלק
+ * ברגע שיש במסמך מקטע שני. ה-tooltip מסביר את זה במקום להשאיר את המשתמש
+ * מול לחיצה שנכשלת בהכרח.
+ */
+const linkToPreviousTooltip = computed(() =>
+  tip(
+    'canLinkToPrevious',
+    headerFooter.value.sectionCount > 1
+      ? 'הכותרות של המקטעים הבאים יהיו זהות לאלה של המקטע שלפניהם'
+      : 'אין במסמך מקטע נוסף — הקישור נוגע רק במקטעים שאחרי הראשון'
+  )
+);
+
+/**
+ * מריצה פעולה, מדווחת עליה, וקוראת מחדש את המצב. הקריאה מחדש נדרשת גם כשהפעולה
+ * נכשלה: מוטציה שנכשלה באמצע רצף מקטעים משאירה מסמך שאינו במצב שהמתג מציג.
+ */
+async function runHeaderFooter(id: string, action: Promise<CommandOutcome>): Promise<void> {
+  report(await action, id);
+  // **קורא** את המונה ואינו מקדם אותו: קידום כאן היה מבטל את הקריאה של ה-watch
+  // אם מסמך אחר נטען בזמן שהפעולה רצה, ו-`capabilities` היה נשאר null — כלומר
+  // כל הקבוצה מנוטרלת לצמיתות עם „המסמך עדיין נטען”. הקריאה בלבד עדיין זורקת
+  // תשובה שהגיעה אחרי שהמסמך התחלף.
+  const mine = headerFooterGeneration;
+  const state = await readHeaderFooterState(superdoc.value);
+  if (mine === headerFooterGeneration) headerFooter.value = state;
+}
+
+function onHeaderFooterAction(kind: HeaderFooterKind, action: string): void {
+  const host = superdoc.value;
+  void runHeaderFooter(
+    `header-footer-${kind}`,
+    action === 'remove' ? removeHeaderFooter(host, kind) : ensureHeaderFooter(host, kind)
+  );
+}
+
+function onHeaderAction(action: string): void {
+  onHeaderFooterAction('header', action);
+}
+
+function onFooterAction(action: string): void {
+  onHeaderFooterAction('footer', action);
+}
+
+function onToggleTitlePage(): void {
+  void runHeaderFooter(
+    'header-footer-title-page',
+    setDifferentFirstPage(superdoc.value, !headerFooter.value.titlePage)
+  );
+}
+
+function onToggleOddEven(): void {
+  void runHeaderFooter(
+    'header-footer-odd-even',
+    setDifferentOddEvenPages(superdoc.value, !headerFooter.value.oddEven)
+  );
+}
+
+function onToggleLinkToPrevious(): void {
+  void runHeaderFooter(
+    'header-footer-link-to-previous',
+    setLinkedToPrevious(superdoc.value, !headerFooter.value.linkedToPrevious)
+  );
 }
 </script>
 

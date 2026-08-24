@@ -377,6 +377,36 @@ export function createSuperdocDouble(options: SuperdocDoubleOptions = {}): Super
       setPageMargins: route('sections.setPageMargins', () => receipt('sections.setPageMargins')),
       setPageSetup: route('sections.setPageSetup', () => receipt('sections.setPageSetup')),
       setColumns: route('sections.setColumns', () => receipt('sections.setColumns')),
+      setTitlePage: route('sections.setTitlePage', () => receipt('sections.setTitlePage')),
+      setOddEvenHeadersFooters: route('sections.setOddEvenHeadersFooters', () =>
+        receipt('sections.setOddEvenHeadersFooters'),
+      ),
+    },
+    /**
+     * המסמך של הכפיל נפתח **בלי** כותרות: `resolve` מחזיר `status: 'none'`
+     * ו-`parts.list` ריק. זה המצב שהפקד נמדד בו — „אין כותרת, לחיצה יוצרת
+     * אחת” — ולא מסמך שכבר יש בו כותרת, שבו „עריכה” היא no-op ולכן אינה
+     * מוכיחה דבר.
+     */
+    headerFooters: {
+      resolve: route('headerFooters.resolve', () => ({ status: 'none' })),
+      refs: {
+        set: route('headerFooters.refs.set', () => receipt('headerFooters.refs.set')),
+        clear: route('headerFooters.refs.clear', () => receipt('headerFooters.refs.clear')),
+        setLinkedToPrevious: route('headerFooters.refs.setLinkedToPrevious', () =>
+          receipt('headerFooters.refs.setLinkedToPrevious'),
+        ),
+      },
+      parts: {
+        list: route('headerFooters.parts.list', () => ({ items: [] })),
+        create: route('headerFooters.parts.create', () => {
+          const result = receipt('headerFooters.parts.create');
+          // הקבלה של `parts.create` נושאת גם את מזהה החלק; בלעדיו אין למה
+          // להפנות, והקורא נכשל על „המנוע לא החזיר מזהה”.
+          return result.success ? { ...result, refId: 'rId9', partPath: 'word/header1.xml' } : result;
+        }),
+        delete: route('headerFooters.parts.delete', () => receipt('headerFooters.parts.delete')),
+      },
     },
     footnotes: {
       insert: route('footnotes.insert', () => receipt('footnotes.insert')),

@@ -40,6 +40,10 @@ function fullCapabilities() {
       'create.sectionBreak': { available: true },
       'create.tableOfContents': { available: true },
       'create.table': { available: true },
+      'headerFooters.parts.create': { available: true },
+      'sections.setTitlePage': { available: true },
+      'sections.setOddEvenHeadersFooters': { available: true },
+      'headerFooters.refs.setLinkedToPrevious': { available: true },
       'comments.create': { available: true },
       'clipboard.serializeSelection': { available: true },
       'clipboard.insert': { available: true },
@@ -187,6 +191,29 @@ describe('readDocCapabilities', () => {
     expect(report.can('canCopySelection')).toBe(false);
     expect(report.explain('canCopySelection')).toBe('אינו זמין בגרסה זו');
     expect(report.can('canDeleteSelection')).toBe(true);
+  });
+
+  it('namespace הכותרות חסר: „כותרת עליונה” מנוטרל, והמתגים של `sections` לא', async () => {
+    // `headerFooters` הוא namespace נפרד מ-`sections`, ומנוע שאין בו אותו
+    // עדיין יודע „שונה בעמוד ראשון” — זו פעולה של `sections`. שתי השאלות
+    // מופרדות בדיוק כדי שהפקדים לא ייכבו יחד בלי סיבה.
+    const raw = fullCapabilities();
+    raw.operations['headerFooters.parts.create'] = {
+      available: false,
+      reasons: ['NAMESPACE_UNAVAILABLE'],
+    } as never;
+    raw.operations['headerFooters.refs.setLinkedToPrevious'] = {
+      available: false,
+      reasons: ['NAMESPACE_UNAVAILABLE'],
+    } as never;
+
+    const report = await readDocCapabilities(hostWith(() => raw));
+
+    expect(report.can('canEditHeaderFooter')).toBe(false);
+    expect(report.explain('canEditHeaderFooter')).toBe('אינו זמין בגרסה זו');
+    expect(report.can('canLinkToPrevious')).toBe(false);
+    expect(report.can('canSetTitlePage')).toBe(true);
+    expect(report.can('canSetOddEvenHeaders')).toBe(true);
   });
 
   it('`available` שאינו בדיוק true אינו „כן”', async () => {

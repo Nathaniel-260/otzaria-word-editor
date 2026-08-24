@@ -89,6 +89,13 @@ const CAPABILITY_SPECS = {
   canInsertSectionBreak: { operation: 'create.sectionBreak' },
   canInsertTableOfContents: { operation: 'create.tableOfContents' },
   canInsertTable: { operation: 'create.table' },
+  // כותרת עליונה ותחתונה. שאלה אחת לכל פקד, ולא אחת לכל פעולה: „עריכה”
+  // ו„הסרה” יושבות באותו כפתור תפריט, ופקד מנוטרל למחצה אינו מצב שאפשר להציג.
+  // `parts.create` הוא הפעולה שבלעדיה אין מה ליצור, ולכן היא זו שנשאלת.
+  canEditHeaderFooter: { operation: 'headerFooters.parts.create' },
+  canSetTitlePage: { operation: 'sections.setTitlePage' },
+  canSetOddEvenHeaders: { operation: 'sections.setOddEvenHeadersFooters' },
+  canLinkToPrevious: { operation: 'headerFooters.refs.setLinkedToPrevious' },
   // סקירה
   canAddComment: { operation: 'comments.create', global: 'comments' },
   canTrackChanges: { global: 'trackChanges' },
