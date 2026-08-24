@@ -36,5 +36,6 @@ const svgContent = computed(() => ICONS[props.name] || '');
   width: 100%;
   height: 100%;
   fill: currentColor;
+  shape-rendering: geometricPrecision;
 }
 </style>

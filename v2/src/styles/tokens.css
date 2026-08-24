@@ -26,7 +26,7 @@
   --word-blue-dark: var(--color-primary);
   --word-blue-light: var(--color-secondary);
   --word-tab-active-border: var(--color-primary);
-  --word-ribbon-bg: var(--color-surface-container-high);
+  --word-ribbon-bg: var(--color-surface);
   --word-ribbon-border: var(--color-outline-variant);
   --word-btn-hover: var(--color-primary-subtle, rgba(0, 0, 0, 0.05));
   --word-btn-active: var(--color-primary-subtle, rgba(21, 101, 192, 0.12));

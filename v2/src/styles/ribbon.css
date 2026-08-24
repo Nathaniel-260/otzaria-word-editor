@@ -3,22 +3,21 @@
 .word-ribbon-container {
   display: flex;
   flex-direction: column;
-  background: var(--word-ribbon-bg);
-  border-block-end: 1px solid var(--word-ribbon-border);
+  background: var(--color-surface-container-high);
   flex-shrink: 0;
   user-select: none;
   position: relative;
   z-index: 10;
 }
 
-/* סרגל לשוניות (Tabs Bar) */
+/* סרגל לשוניות (Tabs Bar) — מקבל את צבע הנושא של השורה העליונה */
 .word-tab-bar {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   padding-inline: 8px;
-  background: var(--word-ribbon-bg);
+  background: var(--color-surface-container-high);
   height: var(--tabbar-height);
-  border-block-end: 1px solid transparent;
+  border-block-end: 1px solid var(--color-outline-variant);
   gap: 2px;
   overflow-x: auto;
   scrollbar-width: none;
@@ -29,40 +28,44 @@
 }
 
 .word-tab-btn {
-  background: none;
-  border: none;
+  background: transparent;
+  border: 1px solid transparent;
+  border-bottom: none;
   border-radius: var(--radius-sm) var(--radius-sm) 0 0;
   color: var(--color-on-surface);
   font-family: var(--font-main);
   font-size: var(--font-size-ui);
-  padding: 4px 12px;
+  padding: 5px 12px 6px;
   cursor: pointer;
   position: relative;
   transition: background 0.1s ease, color 0.1s ease;
   white-space: nowrap;
+  margin-bottom: -1px;
 }
 
-.word-tab-btn:hover {
+.word-tab-btn:hover:not(.active) {
   background: var(--word-btn-hover);
 }
 
 .word-tab-btn.active {
+  background: var(--color-surface);
+  border-color: var(--color-outline-variant);
+  border-bottom-color: var(--color-surface);
   font-weight: 600;
-  color: var(--word-blue);
+  color: var(--color-primary);
+  z-index: 2;
 }
 
 .word-tab-btn.active::after {
   content: '';
   position: absolute;
-  bottom: 0;
-  left: 8px;
-  right: 8px;
+  top: 0;
+  left: 0;
+  right: 0;
   height: 2px;
-  background: var(--word-tab-active-border);
+  background: var(--color-primary);
   border-radius: 2px 2px 0 0;
 }
-
-
 
 .word-tab-btn.otzaria-tab {
   color: var(--color-secondary);
@@ -79,6 +82,7 @@
 
 .word-ribbon-toggle {
   margin-inline-start: auto;
+  margin-bottom: 3px;
   background: none;
   border: none;
   border-radius: var(--radius-sm);
@@ -95,12 +99,14 @@
   background: var(--word-btn-hover);
 }
 
-/* תוכן ה-Ribbon */
+/* תוכן ה-Ribbon — שורת הלחצנים מקבלת רקע surface נקי ונפרד משורות הנושא העליונות */
 .word-ribbon-body {
   display: flex;
   align-items: stretch;
-  padding: 3px 8px 4px;
+  padding: 4px 8px;
   min-height: var(--ribbon-height);
+  background: var(--color-surface);
+  border-block-end: 1px solid var(--color-outline-variant);
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: thin;
@@ -250,7 +256,7 @@
 
 .word-btn.btn-small {
   flex-direction: row;
-  height: 22px;
+  height: 24px;
   padding: 2px 6px;
   justify-content: flex-start;
   gap: 4px;
@@ -258,9 +264,10 @@
 }
 
 .word-btn.btn-icon-only {
-  width: 24px;
-  height: 22px;
+  width: 26px;
+  height: 24px;
   padding: 0;
+  border-radius: var(--radius-xs);
 }
 
 /* מפריד פנימי עדין */

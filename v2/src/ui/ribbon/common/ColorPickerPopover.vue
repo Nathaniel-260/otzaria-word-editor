@@ -17,7 +17,7 @@
       >
         <SvgIcon
           :name="icon"
-          :size="16"
+          :size="18"
         />
         <div
           class="color-indicator-bar"
@@ -210,7 +210,7 @@ onUnmounted(() => {
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
   transition: background 0.08s, border-color 0.08s;
-  height: 22px;
+  height: 24px;
 }
 
 .color-btn-wrapper:hover {
@@ -226,7 +226,7 @@ onUnmounted(() => {
 .color-main-btn {
   background: none;
   border: none;
-  padding: 1px 3px;
+  padding: 1px 4px;
   cursor: pointer;
   display: flex;
   flex-direction: column;
@@ -237,7 +237,7 @@ onUnmounted(() => {
 }
 
 .color-indicator-bar {
-  width: 14px;
+  width: 16px;
   height: 3px;
   border-radius: 1px;
   margin-top: 1px;

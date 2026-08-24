@@ -52,8 +52,8 @@ defineEmits<{
 
 const iconSize = computed(() => {
   if (props.variant === 'large') return 32;
-  if (props.variant === 'small') return 14;
-  return 16;
+  if (props.variant === 'small') return 16;
+  return 18;
 });
 
 const computedTitle = computed(() => {

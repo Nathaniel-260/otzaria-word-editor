@@ -8,6 +8,7 @@
     </div>
     <div class="word-group-footer">
       <span class="word-group-title">{{ title }}</span>
+      <!--
       <button
         v-if="launcher"
         type="button"
@@ -21,12 +22,13 @@
           :size="10"
         />
       </button>
+      -->
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import SvgIcon from '../../icons/SvgIcon.vue';
+// import SvgIcon from '../../icons/SvgIcon.vue';
 
 withDefaults(
   defineProps<{
