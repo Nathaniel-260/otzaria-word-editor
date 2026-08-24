@@ -26,6 +26,7 @@
           variant="small"
           tooltip="הצג או הסתר את סרגל המידות"
           :active="rulerCmd.active.value"
+          :disabled="!rulerCmd.enabled.value"
           @click="rulerCmd.run()"
         />
         <RibbonButton
@@ -34,6 +35,7 @@
           variant="small"
           tooltip="הצג סימני פסקאות ותווים נסתרים"
           :active="marksCmd.active.value"
+          :disabled="!marksCmd.enabled.value"
           @click="marksCmd.run()"
         />
       </div>
@@ -53,6 +55,7 @@
         label="100%"
         variant="large"
         tooltip="הצג את המסמך בגודל 100%"
+        :disabled="!zoomCmd.enabled.value"
         @click="zoomCmd.run(zoomPayload(100))"
       />
       <RibbonButton
@@ -60,6 +63,7 @@
         label="רוחב עמוד"
         variant="large"
         tooltip="התאם את תצוגת העמוד לרוחב החלון"
+        :disabled="!fitWidthCmd.enabled.value"
         @click="fitWidthCmd.run()"
       />
     </RibbonGroup>

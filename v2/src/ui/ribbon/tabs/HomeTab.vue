@@ -36,6 +36,7 @@
           variant="small"
           tooltip="העתק עיצוב ממקום אחד והחל במקום אחר"
           :active="formatPainterCmd.active.value"
+          :disabled="!formatPainterCmd.enabled.value"
           @click="formatPainterCmd.run()"
         />
       </div>
@@ -56,6 +57,7 @@
         <RibbonSelect
           :model-value="selectedFontFamily"
           :options="familySelectOptions"
+          :disabled="!fontFamilyCmd.enabled.value"
           width="130px"
           title="גופן"
           @update:model-value="onFontFamilyChange"
@@ -63,6 +65,7 @@
         <RibbonSelect
           :model-value="selectedFontSize"
           :options="sizeSelectOptions"
+          :disabled="!fontSizeCmd.enabled.value"
           width="50px"
           title="גודל גופן"
           @update:model-value="onFontSizeChange"
@@ -72,6 +75,7 @@
           variant="icon-only"
           tooltip="הגדל גופן"
           shortcut="Ctrl+]"
+          :disabled="!fontSizeCmd.enabled.value"
           @click="growFontSize"
         />
         <RibbonButton
@@ -79,12 +83,14 @@
           variant="icon-only"
           tooltip="הקטן גופן"
           shortcut="Ctrl+["
+          :disabled="!fontSizeCmd.enabled.value"
           @click="shrinkFontSize"
         />
         <RibbonButton
           icon="clearFormatting"
           variant="icon-only"
           tooltip="נקה את כל העיצוב"
+          :disabled="!clearFormatCmd.enabled.value"
           @click="clearFormatCmd.run()"
         />
       </div>
@@ -146,6 +152,7 @@
           icon="highlight"
           title="צבע סימון טקסט"
           default-color="#FFFF00"
+          :disabled="!highlightCmd.enabled.value"
           @change="onHighlightChange"
         />
         <ColorPickerPopover
@@ -153,6 +160,7 @@
           icon="fontColor"
           title="צבע גופן"
           default-color="#000000"
+          :disabled="!fontColorCmd.enabled.value"
           @change="onTextColorChange"
         />
       </div>
@@ -171,6 +179,7 @@
           variant="icon-only"
           tooltip="תבליטים"
           :active="bulletCmd.active.value"
+          :disabled="!bulletCmd.enabled.value"
           @click="bulletCmd.run()"
         />
         <RibbonButton
@@ -178,18 +187,21 @@
           variant="icon-only"
           tooltip="מספור"
           :active="numberedCmd.active.value"
+          :disabled="!numberedCmd.enabled.value"
           @click="numberedCmd.run()"
         />
         <RibbonButton
           icon="indentDecrease"
           variant="icon-only"
           tooltip="הקטן הזחה"
+          :disabled="!indentDecCmd.enabled.value"
           @click="indentDecCmd.run()"
         />
         <RibbonButton
           icon="indentIncrease"
           variant="icon-only"
           tooltip="הגדל הזחה"
+          :disabled="!indentIncCmd.enabled.value"
           @click="indentIncCmd.run()"
         />
 
@@ -200,6 +212,7 @@
           variant="icon-only"
           tooltip="כיוון פסקה מימין לשמאל"
           :active="dirRtlCmd.active.value"
+          :disabled="!dirRtlCmd.enabled.value"
           @click="dirRtlCmd.run()"
         />
         <RibbonButton
@@ -207,6 +220,7 @@
           variant="icon-only"
           tooltip="כיוון פסקה משמאל לימין"
           :active="dirLtrCmd.active.value"
+          :disabled="!dirLtrCmd.enabled.value"
           @click="dirLtrCmd.run()"
         />
         <RibbonButton
@@ -214,6 +228,7 @@
           variant="icon-only"
           tooltip="הצג/הסתר סימני עיצוב"
           :active="marksCmd.active.value"
+          :disabled="!marksCmd.enabled.value"
           @click="marksCmd.run()"
         />
       </div>
@@ -226,6 +241,7 @@
           tooltip="יישור לימין"
           shortcut="Ctrl+R"
           :active="alignCmd.value.value === 'right'"
+          :disabled="!alignCmd.enabled.value"
           @click="onAlign('right')"
         />
         <RibbonButton
@@ -234,6 +250,7 @@
           tooltip="מרכז"
           shortcut="Ctrl+E"
           :active="alignCmd.value.value === 'center'"
+          :disabled="!alignCmd.enabled.value"
           @click="onAlign('center')"
         />
         <RibbonButton
@@ -242,6 +259,7 @@
           tooltip="יישור לשמאל"
           shortcut="Ctrl+L"
           :active="alignCmd.value.value === 'left'"
+          :disabled="!alignCmd.enabled.value"
           @click="onAlign('left')"
         />
         <RibbonButton
@@ -250,6 +268,7 @@
           tooltip="יישור לשני הצדדים"
           shortcut="Ctrl+J"
           :active="alignCmd.value.value === 'justify'"
+          :disabled="!alignCmd.enabled.value"
           @click="onAlign('justify')"
         />
 
@@ -258,6 +277,7 @@
         <RibbonSelect
           :model-value="selectedLineSpacing"
           :options="spacingSelectOptions"
+          :disabled="!lineSpacingCmd.enabled.value"
           width="48px"
           title="מרווח בין שורות"
           @update:model-value="onLineSpacingChange"
@@ -389,6 +409,10 @@ const styleCmd = useCommand('linked-style');
  */
 const { families: fontFamilyOptions, sizes: fontSizeOptions } = useFontOptions();
 
+/* ------------------------------------------------------------------ */
+/* מה שהמנוע מדווח על הבחירה                                            */
+/* ------------------------------------------------------------------ */
+
 /**
  * `CommandState.value` הוא המקור לערך שהבורר מציג — לא ref מקומי. עד עכשיו
  * שלושת הבוררים היו refs שאותחלו לערך קשיח ולעולם לא התעדכנו: לחיצה על טקסט
@@ -470,6 +494,10 @@ const sizeSelectOptions = computed(() =>
 const spacingSelectOptions = computed(() =>
   withCurrent(SPACING_OPTIONS, selectedLineSpacing.value),
 );
+
+/* ------------------------------------------------------------------ */
+/* הפעלה                                                              */
+/* ------------------------------------------------------------------ */
 
 // כל ה-payloads נבנים ב-engine/payloads.ts, ולא כליטרל כאן: מה שנשלח לפקודה
 // הוא חוזה מול ולידטור בתוך המנוע, והוולידטור נכשל **סגור**. ראו את הטבלה
