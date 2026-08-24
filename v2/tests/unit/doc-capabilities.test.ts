@@ -38,6 +38,10 @@ function fullCapabilities() {
       'create.tableOfContents': { available: true },
       'create.table': { available: true },
       'comments.create': { available: true },
+      'clipboard.serializeSelection': { available: true },
+      'clipboard.insert': { available: true },
+      delete: { available: true },
+      'ranges.resolve': { available: true },
     },
   };
 }
@@ -163,6 +167,23 @@ describe('readDocCapabilities', () => {
     expect(report.can('canInsertFootnote')).toBe(false);
     expect(report.reasons('canInsertFootnote')).toEqual(['NAMESPACE_UNAVAILABLE']);
     expect(report.explain('canInsertFootnote')).toBe('אינו זמין בגרסה זו');
+  });
+
+  it('namespace הלוח חסר: „העתק” מנוטרל, ו„מחק” אינו נפגע', async () => {
+    // `clipboard` הוא adapter אופציונלי בחוזה, בדיוק כמו `footnotes`. שתי
+    // השאלות מופרדות כדי שמנוע כזה יוכל להשאיר „גזור” מנוטרל בלי לנטרל את
+    // המחיקה עצמה — ולהיפך.
+    const raw = fullCapabilities();
+    raw.operations['clipboard.serializeSelection'] = {
+      available: false,
+      reasons: ['NAMESPACE_UNAVAILABLE'],
+    } as never;
+
+    const report = await readDocCapabilities(hostWith(() => raw));
+
+    expect(report.can('canCopySelection')).toBe(false);
+    expect(report.explain('canCopySelection')).toBe('אינו זמין בגרסה זו');
+    expect(report.can('canDeleteSelection')).toBe(true);
   });
 
   it('`available` שאינו בדיוק true אינו „כן”', async () => {

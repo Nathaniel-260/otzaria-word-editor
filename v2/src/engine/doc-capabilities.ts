@@ -83,6 +83,14 @@ const CAPABILITY_SPECS = {
   // סקירה
   canAddComment: { operation: 'comments.create', global: 'comments' },
   canTrackChanges: { global: 'trackChanges' },
+  // לוח ובחירה. `clipboard` הוא adapter אופציונלי בחוזה, בדיוק כמו `footnotes`,
+  // ולכן אותה בדיקה נדרשת כאן. „גזור” הוא שתי יכולות (סדרוּר ומחיקה) ולא אחת,
+  // ולכן הן שתי שאלות: מנוע שיודע להעתיק ואינו יודע למחוק צריך להשאיר את
+  // „העתק” פעיל ולנטרל רק את „גזור”.
+  canCopySelection: { operation: 'clipboard.serializeSelection' },
+  canPasteContent: { operation: 'clipboard.insert' },
+  canDeleteSelection: { operation: 'delete' },
+  canResolveRange: { operation: 'ranges.resolve' },
 } as const satisfies Record<string, CapabilitySpec>;
 
 export type DocCapabilityQuestion = keyof typeof CAPABILITY_SPECS;

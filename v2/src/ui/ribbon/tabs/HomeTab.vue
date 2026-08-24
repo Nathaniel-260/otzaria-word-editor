@@ -18,16 +18,18 @@
           icon="cut"
           label="גזור"
           variant="small"
-          tooltip="גזור"
+          :tooltip="cutTooltip"
           shortcut="Ctrl+X"
+          :disabled="!canCut"
           @click="doCut"
         />
         <RibbonButton
           icon="copy"
           label="העתק"
           variant="small"
-          tooltip="העתק"
+          :tooltip="copyTooltip"
           shortcut="Ctrl+C"
+          :disabled="!canCopy"
           @click="doCopy"
         />
         <RibbonButton
@@ -337,7 +339,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, inject, ref, shallowRef, watch } from 'vue';
+import type { SuperDoc } from 'superdoc';
 import RibbonGroup from '../common/RibbonGroup.vue';
 import RibbonButton from '../common/RibbonButton.vue';
 import RibbonSelect, { type SelectOption } from '../common/RibbonSelect.vue';
@@ -345,6 +348,10 @@ import ColorPickerPopover from '../common/ColorPickerPopover.vue';
 import StyleGallery from '../common/StyleGallery.vue';
 import { useCommand } from '../../../composables/useCommand';
 import { useFontOptions } from '../../../composables/useFontOptions';
+import { COMMAND_REPORTER, type CommandReporter } from '../../../composables/keys';
+import { ACTIVE_SUPERDOC } from '../../../engine/document-api';
+import { readDocCapabilities, type DocCapabilityReport } from '../../../engine/doc-capabilities';
+import { copySelection, cutSelection } from '../../../engine/clipboard';
 import {
   DEFAULT_FONT_SIZE_PT,
   DEFAULT_LINE_HEIGHT,
@@ -561,16 +568,71 @@ function onApplyStyle(styleId: string): void {
   void styleCmd.run(payload);
 }
 
+/* ------------------------------------------------------------------ */
+/* לוח                                                                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * פעולות הלוח אינן פקודות ב-registry של ה-controller — אין להן מזהה בקטלוג —
+ * ולכן הן עוברות ב-Document API דרך engine/clipboard.ts, ומדווחות ידנית. ראו
+ * ReferencesTab: אותו דפוס בדיוק, כולל קריאת היכולות בכל החלפת מסמך.
+ */
+const fallbackReporter: CommandReporter = (outcome, id) => {
+  if (!outcome.ok) console.warn(`[otzaria-word] ${id}: ${outcome.message}`);
+};
+
+const superdoc = inject(ACTIVE_SUPERDOC, shallowRef<SuperDoc | null>(null));
+const report = inject(COMMAND_REPORTER, fallbackReporter);
+
+const capabilities = shallowRef<DocCapabilityReport | null>(null);
+
+/** קריאת היכולות א-סינכרונית, ותשובה של מסמך קודם לא תדרוס את הנוכחי. */
+let generation = 0;
+
+watch(
+  superdoc,
+  async (host) => {
+    const mine = ++generation;
+    capabilities.value = null;
+    const result = await readDocCapabilities(host);
+    if (mine === generation) capabilities.value = result;
+  },
+  { immediate: true }
+);
+
+const canCopy = computed(() => capabilities.value?.can('canCopySelection') ?? false);
+
+/** „גזור” הוא סדרוּר **ומחיקה**. מנוע שיודע רק להעתיק משאיר „העתק” פעיל. */
+const canCut = computed(
+  () => canCopy.value && (capabilities.value?.can('canDeleteSelection') ?? false),
+);
+
+function tooltipFor(enabled: boolean, question: 'canCopySelection' | 'canDeleteSelection', text: string): string {
+  if (enabled) return text;
+  return capabilities.value?.explain(question) || 'המסמך עדיין נטען';
+}
+
+const copyTooltip = computed(() =>
+  tooltipFor(canCopy.value, 'canCopySelection', 'העתקת הבחירה ללוח'),
+);
+const cutTooltip = computed(() =>
+  tooltipFor(
+    canCut.value,
+    canCopy.value ? 'canDeleteSelection' : 'canCopySelection',
+    'גזירת הבחירה ללוח',
+  ),
+);
+
+async function doCopy(): Promise<void> {
+  report(await copySelection(superdoc.value), 'clipboard-copy');
+}
+
+async function doCut(): Promise<void> {
+  report(await cutSelection(superdoc.value), 'clipboard-cut');
+}
+
 function doPaste(): void {
   void navigator.clipboard?.readText?.();
-}
-
-function doCut(): void {
-  // הפעולה נתמכת דרך קיצור מקלדת Ctrl+X
-}
-
-function doCopy(): void {
-  // הפעולה נתמכת דרך קיצור מקלדת Ctrl+C
 }
 
 function doSelectAll(): void {
