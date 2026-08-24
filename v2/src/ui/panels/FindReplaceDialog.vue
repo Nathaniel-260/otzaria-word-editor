@@ -2,6 +2,8 @@
   <div
     v-if="isOpen"
     class="find-replace-dialog"
+    role="dialog"
+    aria-label="חיפוש והחלפה"
     @keydown.esc="$emit('close')"
   >
     <div class="fr-header">

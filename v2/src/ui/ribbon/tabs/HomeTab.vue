@@ -125,16 +125,14 @@
         <RibbonButton
           icon="subscript"
           variant="icon-only"
-          tooltip="כתב תחתי"
-          :active="subscriptCmd.active.value"
-          @click="subscriptCmd.run()"
+          tooltip="כתב תחתי (אינו נתמך במנוע הנוכחי)"
+          :disabled="true"
         />
         <RibbonButton
           icon="superscript"
           variant="icon-only"
-          tooltip="כתב עליון"
-          :active="superscriptCmd.active.value"
-          @click="superscriptCmd.run()"
+          tooltip="כתב עליון (אינו נתמך במנוע הנוכחי)"
+          :disabled="true"
         />
 
         <div class="word-separator" />
@@ -354,8 +352,6 @@ const boldCmd = useCommand('bold');
 const italicCmd = useCommand('italic');
 const underlineCmd = useCommand('underline');
 const strikeCmd = useCommand('strikethrough');
-const subscriptCmd = useCommand('subscript');
-const superscriptCmd = useCommand('superscript');
 const clearFormatCmd = useCommand('clear-formatting');
 const formatPainterCmd = useCommand('copy-format');
 

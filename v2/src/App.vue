@@ -399,6 +399,18 @@ function onOpenLibrary(): void {
 
 // קיצורי מקלדת
 function onKeyDown(event: KeyboardEvent): void {
+  if (event.key === 'Escape') {
+    if (isFindOpen.value) {
+      isFindOpen.value = false;
+      event.preventDefault();
+    }
+    if (isAboutOpen.value) {
+      isAboutOpen.value = false;
+      event.preventDefault();
+    }
+    return;
+  }
+
   if (event.ctrlKey || event.metaKey) {
     if (event.key === 's' || event.key === 'S') {
       const shortcut = saveShortcut(event, saveSnapshot.value.isSaving);
