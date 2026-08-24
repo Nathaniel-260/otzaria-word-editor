@@ -125,13 +125,36 @@ const ARITY: Record<string, number> = {
 };
 
 /**
- * נקודות המעטפת של path. נקודות הבקרה של בזייה נכללות בכוונה: הן חוסמות את
- * העקומה מלמעלה, ולכן bounding box שמבוסס עליהן הוא שמרני — הוא עלול לדווח
- * חריגה שאין, אך לא יפספס חריגה שיש.
+ * תת-נתיב אחד — צורה אחת בתוך ה-`d`: הטבעת החיצונית של מסגרת, החור שבתוכה,
+ * שורת טקסט. ההפרדה נדרשת כי „האייקון הוא משולש” היא טענה על **צורה** ולא על
+ * ה-path כולו, ומשולש האזהרה שהיה כאן היה תת-הנתיב הראשון מתוך ארבעה.
  */
-function pathPoints(d: string): Point[] {
+interface Subpath {
+  pts: Point[];
+  /** רק קווים ישרים — כלומר ה-`pts` הן הקודקודים עצמם ולא דגימה או נקודות בקרה. */
+  straight: boolean;
+}
+
+/**
+ * נקודות המעטפת של path, מקובצות לתת-נתיבים. נקודות הבקרה של בזייה נכללות
+ * בכוונה: הן חוסמות את העקומה מלמעלה, ולכן bounding box שמבוסס עליהן הוא שמרני
+ * — הוא עלול לדווח חריגה שאין, אך לא יפספס חריגה שיש.
+ *
+ * הפירוק לתת-נתיבים נעשה כאן ולא בחיתוך המחרוזת על `M`: `m` היא moveto **יחסי**
+ * לסוף התת-נתיב הקודם (כך נכתב משולש האזהרה: `...z m0 3.8...`), ולכן חיתוך
+ * טקסטואלי היה מחשב את הקודקודים של כל צורה שנייה והלאה במקום הלא נכון.
+ */
+function walkPath(d: string): Subpath[] {
   const tokens = d.match(/[MmLlHhVvCcSsQqTtAaZz]|[-+]?(?:\d*\.\d+|\d+)/g) ?? [];
-  const pts: Point[] = [];
+  const subs: Subpath[] = [];
+  let current: Subpath = { pts: [], straight: true };
+  const push = (point: Point): void => {
+    current.pts.push(point);
+  };
+  const startSubpath = (): void => {
+    if (current.pts.length) subs.push(current);
+    current = { pts: [], straight: true };
+  };
   let cmd = '';
   let cx = 0;
   let cy = 0;
@@ -169,7 +192,8 @@ function pathPoints(d: string): Point[] {
         cy = ay(a[1]!);
         startX = cx;
         startY = cy;
-        pts.push({ x: cx, y: cy });
+        startSubpath();
+        push({ x: cx, y: cy });
         // אחרי M נוספים, זוגות נוספים הם L (מפרט SVG §9.3.3).
         cmd = rel ? 'l' : 'L';
         break;
@@ -177,21 +201,24 @@ function pathPoints(d: string): Point[] {
       case 'T':
         cx = ax(a[0]!);
         cy = ay(a[1]!);
-        pts.push({ x: cx, y: cy });
+        // T היא בזייה, ולכן היא מבטלת את „ישר” גם אם הנקודה שנרשמה היא קצה.
+        if (upper === 'T') current.straight = false;
+        push({ x: cx, y: cy });
         break;
       case 'H':
         cx = ax(a[0]!);
-        pts.push({ x: cx, y: cy });
+        push({ x: cx, y: cy });
         break;
       case 'V':
         cy = ay(a[0]!);
-        pts.push({ x: cx, y: cy });
+        push({ x: cx, y: cy });
         break;
       case 'C':
       case 'S':
       case 'Q': {
         const pairs = upper === 'C' ? [0, 2, 4] : [0, 2];
-        for (const p of pairs) pts.push({ x: ax(a[p]!), y: ay(a[p + 1]!) });
+        current.straight = false;
+        for (const p of pairs) push({ x: ax(a[p]!), y: ay(a[p + 1]!) });
         cx = ax(a[pairs[pairs.length - 1]!]!);
         cy = ay(a[pairs[pairs.length - 1]! + 1]!);
         break;
@@ -199,14 +226,21 @@ function pathPoints(d: string): Point[] {
       case 'A': {
         const ex = ax(a[5]!);
         const ey = ay(a[6]!);
-        pts.push(...arcPoints(cx, cy, a[0]!, a[1]!, a[2]!, a[3]!, a[4]!, ex, ey));
+        current.straight = false;
+        for (const point of arcPoints(cx, cy, a[0]!, a[1]!, a[2]!, a[3]!, a[4]!, ex, ey)) push(point);
         cx = ex;
         cy = ey;
         break;
       }
     }
   }
-  return pts;
+  if (current.pts.length) subs.push(current);
+  return subs;
+}
+
+/** כל נקודות המעטפת, בלי חלוקה לצורות — לבדיקות ה-viewBox ויחס המילוי. */
+function pathPoints(d: string): Point[] {
+  return walkPath(d).flatMap((sub) => sub.pts);
 }
 
 interface Measured {
@@ -306,6 +340,68 @@ describe('גבולות ה-viewBox', () => {
     const pts = pathPoints('M10 10a4 4 0 0 1 0-8z');
     expect(Math.min(...pts.map((p) => p.x))).toBeCloseTo(6, 2);
     expect(Math.min(...pts.map((p) => p.y))).toBeCloseTo(2, 2);
+  });
+});
+
+/**
+ * הקודקודים של תת-נתיב שבנוי רק מקווים ישרים, בלי כפילויות — למשל נקודת
+ * הסגירה שחוזרת על נקודת הפתיחה. תת-נתיב עם עקומה מחזיר `null`: שם הנקודות
+ * שנרשמו הן דגימה ונקודות בקרה, ולא קודקודים של פוליגון.
+ */
+function polygonVertices(sub: Subpath): Point[] | null {
+  if (!sub.straight) return null;
+  const seen = new Set<string>();
+  const out: Point[] = [];
+  for (const point of sub.pts) {
+    const key = `${point.x.toFixed(2)},${point.y.toFixed(2)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(point);
+  }
+  return out;
+}
+
+/**
+ * מתחת לזה משולש הוא פרט בתוך אייקון (ראש החץ של `indentIncrease`, המשולש
+ * של `replace`, הדגל של `dirRtl`); מעל זה הוא **הצורה של האייקון**. הסט בפועל
+ * נמצא הרחק משני צדי הגבול: הפרטים תופסים עד 35% מהמידה, ומשולש האזהרה שהיה
+ * כאן תפס 78%x75%.
+ */
+const WARNING_TRIANGLE_MIN = 0.5;
+
+describe('סמנטיקה של הצורה', () => {
+  it('אין אייקון שהוא משולש שממלא את ה-viewBox — זה סימן האזהרה המוסכם', () => {
+    // מה שקרה: `otzaria` היה משולש חלול עם מקף אנכי ונקודה מתחתיו — כלומר
+    // משולש + סימן קריאה — על כפתור „פתח ספרייה”. שום בדיקה לא התלוננה, כי
+    // הגאומטריה הייתה תקינה לחלוטין: viewBox נכון, בתוך הגבולות, יחס מילוי
+    // בטווח. „נראה כמו ספר” אינו ניתן לבדיקה, אבל „הצורה היא סימן אזהרה” כן:
+    // משולש שהוא הצורה הראשית של אייקון פירושו אזהרה או שגיאה בכל סט אייקונים
+    // מוכר, ואין לנו אף פקד שזה תפקידו.
+    const warnings: string[] = [];
+    for (const name of NAMES) {
+      for (const match of ICONS[name]!.matchAll(/\sd="([^"]+)"/g)) {
+        for (const sub of walkPath(match[1]!)) {
+          const vertices = polygonVertices(sub);
+          if (!vertices || vertices.length !== 3) continue;
+          const w = (Math.max(...vertices.map((v) => v.x)) - Math.min(...vertices.map((v) => v.x))) / VB_W;
+          const h = (Math.max(...vertices.map((v) => v.y)) - Math.min(...vertices.map((v) => v.y))) / VB_H;
+          if (w >= WARNING_TRIANGLE_MIN && h >= WARNING_TRIANGLE_MIN) {
+            warnings.push(`${name}: משולש ${(w * 100).toFixed(0)}%x${(h * 100).toFixed(0)}%`);
+          }
+        }
+      }
+    }
+    expect(warnings).toEqual([]);
+  });
+
+  it('הגלאי אכן מזהה את משולש האזהרה שהיה כאן', () => {
+    // בלי הבדיקה הזאת שער כמו זה שלמעלה יכול לעבור בירוק מפני שהוא אינו מודד
+    // כלום — למשל אחרי שינוי בפירוק תת-הנתיבים.
+    const [triangle] = walkPath('M10 2l-8 15h16L10 2zm0 3.8l5.5 10.2H4.5L10 5.8z');
+    const vertices = polygonVertices(triangle!);
+    expect(vertices).toHaveLength(3);
+    const w = Math.max(...vertices!.map((v) => v.x)) - Math.min(...vertices!.map((v) => v.x));
+    expect(w / VB_W).toBeGreaterThanOrEqual(WARNING_TRIANGLE_MIN);
   });
 });
 
