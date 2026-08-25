@@ -111,6 +111,12 @@ export interface Shortcut {
   inModal?: true;
   /** החזקת המקש חוזרת על הפעולה. */
   repeatable?: true;
+  /**
+   * הצירוף מזוהה בשחרור מודיפייר, ולא בלחיצת מקש — כלומר `ui/shortcuts/
+   * direction.ts` ולא המנתב הרגיל. הרשומה קיימת כאן כדי שהתווית והתיאור יבואו
+   * מאותו מקום כמו כל השאר, והמנתב מדלג עליה.
+   */
+  onKeyUp?: true;
 }
 
 /**
@@ -526,6 +532,26 @@ export const SHORTCUTS = [
     ctrl: true,
     shift: true,
     command: 'formatting-marks',
+  },
+  {
+    id: 'direction-rtl',
+    label: 'Ctrl + Shift ימני',
+    description: 'פסקה מימין לשמאל',
+    group: 'direction',
+    code: 'ShiftRight',
+    ctrl: true,
+    command: 'direction-rtl',
+    onKeyUp: true,
+  },
+  {
+    id: 'direction-ltr',
+    label: 'Ctrl + Shift שמאלי',
+    description: 'פסקה משמאל לימין',
+    group: 'direction',
+    code: 'ShiftLeft',
+    ctrl: true,
+    command: 'direction-ltr',
+    onKeyUp: true,
   },
   {
     id: 'escape',

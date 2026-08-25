@@ -190,8 +190,10 @@ import { createLinkDialog } from './composables/use-link-dialog';
 import { createShellActionRunner } from './ui/shortcuts/actions';
 import {
   createShortcutDispatcher,
+  isTextEntryTarget,
   type ShortcutDispatcher,
 } from './ui/shortcuts/dispatch';
+import { createDirectionShortcut } from './ui/shortcuts/direction';
 
 const editorStackRef = ref<HTMLElement | null>(null);
 
@@ -996,6 +998,7 @@ async function runShortcutCommand(id: CommandId, payload?: unknown): Promise<voi
 }
 
 let shortcuts: ShortcutDispatcher | null = null;
+let directionShortcut: { dispose: () => void } | null = null;
 
 onMounted(async () => {
   shortcuts = createShortcutDispatcher({
@@ -1003,6 +1006,11 @@ onMounted(async () => {
     runAction: runShellAction,
     // רק „אודות” חוסם: הוא מודאלי. מעל דיאלוג החיפוש עדיין מותר לשמור.
     isModalOpen: () => isAboutOpen.value,
+  });
+
+  directionShortcut = createDirectionShortcut({
+    runCommand: (id) => void runShortcutCommand(id),
+    isBlocked: (target) => isAboutOpen.value || isTextEntryTarget(target),
   });
 
   if (editorStackRef.value) {
@@ -1043,6 +1051,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   shortcuts?.dispose();
+  directionShortcut?.dispose();
   // חיפוש-בזמן-הקלדה שממתין ירוץ אחרי הפירוק על handle של controller מפורק.
   searchAdapter?.dispose();
 });
