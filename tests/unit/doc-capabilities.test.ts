@@ -33,6 +33,10 @@ function fullCapabilities() {
       'sections.setPageBorders': { available: true },
       'format.vertAlign': { available: true },
       'footnotes.insert': { available: true },
+      'footnotes.list': { available: true },
+      'footnotes.get': { available: true },
+      'footnotes.update': { available: true },
+      'footnotes.remove': { available: true },
       'format.paragraph.setFlowOptions': { available: true },
       insert: { available: true },
       'create.image': { available: true },
@@ -478,6 +482,49 @@ describe('readDocCapabilities', () => {
     expect(
       (await readDocCapabilities(hostWith(() => fullCapabilities()))).can('canManageCaptions'),
     ).toBe(true);
+  });
+
+  it('„נהל הערות” דורש את ארבע הפעולות שהדיאלוג מריץ — כולל `footnotes.get`', async () => {
+    // `footnotes.get` נראה עקיף וגם הוא נמדד כהכרחי: כתובת ההערה אינה נושאת
+    // את סוגה, ו-`get` הוא הדרך היחידה לשאול את המנוע לאיזו הערה היא נפתרת
+    // לפני שנוגעים במסמך. ההנמקה המלאה ב-engine/footnotes.ts.
+    for (const operation of [
+      'footnotes.list',
+      'footnotes.get',
+      'footnotes.update',
+      'footnotes.remove',
+    ]) {
+      const raw = fullCapabilities();
+      raw.operations[operation as 'footnotes.list'] = {
+        available: false,
+        reasons: ['NAMESPACE_UNAVAILABLE'],
+      } as never;
+      expect(
+        (await readDocCapabilities(hostWith(() => raw))).can('canManageNotes'),
+        operation,
+      ).toBe(false);
+    }
+
+    expect(
+      (await readDocCapabilities(hostWith(() => fullCapabilities()))).can('canManageNotes'),
+    ).toBe(true);
+    // וההוספה אינה נשענת על אף אחת מהן — היא כותבת ואינה מחפשת.
+    const onlyInsert = fullCapabilities();
+    onlyInsert.operations['footnotes.get'] = { available: false } as never;
+    expect((await readDocCapabilities(hostWith(() => onlyInsert))).can('canInsertFootnote')).toBe(
+      true,
+    );
+  });
+
+  it('„מספור ההערות” אינו שאלה בכלל', async () => {
+    // `footnotes.configure` כותב OOXML קנוני, ובכל זאת אין לו פקד: אין דרך
+    // לקרוא את ההגדרות שבמסמך, וכל קריאה מחליפה את `w:footnotePr` כולו.
+    // שאלה בלי פקד היא הצהרת יכולת שאיש אינו קורא.
+    const raw = fullCapabilities();
+    (raw.operations as Record<string, { available: boolean }>)['footnotes.configure'] = {
+      available: false,
+    };
+    expect((await readDocCapabilities(hostWith(() => raw))).can('canManageNotes')).toBe(true);
   });
 
   it('„מספור הכיתובים” אינו שאלה בכלל', async () => {

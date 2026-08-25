@@ -271,6 +271,19 @@ export interface SuperdocDoubleOptions {
   missing?: readonly string[];
   /** מסלול שנכשל, עם קוד הכשל שהקבלה מחזירה. */
   failures?: Record<string, { code: string; message?: string }>;
+  /**
+   * מסלולים שהתשובה שלהם נפתרת **מעבר לגבול macrotask**, כמו במנוע האמיתי.
+   *
+   * למה זה נדרש: הכפיל פותר כל קריאה באותו tick, ולכן שום בדיקה אינה יכולה
+   * להעמיד מצב שבו קריאה אחת עדיין באוויר בזמן שהמשתמש לוחץ פקד אחר. זה
+   * בדיוק החלון שבו קריאת אימות (`footnotes.get`) מתיישנת — נמדד ~10ms
+   * במסמך ריק וקר — ובלי ההשהיה כאן המסלול הזה אינו נגיש לבדיקה בכלל.
+   *
+   * התשובה מחושבת **ברגע הקריאה** ונמסרת אחר כך, כמו במנוע: מה שהקורא
+   * מקבל הוא תצלום של המסמך כפי שהיה כשהוא שאל, ולא כפי שהוא בזמן התשובה.
+   * חישוב מאוחר היה מסתיר את המרוץ במקום למדוד אותו.
+   */
+  deferred?: readonly string[];
   /** מה שהבחירה במסמך מדווחת. */
   selection?: { blockId?: string | null; hasRange?: boolean; text?: string };
   /**
@@ -319,6 +332,25 @@ export interface SuperdocDoubleOptions {
     bibliographyIds?: readonly string[];
   };
   /**
+   * ההערות שבמסמך. אותה החלטה כמו ב-`toc` וב-`captions`: מסמך **בלי** הערות.
+   *
+   * `type` נמסר לכל הערה, ו-`noteId` **אינו** — הוא מוקצה כאן לכל סוג בנפרד
+   * ומתחיל מ-1, כמו במנוע האמיתי. זה מה שמייצר את ההתנגשות שנמדדה: הערת
+   * שוליים והערת סיום שנושאות את אותו מספר ואת אותה כתובת בדיוק. כפיל
+   * שהיה מקצה מזהה אחד רץ לשני הסוגים לא היה יודע לייצר את המסלול הזה
+   * בכלל — וזה המסלול שבו „הסר” על הערת סיום מוחק הערת שוליים.
+   */
+  notes?: {
+    items?: readonly { type: 'footnote' | 'endnote'; content: string }[];
+    /**
+     * כמה הערות עמוד אחד מחזיר, וכשהוא נמסר כל שאיבה שאחריו **זורקת** —
+     * כשל אמצע-שאיבה. `total` ממשיך לדווח את הכול, כלומר זה המצב שבו רשימה
+     * חלקית עלולה להיראות מלאה. הכפיל אינו יכול לייצר אותו אחרת: המנוע
+     * שואב ב-200, ומסמך של מאתיים הערות בבדיקת קומפוננטה הוא רעש.
+     */
+    pageLimit?: number;
+  };
+  /**
    * הכיתובים שבמסמך, בסדר הופעתם. אותה החלטה כמו ב-`toc` וב-`citations`:
    * מסמך **בלי** כיתובים. המספור אינו נמסר כאן אלא מחושב ב-`captions.list`
    * מסדר הפריטים — בדיוק כמו במנוע האמיתי, שבו כיתוב שנוסף באמצע מזיז את
@@ -356,6 +388,7 @@ export function createSuperdocDouble(options: SuperdocDoubleOptions = {}): Super
   const calls: DocCall[] = [];
   const denied = new Set(options.denied ?? []);
   const missing = new Set(options.missing ?? []);
+  const deferred = new Set(options.deferred ?? []);
   const failures = options.failures ?? {};
 
   const blockId = options.selection?.blockId === undefined ? 'block-1' : options.selection.blockId;
@@ -390,10 +423,14 @@ export function createSuperdocDouble(options: SuperdocDoubleOptions = {}): Super
   /** מסלול שנרשם, מקליט, ומחזיר קבלה — או `undefined` אם הוא „חסר במנוע”. */
   function route<T>(op: string, impl: (input: unknown) => T): ((input: unknown) => T) | undefined {
     if (missing.has(op)) return undefined;
-    return (input: unknown) => {
+    return ((input: unknown) => {
       calls.push({ op, input });
-      return impl(input);
-    };
+      const value = impl(input);
+      if (!deferred.has(op)) return value;
+      // `setTimeout` ולא `Promise.resolve`: microtask נפתר לפני שהדפדפן
+      // מספיק לעבד אירוע מצביע, ולכן הוא אינו מייצג את החלון שנמדד.
+      return new Promise((resolve) => setTimeout(() => resolve(value), 0));
+    }) as (input: unknown) => T;
   }
 
   function receipt(op: string): { success: boolean; failure?: { code: string; message?: string } } {
@@ -430,6 +467,19 @@ export function createSuperdocDouble(options: SuperdocDoubleOptions = {}): Super
   const citationSources = options.citations?.sources ?? [];
   const citedSourceIds = options.citations?.cited ?? [];
   const bibliographyIds = options.citations?.bibliographyIds ?? [];
+  /**
+   * ההערות שבמסמך. המזהה מוקצה לפי סוג ו**אינו** מחושב מחדש בהסרה: נמדד
+   * שהמנוע משאיר את `displayNumber` של השאר כמו שהיה (הסרה של הערה 2
+   * הותירה 1 ו-3), והמספר ש-Word יציג נקבע אצלו בפתיחה ולא כאן.
+   */
+  let footnoteSeq = 0;
+  let endnoteSeq = 0;
+  const notes = (options.notes?.items ?? []).map((item) => ({
+    type: item.type,
+    noteId: String(item.type === 'endnote' ? ++endnoteSeq : ++footnoteSeq),
+    content: item.content,
+  }));
+
   /** מונה מזהים לכיתוב שנוצר בכפיל. `nodeId` של פסקה הוא כתובת חולפת. */
   let captionSeq = 0;
   /** משתנה: `captions.insert` ו-`captions.remove` מוסיפים ומורידים ממנו. */
@@ -476,6 +526,14 @@ export function createSuperdocDouble(options: SuperdocDoubleOptions = {}): Super
     source: 'superdoc',
     items: [{ type: 'text/plain', kind: 'string', data: selectionText || 'טקסט' }],
   };
+
+  /**
+   * הערת השוליים שמספרה `noteId`, ובהיעדרה הערת הסיום. זה הסדר שנמדד
+   * במנוע — ולא בחירה של הכפיל.
+   */
+  const resolveNote = (noteId: string) =>
+    notes.find((note) => note.type === 'footnote' && note.noteId === noteId) ??
+    notes.find((note) => note.noteId === noteId);
 
   const doc = {
     capabilities: {
@@ -524,8 +582,98 @@ export function createSuperdocDouble(options: SuperdocDoubleOptions = {}): Super
         delete: route('headerFooters.parts.delete', () => receipt('headerFooters.parts.delete')),
       },
     },
+    /**
+     * הערות שוליים והערות סיום. שלוש הבחנות מכוונות, וכולן נמדדו במנוע
+     * האמיתי:
+     *
+     * 1. **הכתובת אינה נושאת את הסוג.** `entityType` הוא `'footnote'` גם
+     *    עבור הערת סיום, ולכן `get`/`update`/`remove` פותרים **תחילה** את
+     *    הערת השוליים שמספרה זהה, ורק בהיעדרה את הערת הסיום. זה מה שהופך
+     *    את האימות שלפני ההסרה לבדיקה אמיתית.
+     * 2. **`get` זורק** על כתובת שאינה קיימת ואינו מחזיר קבלה.
+     * 3. **`list` מכבד `limit`/`offset` באמת**, ומחזיר את שני הסוגים יחד
+     *    עם `type` כמפריד היחיד ביניהם.
+     */
     footnotes: {
-      insert: route('footnotes.insert', () => receipt('footnotes.insert')),
+      insert: route('footnotes.insert', (input) => {
+        const failed = receipt('footnotes.insert');
+        if (!failed.success) return failed;
+        // ההוספה **נכנסת לרשימה**, ולא רק מחזירה קבלה: היא זו שמייצרת את
+        // הכתובת המתנגשת. כפיל שמאשר בלי להוסיף היה מסתיר את מה שקורה
+        // כשהוספה נכנסת בזמן שאימות של הסרה עדיין באוויר.
+        const { type, content } = input as { type: 'footnote' | 'endnote'; content: string };
+        notes.push({
+          type,
+          noteId: String(type === 'endnote' ? ++endnoteSeq : ++footnoteSeq),
+          content,
+        });
+        return { success: true };
+      }),
+      list: route('footnotes.list', (input) => {
+        const query = (input ?? {}) as { type?: string; limit?: number; offset?: number };
+        const pageLimit = options.notes?.pageLimit;
+        if (pageLimit !== undefined && (query.offset ?? 0) >= pageLimit) {
+          throw new Error('footnotes.list failed.');
+        }
+        const matching = notes
+          .filter((note) => query.type === undefined || note.type === query.type)
+          .map((note) => ({
+            id: note.noteId,
+            handle: { ref: `footnote:${note.noteId}`, refStability: 'stable' },
+            address: { kind: 'entity', entityType: 'footnote', noteId: note.noteId },
+            type: note.type,
+            noteId: note.noteId,
+            displayNumber: note.noteId,
+            content: note.content,
+          }));
+        const offset = query.offset ?? 0;
+        const limit = Math.min(query.limit ?? matching.length, pageLimit ?? matching.length);
+        return { items: matching.slice(offset, offset + limit), total: matching.length };
+      }),
+      get: route('footnotes.get', (input) => {
+        const { target } = input as { target: { noteId: string } };
+        const found = resolveNote(target.noteId);
+        if (!found) throw new Error('footnote/endnote was not found.');
+        return {
+          address: { kind: 'entity', entityType: 'footnote', noteId: found.noteId },
+          type: found.type,
+          noteId: found.noteId,
+          displayNumber: found.noteId,
+          content: found.content,
+        };
+      }),
+      update: route('footnotes.update', (input) => {
+        const failed = receipt('footnotes.update');
+        if (!failed.success) return failed;
+        const { target, patch } = input as {
+          target: { noteId: string };
+          patch: { content: string };
+        };
+        const found = resolveNote(target.noteId);
+        if (!found) {
+          return {
+            success: false,
+            failure: { code: 'TARGET_NOT_FOUND', message: 'footnote/endnote was not found.' },
+          };
+        }
+        // מחליף ואינו מוסיף — זה מה שנמדד, וזה ההבדל מ-`captions.update`.
+        found.content = patch.content;
+        return { success: true, footnote: target };
+      }),
+      remove: route('footnotes.remove', (input) => {
+        const failed = receipt('footnotes.remove');
+        if (!failed.success) return failed;
+        const { target } = input as { target: { noteId: string } };
+        const found = resolveNote(target.noteId);
+        if (!found) {
+          return {
+            success: false,
+            failure: { code: 'TARGET_NOT_FOUND', message: 'footnote/endnote was not found.' },
+          };
+        }
+        notes.splice(notes.indexOf(found), 1);
+        return { success: true, footnote: target };
+      }),
     },
     /**
      * המסמך של הכפיל נפתח **בלי** שדות: `fields.list` ריק. זה המצב שהפקדים

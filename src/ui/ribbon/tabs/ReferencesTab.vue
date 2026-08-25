@@ -61,7 +61,7 @@
         label="הערת שוליים"
         variant="large"
         :tooltip="noteTooltip('הוספת הערת שוליים בתחתית העמוד')"
-        :disabled="!canInsertNote"
+        :disabled="!canInsertNote || noteBusy"
         @click="onInsert('footnote')"
       />
       <RibbonButton
@@ -69,8 +69,21 @@
         label="הערת סיום"
         variant="large"
         :tooltip="noteTooltip('הוספת הערת סיום בסוף המסמך')"
-        :disabled="!canInsertNote"
+        :disabled="!canInsertNote || noteBusy"
         @click="onInsert('endnote')"
+      />
+      <!--
+        „נהל הערות” הוא הפקד השלישי, והוא עורך ומסיר בלבד: ההוספה נשארת
+        בשני הכפתורים שלצידו, מפני שהיא נכנסת במקום הסמן — והסמן אינו בעורך
+        מרגע שדיאלוג נפתח. ראו engine/footnotes.ts.
+      -->
+      <RibbonButton
+        icon="book"
+        label="נהל הערות"
+        variant="large"
+        :tooltip="notesTooltip"
+        :disabled="!can('canManageNotes')"
+        @click="onOpenNoteDialog"
       />
     </RibbonGroup>
 
@@ -250,6 +263,15 @@
       @insert="onInsertCitation"
     />
 
+    <NoteDialog
+      :is-open="noteDialogOpen"
+      :notes="notes.notes"
+      :busy="noteBusy"
+      @close="noteDialogOpen = false"
+      @update="onUpdateNote"
+      @remove="onRemoveNote"
+    />
+
     <CaptionDialog
       :is-open="captionDialogOpen"
       :captions="captions.captions"
@@ -285,7 +307,30 @@
  *
  * זמינות ההערות נקבעת מ-`doc.capabilities` ולא מהנחה: `footnotes` הוא adapter
  * אופציונלי בחוזה של המנוע, וכשהוא חסר הפקד מנוטרל עם ההסבר „אינו זמין בגרסה
- * זו” — בדיוק כפי ש-§12 דורש. „תוכן עניינים” ממשיך לרוץ דרך פקודת ה-registry;
+ * זו” — בדיוק כפי ש-§12 דורש.
+ *
+ * ## קבוצת „הערות שוליים”, ולמה ההוספה אינה בדיאלוג
+ *
+ * שלושה פקדים: שני כפתורי ההוספה שהיו כאן, ו„נהל הערות” שעורך ומסיר. הפיצול
+ * הזה אינו סגנון — `footnotes.insert` מכניס את ההערה **במקום הסמן**, ובלי
+ * בחירה חיה הוא מוחזר `PRECONDITION_FAILED / live-selection-unavailable`
+ * (נמדד). מרגע שדיאלוג נפתח הסמן אינו בעורך, ולכן „הוסף” בתוך דיאלוג היה
+ * כפתור שנכשל תמיד.
+ *
+ * הדיאלוג עצמו חוסם דבר אחד שנמדד: כתובת ההערה היא
+ * `{ entityType: 'footnote', noteId }` **גם עבור הערת סיום**, ושני הרצפים
+ * מתחילים מ-1 — כלומר הערת שוליים 1 והערת סיום 1 חולקות כתובת אחת, והמנוע
+ * פותר אותה תמיד לטובת הערת השוליים. לחיצה על „הסר” בשורה של הערת סיום
+ * הייתה מוחקת הערת שוליים אחרת. ההנמקה המלאה, כולל האימות שמונע את זה,
+ * ב-engine/footnotes.ts.
+ *
+ * מה שאין כאן הוא „מספור ההערות”, והוא פקד אמיתי ב-Word.
+ * `footnotes.configure` דווקא כותב `w:footnotePr` קנוני — אבל אין בכל ה-API
+ * דרך לקרוא את ההגדרות שבמסמך, וכל קריאה מחליפה את האלמנט כולו; כלומר טופס
+ * היה מציג ערכים שאינם של המסמך, ובאישור אחד מוחק בשקט את מה שהוגדר ב-Word.
+ * זו אותה שורה שנמתחה בדיאלוג של תוכן העניינים.
+ *
+ * „תוכן עניינים” ממשיך לרוץ דרך פקודת ה-registry;
  * מה שנוסף לו הוא `:disabled` מהמצב שהמנוע מדווח.
  *
  * ## קבוצת „תוכן עניינים”, ומה שאין בה
@@ -386,7 +431,16 @@ import {
   type DocCapabilityQuestion,
   type DocCapabilityReport,
 } from '../../../engine/doc-capabilities';
-import { insertNote, type NoteType } from '../../../engine/footnotes';
+import {
+  emptyNotesState,
+  insertNote,
+  readNotesState,
+  removeNote,
+  updateNote,
+  type NoteRef,
+  type NoteType,
+  type NotesState,
+} from '../../../engine/footnotes';
 import {
   emptyCrossRefsState,
   readCrossRefsState,
@@ -448,6 +502,7 @@ import IndexEntryDialog from '../../panels/IndexEntryDialog.vue';
 import CitationSourceDialog from '../../panels/CitationSourceDialog.vue';
 import InsertCitationDialog from '../../panels/InsertCitationDialog.vue';
 import CaptionDialog from '../../panels/CaptionDialog.vue';
+import NoteDialog from '../../panels/NoteDialog.vue';
 
 const tocCmd = useCommand('table-of-contents-insert');
 
@@ -474,6 +529,9 @@ const indexState = shallowRef<IndexState>(emptyIndexState());
 /** מצב הציטוטים: המקורות שבמסמך, כמה ציטוטים ישנם, וכמה ביבליוגרפיות. */
 const citations = shallowRef<CitationsState>(emptyCitationsState());
 
+/** מצב ההערות: הערות השוליים והערות הסיום שבמסמך, בסדר שהמנוע מחזיר. */
+const notes = shallowRef<NotesState>(emptyNotesState());
+
 /** מצב הכיתובים: מה יש במסמך, ואילו תוויות כבר בשימוש בו. */
 const captions = shallowRef<CaptionsState>(emptyCaptionsState());
 
@@ -486,6 +544,27 @@ const indexEntryDialogOpen = ref(false);
 const indexEntrySuggestion = ref('');
 const sourceDialogOpen = ref(false);
 const insertCitationDialogOpen = ref(false);
+const noteDialogOpen = ref(false);
+/**
+ * פעולה על הערה שיצאה לדרך וטרם חזרה — הנעילה של קבוצת ההערות.
+ *
+ * **זו הגנה על מרוץ שנמדד, ולא זהירות כללית.** כתובת ההערה אינה נושאת את
+ * הסוג, ולכן `updateNote`/`removeNote` קוראות `footnotes.get` לפני שהן
+ * נוגעות במסמך ומוודאות שהכתובת נפתרת לסוג שהמשתמש בחר (ראו
+ * engine/footnotes.ts). ה-`get` הזה חוצה גבול macrotask — נמדד ~10ms במסמך
+ * ריק וקר, וגדל עם גודל המסמך — ובחלון הזה לחיצה על „הערת שוליים” ברצועה
+ * נקלטת ומוסיפה הערה. אז מה שהאימות ראה כבר אינו מה שההסרה תפגע בו: „הסר”
+ * על הערת סיום 1, שאושר מפני שלא הייתה הערת שוליים 1, מוחק את הערת השוליים
+ * שהרגע נוצרה — ומדווח „בוצע”.
+ *
+ * `get` נוסף אינו פותר את זה: זו TOCTOU בהגדרתה, וכל בדיקה נוספת רק מקצרת
+ * את החלון. מה שסוגר אותו הוא שההוספה לא תיקלט כל עוד הפעולה באוויר, ולכן
+ * הנעילה יושבת כאן — בצד שמחזיק את שני המסלולים — ולא במודול.
+ *
+ * הקריאה מחדש נכללת בנעילה בכוונה: רשימה שהתיישנה היא בדיוק המצב שבו
+ * הכתובת שעל המסך מצביעה על הערה אחרת.
+ */
+const noteBusy = ref(false);
 const captionDialogOpen = ref(false);
 
 /** ראו LayoutTab: קריאת היכולות א-סינכרונית, ותשובה של מסמך קודם לא תדרוס. */
@@ -501,15 +580,24 @@ watch(
     indexState.value = emptyIndexState();
     citations.value = emptyCitationsState();
     captions.value = emptyCaptionsState();
-    const [result, refs, tocState, indexSnapshot, citationsSnapshot, captionsSnapshot] =
-      await Promise.all([
-        readDocCapabilities(host),
-        readCrossRefsState(host),
-        readTocState(host),
-        readIndexState(host),
-        readCitationsState(host),
-        readCaptionsState(host),
-      ]);
+    notes.value = emptyNotesState();
+    const [
+      result,
+      refs,
+      tocState,
+      indexSnapshot,
+      citationsSnapshot,
+      captionsSnapshot,
+      notesSnapshot,
+    ] = await Promise.all([
+      readDocCapabilities(host),
+      readCrossRefsState(host),
+      readTocState(host),
+      readIndexState(host),
+      readCitationsState(host),
+      readCaptionsState(host),
+      readNotesState(host),
+    ]);
     if (mine !== generation) return;
     capabilities.value = result;
     crossRefs.value = refs;
@@ -517,6 +605,7 @@ watch(
     indexState.value = indexSnapshot;
     citations.value = citationsSnapshot;
     captions.value = captionsSnapshot;
+    notes.value = notesSnapshot;
   },
   { immediate: true }
 );
@@ -532,13 +621,84 @@ function tip(question: DocCapabilityQuestion, enabledText: string): string {
 
 const canInsertNote = computed(() => capabilities.value?.can('canInsertFootnote') ?? false);
 
+/** מה שהפקד הנעול אומר. אינו נראה במצב מנוחה — `noteBusy` כבוי. */
+const NOTE_BUSY_TOOLTIP = 'פעולה על הערה עדיין בעבודה — ההוספה תיפתח כשהיא תסתיים';
+
 function noteTooltip(enabledText: string): string {
+  // הנעילה קודמת להסבר היכולת: היא הסיבה שהפקד מנוטרל **עכשיו**, והמשתמש
+  // שמרחף מעליו שואל למה דווקא ברגע הזה אי אפשר.
+  if (noteBusy.value) return NOTE_BUSY_TOOLTIP;
   if (canInsertNote.value) return enabledText;
   return capabilities.value?.explain('canInsertFootnote') || 'המסמך עדיין נטען';
 }
 
+/**
+ * הוספה, ואז קריאה מחדש: הדיאלוג עשוי להיות פתוח (אין בו הוספה, אבל אין מה
+ * שסוגר אותו), ורשימה שלא התרעננה הייתה מסתירה את ההערה שהרגע נוספה.
+ * **קורא** את המונה ואינו מקדם אותו — ראו ההסבר ב-InsertTab.
+ */
 async function onInsert(type: NoteType): Promise<void> {
+  // הכפתור כבר מנוטרל בזמן פעולה; הבדיקה כאן היא מה שבאמת נועל, מפני
+  // ש-`:disabled` הוא תצוגה ולחיצה יכולה להגיע גם ממקלדת או מקוד.
+  if (noteBusy.value) return;
   report(await insertNote(superdoc.value, type), `footnotes-insert-${type}`);
+  await refreshNotes();
+}
+
+const notesTooltip = computed(() =>
+  tip(
+    'canManageNotes',
+    notes.value.notes.length > 0
+      ? 'עריכה והסרה של הערות השוליים והערות הסיום שבמסמך'
+      : 'אין במסמך הערות לנהל'
+  )
+);
+
+/**
+ * קוראת מחדש את ההערות. נדרשת גם אחרי כשל, מאותו טעם כמו `refreshToc`,
+ * ובנוסף מטעם ייחודי כאן: הסרה **אינה** ממספרת מחדש את השאר (נמדד), אבל
+ * היא כן משנה לאיזו הערה כתובת נפתרת — מרגע שהערת שוליים 1 הוסרה, אותה
+ * כתובת מצביעה על הערת הסיום שמספרה 1. רשימה שהתיישנה היא בדיוק המצב שבו
+ * לחיצה מכוונת להערה אחרת מזו שעל המסך.
+ */
+async function refreshNotes(): Promise<void> {
+  const mine = generation;
+  const next = await readNotesState(superdoc.value);
+  if (mine === generation) notes.value = next;
+}
+
+/** קוראת את ההערות מהמסמך ברגע הפתיחה. אותו טעם כמו ב-`onOpenTocDialog`. */
+async function onOpenNoteDialog(): Promise<void> {
+  await refreshNotes();
+  noteDialogOpen.value = true;
+}
+
+/** נעולה מהרגע שהפעולה יוצאת ועד שהרשימה רועננה. ראו `noteBusy`. */
+async function runNoteAction(action: () => Promise<void>): Promise<void> {
+  if (noteBusy.value) return;
+  noteBusy.value = true;
+  try {
+    await action();
+  } finally {
+    // `finally` ולא שחרור בסוף הגוף: `updateNote` ו-`removeNote` אינן
+    // זורקות, אבל `refreshNotes` וה-`report` שלפניה כן יכולות — ונעילה
+    // שנשארה דלוקה היא בדיוק „כפתור מת” שאין לו הסבר.
+    noteBusy.value = false;
+  }
+}
+
+async function onUpdateNote(payload: { ref: NoteRef; content: string }): Promise<void> {
+  await runNoteAction(async () => {
+    report(await updateNote(superdoc.value, payload.ref, payload.content), 'footnotes-update');
+    await refreshNotes();
+  });
+}
+
+async function onRemoveNote(ref: NoteRef): Promise<void> {
+  await runNoteAction(async () => {
+    report(await removeNote(superdoc.value, ref), 'footnotes-remove');
+    await refreshNotes();
+  });
 }
 
 const canRebuildCrossRefs = computed(

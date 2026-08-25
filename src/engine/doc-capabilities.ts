@@ -81,6 +81,21 @@ const CAPABILITY_SPECS = {
   canSetVertAlign: { operation: 'format.vertAlign' },
   // הפניות והוספה
   canInsertFootnote: { operation: 'footnotes.insert' },
+  // „נהל הערות” — שאלה אחת לפקד אחד, כמו ב„סימנייה”: הדיאלוג מציג, עורך
+  // ומסיר, ופקד מנוטרל למחצה אינו מצב שאפשר להציג. שתי הבחנות כאן, ושתיהן
+  // נמדדו:
+  //
+  // 1. `footnotes.get` **הוא** חלק מהשאלה ואינו קישוט. כתובת ההערה אינה
+  //    נושאת את סוגה (`entityType` הוא `'footnote'` גם עבור הערת סיום),
+  //    ו-`get` הוא הדרך היחידה לשאול את המנוע לאיזו הערה הכתובת נפתרת לפני
+  //    שנוגעים במסמך. בלעדיו „הסר” על הערת סיום היה מוחק הערת שוליים.
+  // 2. `footnotes.configure` **אינו** נשאל: אין לו פקד. הוא כותב OOXML
+  //    קנוני, אבל אין דרך לקרוא את ההגדרות שבמסמך וכל קריאה מחליפה את
+  //    `w:footnotePr` כולו — כלומר טופס היה מוחק בשקט מה שהוגדר ב-Word.
+  //    ההנמקה המלאה ב-engine/footnotes.ts.
+  canManageNotes: {
+    operation: ['footnotes.list', 'footnotes.get', 'footnotes.update', 'footnotes.remove'],
+  },
   canSetPageBreakBefore: { operation: 'format.paragraph.setFlowOptions' },
   // `insert` ולא `create.text`: הכנסת טקסט היא פעולת הליבה של הפאסדה
   // (`memberPath: 'insert'` בקטלוג), אחותה של `delete`, ולא אחת מ-`create.*`.
