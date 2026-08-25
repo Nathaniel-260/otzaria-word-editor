@@ -5,6 +5,7 @@
       <RibbonButton
         icon="book"
         label="ציטוט מהקורא"
+        shortcut-id="insert-citation"
         variant="large"
         :tooltip="citationTooltip"
         :disabled="!canInsertCitation"
@@ -13,6 +14,7 @@
       <RibbonButton
         icon="search"
         label="חיפוש באוצריא"
+        shortcut-id="search-otzaria"
         variant="large"
         :tooltip="searchTooltip"
         :disabled="!canSearch"
@@ -21,6 +23,7 @@
       <RibbonButton
         icon="otzaria"
         label="פתח ספרייה"
+        shortcut-id="open-library"
         variant="large"
         :tooltip="sdkAvailable ? 'פתיחת ספריית הספרים של אוצריא' : OUTSIDE_OTZARIA"
         :disabled="!sdkAvailable"

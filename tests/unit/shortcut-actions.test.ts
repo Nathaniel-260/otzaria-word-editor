@@ -25,6 +25,9 @@ function setup(over: Partial<ShellActionDeps> = {}) {
     toggleTrackChanges: vi.fn(),
     toggleFocusMode: vi.fn(),
     findAgain: vi.fn(() => true),
+    insertCitation: vi.fn(),
+    searchOtzaria: vi.fn(),
+    openLibrary: vi.fn(),
     ...over,
   };
   return { deps, run: createShellActionRunner(deps) };
@@ -111,6 +114,14 @@ describe('createShellActionRunner', () => {
     expect(deps.toggleFocusMode).toHaveBeenCalledTimes(1);
     expect(deps.findAgain).toHaveBeenNthCalledWith(1, 'next');
     expect(deps.findAgain).toHaveBeenNthCalledWith(2, 'prev');
+
+    run('insert-citation');
+    run('search-otzaria');
+    run('open-library');
+
+    expect(deps.insertCitation).toHaveBeenCalledTimes(1);
+    expect(deps.searchOtzaria).toHaveBeenCalledTimes(1);
+    expect(deps.openLibrary).toHaveBeenCalledTimes(1);
     expect(deps.newDocument).toHaveBeenCalledTimes(1);
     expect(deps.openDocument).toHaveBeenCalledTimes(1);
     expect(deps.selectAll).toHaveBeenCalledTimes(1);

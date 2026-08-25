@@ -37,6 +37,9 @@ export interface ShellActionDeps {
   toggleFocusMode: () => void;
   /** מופע הבא/קודם בחיפוש. מחזיר האם היה מה לחפש. */
   findAgain: (direction: 'next' | 'prev') => boolean;
+  insertCitation: () => void;
+  searchOtzaria: () => void;
+  openLibrary: () => void;
 }
 
 /**
@@ -104,6 +107,15 @@ export function createShellActionRunner(deps: ShellActionDeps): (action: ShellAc
         return deps.findAgain('next');
       case 'find-prev':
         return deps.findAgain('prev');
+      case 'insert-citation':
+        deps.insertCitation();
+        return true;
+      case 'search-otzaria':
+        deps.searchOtzaria();
+        return true;
+      case 'open-library':
+        deps.openLibrary();
+        return true;
     }
   };
 }
