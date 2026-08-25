@@ -1,5 +1,6 @@
 <template>
   <div
+    ref="shellRef"
     class="word-app-shell"
     :class="[
       { 'focus-mode': isFocusMode },
@@ -95,6 +96,11 @@
       :is-open="isAboutOpen"
       @close="isAboutOpen = false"
     />
+
+    <ShortcutsDialog
+      :is-open="isShortcutsHelpOpen"
+      @close="isShortcutsHelpOpen = false"
+    />
   </div>
 </template>
 
@@ -106,6 +112,7 @@ import StatusBar from './ui/shell/StatusBar.vue';
 import FindReplaceDialog from './ui/panels/FindReplaceDialog.vue';
 import AboutDialog from './ui/panels/AboutDialog.vue';
 import LinkDialog from './ui/panels/LinkDialog.vue';
+import ShortcutsDialog from './ui/panels/ShortcutsDialog.vue';
 
 import { createCommandAdapter, type CommandAdapter, type CommandOutcome } from './engine/command-adapter';
 import type { CommandId } from './engine/capabilities';
@@ -195,8 +202,11 @@ import {
   type ShortcutDispatcher,
 } from './ui/shortcuts/dispatch';
 import { createDirectionShortcut } from './ui/shortcuts/direction';
+import { createFocusRing } from './ui/shortcuts/focus-ring';
+import { focusDocument } from './engine/focus';
 
 const editorStackRef = ref<HTMLElement | null>(null);
+const shellRef = ref<HTMLElement | null>(null);
 
 const commandAdapter = shallowRef<CommandAdapter | null>(null);
 provide(COMMAND_ADAPTER, commandAdapter);
@@ -246,6 +256,7 @@ const revealed = ref<RevealZone>(null);
 const isFindOpen = ref(false);
 const findMode = ref<'find' | 'replace'>('find');
 const isAboutOpen = ref(false);
+const isShortcutsHelpOpen = ref(false);
 
 /**
  * מצב החיפוש כפי שהמנוע מדווח עליו. הדיאלוג נשען עליו למונה התוצאות ולשאלה
@@ -935,9 +946,17 @@ const runShellAction = createShellActionRunner({
   insertCitation: () => void onInsertCitation(),
   searchOtzaria: () => void onSearchOtzaria(),
   openLibrary: () => void onOpenLibrary(),
+  openShortcutsHelp: () => {
+    isShortcutsHelpOpen.value = true;
+  },
+  moveFocusRegion: (direction) => focusRing.move(direction) !== null,
   // „אודות” הוא `aria-modal`, ולכן הוא זה שנסגר כשהוא פתוח. החיפוש אינו מודאלי
   // ואפשר להמשיך לערוך מתחתיו, ולכן הוא נסגר רק כשאין חלון מעליו.
   closeTopmost: () => {
+    if (isShortcutsHelpOpen.value) {
+      isShortcutsHelpOpen.value = false;
+      return true;
+    }
     if (isAboutOpen.value) {
       isAboutOpen.value = false;
       return true;
@@ -950,7 +969,9 @@ const runShellAction = createShellActionRunner({
       closeFindDialog();
       return true;
     }
-    return false;
+    // אין מה לסגור: `Escape` מהרצועה או משורת המצב מחזיר את הפוקוס למסמך.
+    // כשהוא כבר שם — `false`, והאירוע ממשיך למנוע ולדפדפן.
+    return focusRing.toDocument();
   },
 });
 
@@ -1060,8 +1081,33 @@ function isDocumentSurface(target: EventTarget | null): boolean {
 
 /** דיאלוג שמכריז `aria-modal`. מה שמאחוריו אינו זמין — גם לא לקיצור. */
 function isModalDialogOpen(): boolean {
-  return isAboutOpen.value || linkDialog.isOpen.value;
+  return isAboutOpen.value || linkDialog.isOpen.value || isShortcutsHelpOpen.value;
 }
+
+/**
+ * מעגל המיקוד של `F6`, בסדר של המסך: הרצועה, המסמך, שורת המצב.
+ *
+ * אזור המסמך ממוקד דרך המנוע ולא דרך ה-`<main>` שמארח אותו: מיקוד המארח מזיז
+ * את הפוקוס אבל אינו מחזיר את הסמן לטקסט, כלומר המשתמש היה מקבל „חזרה למסמך”
+ * שאי אפשר להקליד אחריה.
+ */
+const focusRing = createFocusRing({
+  regions: [
+    {
+      id: 'ribbon',
+      element: () => shellRef.value?.querySelector<HTMLElement>('.word-ribbon-container') ?? null,
+    },
+    {
+      id: 'document',
+      element: () => editorStackRef.value,
+      focus: () => focusDocument(activeSuperdoc.value),
+    },
+    {
+      id: 'statusbar',
+      element: () => shellRef.value?.querySelector<HTMLElement>('.word-statusbar') ?? null,
+    },
+  ],
+});
 
 let shortcuts: ShortcutDispatcher | null = null;
 let directionShortcut: { dispose: () => void } | null = null;

@@ -70,7 +70,10 @@ export type ShellAction =
   | 'find-prev'
   | 'insert-citation'
   | 'search-otzaria'
-  | 'open-library';
+  | 'open-library'
+  | 'shortcuts-help'
+  | 'focus-next-region'
+  | 'focus-prev-region';
 
 export interface Shortcut {
   /** מזהה יציב. משמש את הרצועה, את הבדיקות ואת דיאלוג העזרה. */
@@ -658,9 +661,36 @@ export const SHORTCUTS = [
     onKeyUp: true,
   },
   {
+    id: 'shortcuts-help',
+    label: 'Ctrl+/',
+    description: 'רשימת כל קיצורי המקלדת',
+    group: 'app',
+    // המקש הפיזי, כרגיל: בפריסה העברית אותו מקש מפיק „.” ולא „/”.
+    code: 'Slash',
+    ctrl: true,
+    action: 'shortcuts-help',
+  },
+  {
+    id: 'focus-next-region',
+    label: 'F6',
+    description: 'מעבר בין הרצועה, המסמך ושורת המצב',
+    group: 'app',
+    code: 'F6',
+    action: 'focus-next-region',
+  },
+  {
+    id: 'focus-prev-region',
+    label: 'Shift+F6',
+    description: 'מעבר לאזור הקודם',
+    group: 'app',
+    code: 'F6',
+    shift: true,
+    action: 'focus-prev-region',
+  },
+  {
     id: 'escape',
     label: 'Esc',
-    description: 'סגירת החלון הפתוח',
+    description: 'סגירת החלון הפתוח, או חזרה למסמך',
     group: 'app',
     code: 'Escape',
     action: 'escape',

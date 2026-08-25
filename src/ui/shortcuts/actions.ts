@@ -40,6 +40,9 @@ export interface ShellActionDeps {
   insertCitation: () => void;
   searchOtzaria: () => void;
   openLibrary: () => void;
+  openShortcutsHelp: () => void;
+  /** `F6` — מעביר את המיקוד לאזור הבא. מחזיר האם היה לאן. */
+  moveFocusRegion: (direction: 'next' | 'prev') => boolean;
 }
 
 /**
@@ -116,6 +119,15 @@ export function createShellActionRunner(deps: ShellActionDeps): (action: ShellAc
       case 'open-library':
         deps.openLibrary();
         return true;
+      case 'shortcuts-help':
+        deps.openShortcutsHelp();
+        return true;
+      // אזור שאין בו למה למקד אינו „מטופל”: בליעת F6 שלא הזיז דבר הייתה
+      // לוקחת מהמשתמש את מקש הניווט של הדפדפן בלי לתת לו כלום בתמורה.
+      case 'focus-next-region':
+        return deps.moveFocusRegion('next');
+      case 'focus-prev-region':
+        return deps.moveFocusRegion('prev');
     }
   };
 }

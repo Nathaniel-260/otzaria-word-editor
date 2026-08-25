@@ -1118,6 +1118,12 @@ export function createSuperdocDouble(options: SuperdocDoubleOptions = {}): Super
 
   const host = {
     activeEditor: { doc },
+    /**
+     * `superdoc.focus()` — הדרך היחידה להחזיר את הסמן לטקסט, ומה ש-`F6`
+     * ו-`Escape` נשענים עליה. הכפיל חושף אותה כדי שהמסלול הזה יהיה נמדד ולא
+     * מונח.
+     */
+    focus: route('focus', () => undefined),
     ui: {
       selection: {
         getSnapshot: () => {
