@@ -10,7 +10,7 @@
       <button
         type="button"
         class="color-main-btn"
-        :title="title"
+        :title="menuString(title)"
         :disabled="disabled"
         @pointerdown.prevent
         @click="applyCurrentColor"
@@ -28,7 +28,7 @@
         type="button"
         class="color-arrow-btn"
         :disabled="disabled"
-        title="בחירת צבע"
+        :title="menuString('בחירת צבע')"
         @pointerdown.prevent
         @click="toggleDropdown"
       >
@@ -56,14 +56,14 @@
           @click="selectColor(null)"
         >
           <span class="clear-icon" />
-          ללא צבע
+          {{ menuString('ללא צבע') }}
         </button>
       </div>
 
       <!-- צבעי ערכת נושא (Theme Colors) -->
       <div class="palette-section">
         <div class="palette-title">
-          צבעי ערכת נושא
+          {{ menuString('צבעי ערכת נושא') }}
         </div>
         <div class="theme-colors-grid">
           <div
@@ -89,7 +89,7 @@
       <!-- צבעים סטנדרטיים (Standard Colors) -->
       <div class="palette-section">
         <div class="palette-title">
-          צבעים רגילים
+          {{ menuString('צבעים רגילים') }}
         </div>
         <div class="standard-colors-row">
           <button
@@ -112,7 +112,7 @@
           class="custom-color-label"
           @pointerdown.prevent="openCustomColorPicker"
         >
-          <span>צבעים נוספים...</span>
+          <span>{{ menuString('צבעים נוספים...') }}</span>
           <input
             ref="customColorRef"
             type="color"
@@ -129,6 +129,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue';
 import SvgIcon from '../../icons/SvgIcon.vue';
+import { menuString } from '../i18n';
 
 const THEME_COLUMNS = [
   ['#ffffff', '#f2f2f2', '#d9d9d9', '#bfbfbf', '#a6a6a6', '#7f7f7f'], // לבן/אפור בהיר

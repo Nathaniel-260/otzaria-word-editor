@@ -4,7 +4,7 @@
       ref="scrollContainerRef"
       class="style-cards-scroll"
       role="group"
-      aria-label="סגנונות"
+      :aria-label="menuString('סגנונות')"
       @scroll.passive="measure"
     >
       <button
@@ -13,7 +13,7 @@
         type="button"
         class="style-card"
         :class="{ active: activeId === item.id }"
-        :title="item.label"
+        :title="menuString(item.label)"
         :aria-pressed="activeId === item.id"
         :disabled="disabled"
         @pointerdown.prevent
@@ -25,7 +25,7 @@
         >
           {{ item.previewText }}
         </span>
-        <span class="style-card-name">{{ item.label }}</span>
+        <span class="style-card-name">{{ menuString(item.label) }}</span>
       </button>
     </div>
 
@@ -39,8 +39,8 @@
         v-if="canScrollStart"
         type="button"
         class="nav-btn"
-        title="הסגנונות הקודמים"
-        aria-label="הסגנונות הקודמים"
+        :title="menuString('הסגנונות הקודמים')"
+        :aria-label="menuString('הסגנונות הקודמים')"
         @pointerdown.prevent
         @click="scrollToward('start')"
       >
@@ -53,8 +53,8 @@
         v-if="canScrollEnd"
         type="button"
         class="nav-btn"
-        title="הסגנונות הבאים"
-        aria-label="הסגנונות הבאים"
+        :title="menuString('הסגנונות הבאים')"
+        :aria-label="menuString('הסגנונות הבאים')"
         @pointerdown.prevent
         @click="scrollToward('end')"
       >
@@ -70,6 +70,7 @@
 <script setup lang="ts">
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
 import SvgIcon from '../../icons/SvgIcon.vue';
+import { menuString } from '../i18n';
 import { STYLE_GALLERY } from '../../../composables/keys';
 import {
   fallbackStyleGallery,

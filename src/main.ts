@@ -10,6 +10,7 @@ import App from './App.vue';
 import { installBundledFonts } from './styles/fonts';
 import { onThemeChanged, resolveBoot } from './host/otzaria-client';
 import { applyTheme } from './host/theme';
+import { setMenuLocale } from './ui/ribbon/i18n';
 
 /** ב-build הסקריפט קלאסי, כלומר הוא עשוי לרוץ לפני שה-body נפרס. */
 function domReady(): Promise<void> {
@@ -48,6 +49,10 @@ async function main(): Promise<void> {
   try {
     const info = await bootPromise;
     applyTheme(info.theme);
+    // שפת התפריטים לפי שפת המשתמש (`app.language` — 'he' / 'en'; ראו
+    // docs/plugin-sdk). נקבעת גם במסלול „recovered", כי `app.getInfo`
+    // מחזיר את אותו מידע. כשל אתחול משאיר עברית — שפת ברירת המחדל.
+    setMenuLocale(info.app.language);
     onThemeChanged(applyTheme);
     root.dataset.boot = info.source === 'recovered' ? 'recovered' : 'event';
 

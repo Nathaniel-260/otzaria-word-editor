@@ -20,7 +20,7 @@
     <span
       v-if="label && variant !== 'icon-only'"
       class="btn-label"
-    >{{ label }}</span>
+    >{{ menuString(label) }}</span>
     <slot />
   </button>
 </template>
@@ -28,6 +28,7 @@
 <script setup lang="ts">
 import { computed, getCurrentInstance } from 'vue';
 import { isToggleButton } from '../aria';
+import { menuString } from '../i18n';
 import SvgIcon from '../../icons/SvgIcon.vue';
 import { shortcutLabel, type ShortcutId } from '../../shortcuts/registry';
 
@@ -73,7 +74,7 @@ const iconSize = computed(() => {
 });
 
 const computedTitle = computed(() => {
-  const base = props.tooltip || props.label || '';
+  const base = menuString(props.tooltip || props.label || '');
   if (!props.shortcutId) return base;
   return `${base} (${shortcutLabel(props.shortcutId)})`;
 });

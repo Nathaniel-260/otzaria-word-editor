@@ -7,12 +7,12 @@
       <div
         class="word-tab-strip"
         role="tablist"
-        aria-label="לשוניות הרצועה"
         aria-orientation="horizontal"
+        :aria-label="menuString('לשוניות הרצועה')"
         @keydown="onTabKeydown"
       >
         <button
-          v-for="(tab, index) in TABS"
+          v-for="(tab, index) in translatedTabs"
           :id="ribbonTabId(tab.id)"
           :key="tab.id"
           :ref="(el) => registerTabRef(el, index)"
@@ -36,8 +36,8 @@
       <button
         type="button"
         class="word-ribbon-toggle"
-        :title="isCollapsed ? 'הצג את הרצועה' : 'כווץ את הרצועה'"
-        :aria-label="isCollapsed ? 'הצג את הרצועה' : 'כווץ את הרצועה'"
+        :title="isCollapsed ? menuString('הצג את הרצועה') : menuString('כווץ את הרצועה')"
+        :aria-label="isCollapsed ? menuString('הצג את הרצועה') : menuString('כווץ את הרצועה')"
         :aria-expanded="!isCollapsed"
         :aria-controls="RIBBON_PANEL_ID"
         @click="toggleCollapsed"
@@ -100,8 +100,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, type ComponentPublicInstance } from 'vue';
+import { ref, computed, type ComponentPublicInstance } from 'vue';
 import { RIBBON_PANEL_ID, nextTabIndex, ribbonTabId } from './aria';
+import { menuString } from './i18n';
 import SvgIcon from '../icons/SvgIcon.vue';
 import HomeTab from './tabs/HomeTab.vue';
 import FileTab from './tabs/FileTab.vue';
@@ -128,6 +129,12 @@ const TABS: TabDefinition[] = [
   { id: 'view', label: 'תצוגה' },
   { id: 'otzaria', label: '✦ אוצריא', className: 'otzaria-tab' },
 ];
+
+/**
+ * התוויות שמוצגות למשתמש, מתורגמות לפי שפת המשתמש (ui/ribbon/i18n).
+ * `TABS` עצמו נשאר בעברית והוא מקור האמת למזהים ולסדר; רק התווית מתורגמת.
+ */
+const translatedTabs = computed(() => TABS.map((tab) => ({ ...tab, label: menuString(tab.label) })));
 
 /**
  * מצב המעטפת, לפקדי לשונית „קובץ”.

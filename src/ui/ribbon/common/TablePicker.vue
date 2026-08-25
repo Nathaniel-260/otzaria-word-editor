@@ -45,7 +45,7 @@
         class="table-grid"
         role="grid"
         tabindex="0"
-        aria-label="בחירת מידות הטבלה"
+        :aria-label="menuString('בחירת מידות הטבלה')"
         :aria-activedescendant="activeCellId"
         @mouseleave="onMouseLeave"
         @focus="onGridFocus"
@@ -95,6 +95,7 @@
  */
 import { computed, ref, onMounted, onUnmounted } from 'vue';
 import RibbonButton from './RibbonButton.vue';
+import { menuString } from '../i18n';
 
 const MAX_ROWS = 10;
 const MAX_COLS = 10;
@@ -118,7 +119,9 @@ const hoveredCols = ref(0);
 const hasSize = computed(() => hoveredRows.value > 0 && hoveredCols.value > 0);
 
 const headerText = computed(() =>
-  hasSize.value ? `טבלה ${hoveredCols.value} × ${hoveredRows.value}` : 'הוסף טבלה',
+  hasSize.value
+    ? `${menuString('טבלה')} ${hoveredCols.value} × ${hoveredRows.value}`
+    : menuString('הוסף טבלה'),
 );
 
 function cellId(row: number, col: number): string {
@@ -136,9 +139,9 @@ function isWithin(row: number, col: number): boolean {
 
 /** „3 עמודות על 2 שורות” — הניסוח המלא, כי `aria-activedescendant` מכריז אותו. */
 function cellLabel(row: number, col: number): string {
-  const cols = col === 1 ? 'עמודה אחת' : `${col} עמודות`;
-  const rows = row === 1 ? 'שורה אחת' : `${row} שורות`;
-  return `${cols} על ${rows}`;
+  const cols = col === 1 ? menuString('עמודה אחת') : `${col} ${menuString('עמודות')}`;
+  const rows = row === 1 ? menuString('שורה אחת') : `${row} ${menuString('שורות')}`;
+  return `${cols} ${menuString('על')} ${rows}`;
 }
 
 function setSize(row: number, col: number): void {

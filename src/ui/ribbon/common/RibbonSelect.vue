@@ -7,7 +7,7 @@
       :value="modelValue"
       class="ribbon-select"
       :disabled="disabled"
-      :title="title"
+      :title="menuString(title)"
       @change="$emit('update:modelValue', ($event.target as HTMLSelectElement).value)"
     >
       <option
@@ -16,7 +16,7 @@
         :value="opt.value"
         :style="opt.preview ? { fontFamily: opt.preview } : undefined"
       >
-        {{ opt.label }}
+        {{ menuString(opt.label) }}
       </option>
     </select>
     <SvgIcon
@@ -29,6 +29,7 @@
 
 <script setup lang="ts">
 import SvgIcon from '../../icons/SvgIcon.vue';
+import { menuString } from '../i18n';
 
 export interface SelectOption {
   value: string;

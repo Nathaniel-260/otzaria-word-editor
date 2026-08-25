@@ -20,7 +20,7 @@
       v-if="isOpen"
       class="ribbon-menu__popover"
       role="menu"
-      :aria-label="label"
+      :aria-label="menuString(label)"
       @pointerdown.prevent.stop
     >
       <button
@@ -31,11 +31,11 @@
         role="menuitem"
         @click="choose(item.id)"
       >
-        <span class="ribbon-menu__item-label">{{ item.label }}</span>
+        <span class="ribbon-menu__item-label">{{ menuString(item.label) }}</span>
         <span
           v-if="item.hint"
           class="ribbon-menu__item-hint"
-        >{{ item.hint }}</span>
+        >{{ menuString(item.hint) }}</span>
       </button>
     </div>
   </div>
@@ -61,6 +61,7 @@
  */
 import { ref, onMounted, onUnmounted } from 'vue';
 import RibbonButton from './RibbonButton.vue';
+import { menuString } from '../i18n';
 
 /** פריט בתפריט. מקומי בכוונה: `<script setup>` אינו מייצא, והצרכן מעביר literal. */
 interface MenuItem {

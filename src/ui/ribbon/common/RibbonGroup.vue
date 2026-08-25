@@ -7,12 +7,14 @@
       <slot />
     </div>
     <div class="word-group-footer">
-      <span class="word-group-title">{{ title }}</span>
+      <span class="word-group-title">{{ menuString(title) }}</span>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
+import { menuString } from '../i18n';
+
 /* אין כאן `launcher`: כפתור ההרחבה בפינת הקבוצה הוסר מהעיצוב (b2f0635),
    ה-HTML שלו הוסר (e66dc8f), וה-prop עצמו נשאר אחריו בלי צרכן. הוא הוסר ביחד
    עם כל אתרי הקריאה שהעבירו אותו — prop שאינו מוצהר נוזל ל-`$attrs` ומרונדר
