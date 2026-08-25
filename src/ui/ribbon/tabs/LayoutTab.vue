@@ -79,7 +79,17 @@
         :disabled="!can('canSetHeaderFooterMargins')"
         @click="onOpenHeaderDistance"
       />
+      <!-- גל 13: ברירות מחדל לגופן של המסמך כולו (styles.apply על docDefaults). -->
+      <RibbonButton
+        icon="fontColor"
+        label="ברירות מחדל"
+        variant="large"
+        :tooltip="tip('canSetDocDefaults', 'גופן וגודל ברירת המחדל של המסמך כולו')"
+        :disabled="!can('canSetDocDefaults')"
+        @click="onOpenDocDefaults"
+      />
     </RibbonGroup>
+
 
     <PageNumberingDialog
       :is-open="pageNumberingOpen"
@@ -96,6 +106,14 @@
       :busy="inFlight"
       @close="headerDistanceOpen = false"
       @submit="onHeaderDistanceSubmit"
+    />
+
+    <DocDefaultsDialog
+      :is-open="docDefaultsOpen"
+      :busy="docDefaultsInFlight"
+      :current-size-pt="docDefaultsSizePt"
+      @close="docDefaultsOpen = false"
+      @submit="onDocDefaultsSubmit"
     />
   </div>
 </template>
@@ -140,6 +158,7 @@ import RibbonButton from '../common/RibbonButton.vue';
 import RibbonMenuButton from '../common/RibbonMenuButton.vue';
 import PageNumberingDialog from '../../panels/PageNumberingDialog.vue';
 import HeaderDistanceDialog from '../../panels/HeaderDistanceDialog.vue';
+import DocDefaultsDialog from '../../panels/DocDefaultsDialog.vue';
 import { ACTIVE_SUPERDOC } from '../../../engine/document-api';
 import {
   COMMAND_REPORTER,
@@ -175,6 +194,10 @@ import {
   type PageNumberingSettings,
   type PageOrientation,
 } from '../../../engine/page-setup';
+import {
+  applyDocStyleDefaults,
+  readDefaultFontSizePt,
+} from '../../../engine/doc-style-defaults';
 
 /** ברירת המחדל כשאין מדווח — הרכבה חלקית בבדיקות. זהה להתנהגות של `useCommand`. */
 const fallbackReporter: CommandReporter = (outcome, id) => {
@@ -342,6 +365,44 @@ function onPageNumberingSubmit(settings: PageNumberingSettings): void {
 function onHeaderDistanceSubmit(settings: HeaderDistanceSettings): void {
   headerDistanceOpen.value = false;
   void run('page-header-distance', () => applyHeaderDistance(superdoc.value, settings));
+}
+
+/* ------------------------------------------------------------------ */
+/* ברירות מחדל למסמך (גל 13)                                           */
+/* ------------------------------------------------------------------ */
+
+/**
+ * „ברירות מחדל" — גופן/גודל ברירת המחדל של המסמך כולו, דרך `styles.apply`
+ * על docDefaults (engine/doc-style-defaults.ts). הגודל הנוכחי נקרא ב-dryRun
+ * בפתיחה, למילוי מקדים של ה-placeholder.
+ */
+const docDefaultsOpen = shallowRef(false);
+const docDefaultsInFlight = shallowRef(false);
+const docDefaultsSizePt = shallowRef<number | null>(null);
+
+async function onOpenDocDefaults(): Promise<void> {
+  if (docDefaultsInFlight.value) return;
+  docDefaultsInFlight.value = true;
+  try {
+    // dryRun היא קריאת המצב; כשלה אינו חוסם פתיחה — השדה נפתח „ללא שינוי".
+    docDefaultsSizePt.value = await readDefaultFontSizePt(superdoc.value);
+    docDefaultsOpen.value = true;
+  } finally {
+    docDefaultsInFlight.value = false;
+  }
+}
+
+function onDocDefaultsSubmit(patch: { fontFamily?: string; fontSizePt?: number }): void {
+  docDefaultsOpen.value = false;
+  if (docDefaultsInFlight.value) return;
+  docDefaultsInFlight.value = true;
+  void (async () => {
+    try {
+      report(await applyDocStyleDefaults(superdoc.value, patch), 'doc-style-defaults');
+    } finally {
+      docDefaultsInFlight.value = false;
+    }
+  })();
 }
 </script>
 

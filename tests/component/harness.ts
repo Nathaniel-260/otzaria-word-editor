@@ -1072,6 +1072,16 @@ export function createSuperdocDouble(options: SuperdocDoubleOptions = {}): Super
     ranges: {
       resolve: route('ranges.resolve', () => ({ target: selectionTarget })),
     },
+    // גל 13 — „ברירות מחדל למסמך". dryRun נתמך ומחזיר before, כמו במנוע.
+    styles: {
+      apply: route('styles.apply', (input) => {
+        const options = (input as { options?: { dryRun?: boolean } }).options;
+        if (options?.dryRun) {
+          return { success: true, changed: false, before: { fontSize: 24 }, after: {}, dryRun: true };
+        }
+        return receipt('styles.apply');
+      }),
+    },
     insert: route('insert', () => receipt('insert')),
   };
 

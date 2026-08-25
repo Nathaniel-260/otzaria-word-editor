@@ -44,6 +44,7 @@ function fullCapabilities() {
       'footnotes.remove': { available: true },
       'format.paragraph.setFlowOptions': { available: true },
       'format.apply': { available: true },
+      'styles.apply': { available: true },
       'format.paragraph.setIndentation': { available: true },
       'format.paragraph.clearIndentation': { available: true },
       'format.paragraph.setSpacing': { available: true },

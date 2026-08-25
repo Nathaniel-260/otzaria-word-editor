@@ -134,6 +134,8 @@ const CAPABILITY_SPECS = {
   // (patch מרובה מפתחות = undo אחד), ולכן שאלה אחת לפעולה אחת. ה-alias
   // הבודדים (format.letterSpacing וכו') אינם נשאלים: איש מהם אינו נשלח.
   canApplyFontAdvanced: { operation: 'format.apply' },
+  // גל 13 — „ברירות מחדל למסמך". styles.apply על docDefaults, ערוץ run.
+  canSetDocDefaults: { operation: 'styles.apply' },
   // `insert` ולא `create.text`: הכנסת טקסט היא פעולת הליבה של הפאסדה
   // (`memberPath: 'insert'` בקטלוג), אחותה של `delete`, ולא אחת מ-`create.*`.
   canInsertText: { operation: 'insert' },

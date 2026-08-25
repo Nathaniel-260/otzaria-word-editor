@@ -577,4 +577,29 @@ engine/font-advanced.ts:
   ושני מסלולים לאותה כתיבה הם באג. גם `webHidden` דילג: אין לו משמעות
   ממשק מחוץ לתשתית ההסתרה של Word.
 
+## `styles.*` — גל 13, מה שנמדד
+
+- **`format.paragraph.setStyle/setStyleRef/clearStyle` אינן נתמכות
+  בדפדפן** למרות ש-`capabilities.get()` מדווח עליהן `available:true`:
+  הריצה מחזירה `CAPABILITY_UNAVAILABLE` ("not a supported v2 browser
+  Document API operation"). **הסתירה החדה ביותר במאגר** של הכלל „available
+  אינו הוכחה". הפקודה `linked-style` נשארת המסלול היחיד להחלת סגנון על
+  תוכן — אין להוסיף מסלול Document API מקביל.
+- **`resetDirectFormatting` כן עובד** (success), וכבר מיוצג בפקודה
+  „נקה עיצוב".
+- **docDefaults (ערוץ run) ביחידות גולמיות:** `patch {fontSize: 14}` →
+  `<w:sz w:val="14"/>` = **חצאי-נקודות**, ולא נקודות כמו `format.fontSize`
+  (שם 24 → sz 48). `fontFamily` record `{ascii,hAnsi,cs}` נכתב ישירות
+  ל-`w:rFonts`. ההמרה pt→×2 יושבת ב-engine/doc-style-defaults.ts.
+- **`dryRun` הוא קריאת המצב היחידה:** אין `styles.get`;
+  `apply(...,{dryRun:true})` מחזיר `before/after` בלי לשנות. במסמך הריק
+  `before.fontSize = 24` (=12pt).
+- **חזרה זהה אינה NO_OP אלא `success:true, changed:false`** — שונה מכל
+  מרחב אחר; מבחינת המשתמש זו הצלחה.
+- **`getCatalog({view:'quickGallery'})` עובד:** 7 פריטים במסמך ריק,
+  `sourceStatus.styles:'present'`, שמות כפי שהם במסמך (`heading 1`
+  באות קטנה). הגלריה כבר צורכת אותו דרך `ui.styles` מגל קודם — לא
+  שוכפלו כאן שני מסלולי קריאה.
+
+
 
