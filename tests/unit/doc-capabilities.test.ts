@@ -59,6 +59,14 @@ function fullCapabilities() {
       'toc.markEntry': { available: true },
       'toc.unmarkEntry': { available: true },
       'toc.listEntries': { available: true },
+      'index.insert': { available: true },
+      'index.list': { available: true },
+      'index.rebuild': { available: true },
+      'index.remove': { available: true },
+      'index.configure': { available: true },
+      'index.entries.list': { available: true },
+      'index.entries.insert': { available: true },
+      'index.entries.remove': { available: true },
       'blocks.list': { available: true },
       'blocks.deleteRange': { available: true },
       'comments.create': { available: true },
@@ -373,6 +381,44 @@ describe('readDocCapabilities', () => {
 
     expect(
       (await readDocCapabilities(hostWith(() => fullCapabilities()))).can('canMarkTocEntry'),
+    ).toBe(true);
+  });
+
+  it('„הוסף מפתח” אינו נשען על `index.rebuild`, ו„הסר מפתח” אינו נשען על `blocks.*`', async () => {
+    // שתי ההבחנות האלה נמדדו במנוע, והן מה שמבדיל את המפתח מתוכן העניינים:
+    // `index.insert` מרנדר את המפתח מלא כבר ביצירה, ו-`index.remove` מוחק את
+    // הבלוק כולו בלי להשאיר פסקאות יתומות. שאלה שהייתה מונה גם אותן הייתה
+    // מנטרלת פקד עובד. ההנמקה המלאה ב-engine/index-field.ts.
+    const raw = fullCapabilities();
+    raw.operations['index.rebuild'] = { available: false } as never;
+    raw.operations['blocks.deleteRange'] = { available: false } as never;
+
+    const report = await readDocCapabilities(hostWith(() => raw));
+    expect(report.can('canInsertIndex')).toBe(true);
+    expect(report.can('canRemoveIndex')).toBe(true);
+    // ואילו „עדכן מפתח” כן נשען עליה.
+    expect(report.can('canRebuildIndex')).toBe(false);
+  });
+
+  it('„סמן ערך למפתח” דורש את שלוש הפעולות שהדיאלוג מריץ', async () => {
+    for (const operation of [
+      'index.entries.list',
+      'index.entries.insert',
+      'index.entries.remove',
+    ]) {
+      const raw = fullCapabilities();
+      raw.operations[operation as 'index.entries.list'] = {
+        available: false,
+        reasons: ['NAMESPACE_UNAVAILABLE'],
+      } as never;
+      expect(
+        (await readDocCapabilities(hostWith(() => raw))).can('canMarkIndexEntry'),
+        operation,
+      ).toBe(false);
+    }
+
+    expect(
+      (await readDocCapabilities(hostWith(() => fullCapabilities()))).can('canMarkIndexEntry'),
     ).toBe(true);
   });
 

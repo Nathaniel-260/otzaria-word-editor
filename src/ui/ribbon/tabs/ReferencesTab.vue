@@ -89,6 +89,54 @@
       />
     </RibbonGroup>
 
+    <!--
+      „מפתח” — הקבוצה שהקהל של התוסף בא בשבילה: ספר תורני עם מפתח ערכים.
+      „סמן ערך למפתח” ולא „סמן ערך”, כדי שלא יהיו בלשונית אחת שני כפתורים
+      באותו שם — ב-Word הקבוצה השכנה קוראת לפקד שלה „הוסף טקסט”.
+    -->
+    <RibbonGroup title="מפתח">
+      <RibbonButton
+        icon="bookmark"
+        label="סמן ערך למפתח"
+        variant="large"
+        :tooltip="tip('canMarkIndexEntry', 'סימון הטקסט שנבחר כערך במפתח')"
+        :disabled="!can('canMarkIndexEntry')"
+        @click="onOpenIndexEntryDialog"
+      />
+      <RibbonButton
+        icon="book"
+        label="הוסף מפתח"
+        variant="large"
+        :tooltip="tip('canInsertIndex', 'הוספת מפתח הערכים בסוף המסמך')"
+        :disabled="!can('canInsertIndex')"
+        @click="onInsertIndex"
+      />
+      <RibbonButton
+        icon="updateFields"
+        label="עדכן מפתח"
+        variant="large"
+        :tooltip="indexRebuildTooltip"
+        :disabled="!can('canRebuildIndex')"
+        @click="onRebuildIndex"
+      />
+      <RibbonButton
+        icon="toc"
+        label="הגדרות מפתח"
+        variant="large"
+        :tooltip="indexConfigureTooltip"
+        :disabled="!can('canConfigureIndex')"
+        @click="onOpenIndexDialog"
+      />
+      <RibbonButton
+        icon="reject"
+        label="הסר מפתח"
+        variant="large"
+        :tooltip="indexRemoveTooltip"
+        :disabled="!can('canRemoveIndex')"
+        @click="onRemoveIndex"
+      />
+    </RibbonGroup>
+
     <TocDialog
       :is-open="tocDialogOpen"
       :levels="toc.levels"
@@ -104,6 +152,23 @@
       @close="entryDialogOpen = false"
       @mark="onMarkEntry"
       @unmark="onUnmarkEntry"
+    />
+
+    <IndexDialog
+      :is-open="indexDialogOpen"
+      :columns="indexState.columns"
+      :run-in="indexState.runIn"
+      @close="indexDialogOpen = false"
+      @submit="onConfigureIndex"
+    />
+
+    <IndexEntryDialog
+      :is-open="indexEntryDialogOpen"
+      :entries="indexState.entries"
+      :selected-text="indexEntrySuggestion"
+      @close="indexEntryDialogOpen = false"
+      @mark="onMarkIndexEntry"
+      @unmark="onUnmarkIndexEntry"
     />
   </div>
 </template>
@@ -156,6 +221,24 @@
  * בדיאלוג של Word — אינו השמטה: המנוע מקבל את שניהם עם `success: true`
  * ואינו מיישם אותם, ומספרי העמודים הם בנוסף מתג חד-כיווני. ההנמקה המלאה,
  * כולל המדידה, ב-engine/toc.ts.
+ *
+ * ## קבוצת „מפתח”, ומה שהיא מבטיחה ומה לא
+ *
+ * זו הקבוצה שהקהל של התוסף בא בשבילה: ספר תורני עם מפתח ערכים. חמישה פקדים,
+ * כולם מעל `doc.index` דרך engine/index-field.ts, ו„סמן ערך למפתח” הוא
+ * העיקר — זו הפעולה שתבוצע מאות פעמים בספר אחד.
+ *
+ * הנוסח של ה-tooltips וההערות בדיאלוגים מדויק בכוונה, ובגלל ממצא: המנוע
+ * מרנדר את בלוק ה-`INDEX` כרשימת הערכים **בסדר הופעתם במסמך**, בלי מיון,
+ * בלי מספרי עמודים ובלי כותרות אותיות (נמדד — שמונה ערכים חזרו בדיוק בסדר
+ * שנשלחו). השדות שנכתבים למסמך הם `XE` ו-`INDEX` תקניים לחלוטין, ו-Word הוא
+ * זה שימיין וימספר. לכן שום פקד כאן אינו מבטיח מיון, וההערה בדיאלוג אומרת
+ * במפורש שהמיון ומספרי העמודים נבנים ב-Word.
+ *
+ * „הוסף מפתח” אינו פותח דיאלוג, שלא כמו ב-Word: שתי ההגדרות היחידות שהמנוע
+ * באמת כותב ניתנות לשינוי אחר כך ב„הגדרות מפתח”, ודיאלוג שחוסם את הפעולה
+ * בשביל שתי ברירות מחדל הוא מס. ההנמקה המלאה, כולל מה שנשאר בחוץ ולמה,
+ * ב-engine/index-field.ts.
  */
 import { computed, inject, ref, shallowRef, watch } from 'vue';
 import type { SuperDoc } from 'superdoc';
@@ -188,8 +271,24 @@ import {
   type TocState,
 } from '../../../engine/toc';
 import { readDocSelection } from '../../../engine/doc-selection';
+import {
+  DEFAULT_INDEX_COLUMNS,
+  configureIndex,
+  emptyIndexState,
+  insertIndex,
+  markIndexEntry,
+  readIndexState,
+  rebuildIndex,
+  removeIndex,
+  removeIndexEntry,
+  type IndexEntryDraft,
+  type IndexSettings,
+  type IndexState,
+} from '../../../engine/index-field';
 import TocDialog from '../../panels/TocDialog.vue';
 import TocEntryDialog from '../../panels/TocEntryDialog.vue';
+import IndexDialog from '../../panels/IndexDialog.vue';
+import IndexEntryDialog from '../../panels/IndexEntryDialog.vue';
 
 const tocCmd = useCommand('table-of-contents-insert');
 
@@ -210,10 +309,16 @@ const crossRefs = shallowRef<CrossRefsState>(emptyCrossRefsState());
 /** מצב תוכן העניינים: כמה טבלאות, מה ההגדרות שלהן, ואילו ערכים ידניים סומנו. */
 const toc = shallowRef<TocState>(emptyTocState());
 
+/** מצב המפתח: כמה מפתחות, מה ההגדרות שלהם, ואילו ערכים סומנו. */
+const indexState = shallowRef<IndexState>(emptyIndexState());
+
 const tocDialogOpen = ref(false);
 const entryDialogOpen = ref(false);
 /** הטקסט שהמשתמש סימן בעורך ברגע פתיחת הדיאלוג, כהצעה לטקסט הערך. */
 const entrySuggestion = ref('');
+const indexDialogOpen = ref(false);
+const indexEntryDialogOpen = ref(false);
+const indexEntrySuggestion = ref('');
 
 /** ראו LayoutTab: קריאת היכולות א-סינכרונית, ותשובה של מסמך קודם לא תדרוס. */
 let generation = 0;
@@ -225,15 +330,18 @@ watch(
     capabilities.value = null;
     crossRefs.value = emptyCrossRefsState();
     toc.value = emptyTocState();
-    const [result, refs, tocState] = await Promise.all([
+    indexState.value = emptyIndexState();
+    const [result, refs, tocState, indexSnapshot] = await Promise.all([
       readDocCapabilities(host),
       readCrossRefsState(host),
       readTocState(host),
+      readIndexState(host),
     ]);
     if (mine !== generation) return;
     capabilities.value = result;
     crossRefs.value = refs;
     toc.value = tocState;
+    indexState.value = indexSnapshot;
   },
   { immediate: true }
 );
@@ -379,6 +487,115 @@ async function onMarkEntry(entry: { text: string; level: number }): Promise<void
 async function onUnmarkEntry(nodeId: string): Promise<void> {
   report(await unmarkTocEntry(superdoc.value, nodeId), 'toc-unmark-entry');
   await refreshToc();
+}
+
+/* ------------------------------------------------------------------ */
+/* מפתח                                                                */
+/* ------------------------------------------------------------------ */
+
+const indexRebuildTooltip = computed(() =>
+  tip(
+    'canRebuildIndex',
+    indexState.value.count > 0
+      ? 'בניית המפתח מחדש מהערכים שסומנו במסמך'
+      : 'אין במסמך מפתח לעדכן'
+  )
+);
+
+const indexRemoveTooltip = computed(() =>
+  tip(
+    'canRemoveIndex',
+    indexState.value.count > 0
+      ? 'מחיקת המפתח מהמסמך. הערכים שסומנו נשארים'
+      : 'אין במסמך מפתח להסיר'
+  )
+);
+
+const indexConfigureTooltip = computed(() =>
+  tip(
+    'canConfigureIndex',
+    indexState.value.count > 0
+      ? 'מספר הטורים של המפתח, והאם תת-הערכים רצופים'
+      : 'אין במסמך מפתח להתאים'
+  )
+);
+
+/**
+ * קוראת מחדש את מצב המפתח. נדרשת גם אחרי כשל, מאותו טעם כמו `refreshToc`,
+ * ובנוסף מטעם ייחודי למפתח: הכתובת של שדה `XE` היא **מיקומית**, ולכן רשימת
+ * הערכים שהדיאלוג מחזיק מתיישנת אחרי כל סימון וכל ביטול. **קוראת** את המונה
+ * ואינה מקדמת אותו — ראו ההסבר ב-InsertTab.
+ */
+async function refreshIndex(): Promise<void> {
+  const mine = generation;
+  const next = await readIndexState(superdoc.value);
+  if (mine === generation) indexState.value = next;
+}
+
+/**
+ * „הוסף מפתח” — ישירות, בלי דיאלוג. שתי ההגדרות היחידות שנחשפות הן טורים
+ * ורצף, ושתיהן ניתנות לשינוי אחר כך ב„הגדרות מפתח”; דיאלוג שחוסם את הפעולה
+ * הנפוצה בשביל שתי ברירות מחדל היה מס ולא עזרה.
+ */
+async function onInsertIndex(): Promise<void> {
+  report(
+    await insertIndex(superdoc.value, { columns: DEFAULT_INDEX_COLUMNS, runIn: false }),
+    'index-insert'
+  );
+  await refreshIndex();
+}
+
+async function onRebuildIndex(): Promise<void> {
+  report(await rebuildIndex(superdoc.value), 'index-rebuild');
+  await refreshIndex();
+}
+
+async function onRemoveIndex(): Promise<void> {
+  report(await removeIndex(superdoc.value), 'index-remove');
+  await refreshIndex();
+}
+
+/** קוראת את ההגדרות מהמסמך ברגע הפתיחה. אותו טעם כמו ב-`onOpenTocDialog`. */
+async function onOpenIndexDialog(): Promise<void> {
+  await refreshIndex();
+  indexDialogOpen.value = true;
+}
+
+/**
+ * מחילה את ההגדרות ומיד בונה את המפתח מחדש: `configure` כותב את המתגים
+ * בלבד ואינו אוסף את הערכים מחדש (נמדד), ובלי העדכון היה נשאר על המסך מצב
+ * שאינו תואם את מה שהמשתמש הרגע אישר. שני הכשלים מדווחים בנפרד.
+ */
+async function onConfigureIndex(settings: IndexSettings): Promise<void> {
+  indexDialogOpen.value = false;
+  const configured = await configureIndex(superdoc.value, settings);
+  report(configured, 'index-configure');
+  if (configured.ok) report(await rebuildIndex(superdoc.value), 'index-rebuild');
+  await refreshIndex();
+}
+
+/**
+ * פותחת את דיאלוג ערכי המפתח עם הטקסט שסומן בעורך כהצעה.
+ *
+ * הבחירה נקראת **ברגע הלחיצה** ולא כשהדיאלוג מאשר, בדיוק כמו בדיאלוג ערכי
+ * תוכן העניינים. הרשימה נקראת מחדש גם היא: הכתובות מיקומיות, וכל עריכה
+ * בעורך מאז הקריאה הקודמת הזיזה אותן.
+ */
+async function onOpenIndexEntryDialog(): Promise<void> {
+  const selection = await readDocSelection(superdoc.value, { includeText: true });
+  indexEntrySuggestion.value = selection.text;
+  await refreshIndex();
+  indexEntryDialogOpen.value = true;
+}
+
+async function onMarkIndexEntry(entry: IndexEntryDraft): Promise<void> {
+  report(await markIndexEntry(superdoc.value, entry), 'index-mark-entry');
+  await refreshIndex();
+}
+
+async function onUnmarkIndexEntry(address: unknown): Promise<void> {
+  report(await removeIndexEntry(superdoc.value, address), 'index-unmark-entry');
+  await refreshIndex();
 }
 </script>
 

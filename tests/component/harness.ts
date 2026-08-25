@@ -285,6 +285,21 @@ export interface SuperdocDoubleOptions {
     /** ערכי `TC` שסומנו במסמך. */
     entries?: readonly { nodeId: string; text: string; level: number }[];
   };
+  /**
+   * המפתח שבמסמך. ברירת המחדל היא מסמך **בלי** מפתח ובלי ערכים מסומנים —
+   * אותה החלטה כמו ב-`toc`, ומאותו טעם: זה המצב שבו „עדכן מפתח” אמור לומר
+   * למה הוא אינו יכול, ומסמך שכבר יש בו מפתח היה מסתיר את ההבדל בין „נוצר”
+   * ל„היה שם”.
+   */
+  index?: {
+    /** מזהי המפתחות. יותר מאחד = המצב הדו-משמעי שההסרה מסרבת לו. */
+    ids?: readonly string[];
+    /** מספר הטורים של המפתח הראשון, כפי ש-`index.list` מצהיר עליו. */
+    columns?: number;
+    runIn?: boolean;
+    /** ערכי `XE` שסומנו במסמך. הכתובת מיקומית, כמו במנוע האמיתי. */
+    entries?: readonly { blockId: string; offset: number; text: string; subEntry?: string }[];
+  };
 }
 
 export interface SuperdocDouble {
@@ -370,6 +385,8 @@ export function createSuperdocDouble(options: SuperdocDoubleOptions = {}): Super
 
   const tocIds = options.toc?.ids ?? [];
   const tocEntries = options.toc?.entries ?? [];
+  const indexIds = options.index?.ids ?? [];
+  const indexEntries = options.index?.entries ?? [];
 
   /**
    * הבלוקים שבמסמך, במבנה שהמנוע האמיתי מחזיק: **בלוק אחד** מסוג
@@ -504,6 +521,48 @@ export function createSuperdocDouble(options: SuperdocDoubleOptions = {}): Super
         })),
         total: tocEntries.length,
       })),
+    },
+    /**
+     * המפתח. שלושה הבדלים מכוונים מ-`toc` שמעל, וכולם נמדדו במנוע האמיתי:
+     * `index.insert` מקבל `at` ו-`config` (ולא כתובת של עצם קיים), הכתובת של
+     * ערך `XE` היא **עוגן מיקומי** ולא `nodeId`, ו-`index.remove` מפיל את
+     * הבלוק כולו — ולכן אין כאן שיירים ואין תלות ב-`blocks.*`.
+     * ההנמקה המלאה ב-engine/index-field.ts.
+     */
+    index: {
+      list: route('index.list', () => ({
+        items: indexIds.map((nodeId) => ({
+          id: nodeId,
+          address: { kind: 'block', nodeType: 'index', nodeId },
+          config: { columns: options.index?.columns, runIn: options.index?.runIn === true },
+          entryCount: indexEntries.length,
+        })),
+        total: indexIds.length,
+      })),
+      insert: route('index.insert', () => receipt('index.insert')),
+      configure: route('index.configure', () => receipt('index.configure')),
+      rebuild: route('index.rebuild', () => receipt('index.rebuild')),
+      remove: route('index.remove', () => receipt('index.remove')),
+      entries: {
+        list: route('index.entries.list', () => ({
+          items: indexEntries.map((entry) => ({
+            id: `${entry.blockId}#${entry.offset}`,
+            address: {
+              kind: 'inline',
+              nodeType: 'indexEntry',
+              anchor: {
+                start: { blockId: entry.blockId, offset: entry.offset },
+                end: { blockId: entry.blockId, offset: entry.offset + 1 },
+              },
+            },
+            text: entry.text,
+            subEntry: entry.subEntry,
+          })),
+          total: indexEntries.length,
+        })),
+        insert: route('index.entries.insert', () => receipt('index.entries.insert')),
+        remove: route('index.entries.remove', () => receipt('index.entries.remove')),
+      },
     },
     /**
      * `blocks` נדרש להסרת תוכן העניינים בלבד: `toc.remove` מוחק את הבלוק

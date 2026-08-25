@@ -149,6 +149,26 @@ const CAPABILITY_SPECS = {
   canMarkTocEntry: {
     operation: ['toc.markEntry', 'toc.unmarkEntry', 'toc.listEntries'],
   },
+  // מפתח ערכים. אותו עיקרון כמו בתוכן העניינים — כל שאלה מונה את הפעולות
+  // שהפקד שלה **באמת** מריץ — אבל שתי הבחנות כאן שונות ממנו, ושתיהן נמדדו:
+  //
+  // 1. `index.rebuild` **אינו** חלק מ-`canInsertIndex`. שלא כמו `fields.insert`,
+  //    שמכניס שדה עם תוצאה ריקה, `index.insert` מרנדר את המפתח מלא כבר
+  //    ביצירה (נמדד: `getText` קיבל מיד את כל שמונת הערכים). מנוע שיודע
+  //    להכניס ואינו יודע לבנות מחדש עדיין נותן למשתמש מפתח שרואים.
+  // 2. `blocks.*` **אינם** חלק מ-`canRemoveIndex`, בניגוד ל„הסר תוכן
+  //    עניינים”. המפתח הוא בלוק יחיד, ו-`index.remove` מוחק אותו כולו בלי
+  //    להשאיר פסקאות יתומות (נמדד). ההנמקה המלאה ב-engine/index-field.ts.
+  canInsertIndex: { operation: 'index.insert' },
+  canRebuildIndex: { operation: ['index.list', 'index.rebuild'] },
+  canRemoveIndex: { operation: ['index.list', 'index.remove'] },
+  canConfigureIndex: { operation: ['index.list', 'index.configure'] },
+  // שאלה אחת לפקד אחד, כמו ב„סימנייה”: „סמן ערך למפתח” הוא כפתור שפותח
+  // דיאלוג שמסמן, מציג את הערכים הקיימים ומבטל סימון, ופקד מנוטרל למחצה
+  // אינו מצב שאפשר להציג.
+  canMarkIndexEntry: {
+    operation: ['index.entries.list', 'index.entries.insert', 'index.entries.remove'],
+  },
   // סקירה
   canAddComment: { operation: 'comments.create', global: 'comments' },
   canTrackChanges: { global: 'trackChanges' },
