@@ -4,6 +4,7 @@
       <RibbonButton
         icon="newDoc"
         label="מסמך חדש"
+        shortcut-id="new-document"
         variant="large"
         :tooltip="switchTooltip('יצירת מסמך Word ריק חדש')"
         :disabled="isSwitchBlocked"
@@ -12,6 +13,7 @@
       <RibbonButton
         icon="folder"
         label="פתח קובץ"
+        shortcut-id="open-document"
         variant="large"
         :tooltip="switchTooltip('פתיחת מסמך Word (.docx) מהמחשב')"
         :disabled="isSwitchBlocked"

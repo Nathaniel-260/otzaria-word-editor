@@ -232,13 +232,11 @@ describe('חיווט האירועים ל-App', () => {
     await buttonByTitle(harness.wrapper, 'חיפוש טקסט במסמך').trigger('click');
     await tabByLabel(harness, 'קובץ').trigger('click');
     await settle();
-    await harness.wrapper.find('button[title="יצירת מסמך Word ריק חדש"]').trigger('click');
-    await harness.wrapper.find('button[title="אודות עורך Word לאוצריא"]').trigger('click');
+    await buttonByTitle(harness.wrapper, 'יצירת מסמך Word ריק חדש').trigger('click');
+    await buttonByTitle(harness.wrapper, 'אודות עורך Word לאוצריא').trigger('click');
     await tabByLabel(harness, 'תצוגה').trigger('click');
     await settle();
-    await harness.wrapper
-      .find('button[title="מצב קריאה ומיקוד ללא הסחות דעת"]')
-      .trigger('click');
+    await buttonByTitle(harness.wrapper, 'מצב קריאה ומיקוד ללא הסחות דעת').trigger('click');
 
     expect(harness.wrapper.emitted('open-find')).toHaveLength(1);
     expect(harness.wrapper.emitted('new-doc')).toHaveLength(1);

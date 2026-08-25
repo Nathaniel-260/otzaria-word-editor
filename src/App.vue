@@ -166,6 +166,8 @@ import {
   saveAutosaveEnabled,
 } from './host/settings';
 import { revealZone, type RevealZone } from './composables/focus-mode';
+import { selectWholeDocument } from './engine/clipboard';
+import { startParagraphOnNewPage } from './engine/page-break';
 import { createShellActionRunner } from './ui/shortcuts/actions';
 import {
   createShortcutDispatcher,
@@ -894,6 +896,12 @@ const runShellAction = createShellActionRunner({
   save: (saveAs) => void onSave(saveAs),
   print: () => void onPrint(),
   openFind: (mode) => openFindDialog(mode),
+  newDocument: () => void onNewDocument(),
+  openDocument: () => void onPickAndOpen(),
+  // שני אלה אינם פקודות של ה-controller אלא Document API ישיר, בדיוק כמו
+  // הכפתורים המקבילים ברצועה — ולכן אותה פונקציה, ואותו דיווח.
+  selectAll: () => void runSelectAll(),
+  pageBreak: () => void runPageBreak(),
   // „אודות” הוא `aria-modal`, ולכן הוא זה שנסגר כשהוא פתוח. החיפוש אינו מודאלי
   // ואפשר להמשיך לערוך מתחתיו, ולכן הוא נסגר רק כשאין חלון מעליו.
   closeTopmost: () => {
@@ -908,6 +916,14 @@ const runShellAction = createShellActionRunner({
     return false;
   },
 });
+
+async function runSelectAll(): Promise<void> {
+  reportCommand(await selectWholeDocument(activeSuperdoc.value), 'select-all');
+}
+
+async function runPageBreak(): Promise<void> {
+  reportCommand(await startParagraphOnNewPage(activeSuperdoc.value), 'page-break-before');
+}
 
 /** פקודת מנוע שמגיעה מקיצור. אותו מסלול, ואותו דיווח, כמו לחיצת כפתור. */
 async function runShortcutCommand(id: CommandId, payload?: unknown): Promise<void> {

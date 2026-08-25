@@ -17,6 +17,10 @@ export interface ShellActionDeps {
   openFind: (mode: 'find' | 'replace') => void;
   /** סוגר את החלון הפתוח. `false` פירושו „לא היה מה לסגור”. */
   closeTopmost: () => boolean;
+  newDocument: () => void;
+  openDocument: () => void;
+  selectAll: () => void;
+  pageBreak: () => void;
 }
 
 export function createShellActionRunner(deps: ShellActionDeps): (action: ShellAction) => void {
@@ -37,6 +41,18 @@ export function createShellActionRunner(deps: ShellActionDeps): (action: ShellAc
         return;
       case 'escape':
         deps.closeTopmost();
+        return;
+      case 'new-document':
+        deps.newDocument();
+        return;
+      case 'open-document':
+        deps.openDocument();
+        return;
+      case 'select-all':
+        deps.selectAll();
+        return;
+      case 'page-break':
+        deps.pageBreak();
         return;
     }
   };

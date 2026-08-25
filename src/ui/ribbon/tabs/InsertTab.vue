@@ -10,6 +10,7 @@
       <RibbonButton
         icon="pageBreak"
         label="התחל בעמוד חדש"
+        shortcut-id="page-break"
         variant="large"
         :tooltip="pageBreakTooltip"
         :disabled="!pageBreak.available"

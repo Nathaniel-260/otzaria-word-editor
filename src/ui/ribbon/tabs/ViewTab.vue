@@ -26,6 +26,7 @@
         <RibbonButton
           icon="pilcrow"
           label="סימני עיצוב"
+          shortcut-id="formatting-marks"
           variant="small"
           tooltip="הצג סימני פסקאות ותווים נסתרים"
           :active="marksCmd.active.value"
