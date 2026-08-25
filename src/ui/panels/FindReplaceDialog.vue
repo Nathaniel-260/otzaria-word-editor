@@ -4,7 +4,7 @@
     class="find-replace-dialog"
     role="dialog"
     aria-label="חיפוש והחלפה"
-    @keydown.esc="$emit('close')"
+    @keydown.esc.stop="$emit('close')"
   >
     <div class="fr-header">
       <div

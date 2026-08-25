@@ -207,6 +207,18 @@ describe('החוזה מול המקור', () => {
     expect(hits(labelWithCombo, (path) => path === REGISTRY)).toEqual([]);
   });
 
+  it('דיאלוג שסוגר את עצמו ב-Escape עוצר את האירוע', () => {
+    // הליקוי שנמצא בסקירה: `FindReplaceDialog` היה היחיד מבין שמונה-עשר
+    // הדיאלוגים עם `@keydown.esc` בלי `.stop`. הוא מאפס את מצבו סינכרונית,
+    // ואז האירוע ממשיך ל-window — ושם `closeTopmost` כבר אינו רואה חלון
+    // פתוח, ונופל לענף הבא. כלומר Escape אחד עשה שתי פעולות: סגר את החיפוש
+    // **וגם** יצא ממצב מיקוד.
+    //
+    // מה שנאסר הוא `$emit` ישיר: הוא אינו יכול לעצור הפצה. מטפל בשם מותר —
+    // `RibbonMenuButton` עוצר רק כשהתפריט פתוח, וזו הכרעה שהוא רשאי לעשות.
+    expect(hits(/@keydown\.esc(?:ape)?="\s*\$emit/)).toEqual([]);
+  });
+
   it('כל shortcut-id ברצועה קיים ברשימה', () => {
     const ids = new Set<string>(ENTRIES.map((shortcut) => shortcut.id));
     const used = new Set<string>();

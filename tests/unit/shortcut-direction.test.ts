@@ -60,11 +60,46 @@ describe('זיהוי הכיווניות', () => {
   it('Shift נלחץ לפני Ctrl — עדיין נחשב', () => {
     // סדר הלחיצה אינו משהו שמשתמש חושב עליו. מה שקובע הוא ש-Ctrl לחוץ ברגע
     // השחרור.
+    //
+    // **הרצף כאן הוא המלא, כולל ה-keydown של Control עצמו.** הגרסה הראשונה
+    // של הבדיקה דילגה עליו, ולכן אישרה בירוק התנהגות שאינה קיימת: לחיצת
+    // Control היא אירוע keydown ככל אחר, ו-„כל מקש אחר מבטל” ניקה בגללה את
+    // החימוש.
     const detector = createDirectionDetector();
 
     detector.keydown(shift('ShiftRight', { ctrlKey: false }));
+    detector.keydown({ code: 'ControlLeft', key: 'Control', ctrlKey: true, metaKey: false });
 
     expect(detector.keyup(shift('ShiftRight'))).toBe('rtl');
+  });
+
+  it('Meta שנלחץ אחרי ה-Shift אינו מבטל', () => {
+    const detector = createDirectionDetector();
+
+    detector.keydown(shift('ShiftRight', { ctrlKey: false }));
+    detector.keydown({ code: 'MetaLeft', key: 'Meta', ctrlKey: false, metaKey: true });
+
+    expect(detector.keyup(shift('ShiftRight', { ctrlKey: false, metaKey: true }))).toBe('rtl');
+  });
+
+  it('Alt שנלחץ אחרי ה-Shift כן מבטל — זה AltGr', () => {
+    const detector = createDirectionDetector();
+
+    detector.keydown(shift('ShiftRight'));
+    detector.keydown({ code: 'AltRight', key: 'Alt', ctrlKey: true, metaKey: false, altKey: true });
+
+    expect(detector.keyup(shift('ShiftRight'))).toBeNull();
+  });
+
+  it('מקש אמיתי אחרי ה-Shift עדיין מבטל', () => {
+    // ההגנה שהמכונה קיימת בשבילה לא נחלשה: Ctrl+Shift+X הוא קו חוצה.
+    const detector = createDirectionDetector();
+
+    detector.keydown(shift('ShiftRight'));
+    detector.keydown({ code: 'ControlLeft', key: 'Control', ctrlKey: true, metaKey: false });
+    detector.keydown(letter('KeyX'));
+
+    expect(detector.keyup(shift('ShiftRight'))).toBeNull();
   });
 
   it('AltGr אינו מחמש כיווניות', () => {

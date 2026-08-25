@@ -494,6 +494,30 @@ describe('מצב מיקוד', () => {
     expect(event.defaultPrevented).toBe(true);
   });
 
+  it('Escape מתוך דיאלוג החיפוש סוגר אותו בלבד', async () => {
+    // הדיאלוג מטפל ב-Escape בעצמו ומאפס את המצב סינכרונית. בלי `.stop`
+    // האירוע ממשיך ל-window, ושם `closeTopmost` כבר אינו רואה חיפוש פתוח —
+    // ונופל לענף הבא. עד שנוסף מצב המיקוד הנפילה הזאת הייתה בלתי מזיקה.
+    const wrapper = await mountShell();
+    press({ code: 'F11' });
+    press({ code: 'KeyF', ctrlKey: true });
+    await settle();
+    const dialog = wrapper.find('.find-replace-dialog');
+    expect(dialog.exists(), 'החיפוש נפתח').toBe(true);
+    expect(wrapper.find('.word-app-shell').classes()).toContain('focus-mode');
+
+    dialog.element.dispatchEvent(
+      new KeyboardEvent('keydown', { code: 'Escape', key: 'Escape', cancelable: true, bubbles: true }),
+    );
+    await settle();
+
+    expect(wrapper.find('.find-replace-dialog').exists(), 'החיפוש נסגר').toBe(false);
+    expect(
+      wrapper.find('.word-app-shell').classes(),
+      'מצב המיקוד נשאר — Escape אחד, פעולה אחת',
+    ).toContain('focus-mode');
+  });
+
   it('דיאלוג פתוח נסגר לפני מצב המיקוד, ולא יחד איתו', async () => {
     const wrapper = await mountShell();
     press({ code: 'F11' });
