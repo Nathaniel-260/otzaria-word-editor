@@ -273,6 +273,18 @@ export interface SuperdocDoubleOptions {
   failures?: Record<string, { code: string; message?: string }>;
   /** מה שהבחירה במסמך מדווחת. */
   selection?: { blockId?: string | null; hasRange?: boolean; text?: string };
+  /**
+   * תוכן העניינים שבמסמך. ברירת המחדל היא מסמך **בלי** טבלה — ראו ההסבר
+   * ליד מסלולי `toc` למטה — ומי שבודק את הקבוצה מעמיד כאן מסמך שיש בו אחת.
+   */
+  toc?: {
+    /** מזהי הטבלאות. יותר מאחד = המצב הדו-משמעי שההסרה מסרבת לו. */
+    ids?: readonly string[];
+    /** כמה שורות `TOC1` נשארות אחרי `toc.remove` בכל טבלה. */
+    rowsPerToc?: number;
+    /** ערכי `TC` שסומנו במסמך. */
+    entries?: readonly { nodeId: string; text: string; level: number }[];
+  };
 }
 
 export interface SuperdocDouble {
@@ -356,6 +368,27 @@ export function createSuperdocDouble(options: SuperdocDoubleOptions = {}): Super
     end: { kind: 'text', blockId, offset: selectionText.length || 4 },
   };
 
+  const tocIds = options.toc?.ids ?? [];
+  const tocEntries = options.toc?.entries ?? [];
+
+  /**
+   * הבלוקים שבמסמך, במבנה שהמנוע האמיתי מחזיק: **בלוק אחד** מסוג
+   * `tableOfContents` לכל טבלה, ואחריו שורותיה כפסקאות `TOC1`. זה מה שהופך
+   * את „הסר” לבדיקה אמיתית — `toc.remove` מפיל רק את הבלוק הראשון, וכל
+   * השאר תלוי ב-`blocks.deleteRange`. ההנמקה ב-engine/toc.ts.
+   */
+  let blocks = tocIds
+    .flatMap((nodeId) => [
+      { nodeId, nodeType: 'tableOfContents', styleId: 'TOC1' },
+      ...Array.from({ length: options.toc?.rowsPerToc ?? 0 }, (_, index) => ({
+        nodeId: `${nodeId}-row-${index}`,
+        nodeType: 'paragraph',
+        styleId: 'TOC1',
+      })),
+    ])
+    .concat([{ nodeId: 'block-1', nodeType: 'paragraph', styleId: 'Normal' }])
+    .map((block, ordinal) => ({ ...block, ordinal }));
+
   const clipboardPayload = {
     source: 'superdoc',
     items: [{ type: 'text/plain', kind: 'string', data: selectionText || 'טקסט' }],
@@ -438,6 +471,59 @@ export function createSuperdocDouble(options: SuperdocDoubleOptions = {}): Super
       insert: route('bookmarks.insert', () => receipt('bookmarks.insert')),
       rename: route('bookmarks.rename', () => receipt('bookmarks.rename')),
       remove: route('bookmarks.remove', () => receipt('bookmarks.remove')),
+    },
+    /**
+     * אותה החלטה כמו ב-`fields`: מסמך **בלי** תוכן עניינים ובלי ערכים
+     * מסומנים. זה המצב שהפקדים נמדדים בו — „אין טבלה, ולכן הפעולה מדווחת
+     * למה” — ומסמך שכבר יש בו טבלה היה מסתיר את ההבדל בין „נוצרה” ל„הייתה
+     * שם”. בדיקת הקומפוננטה של הקבוצה מרכיבה כפיל משלה עם טבלה אחת.
+     */
+    toc: {
+      list: route('toc.list', () => ({
+        items: tocIds.map((nodeId) => ({
+          address: { kind: 'block', nodeType: 'tableOfContents', nodeId },
+          sourceConfig: {},
+          displayConfig: { hyperlinks: true },
+        })),
+        total: tocIds.length,
+      })),
+      update: route('toc.update', () => receipt('toc.update')),
+      remove: route('toc.remove', (input) => {
+        const { target } = input as { target: { nodeId: string } };
+        blocks = blocks.filter((block) => block.nodeId !== target.nodeId);
+        return receipt('toc.remove');
+      }),
+      configure: route('toc.configure', () => receipt('toc.configure')),
+      markEntry: route('toc.markEntry', () => receipt('toc.markEntry')),
+      unmarkEntry: route('toc.unmarkEntry', () => receipt('toc.unmarkEntry')),
+      listEntries: route('toc.listEntries', () => ({
+        items: tocEntries.map((entry) => ({
+          address: { kind: 'inline', nodeType: 'tableOfContentsEntry', nodeId: entry.nodeId },
+          text: entry.text,
+          level: entry.level,
+        })),
+        total: tocEntries.length,
+      })),
+    },
+    /**
+     * `blocks` נדרש להסרת תוכן העניינים בלבד: `toc.remove` מוחק את הבלוק
+     * הראשון של הטבלה ומשאיר את שאר השורות, ו-`blocks.deleteRange` הוא מה
+     * שמנקה אותן. ההנמקה המלאה ב-engine/toc.ts.
+     */
+    blocks: {
+      list: route('blocks.list', (input) => {
+        const query = (input ?? {}) as { limit?: number; offset?: number };
+        const offset = query.offset ?? 0;
+        const end = query.limit === undefined ? undefined : offset + query.limit;
+        return { blocks: blocks.slice(offset, end), total: blocks.length };
+      }),
+      deleteRange: route('blocks.deleteRange', (input) => {
+        const { start, end } = input as { start: { nodeId: string }; end: { nodeId: string } };
+        const from = blocks.findIndex((block) => block.nodeId === start.nodeId);
+        const to = blocks.findIndex((block) => block.nodeId === end.nodeId);
+        if (from !== -1 && to !== -1) blocks.splice(from, to - from + 1);
+        return receipt('blocks.deleteRange');
+      }),
     },
     /** אותה החלטה כמו ב-`fields`: מסמך בלי הפניות מקושרות. */
     crossRefs: {

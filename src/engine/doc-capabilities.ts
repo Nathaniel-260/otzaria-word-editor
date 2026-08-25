@@ -128,6 +128,27 @@ const CAPABILITY_SPECS = {
   // בלי פקד היא הצהרת יכולת שאיש אינו קורא. ההנמקה המלאה, כולל המדידה,
   // ב-engine/cross-refs.ts.
   canRebuildCrossRefs: { operation: ['crossRefs.list', 'crossRefs.rebuild'] },
+  // תוכן עניינים. כל שאלה כאן מונה את הפעולות שהפקד שלה **באמת** מריץ, ולא
+  // את ה-namespace כולו: מנוע שיודע לעדכן ואינו יודע להסיר צריך להשאיר את
+  // „עדכן טבלה” פעיל ולנטרל רק את „הסר”.
+  //
+  // `toc.list` נדרש בשלוש מהן מפני ש-`update`/`remove`/`configure` מקבלים
+  // כתובת של טבלה מסוימת, ואין דרך אחרת להשיג אותה.
+  canUpdateTableOfContents: { operation: ['toc.list', 'toc.update'] },
+  // `blocks.*` הם חלק מהשאלה ולא קישוט: `toc.remove` מוחק את הבלוק הראשון
+  // של הטבלה בלבד ומשאיר את שאר השורות במסמך כפסקאות `TOC1`…`TOC9` (נמדד),
+  // ו-`blocks.deleteRange` הוא מה שמנקה אותן. מנוע בלעדיו היה מציג „הסר”
+  // שמחזיר „בוצע” ומשאיר את הטבלה על המסך. ההנמקה המלאה ב-engine/toc.ts.
+  canRemoveTableOfContents: {
+    operation: ['toc.list', 'toc.remove', 'blocks.list', 'blocks.deleteRange'],
+  },
+  canConfigureTableOfContents: { operation: ['toc.list', 'toc.configure'] },
+  // שאלה אחת לפקד אחד, כמו ב„סימנייה”: „סמן ערך” הוא כפתור שפותח דיאלוג
+  // שמסמן, מציג את הערכים הקיימים ומבטל סימון, ופקד מנוטרל למחצה אינו מצב
+  // שאפשר להציג.
+  canMarkTocEntry: {
+    operation: ['toc.markEntry', 'toc.unmarkEntry', 'toc.listEntries'],
+  },
   // סקירה
   canAddComment: { operation: 'comments.create', global: 'comments' },
   canTrackChanges: { global: 'trackChanges' },

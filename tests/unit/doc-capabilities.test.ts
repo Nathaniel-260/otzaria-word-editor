@@ -52,6 +52,15 @@ function fullCapabilities() {
       'bookmarks.remove': { available: true },
       'crossRefs.list': { available: true },
       'crossRefs.rebuild': { available: true },
+      'toc.list': { available: true },
+      'toc.update': { available: true },
+      'toc.remove': { available: true },
+      'toc.configure': { available: true },
+      'toc.markEntry': { available: true },
+      'toc.unmarkEntry': { available: true },
+      'toc.listEntries': { available: true },
+      'blocks.list': { available: true },
+      'blocks.deleteRange': { available: true },
       'comments.create': { available: true },
       'clipboard.serializeSelection': { available: true },
       'clipboard.insert': { available: true },
@@ -326,6 +335,44 @@ describe('readDocCapabilities', () => {
 
     expect(
       (await readDocCapabilities(hostWith(() => fullCapabilities()))).can('canRebuildCrossRefs'),
+    ).toBe(true);
+  });
+
+  it('„הסר תוכן עניינים” דורש גם את מחיקת השורות שנשארות', async () => {
+    // `toc.remove` מוחק את הבלוק הראשון של הטבלה בלבד ומשאיר את שאר השורות
+    // כפסקאות `TOC1`…`TOC9` (נמדד בדפדפן). מנוע בלי `blocks.deleteRange`
+    // היה מציג „הסר” שמחזיר „בוצע” ומשאיר את גוף הטבלה על המסך.
+    const withoutSweep = fullCapabilities();
+    withoutSweep.operations['blocks.deleteRange'] = {
+      available: false,
+      reasons: ['NAMESPACE_UNAVAILABLE'],
+    } as never;
+    expect(
+      (await readDocCapabilities(hostWith(() => withoutSweep))).can('canRemoveTableOfContents'),
+    ).toBe(false);
+    // ואילו „עדכן טבלה” אינו נשען עליה, ולכן הוא נשאר פעיל.
+    expect(
+      (await readDocCapabilities(hostWith(() => withoutSweep))).can('canUpdateTableOfContents'),
+    ).toBe(true);
+  });
+
+  it('„סמן ערך” דורש את שלוש הפעולות שהדיאלוג מריץ', async () => {
+    // הדיאלוג מסמן, מציג את הערכים הקיימים ומבטל סימון. פקד מנוטרל למחצה
+    // אינו מצב שאפשר להציג, ולכן היעדר כל אחת מהשלוש מנטרל אותו.
+    for (const operation of ['toc.markEntry', 'toc.unmarkEntry', 'toc.listEntries']) {
+      const raw = fullCapabilities();
+      raw.operations[operation as 'toc.markEntry'] = {
+        available: false,
+        reasons: ['NAMESPACE_UNAVAILABLE'],
+      } as never;
+      expect(
+        (await readDocCapabilities(hostWith(() => raw))).can('canMarkTocEntry'),
+        operation,
+      ).toBe(false);
+    }
+
+    expect(
+      (await readDocCapabilities(hostWith(() => fullCapabilities()))).can('canMarkTocEntry'),
     ).toBe(true);
   });
 
