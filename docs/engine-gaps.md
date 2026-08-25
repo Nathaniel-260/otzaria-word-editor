@@ -506,3 +506,40 @@ supported by v2 yet”).
 
 `create.image`, `images.delete`, `images.replaceSource`, `hyperlinks.patch`
 — `OPERATION_UNAVAILABLE`. אין לבנות עליהן פקד פעיל.
+
+## `format.paragraph.*` — גל 11, מה שנמדד לפני המימוש
+
+Chrome headless על ה-dist הארוז; כל סבב מלווה בפירוק ה-zip של
+`export.toDocx`. ההנמקות ב-engine/paragraph-format.ts, וזה הפער:
+
+- **היחידות הן twips גולמיים.** `setIndentation({left:720})` כתב
+  `<w:ind w:left="720"/>`, `setSpacing({before:240})` כתב `w:before="240"` —
+  אחד לאחר, בלי המרה. **שונה** מ-`sections.*`, שם ה-API מקבל אינצ'ים וכותב
+  `Math.round(v*1440)`. מי שמעביר ערכי UI ישירות כותב שוליים במידות מטר.
+- **כל קריאה מחליפה את האלמנט כולו.** `setIndentation({left:-500})` אחרי
+  `setIndentation({left,right,firstLine})` השאיר `<w:ind w:left="-500"/>`
+  בלבד. אותו דין ל-`w:spacing`. אין patch; כל ממשק חייב לשלוח מצב מלא.
+- **מה שהמנוע מאמת וזורק** (`INVALID_INPUT`, ולא קבלה): ערך שאינו מספר
+  שלם (`hanging:0.5` → „must be a non-negative integer”), שלילי בריווח
+  (`before:-240`), וערכי enum (`lineRule:'zigzag'`, alignment `'zigzag'`
+  בטאב). הזריקות מחייבות catch אצל כל קורא.
+- **מה שעובר בשקט ונאסר אצלנו:**
+  - `setIndentation({left:-500})` → `success:true` ו-`w:left="-500"`.
+    חוקי ב-OOXML (`ST_SignedTwipsMeasure`) אך לא מוצע ב-Word — ולא אצלנו.
+  - `setTabStop({position:-100})` → `success:true`. `w:pos` שלילי אינו
+    חוקי ב-ECMA-376; השער יושב במודול שלנו (מיקום חייב להיות שלם > 0).
+- **NO_OP:** קריאה חוזרת עם ערכים זהים מחזירה
+  `success:false / code:'NO_OP'` — „produced no changes”. זו הצלחה
+  מבחינת המשתמש, כמו בכל המרחבים האחרים.
+- **טאבים הם רשימה:** `setTabStop` **מוסיף** ואינו נוגע באחרות (שתי קריאות
+  השאירו `<w:tab w:val="center" w:pos="1440" w:leader="dot"/>` ו-
+  `<w:tab w:val="right" w:pos="2880"/>` יחד); `clearTabStop({position})`
+  מוריד יעד יחיד; `clearAllTabStops` מוריד את `<w:tabs>` כולו.
+- **קריאת המצב בנקודות.** `doc.get()` מחזיר SDM/1 שבו ה-indentation,
+  ה-spacing וה-tabs הם ב**נקודות** (והטאבים נושאים `kind:'set'|'clear'`) —
+  פי 20 מה-API של הכתיבה. הקורא (`readParagraphFormat`) הוא המקום היחיד
+  שמכיר את שתי המערכות.
+- **keep options:** `keepNext`/`keepLines` נכתבים `<w:keepNext/>`,
+  `<w:keepLines/>`; `widowControl:false` נכתב `<w:widowControl w:val="0"/>`.
+  סדר הילדים ב-`pPr` יוצא מהמנוע קנוני ועובר round-trip.
+

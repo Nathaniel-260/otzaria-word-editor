@@ -111,6 +111,25 @@ const CAPABILITY_SPECS = {
     operation: ['footnotes.list', 'footnotes.get', 'footnotes.update', 'footnotes.remove'],
   },
   canSetPageBreakBefore: { operation: 'format.paragraph.setFlowOptions' },
+  // גל 11 — תפריט „פסקה”. כל שאלה מונה את **כל** הפעולות שהפקד שלה מריץ,
+  // בדיוק כמו `canSetPageBorders` למעלה: „נקה” בדיאלוג הוא כפתור לכל דבר,
+  // ומנוע שיודע להגדיר ואינו יודע לנקות היה משאיר אותו פעיל על כשל מובטח.
+  // `setKeepOptions` אין לו clear — `widowControl:false` הוא הניקוי שלו —
+  // ולכן השאלה שלו על פעולה אחת.
+  canSetParagraphIndentation: {
+    operation: ['format.paragraph.setIndentation', 'format.paragraph.clearIndentation'],
+  },
+  canSetParagraphSpacing: {
+    operation: ['format.paragraph.setSpacing', 'format.paragraph.clearSpacing'],
+  },
+  canSetParagraphKeepOptions: { operation: 'format.paragraph.setKeepOptions' },
+  canManageParagraphTabs: {
+    operation: [
+      'format.paragraph.setTabStop',
+      'format.paragraph.clearTabStop',
+      'format.paragraph.clearAllTabStops',
+    ],
+  },
   // `insert` ולא `create.text`: הכנסת טקסט היא פעולת הליבה של הפאסדה
   // (`memberPath: 'insert'` בקטלוג), אחותה של `delete`, ולא אחת מ-`create.*`.
   canInsertText: { operation: 'insert' },

@@ -303,6 +303,12 @@ export interface SuperdocDoubleOptions {
     pageNumbering?: { start?: number; format?: string };
   };
   /**
+   * תכונות הפסקה שבה הסמן, במודל SDM/1 — **נקודות**, לא twips. אלה מה ש-
+   * `doc.get` מחזיר ל-`readParagraphFormat`, ולכן הדיאלוג „פסקה” ממלא את
+   * עצמו מהם. ברירת המחדל היא פסקה בלי עיצוב ישיר.
+   */
+  paragraphProps?: Record<string, unknown>;
+  /**
    * תוכן העניינים שבמסמך. ברירת המחדל היא מסמך **בלי** טבלה — ראו ההסבר
    * ליד מסלולי `toc` למטה — ומי שבודק את הקבוצה מעמיד כאן מסמך שיש בו אחת.
    */
@@ -1005,9 +1011,41 @@ export function createSuperdocDouble(options: SuperdocDoubleOptions = {}): Super
         setFlowOptions: route('format.paragraph.setFlowOptions', () =>
           receipt('format.paragraph.setFlowOptions'),
         ),
+        // גל 11 — תפריט „פסקה”. אותן חתימות של המנוע: יעד + מצב מלא, והכשל
+        // מוכרע לפי `failures` בדיוק כמו בכל מסלול אחר.
+        setIndentation: route('format.paragraph.setIndentation', () =>
+          receipt('format.paragraph.setIndentation'),
+        ),
+        clearIndentation: route('format.paragraph.clearIndentation', () =>
+          receipt('format.paragraph.clearIndentation'),
+        ),
+        setSpacing: route('format.paragraph.setSpacing', () => receipt('format.paragraph.setSpacing')),
+        clearSpacing: route('format.paragraph.clearSpacing', () => receipt('format.paragraph.clearSpacing')),
+        setKeepOptions: route('format.paragraph.setKeepOptions', () =>
+          receipt('format.paragraph.setKeepOptions'),
+        ),
+        setTabStop: route('format.paragraph.setTabStop', () => receipt('format.paragraph.setTabStop')),
+        clearTabStop: route('format.paragraph.clearTabStop', () => receipt('format.paragraph.clearTabStop')),
+        clearAllTabStops: route('format.paragraph.clearAllTabStops', () =>
+          receipt('format.paragraph.clearAllTabStops'),
+        ),
       },
       vertAlign: route('format.vertAlign', () => receipt('format.vertAlign')),
     },
+    /**
+     * `doc.get` — המסמך במודל SDM/1, מצומצם לבלוק אחד שהבחירה מצביעה עליו.
+     * `readParagraphFormat` הוא הקורא היחיד כרגע, והוא מחפש `id === nodeId`
+     * ואת ה-props תחת המפתח של סוג הבלוק.
+     */
+    get: route('get', () => ({
+      body: [
+        {
+          id: blockId,
+          kind: 'paragraph',
+          paragraph: { inlines: [], props: options.paragraphProps ?? {} },
+        },
+      ],
+    })),
     selection: {
       current: route('selection.current', () => ({
         empty: !hasRange,

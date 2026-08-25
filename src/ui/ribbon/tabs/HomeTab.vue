@@ -282,6 +282,22 @@
           title="מרווח בין שורות"
           @update:model-value="onLineSpacingChange"
         />
+
+        <div class="word-separator" />
+
+        <!--
+          „תפריט פסקה” — פתח הדיאלוג, כמו פתח ה„פסקה” של Word בקצה הקבוצה.
+          זמינותו אינה של פקודה: הדיאלוג עצמו נכשל סגור כשאין Document API,
+          ולכן הכפתור נשאר לחיץ והפתיחה מסבירה. `@pointerdown.prevent` מונע
+          גזילת המיקוד מהעורך — הבחירה חייבת לשרוד עד פתיחת הדיאלוג.
+        -->
+        <RibbonButton
+          icon="pilcrow"
+          variant="icon-only"
+          tooltip="תפריט פסקה: כניסות, ריווח ועצירות טאב"
+          :disabled="paraInFlight"
+          @click="onOpenParagraph"
+        />
       </div>
     </RibbonGroup>
 
@@ -334,6 +350,18 @@
         />
       </div>
     </RibbonGroup>
+
+    <ParagraphDialog
+      :is-open="paragraphOpen"
+      :busy="paraInFlight"
+      :tabs-enabled="tabsEnabled"
+      :snapshot="paraSnapshot"
+      @close="paragraphOpen = false"
+      @submit="onParagraphSubmit"
+      @tab-add="onParagraphTabAdd"
+      @tab-remove="onParagraphTabRemove"
+      @tabs-clear="onParagraphTabsClear"
+    />
   </div>
 </template>
 
@@ -363,6 +391,20 @@ import {
   type VertAlignKind,
   type VertAlignSupport,
 } from '../../../engine/vert-align';
+import ParagraphDialog from '../../panels/ParagraphDialog.vue';
+import {
+  TWIPS_PER_CM,
+  TWIPS_PER_PT,
+  addParagraphTabStop,
+  applyParagraphIndentation,
+  applyParagraphKeepOptions,
+  applyParagraphSpacing,
+  clearAllParagraphTabStops,
+  emptyParagraphFormat,
+  readParagraphFormat,
+  removeParagraphTabStop,
+  type TabStop,
+} from '../../../engine/paragraph-format';
 import {
   DEFAULT_FONT_SIZE_PT,
   DEFAULT_LINE_HEIGHT,
@@ -767,6 +809,138 @@ function vertAlignTooltip(kind: VertAlignKind): string {
 
 async function onVertAlign(kind: VertAlignKind): Promise<void> {
   report(await toggleVertAlign(superdoc.value, kind), `vert-align-${kind}`);
+}
+
+/* ------------------------------------------------------------------ */
+/* תפריט פסקה                                                          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * דיאלוג „פסקה” — כניסות, ריווח, אפשרויות שמירה וטאבים, דרך
+ * `doc.format.paragraph.*` (engine/paragraph-format.ts). אין לזה פקודה בקטלוג,
+ * ולכן המסלול הוא Document API — אותו דפוס של פעולות הלוח מעל.
+ *
+ * `paraInFlight` הוא TOCTOU-lock ולא נוחות: הדיאלוג נפתח על **תצלום** מצב
+ * הפסקה (`readParagraphFormat`), ושלושת סעיפי „אישור” כותבים מצב מלא. פעולה
+ * שנייה שתיקלט בזמן שהראשונה באוויר הייתה כותבת על תצלום מיושן.
+ */
+const paragraphOpen = shallowRef(false);
+const paraInFlight = shallowRef(false);
+/** יעד הפסקה שהתצלום נלקח ממנו; כל פעולת „אישור” חוזרת אליו. */
+let paraTarget: unknown = null;
+const paraSnapshot = shallowRef(emptyParagraphFormat());
+
+const tabsEnabled = computed(() => capabilities.value?.can('canManageParagraphTabs') ?? false);
+
+async function runParagraph(action: () => Promise<void>): Promise<void> {
+  if (paraInFlight.value) return;
+  paraInFlight.value = true;
+  try {
+    await action();
+  } finally {
+    paraInFlight.value = false;
+  }
+}
+
+/**
+ * קוראת את מצב הפסקה ואז פותחת — בדיוק `openWithState` של LayoutTab:
+ * דיאלוג שנפתח ריק וממלא את עצמו כעבור tick הוא דיאלוג שהמשתמש עשוי לאשר
+ * לפני שהוא מלא. כשל קריאה מסביר ולא פותח דיאלוג על ערכים ריקים.
+ */
+async function onOpenParagraph(): Promise<void> {
+  if (paraInFlight.value) return;
+  paraInFlight.value = true;
+  try {
+    const result = await readParagraphFormat(superdoc.value);
+    if (!result.ok) {
+      report(result.outcome, 'paragraph-open');
+      return;
+    }
+    paraTarget = result.target;
+    paraSnapshot.value = result.snapshot;
+    paragraphOpen.value = true;
+  } finally {
+    paraInFlight.value = false;
+  }
+}
+
+function onParagraphSubmit(payload: {
+  leftCm: number;
+  rightCm: number;
+  special: 'none' | 'firstLine' | 'hanging';
+  amountCm: number;
+  beforePt: number;
+  afterPt: number;
+  lineTwips: number;
+  lineRule: 'auto' | 'exact' | 'atLeast';
+  keepNext: boolean;
+  keepLines: boolean;
+  widowControl: boolean;
+}): void {
+  paragraphOpen.value = false;
+  const target = paraTarget;
+  // המרת היחידות כאן ולא בדיאלוג: engine/paragraph-format.ts הוא המקום היחיד
+  // שמכיר את שתי המערכות (cm/pt אצל המשתמש, twips ב-API).
+  const indentation = {
+    leftTwips: Math.round(payload.leftCm * TWIPS_PER_CM),
+    rightTwips: Math.round(payload.rightCm * TWIPS_PER_CM),
+    special: payload.special,
+    amountTwips: Math.round(payload.amountCm * TWIPS_PER_CM),
+  };
+  const spacing = {
+    beforeTwips: Math.round(payload.beforePt * TWIPS_PER_PT),
+    afterTwips: Math.round(payload.afterPt * TWIPS_PER_PT),
+    lineTwips: payload.lineTwips,
+    rule: payload.lineRule,
+  };
+  const keep = {
+    keepNext: payload.keepNext,
+    keepLines: payload.keepLines,
+    widowControl: payload.widowControl,
+  };
+  void runParagraph(async () => {
+    // שלוש פעולות על אותו pPr; כשל אחד אינו מבטל את האחרים, וכל אחת מדווחת
+    // בפני עצמה — NO_OP כבר מטופל בתוך המודול.
+    const outcomes = [
+      await applyParagraphIndentation(superdoc.value, target, indentation),
+      await applyParagraphSpacing(superdoc.value, target, spacing),
+      await applyParagraphKeepOptions(superdoc.value, target, keep),
+    ];
+    for (const [index, outcome] of outcomes.entries()) {
+      if (!outcome.ok) {
+        report(outcome, ['paragraph-indent', 'paragraph-spacing', 'paragraph-keep'][index]);
+        return;
+      }
+    }
+    report({ ok: true }, 'paragraph-format');
+  });
+}
+
+function onParagraphTabAdd(tab: {
+  positionTwips: number;
+  alignment: 'left' | 'center' | 'right' | 'decimal' | 'bar';
+  leader?: string;
+}): void {
+  void runParagraph(async () => {
+    // ה-leader מגיע מה-select של הדיאלוג עם ערכי ה-union בלבד; ההיצמדות
+    // ל-union נבדקת שוב בתוך המודול.
+    const outcome = await addParagraphTabStop(superdoc.value, paraTarget, tab as TabStop);
+    report(outcome, 'paragraph-tab-add');
+  });
+}
+
+function onParagraphTabRemove(payload: { positionTwips: number }): void {
+  void runParagraph(async () => {
+    const outcome = await removeParagraphTabStop(superdoc.value, paraTarget, payload.positionTwips);
+    report(outcome, 'paragraph-tab-remove');
+  });
+}
+
+function onParagraphTabsClear(): void {
+  void runParagraph(async () => {
+    const outcome = await clearAllParagraphTabStops(superdoc.value, paraTarget);
+    report(outcome, 'paragraph-tabs-clear');
+  });
 }
 </script>
 
