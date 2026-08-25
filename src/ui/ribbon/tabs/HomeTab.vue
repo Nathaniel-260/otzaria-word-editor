@@ -219,6 +219,20 @@
           @click="indentIncCmd.run()"
         />
 
+        <!--
+          „רשימה" (גל 14א) — פעולות שאין להן פקודה ברצועה: מספור עברי
+          (hebrew1 — נמדד שנכתב ל-numbering.xml), התחלה מחדש, המשך מספור
+          קודם והמרה לטקסט. „המר לטקסט" בלתי-הפיך ולכן דורש לחיצה שנייה.
+        -->
+        <RibbonMenuButton
+          icon="numberList"
+          label="רשימה"
+          :tooltip="listsTooltip"
+          :disabled="!listsAvailable"
+          :items="listMenuItems"
+          @select="onListMenuSelect"
+        />
+
         <div class="word-separator" />
 
         <RibbonButton
@@ -431,6 +445,13 @@ import {
   applyFontAdvanced,
   type FontAdvancedPatch,
 } from '../../../engine/font-advanced';
+import {
+  NUMBER_STYLE_LABELS,
+  continuePreviousList,
+  convertListToText,
+  restartListAt,
+  setListNumberStyle,
+} from '../../../engine/lists';
 import {
   DEFAULT_FONT_SIZE_PT,
   DEFAULT_LINE_HEIGHT,
@@ -1000,6 +1021,76 @@ function onFontAdvancedSubmit(patch: FontAdvancedPatch): void {
       fontAdvInFlight.value = false;
     }
   })();
+}
+
+/* ------------------------------------------------------------------ */
+/* רשימה (גל 14א)                                                      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * פעולות רשימה שאין להן פקודה בקטלוג: המספור העברי (hebrew1 — נמדד),
+ * התחלה מחדש, המשך מספור קודם, והמרה לטקסט. `listsInFlight` הוא נעילת
+ * TOCTOU: `canContinuePrevious` בוליאני ואין לסמוך עליו בין קריאות.
+ */
+const listsInFlight = shallowRef(false);
+
+/** אישור דו-לחיצה ל„המר לטקסט" — בלתי-הפיך (נמדד: הסמן מועתק לטקסט). */
+const convertArmed = shallowRef(false);
+
+const listsAvailable = computed(() => capabilities.value?.can('canManageLists') ?? false);
+
+const listMenuItems = computed(() => [
+  ...Object.entries(NUMBER_STYLE_LABELS).map(([id, label]) => ({ id: `style:${id}`, label })),
+  { id: 'restart', label: 'התחל מחדש מ-1' },
+  { id: 'continue', label: 'המשך מספור קודם' },
+  {
+    id: 'convert',
+    label: convertArmed.value ? 'לחץ שוב לאישור — הפעולה בלתי-הפיכה' : 'המר לטקסט…',
+  },
+]);
+
+const listsTooltip = computed(() => {
+  if (!listsAvailable.value) return capabilities.value?.explain('canManageLists') || 'המסמך עדיין נטען';
+  return 'פעולות רשימה: סגנון מספור (כולל עברי), התחלה מחדש והמרה לטקסט';
+});
+
+async function runList(action: () => Promise<CommandOutcome>): Promise<void> {
+  if (listsInFlight.value) return;
+  listsInFlight.value = true;
+  try {
+    report(await action(), 'lists');
+  } finally {
+    listsInFlight.value = false;
+  }
+}
+
+function onListMenuSelect(id: string): void {
+  if (id.startsWith('style:')) {
+    const style = id.slice('style:'.length);
+    void runList(() => setListNumberStyle(superdoc.value, style));
+    return;
+  }
+
+  if (id === 'restart') {
+    void runList(() => restartListAt(superdoc.value, 1));
+    return;
+  }
+
+  if (id === 'continue') {
+    void runList(() => continuePreviousList(superdoc.value));
+    return;
+  }
+
+  if (id === 'convert') {
+    // אישור דו-לחיצה: הפעולה בלתי-הפיכה (נמדד). לחיצה ראשונה חומשת,
+    // שנייה מבצעת; מעבר בין פתיחות התפריט מנטרל את החימוש.
+    if (!convertArmed.value) {
+      convertArmed.value = true;
+      return;
+    }
+    convertArmed.value = false;
+    void runList(() => convertListToText(superdoc.value));
+  }
 }
 </script>
 

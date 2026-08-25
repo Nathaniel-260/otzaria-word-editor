@@ -1034,6 +1034,15 @@ export function createSuperdocDouble(options: SuperdocDoubleOptions = {}): Super
       // גל 12 — „גופן מתקדם". החתימה: { target: SelectionTarget, inline }.
       apply: route('format.apply', () => receipt('format.apply')),
     },
+    // גל 14א — פעולות רשימה. היעד: ListItemAddress; הכשל לפי `failures`.
+    lists: {
+      setLevelNumberStyle: route('lists.setLevelNumberStyle', () =>
+        receipt('lists.setLevelNumberStyle'),
+      ),
+      restartAt: route('lists.restartAt', () => receipt('lists.restartAt')),
+      continuePrevious: route('lists.continuePrevious', () => receipt('lists.continuePrevious')),
+      convertToText: route('lists.convertToText', () => receipt('lists.convertToText')),
+    },
     /**
      * `doc.get` — המסמך במודל SDM/1, מצומצם לבלוק אחד שהבחירה מצביעה עליו.
      * `readParagraphFormat` הוא הקורא היחיד כרגע, והוא מחפש `id === nodeId`

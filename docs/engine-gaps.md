@@ -601,5 +601,26 @@ engine/font-advanced.ts:
   באות קטנה). הגלריה כבר צורכת אותו דרך `ui.styles` מגל קודם — לא
   שוכפלו כאן שני מסלולי קריאה.
 
+## `lists.*` — גל 14א, התשובה לשאלת המספור העברי
+
+- **`setLevelNumberStyle` עם `'hebrew1'` עובד.** `numberStyle` הוא
+  **string חופשי** בחוזה (לא union) — ההפך מ-`sections.setPageNumbering`.
+  נמדד: `<w:numFmt w:val="hebrew1"/>` נכתב ל-numbering.xml. מספור
+  א׳ ב׳ ג׳ אפשרי, ומיושם בתפריט „רשימה" ב„בית". השער שלנו: רשימת
+  numFmt תקניים של ECMA-376; מחוץ לה — נדחה.
+- **`restartAt({startAt})`** עובד; **`continuePrevious`** מחזיר קבלת
+  כשל `INVALID_CONTEXT / NO_PREVIOUS_LIST` כשאין קודם (לא זורק);
+  **`canContinuePrevious` בוליאני = TOCTOU** — לא נשלח לפני פעולה,
+  הקבלה עצמה מדווחת.
+- **`convertToText({includeMarker:true})`** מעתיק את סמן הרשימה
+  ('a. ') לתוך הטקסט והפריט הופך לפסקה — בלתי-הפיך למעשה; הפקד דורש
+  אישור דו-לחיצה.
+- **כתובת פריט:** `{kind:'block', nodeType:'listItem', nodeId}`; פסקה
+  רגילה מקבלת `target.nodeType must be 'listItem'`. היעד נפתר אצלנו
+  מהבחירה + `blocks.list`.
+- **`lists.create mode:'fromParagraphs'`** מקבל BlockAddress בודד או
+  BlockRange `{from,to}` — **לא מערך**.
+
+
 
 

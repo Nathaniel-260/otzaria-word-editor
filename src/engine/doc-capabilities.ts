@@ -136,6 +136,16 @@ const CAPABILITY_SPECS = {
   canApplyFontAdvanced: { operation: 'format.apply' },
   // גל 13 — „ברירות מחדל למסמך". styles.apply על docDefaults, ערוץ run.
   canSetDocDefaults: { operation: 'styles.apply' },
+  // גל 14א — פעולות רשימה שאין להן פקודה ברצועה. המספור העברי
+  // (setLevelNumberStyle + numberStyle:'hebrew1') הוא העיקרי.
+  canManageLists: {
+    operation: [
+      'lists.setLevelNumberStyle',
+      'lists.restartAt',
+      'lists.continuePrevious',
+      'lists.convertToText',
+    ],
+  },
   // `insert` ולא `create.text`: הכנסת טקסט היא פעולת הליבה של הפאסדה
   // (`memberPath: 'insert'` בקטלוג), אחותה של `delete`, ולא אחת מ-`create.*`.
   canInsertText: { operation: 'insert' },
