@@ -622,10 +622,18 @@ export const SHORTCUTS = [
   },
   {
     id: 'search-otzaria',
-    label: 'Ctrl+Shift+F',
+    label: 'Ctrl+Shift+G',
     description: 'חיפוש הטקסט המסומן בספרייה',
     group: 'otzaria',
-    code: 'KeyF',
+    // **לא** `Ctrl+Shift+F`: זה הצירוף של אוצריא עצמה ל„חיפוש חדש בכל
+    // הספרים” (`lib/shortcuts/shortcut_validator.dart`). שתי פעולות חיפוש
+    // כמעט זהות על אותו צירוף הן בדיוק סוג ההבטחה שאי אפשר לקיים — ומי
+    // שמפסיד הוא הצירוף שלנו, שאין לו שום סיכוי מול מאזין ברמת האפליקציה.
+    //
+    // `G` נבחר מפני שהוא פנוי גם באוצריא וגם ב-Word: כל שאר האפשרויות
+    // הפנויות באוצריא (`A`,`B`,`C`,`E`,`F`,`L`,`N`,`P`,`T`,`W` תפוסים אצלה)
+    // מתנגשות בצירוף Word אמיתי.
+    code: 'KeyG',
     ctrl: true,
     shift: true,
     action: 'search-otzaria',

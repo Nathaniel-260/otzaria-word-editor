@@ -576,15 +576,26 @@ describe('כיווניות פסקה', () => {
 });
 
 describe('אוצריא', () => {
-  it('Ctrl+Shift+F אינו Ctrl+F — חיפוש בספרייה מול חיפוש במסמך', async () => {
+  it('Ctrl+Shift+G הוא חיפוש בספרייה, ואינו נוגע בחיפוש במסמך', async () => {
     const wrapper = await mountShell();
 
-    press({ code: 'KeyF', ctrlKey: true, shiftKey: true });
+    press({ code: 'KeyG', ctrlKey: true, shiftKey: true });
     await settle();
 
     // בלי מאחז אוצריא הפעולה נכשלת סגור ומדווחת — ומה שחשוב כאן הוא שהיא
     // **לא** פתחה את דיאלוג החיפוש במסמך.
     expect(wrapper.find('.find-replace-dialog').exists()).toBe(false);
+  });
+
+  it('Ctrl+Shift+F נשאר של אוצריא ואינו נבלע', async () => {
+    // אוצריא קושרת אותו ל„חיפוש חדש בכל הספרים” ברמת האפליקציה. רשומה שלנו
+    // על אותו צירוף הייתה תווית שאין לה סיכוי — בדיוק המחלה שהתוכנית מרפאת.
+    await mountShell();
+
+    const event = press({ code: 'KeyF', ctrlKey: true, shiftKey: true });
+    await settle();
+
+    expect(event.defaultPrevented).toBe(false);
   });
 
   it('Ctrl+Shift+O אינו Ctrl+O — ספרייה מול בורר קבצים', async () => {
