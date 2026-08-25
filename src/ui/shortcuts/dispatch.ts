@@ -10,13 +10,15 @@ import { matchAny } from './match';
 import { SHORTCUTS, type ShellAction, type Shortcut } from './registry';
 
 /**
- * האם הפוקוס בשדה טקסט של הממשק **שלנו** — שם המסמך, שדות החיפוש, בוררים.
- * שם `Ctrl+F` הוא הקיצור של השדה, ואסור לנו לדרוס אותו.
+ * האם היעד הוא שדה טקסט — לפי `tagName` ולפי `role`, ולא לפי מאפיין העריכה
+ * (שאילתה כזאת על ה-DOM הפנימי של SuperDoc אסורה, ראו
+ * tests/unit/engine-boundaries.test.ts).
  *
- * אזור המסמך של המנוע אינו נכלל כאן בכוונה: הוא אזור עריכה של הדפדפן, ודווקא
- * בו קיצורי המסמך חייבים לעבוד. הבדיקה היא על `tagName` ועל `role` ולא על
- * מאפיין העריכה, גם מפני ששאילתה כזאת על ה-DOM הפנימי של SuperDoc אסורה
- * (tests/unit/engine-boundaries.test.ts).
+ * **זה אינו מספיק לבדו כדי לחסום קיצור**, וזה מה שנמדד בדפדפן אמיתי: משטח
+ * ההקלדה של המנוע הוא `<textarea aria-label="Text composition input">` ברוחב
+ * פיקסל אחד, בתוך אזור המסמך. כלומר ברגע שהמשתמש מתחיל להקליד, `event.target`
+ * של **כל** הקשה הוא TEXTAREA — ובדיקה על ה-tag לבדה חסמה את כל הקיצורים בדיוק
+ * במצב היחיד שבו הם נחוצים. לכן החסימה מצליבה עם `isDocumentSurface`.
  */
 export function isTextEntryTarget(target: EventTarget | null): boolean {
   const element = target as HTMLElement | null;
@@ -32,6 +34,13 @@ export interface ShortcutDispatcherDeps {
   runAction: (action: ShellAction) => boolean;
   /** האם דיאלוג מודאלי פתוח כרגע. */
   isModalOpen?: () => boolean;
+  /**
+   * האם היעד נמצא **בתוך אזור המסמך** — כלומר שייך למנוע ולא לממשק שלנו.
+   *
+   * ברירת המחדל היא „לא”, וכל מי שמרכיב את המנתב על מסמך אמיתי חייב למסור
+   * אותה: בלעדיה הקיצורים מתים ברגע שמקלידים (ראו `isTextEntryTarget`).
+   */
+  isDocumentSurface?: (target: EventTarget | null) => boolean;
   /** הרשומות. ברירת המחדל היא הרג'יסטרי; הבדיקות מזריקות רשימה משלהן. */
   shortcuts?: readonly Shortcut[];
   /** היעד שאליו נרשם המאזין. ברירת מחדל `window`. */
@@ -48,6 +57,15 @@ export interface ShortcutDispatcher {
 export function createShortcutDispatcher(deps: ShortcutDispatcherDeps): ShortcutDispatcher {
   const shortcuts = deps.shortcuts ?? SHORTCUTS;
   const isModalOpen = deps.isModalOpen ?? (() => false);
+  const isDocumentSurface = deps.isDocumentSurface ?? (() => false);
+
+  /**
+   * שדה טקסט **של הממשק שלנו** — שם המסמך, שדות החיפוש, בוררים. שם `Ctrl+F`
+   * שייך לשדה ואסור לנו לדרוס אותו. משטח ההקלדה של המנוע הוא גם הוא
+   * `<textarea>`, אבל הוא יושב בתוך אזור המסמך — ובו הקיצורים חייבים לעבוד.
+   */
+  const inUiTextEntry = (target: EventTarget | null): boolean =>
+    isTextEntryTarget(target) && !isDocumentSurface(target);
 
   function handle(event: KeyboardEvent): boolean {
     // מישהו כבר טיפל. המאזין שלנו יושב על `window` בשלב ה-bubble, כלומר
@@ -68,7 +86,7 @@ export function createShortcutDispatcher(deps: ShortcutDispatcherDeps): Shortcut
     if (shortcut.native) return false;
 
     if (isModalOpen() && !shortcut.inModal) return false;
-    if (!shortcut.inTextEntry && isTextEntryTarget(event.target)) return false;
+    if (!shortcut.inTextEntry && inUiTextEntry(event.target)) return false;
 
     // פקודת מנוע נחשבת מטופלת תמיד: גם סירוב של ה-controller הוא תשובה,
     // והיא מגיעה למשתמש כהודעה בעברית. פעולת מעטפת מדווחת בעצמה — `Escape`

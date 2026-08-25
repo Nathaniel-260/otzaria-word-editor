@@ -120,6 +120,37 @@ describe('isTextEntryTarget', () => {
   });
 });
 
+describe('משטח ההקלדה של המנוע', () => {
+  // הבאג שנמדד בדפדפן אמיתי: המנוע מקבל הקשות דרך `<textarea>` נסתר ברוחב
+  // פיקסל אחד בתוך אזור המסמך, ולכן `event.target` של כל הקשה בזמן הקלדה הוא
+  // TEXTAREA. בדיקת ה-tag לבדה חסמה את **כל** הקיצורים בדיוק כשהפוקוס במסמך.
+  const composing = element('textarea');
+
+  it('שדה טקסט בתוך אזור המסמך אינו חוסם', () => {
+    const { dispatcher, runCommand } = setup({ isDocumentSurface: () => true });
+
+    dispatcher.handle(event({ code: 'KeyB', ctrlKey: true, target: composing }));
+
+    expect(runCommand).toHaveBeenCalledExactlyOnceWith('bold', undefined);
+  });
+
+  it('אותו שדה מחוץ לאזור המסמך כן חוסם', () => {
+    const { dispatcher, runCommand } = setup({ isDocumentSurface: () => false });
+
+    dispatcher.handle(event({ code: 'KeyB', ctrlKey: true, target: composing }));
+
+    expect(runCommand).not.toHaveBeenCalled();
+  });
+
+  it('בלי ההכרעה הזאת ברירת המחדל היא לחסום — כדי ששדה החיפוש יישאר שלו', () => {
+    const { dispatcher, runCommand } = setup();
+
+    dispatcher.handle(event({ code: 'KeyB', ctrlKey: true, target: element('input') }));
+
+    expect(runCommand).not.toHaveBeenCalled();
+  });
+});
+
 describe('המנתב', () => {
   it('צירוף מוכר: הפקודה רצה דרך האדפטר, וברירת המחדל נבלעת', () => {
     const { dispatcher, runCommand } = setup();
