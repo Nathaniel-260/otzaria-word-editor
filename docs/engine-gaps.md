@@ -621,6 +621,63 @@ engine/font-advanced.ts:
 - **`lists.create mode:'fromParagraphs'`** מקבל BlockAddress בודד או
   BlockRange `{from,to}` — **לא מערך**.
 
+## גלים 17–25 — ממצאי מדידה והכרעות
+
+נמדדו בסבב אחד על ה-dist הארוז (Chrome headless, CDP):
+
+### גל 17 — תמונות: דחייה מנומקת
+`images.list` עובד (ריק), אך `create.image` לא-זמין ו-HTML `<img data:>`
+נדחה `INVALID_PAYLOAD` — אין דרך לקבל תמונה במסמך, ולכן אין מה לבדוק
+ואין מה לבנות. כפי שהמדריך קבע: „הגל הוא תיעוד ולא קוד".
+
+### גל 18 — metadata: חוסך בין החוזה לתיאור
+`metadata.*` בחוזה הוא anchored metadata (JSON מוסתר ב-SDT + Custom XML
+Storage Part על טווח טקסט) — ולא „מאפייני מסמך" (כותרת/מחבר). נמדד
+עובד: attach/list עם payload עברי (`customXml/item1.xml`). אין API
+שכותב docProps ב-2.8.0, ולכן לא נבנה UI „מאפיינים" על מצג שווא.
+התשתית בעלת ערך עתידי (למשל קישור מקור→ציטוט).
+
+### גל 19 — הגנת מסמך: מיושם
+מסלול הביטול נמדד לפני ההפעלה ועובד ללא סיסמה: set(readOnly) →
+enforced:true; capabilities.get אחריה: **4 פעולות נפלו ל-false**
+(התוסף עצמו מוגבל!); clear → enforced:false. מיושם כמתג עם אישור
+דו-לחיצה ב„סקירה" (engine/protection.ts).
+
+### גל 20 — diff: דחייה עד לפתרון ה-host
+`diff.capture` עובד (`sd-diff-snapshot/v2`, fingerprint sha256).
+`diff.compare` דורש **מסמך שני** — כלומר `fs.pickUserFile` של אוצריא;
+בלעדיו אין מסלול משתמש. `diff.apply` הרסני ולא נבדק בנפרד.
+
+### גל 21 — תגובות: דחייה על חוסם זהות
+`comments.create` דורש מחבר; לאוצריא אין מודל זהות (`app.getInfo`
+אינו מחזיר משתמש) — §13.1 דורש הגדרת משתמש מקומית, שעדיין אינה
+קיימת. הפקד „תגובה חדשה" נשאר מנוטרל עם הסבר. `trackChanges.decide`
+מתנגש בשש הפקודות הקיימות ולא נשלח; `history.undo/redo` מתנגשות
+בפקודות undo/redo ולא נשלחות.
+
+### גל 22 — hyperlinks: מיושם (ראו למעלה)
+wrap/remove דורשים TextAddress; wrap דורש מפרט `{link:{destination}}`;
+patch לא זמין → עריכה = remove+wrap.
+
+### גל 23 — blocks/create: רובו דחוי — אין פקד Word
+`create.paragraph({at:{target,placement:'after'}})` עובד.
+`blocks.delete` על פסקה עם `w:bidi` זרק
+`paragraph-tracked-wrapper-unsupported` — האי-עקביות שהמדריך ציין
+**אושרה**. כל הפעולות הרסניות ואין להן מקבילה ברצועת Word — דילוג
+לפי השאלה שהמדריך מציב.
+
+### גל 24 — plan.execute: חוסם חתימת input ל-bookmarks.insert
+`plan.execute` רץ אך נכשל בשלב הראשון: "Cannot use 'in' operator to
+search for 'story' in undefined" — bookmarks.insert דרך plan דורש
+input שונה מה-direct call. נדרש מיפוי מלא של חתימות ה-plan לכל
+operationId לפני שאפשר לשלוח מאקרו. mutations.preview/apply לא
+נבדקו עד אז.
+
+### גל 25 — contentControls: דילוג לפי ההמלצה
+`d.contentControls` ו-`d.customXml` קיימים. 54 פעולות לקהל שאינו
+קהל התוסף — ההשקעה גרועה, כפי שהמדריך קובע.
+
+
 
 
 

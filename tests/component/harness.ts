@@ -1053,6 +1053,18 @@ export function createSuperdocDouble(options: SuperdocDoubleOptions = {}): Super
       wrap: route('hyperlinks.wrap', () => receipt('hyperlinks.wrap')),
       remove: route('hyperlinks.remove', () => receipt('hyperlinks.remove')),
     },
+    // גל 19 — הגנת מסמך. get מחזיר מצב; set/clear לפי `failures`.
+    protection: {
+      get: route('protection.get', () => ({
+        editingRestriction: { mode: 'none', enforced: false },
+      })),
+      setEditingRestriction: route('protection.setEditingRestriction', () =>
+        receipt('protection.setEditingRestriction'),
+      ),
+      clearEditingRestriction: route('protection.clearEditingRestriction', () =>
+        receipt('protection.clearEditingRestriction'),
+      ),
+    },
     /**
      * `doc.get` — המסמך במודל SDM/1, מצומצם לבלוק אחד שהבחירה מצביעה עליו.
      * `readParagraphFormat` הוא הקורא היחיד כרגע, והוא מחפש `id === nodeId`

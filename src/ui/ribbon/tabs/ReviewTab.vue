@@ -22,6 +22,20 @@
       />
     </RibbonGroup>
 
+    <!-- הגנת מסמך (גל 19) -->
+    <RibbonGroup title="הגנה">
+      <RibbonButton
+        icon="proofing"
+        label="הגבל עריכה"
+        variant="large"
+        :tooltip="protectionTooltip"
+        :disabled="protectionInFlight"
+        @pointerdown.prevent
+        @click="onToggleProtection"
+      />
+    </RibbonGroup>
+
+
     <!-- מעקב -->
     <RibbonGroup title="מעקב אחר שינויים">
       <RibbonButton
@@ -102,10 +116,17 @@
  *     תגובה. חצי מימוש כאן היה יוצר מערכת תגובות מקבילה — בדיוק מה שהתכנית
  *     אוסרת.
  */
-import { computed } from 'vue';
+import { computed, inject, ref, shallowRef, watch } from 'vue';
 import RibbonGroup from '../common/RibbonGroup.vue';
 import RibbonButton from '../common/RibbonButton.vue';
 import { useCommand } from '../../../composables/useCommand';
+import {
+  disableProtection,
+  enableReadOnlyProtection,
+  readProtectionState,
+} from '../../../engine/protection';
+import { ACTIVE_SUPERDOC } from '../../../engine/document-api';
+import { COMMAND_REPORTER, type CommandReporter } from '../../../composables/keys';
 
 const acceptCmd = useCommand('acceptChange');
 const rejectCmd = useCommand('rejectChange');
@@ -114,6 +135,74 @@ const rejectAllCmd = useCommand('rejectAllChanges');
 const modeCmd = useCommand('document-mode');
 
 const isSuggesting = computed(() => modeCmd.value.value === 'suggesting');
+
+/* ------------------------------------------------------------------ */
+/* הגנת מסמך (גל 19)                                                   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * „הגבל עריכה" — מתג הפעלה/ביטול של קריאה-בלבד, דרך `protection.*`
+ * (engine/protection.ts). מסלול הביטול נמדד **לפני** ההפעלה ועובד
+ * בלי סיסמה; אחרי ההפעלה 4 יכולות נופלות ל-false — ולכן ה-tooltip
+ * אומר במדויק מה יקרה, ואישור דו-לחיצה לפני הנעילה.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const superdoc = inject(ACTIVE_SUPERDOC, shallowRef(null));
+const fallbackReporter: CommandReporter = (outcome, id) => {
+  if (!outcome.ok) console.warn(`[otzaria-word] ${id}: ${outcome.message}`);
+};
+const report = inject(COMMAND_REPORTER, fallbackReporter);
+
+/** מצב מקומי; המנוע הוא מקור האמת בכל קריאת get. */
+const protectionEnforced = ref(false);
+const protectionInFlight = ref(false);
+const protectionConfirm = ref(false);
+let protectionGeneration = 0;
+
+watch(
+  superdoc,
+  async (host) => {
+    const mine = ++protectionGeneration;
+    const state = await readProtectionState(host);
+    if (mine === protectionGeneration && state) protectionEnforced.value = state.enforced;
+  },
+  { immediate: true },
+);
+
+const protectionTooltip = computed(() => {
+  if (protectionInFlight.value) return 'הפעולה מתבצעת…';
+  if (protectionConfirm.value) return 'לחץ שוב לאישור: המסמך יינעל לקריאה בלבד (ניתן לביטול מכאן)';
+  if (protectionEnforced.value) return 'ביטול ההגבלה — המסמך יחזור לעריכה מלאה';
+  return 'הצג את המסמך במצב „קריאה בלבד". ניתן לבטל מכאן בכל עת.';
+});
+
+async function onToggleProtection(): Promise<void> {
+  if (protectionInFlight.value) return;
+
+  // „המר לטקסט" של הרשימות חימש דו-לחיצה; כאן אותו עיקרון לנעילה.
+  if (!protectionEnforced.value && !protectionConfirm.value) {
+    protectionConfirm.value = true;
+    return;
+  }
+  protectionConfirm.value = false;
+
+  protectionInFlight.value = true;
+  try {
+    const outcome = protectionEnforced.value
+      ? await disableProtection(superdoc.value)
+      : await enableReadOnlyProtection(superdoc.value);
+    report(outcome, 'protection-toggle');
+
+    if (outcome.ok) {
+      const mine = ++protectionGeneration;
+      const state = await readProtectionState(superdoc.value);
+      if (mine === protectionGeneration && state) protectionEnforced.value = state.enforced;
+    }
+  } finally {
+    protectionInFlight.value = false;
+  }
+}
 
 /** `run` של ה-composable כבר מדווח כשל למשתמש; אין כאן טיפול שני. */
 function onToggleTrackChanges(): void {
