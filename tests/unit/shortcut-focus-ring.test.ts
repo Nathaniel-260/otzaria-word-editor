@@ -83,7 +83,6 @@ describe('createFocusRing', () => {
   });
 
   it('אזור שאין בו למה למקד מדולג', () => {
-    // שורת המצב מוסתרת במצב מיקוד. קפיצה אליה הייתה משאירה את הפוקוס באוויר.
     const empty = document.createElement('div');
     root.appendChild(empty);
     const ribbon = region('ribbon');
@@ -115,6 +114,33 @@ describe('createFocusRing', () => {
     documentArea.querySelector('button')!.focus();
 
     expect(ring.move()).toBe('ribbon');
+  });
+
+  it('אזור שהוכרז לא-זמין מדולג, גם כשיש בו פקדים', () => {
+    // זה המצב האמיתי במצב מיקוד: הרצועה ושורת המצב מוסתרות ב-`opacity: 0`
+    // ונשארות בעץ **ונשארות ניתנות למיקוד**. `pointer-events: none` אינו
+    // חוסם מקלדת. הגרסה הראשונה של הבדיקה השתמשה ב-div ריק, ולכן עברה בעוד
+    // שהמצב שבשמה נכתבה היה שבור.
+    const ribbon = region('ribbon');
+    const documentArea = region('document');
+    const statusbar = region('statusbar');
+    let hidden = true;
+
+    const ring = createFocusRing({
+      regions: [
+        { id: 'ribbon', element: () => ribbon, isAvailable: () => !hidden },
+        { id: 'document', element: () => documentArea },
+        { id: 'statusbar', element: () => statusbar, isAvailable: () => !hidden },
+      ],
+    });
+    documentArea.querySelector('button')!.focus();
+
+    // מוסתר: אין לאן ללכת מלבד המסמך עצמו, והוא כבר ממוקד.
+    expect(ring.move()).toBe('document');
+    expect(document.activeElement).toBe(documentArea.querySelector('button'));
+
+    hidden = false;
+    expect(ring.move()).toBe('statusbar');
   });
 
   it('פוקוס מחוץ לכל האזורים — F6 נכנס לראשון', () => {

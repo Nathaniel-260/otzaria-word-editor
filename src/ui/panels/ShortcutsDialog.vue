@@ -27,7 +27,14 @@
         </button>
       </div>
 
-      <div class="shortcuts-body">
+      <!--
+        `tabindex="0"` כדי שאפשר יהיה לגלול במקלדת: 56 רשומות בגובה 84vh
+        גולשות, ובדיאלוג יש שתי תחנות Tab בלבד — ואף אחת מהן אינה גוללת.
+      -->
+      <div
+        class="shortcuts-body"
+        tabindex="0"
+      >
         <section
           v-for="group in groups"
           :key="group.group"

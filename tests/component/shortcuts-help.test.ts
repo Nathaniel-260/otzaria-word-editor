@@ -313,7 +313,12 @@ describe('מעגל המיקוד', () => {
   function focusedRegion(wrapper: ReturnType<typeof mount>): string | null {
     const active = document.activeElement;
     if (!active) return null;
-    for (const selector of ['.word-ribbon-container', '.editor-stack', '.word-statusbar']) {
+    for (const selector of [
+      '.word-titlebar',
+      '.word-ribbon-container',
+      '.editor-stack',
+      '.word-statusbar',
+    ]) {
       const region = wrapper.find(selector);
       if (region.exists() && region.element.contains(active)) return selector;
     }
@@ -343,19 +348,24 @@ describe('מעגל המיקוד', () => {
     return surface;
   }
 
-  it('F6 עובר בין שלושת האזורים ומקיף חזרה', async () => {
+  it('F6 עובר בין ארבעת האזורים ומקיף חזרה', async () => {
     const wrapper = await mountShell();
     withEngineFocus(wrapper);
     (wrapper.find('.word-ribbon-container button').element as HTMLElement).focus();
 
     const visited: Array<string | null> = [];
-    for (let step = 0; step < 3; step += 1) {
+    for (let step = 0; step < 4; step += 1) {
       press({ code: 'F6' });
       await settle();
       visited.push(focusedRegion(wrapper));
     }
 
-    expect(visited).toEqual(['.editor-stack', '.word-statusbar', '.word-ribbon-container']);
+    expect(visited).toEqual([
+      '.editor-stack',
+      '.word-statusbar',
+      '.word-titlebar',
+      '.word-ribbon-container',
+    ]);
   });
 
   it('Shift+F6 עובר בכיוון ההפוך', async () => {
@@ -366,7 +376,7 @@ describe('מעגל המיקוד', () => {
     press({ code: 'F6', shiftKey: true });
     await settle();
 
-    expect(focusedRegion(wrapper)).toBe('.word-statusbar');
+    expect(focusedRegion(wrapper)).toBe('.word-titlebar');
   });
 
   it('המסמך ממוקד דרך המנוע, ולא דרך המארח', async () => {
@@ -416,5 +426,89 @@ describe('מעגל המיקוד', () => {
     await settle();
 
     expect(event.defaultPrevented).toBe(false);
+  });
+});
+
+describe('מצב מיקוד', () => {
+  /** משטח ההקלדה של המנוע, כדי שלאזור המסמך יהיה למה למקד. */
+  function surface(wrapper: ReturnType<typeof mount>): HTMLTextAreaElement {
+    const element = document.createElement('textarea');
+    wrapper.find('.editor-stack').element.appendChild(element);
+    return element;
+  }
+
+  it('Escape יוצא ממצב מיקוד', async () => {
+    // המקש הראשון שכל משתמש מנסה. בלעדיו היציאה היחידה היא למצוא שוב את F11
+    // או לרחף מעל קצה המסך.
+    const wrapper = await mountShell();
+    press({ code: 'F11' });
+    await settle();
+    expect(wrapper.find('.word-app-shell').classes()).toContain('focus-mode');
+
+    const event = press({ code: 'Escape' });
+    await settle();
+
+    expect(wrapper.find('.word-app-shell').classes()).not.toContain('focus-mode');
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it('דיאלוג פתוח נסגר לפני מצב המיקוד, ולא יחד איתו', async () => {
+    const wrapper = await mountShell();
+    press({ code: 'F11' });
+    press({ code: 'Slash', ctrlKey: true });
+    await settle();
+
+    press({ code: 'Escape' });
+    await settle();
+
+    expect(wrapper.find('.shortcuts-dialog').exists()).toBe(false);
+    expect(wrapper.find('.word-app-shell').classes(), 'מצב המיקוד נשאר').toContain('focus-mode');
+  });
+
+  it('F6 במצב מיקוד אינו ממקד פקד בלתי נראה', async () => {
+    // הרצועה ושורת המצב מוסתרות ב-`opacity: 0` — הן עדיין בעץ ועדיין ניתנות
+    // למיקוד. בלי סימון הזמינות המשתמש היה מקבל טבעת מיקוד שאינה נראית,
+    // הקלדה שאינה מגיעה למסמך, ו-Enter שמפעיל כפתור שקוף.
+    const wrapper = await mountShell();
+    const typing = surface(wrapper);
+    typing.focus();
+    press({ code: 'F11' });
+    await settle();
+
+    press({ code: 'F6' });
+    await settle();
+
+    const ribbon = wrapper.find('.word-ribbon-container').element;
+    const statusbar = wrapper.find('.word-statusbar').element;
+    expect(ribbon.contains(document.activeElement), 'הרצועה').toBe(false);
+    expect(statusbar.contains(document.activeElement), 'שורת המצב').toBe(false);
+  });
+
+  it('מחוץ למצב מיקוד F6 כן מגיע לרצועה', async () => {
+    // הבקרה: בלעדיה הבדיקה שמעליה הייתה עוברת גם אם F6 הפסיק לעבוד לגמרי.
+    const wrapper = await mountShell();
+    surface(wrapper).focus();
+
+    press({ code: 'F6' });
+    await settle();
+
+    expect(wrapper.find('.word-statusbar').element.contains(document.activeElement)).toBe(true);
+  });
+});
+
+describe('סרגל הכותרת במעגל', () => {
+  it('Escape משדה שם המסמך מחזיר את הפוקוס למסמך', async () => {
+    // בלי סרגל הכותרת כאזור, `current()` החזיר null ומי שהגיע לשדה השם
+    // ב-Tab נשאר תקוע: F6 חסום שם בכוונה, ו-Escape לא עשה דבר.
+    const wrapper = await mountShell();
+    const field = wrapper.find('.word-titlebar input');
+    expect(field.exists(), 'יש שדה טקסט בסרגל הכותרת').toBe(true);
+    (field.element as HTMLElement).focus();
+    superdoc.reset();
+
+    press({ code: 'Escape' });
+    await settle();
+
+    expect(superdoc.ops()).toContain('focus');
   });
 });
