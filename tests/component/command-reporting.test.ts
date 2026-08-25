@@ -203,9 +203,7 @@ describe('כשל של Document API', () => {
     });
     await settle();
 
-    await harness.wrapper
-      .find('button[title="הפסקה שבה הסמן תתחיל בראש עמוד חדש"]')
-      .trigger('click');
+    await buttonByTitle(harness.wrapper, 'הפסקה שבה הסמן תתחיל בראש עמוד חדש').trigger('click');
     await settle();
 
     expect(harness.failures()).toEqual([
@@ -267,7 +265,7 @@ describe('לוח', () => {
     const harness = mountUi(HomeTab, { superdoc });
     await settle();
 
-    await harness.wrapper.find('button[title="בחירת כל הטקסט במסמך"]').trigger('click');
+    await buttonByTitle(harness.wrapper, 'בחירת כל הטקסט במסמך').trigger('click');
     await settle();
 
     expect(superdoc.inputs('ranges.resolve')).toEqual([

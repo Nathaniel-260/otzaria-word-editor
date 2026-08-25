@@ -13,6 +13,10 @@ function setup(over: Partial<ShellActionDeps> = {}) {
     print: vi.fn(),
     openFind: vi.fn(),
     closeTopmost: vi.fn(() => true),
+    newDocument: vi.fn(),
+    openDocument: vi.fn(),
+    selectAll: vi.fn(),
+    pageBreak: vi.fn(),
     ...over,
   };
   return { deps, run: createShellActionRunner(deps) };
@@ -65,6 +69,21 @@ describe('createShellActionRunner', () => {
   it('escape בלי חלון פתוח אינו נופל', () => {
     const { run } = setup({ closeTopmost: vi.fn(() => false) });
     expect(() => run('escape')).not.toThrow();
+  });
+
+  it('כל פעולה מגיעה ליעד שלה בלבד', () => {
+    const { deps, run } = setup();
+
+    run('new-document');
+    run('open-document');
+    run('select-all');
+    run('page-break');
+
+    expect(deps.newDocument).toHaveBeenCalledTimes(1);
+    expect(deps.openDocument).toHaveBeenCalledTimes(1);
+    expect(deps.selectAll).toHaveBeenCalledTimes(1);
+    expect(deps.pageBreak).toHaveBeenCalledTimes(1);
+    expect(deps.save).not.toHaveBeenCalled();
   });
 
   it('הדפסה ושמירה אינן מתערבבות', () => {

@@ -45,7 +45,17 @@ export const SHORTCUT_GROUP_TITLES: Record<ShortcutGroup, string> = {
  * פעולות המעטפת שקיצור יכול להריץ. אלה אינן פקודות מנוע: הן חיות ב-`App.vue`
  * (שמירה, הדפסה, דיאלוגים), ולכן הן מזוהות בשם ומופעלות דרך `actions.ts`.
  */
-export type ShellAction = 'save' | 'save-as' | 'find' | 'replace' | 'print' | 'escape';
+export type ShellAction =
+  | 'save'
+  | 'save-as'
+  | 'find'
+  | 'replace'
+  | 'print'
+  | 'escape'
+  | 'new-document'
+  | 'open-document'
+  | 'select-all'
+  | 'page-break';
 
 export interface Shortcut {
   /** מזהה יציב. משמש את הרצועה, את הבדיקות ואת דיאלוג העזרה. */
@@ -102,6 +112,24 @@ export interface Shortcut {
  */
 export const SHORTCUTS = [
   {
+    id: 'new-document',
+    label: 'Ctrl+N',
+    description: 'מסמך חדש',
+    group: 'file',
+    code: 'KeyN',
+    ctrl: true,
+    action: 'new-document',
+  },
+  {
+    id: 'open-document',
+    label: 'Ctrl+O',
+    description: 'פתיחת קובץ Word',
+    group: 'file',
+    code: 'KeyO',
+    ctrl: true,
+    action: 'open-document',
+  },
+  {
     id: 'save',
     label: 'Ctrl+S',
     description: 'שמירת המסמך',
@@ -119,6 +147,15 @@ export const SHORTCUTS = [
     code: 'KeyS',
     ctrl: true,
     shift: true,
+    action: 'save-as',
+    inTextEntry: true,
+  },
+  {
+    id: 'save-as-f12',
+    label: 'F12',
+    description: 'שמירה בשם',
+    group: 'file',
+    code: 'F12',
     action: 'save-as',
     inTextEntry: true,
   },
@@ -175,6 +212,125 @@ export const SHORTCUTS = [
     code: 'KeyH',
     ctrl: true,
     action: 'replace',
+  },
+  {
+    id: 'undo',
+    label: 'Ctrl+Z',
+    description: 'ביטול הפעולה האחרונה',
+    group: 'edit',
+    code: 'KeyZ',
+    ctrl: true,
+    command: 'undo',
+    repeatable: true,
+  },
+  {
+    id: 'redo',
+    label: 'Ctrl+Y',
+    description: 'ביצוע חוזר',
+    group: 'edit',
+    code: 'KeyY',
+    ctrl: true,
+    command: 'redo',
+    repeatable: true,
+  },
+  {
+    id: 'redo-shift',
+    label: 'Ctrl+Shift+Z',
+    description: 'ביצוע חוזר',
+    group: 'edit',
+    code: 'KeyZ',
+    ctrl: true,
+    shift: true,
+    command: 'redo',
+    repeatable: true,
+  },
+  {
+    id: 'select-all',
+    label: 'Ctrl+A',
+    description: 'בחירת כל הטקסט במסמך',
+    group: 'edit',
+    code: 'KeyA',
+    ctrl: true,
+    action: 'select-all',
+  },
+  {
+    id: 'bold',
+    label: 'Ctrl+B',
+    description: 'מודגש',
+    group: 'font',
+    code: 'KeyB',
+    ctrl: true,
+    command: 'bold',
+  },
+  {
+    id: 'italic',
+    label: 'Ctrl+I',
+    description: 'נטוי',
+    group: 'font',
+    code: 'KeyI',
+    ctrl: true,
+    command: 'italic',
+  },
+  {
+    id: 'underline',
+    label: 'Ctrl+U',
+    description: 'קו תחתון',
+    group: 'font',
+    code: 'KeyU',
+    ctrl: true,
+    command: 'underline',
+  },
+  {
+    id: 'heading-1',
+    label: 'Ctrl+Alt+1',
+    description: 'סגנון כותרת 1',
+    group: 'paragraph',
+    code: 'Digit1',
+    ctrl: true,
+    alt: true,
+    command: 'linked-style',
+    payload: { style: 'Heading1' },
+  },
+  {
+    id: 'heading-2',
+    label: 'Ctrl+Alt+2',
+    description: 'סגנון כותרת 2',
+    group: 'paragraph',
+    code: 'Digit2',
+    ctrl: true,
+    alt: true,
+    command: 'linked-style',
+    payload: { style: 'Heading2' },
+  },
+  {
+    id: 'heading-3',
+    label: 'Ctrl+Alt+3',
+    description: 'סגנון כותרת 3',
+    group: 'paragraph',
+    code: 'Digit3',
+    ctrl: true,
+    alt: true,
+    command: 'linked-style',
+    payload: { style: 'Heading3' },
+  },
+  {
+    id: 'page-break',
+    label: 'Ctrl+Enter',
+    description: 'התחלת פסקה בעמוד חדש',
+    group: 'insert',
+    code: 'Enter',
+    ctrl: true,
+    action: 'page-break',
+  },
+  {
+    id: 'formatting-marks',
+    label: 'Ctrl+Shift+8',
+    description: 'הצגת סימני עיצוב',
+    group: 'view',
+    code: 'Digit8',
+    ctrl: true,
+    shift: true,
+    command: 'formatting-marks',
   },
   {
     id: 'escape',
