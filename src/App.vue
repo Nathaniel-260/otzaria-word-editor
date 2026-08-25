@@ -1041,6 +1041,23 @@ async function runShortcutCommand(id: CommandId, payload?: unknown): Promise<voi
   reportCommand(await adapter.run(id, payload), id);
 }
 
+/**
+ * האם היעד יושב בתוך אזור המסמך.
+ *
+ * זה מה שמפריד בין „שדה טקסט שלנו” ל„משטח ההקלדה של המנוע”. המנוע
+ * מקבל הקשות דרך `<textarea>` נסתר ברוחב פיקסל אחד (נמדד בדפדפן: הוא
+ * בנוי ל-IME), ולכן מרגע שהמשתמש מתחיל להקליד `event.target` של כל הקשה
+ * הוא TEXTAREA. בלי ההצלבה הזאת כל הקיצורים נחסמים בדיוק כשהפוקוס במסמך —
+ * כלומר במצב היחיד שבו הם נחוצים.
+ *
+ * הבדיקה היא הכלה באלמנט שאנחנו מחזיקים, ולא שאילתה על ה-DOM הפנימי של
+ * המנוע — אותו גבול ש-tests/unit/engine-boundaries.test.ts שומר עליו.
+ */
+function isDocumentSurface(target: EventTarget | null): boolean {
+  const host = editorStackRef.value;
+  return host !== null && target instanceof Node && host.contains(target);
+}
+
 /** דיאלוג שמכריז `aria-modal`. מה שמאחוריו אינו זמין — גם לא לקיצור. */
 function isModalDialogOpen(): boolean {
   return isAboutOpen.value || linkDialog.isOpen.value;
@@ -1056,11 +1073,13 @@ onMounted(async () => {
     // מודאלי = `aria-modal`, וזה מה שקובע. „אודות” ודיאלוג הקישור מכריזים
     // כך; דיאלוג החיפוש אינו מודאלי בכוונה, ומעליו עדיין מותר לערוך ולשמור.
     isModalOpen: () => isModalDialogOpen(),
+    isDocumentSurface,
   });
 
   directionShortcut = createDirectionShortcut({
     runCommand: (id) => void runShortcutCommand(id),
-    isBlocked: (target) => isModalDialogOpen() || isTextEntryTarget(target),
+    isBlocked: (target) =>
+      isModalDialogOpen() || (isTextEntryTarget(target) && !isDocumentSurface(target)),
   });
 
   if (editorStackRef.value) {

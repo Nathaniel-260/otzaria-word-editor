@@ -718,3 +718,81 @@ describe('מה שהקיצורים אינם עושים', () => {
     expect(adapter.calls).toEqual([]);
   });
 });
+
+describe('הפוקוס בתוך המסמך', () => {
+  /**
+   * הבאג שנמדד בדפדפן אמיתי, ולא בשום בדיקה: משטח ההקלדה של המנוע הוא
+   * `<textarea aria-label="Text composition input">` ברוחב פיקסל אחד, בתוך
+   * אזור המסמך. כלומר ברגע שהמשתמש מתחיל להקליד, `event.target` של כל הקשה
+   * הוא TEXTAREA — והשומר של „שדה טקסט” חסם את כל הקיצורים בדיוק במצב היחיד
+   * שבו הם נחוצים. הבדיקות הקודמות ירו על `window` ולכן לא ראו את זה.
+   */
+  function composingSurface(wrapper: ReturnType<typeof mount>): HTMLTextAreaElement {
+    const host = wrapper.find('.editor-stack').element;
+    const surface = document.createElement('textarea');
+    surface.setAttribute('aria-label', 'Text composition input');
+    host.appendChild(surface);
+    return surface;
+  }
+
+  /** הקשה שמקורה במשטח ההקלדה, כמו אצל מי שמקליד במסמך. */
+  function typeInDocument(
+    surface: HTMLElement,
+    over: Partial<KeyboardEventInit> & { code: string },
+  ): KeyboardEvent {
+    const event = new KeyboardEvent('keydown', { cancelable: true, bubbles: true, ...over });
+    surface.dispatchEvent(event);
+    return event;
+  }
+
+  it('Ctrl+Z בזמן הקלדה מגיע לפקודה', async () => {
+    const wrapper = await mountShell();
+
+    typeInDocument(composingSurface(wrapper), { code: 'KeyZ', ctrlKey: true });
+    await settle();
+
+    expect(adapter.calls.map((call) => call.id)).toEqual(['undo']);
+  });
+
+  it('Ctrl+Z בזמן הקלדה בעברית מגיע לפקודה', async () => {
+    // בפריסה עברית `key` הוא „ז”. זה בדיוק המצב שדווח: באנגלית עבד, בעברית לא.
+    const wrapper = await mountShell();
+
+    typeInDocument(composingSurface(wrapper), { code: 'KeyZ', key: 'ז', ctrlKey: true });
+    await settle();
+
+    expect(adapter.calls.map((call) => call.id)).toEqual(['undo']);
+  });
+
+  it('כל קיצורי העיצוב עובדים בזמן הקלדה, לא רק הביטול', async () => {
+    const wrapper = await mountShell();
+    const surface = composingSurface(wrapper);
+
+    typeInDocument(surface, { code: 'KeyB', key: 'נ', ctrlKey: true });
+    typeInDocument(surface, { code: 'KeyI', key: 'ן', ctrlKey: true });
+    typeInDocument(surface, { code: 'KeyE', key: 'ק', ctrlKey: true });
+    await settle();
+
+    expect(adapter.calls.map((call) => call.id)).toEqual(['bold', 'italic', 'text-align']);
+  });
+
+  it('שדה טקסט של הממשק עדיין חוסם — הוא לא באזור המסמך', async () => {
+    // שם `Ctrl+B` שייך לשדה, ובליעתו הייתה שוברת אותו.
+    await mountShell();
+    const field = document.createElement('input');
+    document.body.appendChild(field);
+
+    const event = new KeyboardEvent('keydown', {
+      code: 'KeyB',
+      ctrlKey: true,
+      cancelable: true,
+      bubbles: true,
+    });
+    field.dispatchEvent(event);
+    await settle();
+    field.remove();
+
+    expect(adapter.calls).toEqual([]);
+    expect(event.defaultPrevented).toBe(false);
+  });
+});
