@@ -61,7 +61,13 @@ export type ShellAction =
   | 'font-grow'
   | 'font-shrink'
   | 'superscript'
-  | 'subscript';
+  | 'subscript'
+  | 'footnote'
+  | 'endnote'
+  | 'track-changes'
+  | 'focus-mode'
+  | 'find-next'
+  | 'find-prev';
 
 export interface Shortcut {
   /** מזהה יציב. משמש את הרצועה, את הבדיקות ואת דיאלוג העזרה. */
@@ -530,6 +536,63 @@ export const SHORTCUTS = [
     code: ['Enter', 'NumpadEnter'],
     ctrl: true,
     action: 'page-break',
+  },
+  {
+    id: 'footnote',
+    label: 'Ctrl+Alt+F',
+    description: 'הוספת הערת שוליים',
+    group: 'insert',
+    code: 'KeyF',
+    ctrl: true,
+    alt: true,
+    action: 'footnote',
+  },
+  {
+    id: 'endnote',
+    label: 'Ctrl+Alt+D',
+    description: 'הוספת הערת סיום',
+    group: 'insert',
+    code: 'KeyD',
+    ctrl: true,
+    alt: true,
+    action: 'endnote',
+  },
+  {
+    id: 'track-changes',
+    label: 'Ctrl+Shift+E',
+    description: 'מעקב אחר שינויים',
+    group: 'review',
+    code: 'KeyE',
+    ctrl: true,
+    shift: true,
+    action: 'track-changes',
+  },
+  {
+    id: 'find-next',
+    label: 'F3',
+    description: 'המופע הבא',
+    group: 'edit',
+    code: 'F3',
+    action: 'find-next',
+    inTextEntry: true,
+  },
+  {
+    id: 'find-prev',
+    label: 'Shift+F3',
+    description: 'המופע הקודם',
+    group: 'edit',
+    code: 'F3',
+    shift: true,
+    action: 'find-prev',
+    inTextEntry: true,
+  },
+  {
+    id: 'focus-mode',
+    label: 'F11',
+    description: 'מצב מיקוד',
+    group: 'view',
+    code: 'F11',
+    action: 'focus-mode',
   },
   {
     id: 'formatting-marks',

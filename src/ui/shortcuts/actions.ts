@@ -31,6 +31,12 @@ export interface ShellActionDeps {
   shrinkFont: () => void;
   /** כתב עילי/תחתי אינם פקודות ה-controller אלא Document API ישיר. */
   vertAlign: (kind: 'superscript' | 'subscript') => void;
+  insertNote: (type: 'footnote' | 'endnote') => void;
+  /** מחליף בין עריכה למעקב. המצב הנוכחי נקרא מהמנוע. */
+  toggleTrackChanges: () => void;
+  toggleFocusMode: () => void;
+  /** מופע הבא/קודם בחיפוש. מחזיר האם היה מה לחפש. */
+  findAgain: (direction: 'next' | 'prev') => boolean;
 }
 
 /**
@@ -84,6 +90,20 @@ export function createShellActionRunner(deps: ShellActionDeps): (action: ShellAc
       case 'subscript':
         deps.vertAlign(action);
         return true;
+      case 'footnote':
+      case 'endnote':
+        deps.insertNote(action);
+        return true;
+      case 'track-changes':
+        deps.toggleTrackChanges();
+        return true;
+      case 'focus-mode':
+        deps.toggleFocusMode();
+        return true;
+      case 'find-next':
+        return deps.findAgain('next');
+      case 'find-prev':
+        return deps.findAgain('prev');
     }
   };
 }

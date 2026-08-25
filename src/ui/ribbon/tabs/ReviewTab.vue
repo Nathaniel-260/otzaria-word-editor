@@ -41,6 +41,7 @@
       <RibbonButton
         icon="trackChanges"
         label="עקוב אחר שינויים"
+        shortcut-id="track-changes"
         variant="large"
         :tooltip="isSuggesting ? 'כיבוי מצב מעקב אחר שינויים' : 'הפעלת מצב מעקב אחר שינויים במסמך'"
         :active="isSuggesting"

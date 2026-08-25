@@ -5,6 +5,7 @@
       <RibbonButton
         icon="focusMode"
         label="מצב מיקוד"
+        shortcut-id="focus-mode"
         variant="large"
         tooltip="מצב קריאה ומיקוד ללא הסחות דעת"
         @click="$emit('toggle-focus-mode')"
