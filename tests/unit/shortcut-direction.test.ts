@@ -12,6 +12,7 @@ import {
   DIRECTION_COMMANDS,
   type ModifierEventLike,
 } from '../../src/ui/shortcuts/direction';
+import { SHORTCUTS, type Shortcut } from '../../src/ui/shortcuts/registry';
 
 function shift(side: 'ShiftLeft' | 'ShiftRight', over: Partial<ModifierEventLike> = {}) {
   return { code: side, key: 'Shift', ctrlKey: true, metaKey: false, ...over };
@@ -54,6 +55,46 @@ describe('זיהוי הכיווניות', () => {
     detector.keydown(letter('KeyX', { ctrlKey: true }));
 
     expect(detector.keyup(shift('ShiftLeft'))).toBeNull();
+  });
+
+  it('Shift נלחץ לפני Ctrl — עדיין נחשב', () => {
+    // סדר הלחיצה אינו משהו שמשתמש חושב עליו. מה שקובע הוא ש-Ctrl לחוץ ברגע
+    // השחרור.
+    const detector = createDirectionDetector();
+
+    detector.keydown(shift('ShiftRight', { ctrlKey: false }));
+
+    expect(detector.keyup(shift('ShiftRight'))).toBe('rtl');
+  });
+
+  it('AltGr אינו מחמש כיווניות', () => {
+    // AltGr מדווח ctrl+alt, והוא שכבת תווים בפריסה העברית הסטנדרטית.
+    const detector = createDirectionDetector();
+    const withAlt = shift('ShiftRight', { altKey: true });
+
+    detector.keydown(withAlt);
+
+    expect(detector.keyup(withAlt)).toBeNull();
+  });
+
+  it('שני Shift-ים: שחרור הראשון מבטל, ואין פעולה כפולה', () => {
+    const detector = createDirectionDetector();
+
+    detector.keydown(shift('ShiftRight'));
+    detector.keydown(shift('ShiftLeft'));
+
+    // הלחיצה השנייה החליפה את החימוש: זה מה שמשוחרר, וזה מה שנספר.
+    expect(detector.keyup(shift('ShiftLeft'))).toBe('ltr');
+    expect(detector.keyup(shift('ShiftRight'))).toBeNull();
+  });
+
+  it('reset מבטל חימוש שנתקע', () => {
+    const detector = createDirectionDetector();
+
+    detector.keydown(shift('ShiftRight'));
+    detector.reset();
+
+    expect(detector.keyup(shift('ShiftRight'))).toBeNull();
   });
 
   it('Ctrl ששוחרר לפני ה-Shift מבטל', () => {
@@ -158,11 +199,12 @@ describe('החיבור לאירועים', () => {
     expect(runCommand).not.toHaveBeenCalled();
   });
 
-  it('dispose מנתק את שני המאזינים', () => {
+  it('dispose מנתק את כל המאזינים', () => {
     const runCommand = vi.fn();
     const target = fakeTarget();
     const handle = createDirectionShortcut({ runCommand, target });
-    expect(target.total()).toBe(2);
+    // keydown, keyup, blur
+    expect(target.total()).toBe(3);
 
     handle.dispose();
     expect(target.total()).toBe(0);
@@ -172,7 +214,39 @@ describe('החיבור לאירועים', () => {
     expect(runCommand).not.toHaveBeenCalled();
   });
 
+  it('אובדן פוקוס מבטל חימוש תלוי באוויר', () => {
+    // ה-keyup מגיע לחלון האחר. בלי האיפוס, החזרה ושחרור ה-Shift היו הופכים
+    // את כיוון הפסקה בלי שהמשתמש ביקש.
+    const runCommand = vi.fn();
+    const target = fakeTarget();
+    createDirectionShortcut({ runCommand, target });
+
+    target.fire('keydown', shift('ShiftRight'));
+    target.fire('blur', {});
+    target.fire('keyup', shift('ShiftRight'));
+
+    expect(runCommand).not.toHaveBeenCalled();
+  });
+
   it('מזהי הפקודות הם אלה שב-registry של היכולות', () => {
     expect(DIRECTION_COMMANDS).toEqual({ rtl: 'direction-rtl', ltr: 'direction-ltr' });
+  });
+});
+
+describe('הרשומות ברשימה', () => {
+  it('שתי הכיווניות מתועדות, עם תווית ועם סימון keyup', () => {
+    // הן חייבות להיות ברשימה כדי שהתווית ברצועה ובדיאלוג העזרה תבוא ממנה,
+    // ומסומנות `onKeyUp` כדי שהמנתב הרגיל לא יירה אותן בלחיצת ה-Shift.
+    const entries: readonly Shortcut[] = SHORTCUTS;
+    const rtl = entries.find((entry) => entry.id === 'direction-rtl');
+    const ltr = entries.find((entry) => entry.id === 'direction-ltr');
+
+    expect(rtl?.command).toBe('direction-rtl');
+    expect(ltr?.command).toBe('direction-ltr');
+    expect(rtl?.onKeyUp).toBe(true);
+    expect(ltr?.onKeyUp).toBe(true);
+    expect(rtl?.label).toContain('ימני');
+    expect(ltr?.label).toContain('שמאלי');
+    expect(rtl?.group).toBe('direction');
   });
 });

@@ -319,3 +319,107 @@ describe('צבע קשיח ב-CSS', () => {
     );
   });
 });
+
+/* ------------------------------------------------------------------ */
+/* גופן הממשק מול גופן המסמך                                          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * ההפרדה שהתיקון הזה הכניס, ולמה היא צריכה שער.
+ *
+ * `--font-main` הוא גופן ה**מסמך**, ו-host/theme.ts מציב בראשו את בחירת
+ * הקריאה של המשתמש באוצריא. עד לתיקון הרצועה נצבעה בו — כלומר כפתורי הממשק
+ * רונדרו בגופן קריאה סריפי בגודל 11px, וזה נראה מטושטש. נמדד על
+ * FrankRuehlCLM-Medium.ttf שאוצריא מגישה: 46 בתי הוראות hinting בכל הגופן,
+ * unitsPerEm=1200, ו-gasp=0b0010 — DOGRAY בלי GRIDFIT, כלומר הוראה מפורשת
+ * ל-Windows לא ליישר את הגופן לרשת הפיקסלים באף גודל.
+ *
+ * הרגרסיה כאן שקטה לחלוטין: `var(--font-main)` על סלקטור ממשק חדש עובר כל
+ * בדיקה אחרת בירוק ונראה רק בעין, על Windows, עם הגופן הנכון מותקן. לכן
+ * הספירה.
+ */
+describe('גופן הממשק', () => {
+  /**
+   * החריג היחיד, ובכוונה: הכרטיס מציג **תצוגה מקדימה של סגנון מסמך**, ולכן
+   * הוא חייב להיראות כמו המסמך ולא כמו הרצועה.
+   */
+  const DOCUMENT_FONT_ALLOWED = ['.style-card-preview'];
+
+  it('אף סלקטור ממשק אינו נצבע בגופן המסמך', () => {
+    const offenders: string[] = [];
+
+    for (const file of [...STYLE_SHEETS, ...CODE_FILES]) {
+      const source = CONTENT.get(file) ?? '';
+      if (!source.includes('var(--font-main)')) continue;
+
+      // ההערות מוסרות: הן מזכירות את --font-main בתיעוד, וזה לא צביעה.
+      const css = source.replace(/\/\*[\s\S]*?\*\//g, ' ');
+      for (const block of css.matchAll(/(?:^|\})([^{}]*)\{([^{}]*)\}/g)) {
+        if (!block[2].includes('var(--font-main)')) continue;
+        const selector = block[1].trim().replace(/\s+/g, ' ');
+        if (DOCUMENT_FONT_ALLOWED.some((allowed) => selector.includes(allowed))) continue;
+        offenders.push(`${selector} (${short(file)})`);
+      }
+    }
+
+    expect(offenders).toEqual([]);
+  });
+
+  it('--font-ui פותח בגופן ממשק מהודק ונסגר בגופן הארוז', () => {
+    const chain = tokenTable().get('--font-ui') ?? '';
+
+    // Segoe UI ראשון: הוא גופן הממשק של Windows, מהודק ביד, ו-gasp שלו מדורג
+    // לפי גודל. Assistant אחריו — הוא הארוז, כלומר היחיד שמובטח שקיים.
+    expect(chain.indexOf('Segoe UI')).toBeGreaterThanOrEqual(0);
+    expect(chain.indexOf('Segoe UI')).toBeLessThan(chain.indexOf('Assistant'));
+
+    // אסור שגופן קריאה סריפי ייכנס לשרשרת הממשק מאיזו דלת אחורית.
+    for (const serif of ['FrankRuhl', 'David', 'serif,']) {
+      expect(chain).not.toContain(serif);
+    }
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* גדלים על רשת הפיקסלים                                              */
+/* ------------------------------------------------------------------ */
+
+/**
+ * גודל גופן שברירי פירושו ppem שברירי, וגובה שורה שברירי פירושו בסיס שורה
+ * שיושב על חצי פיקסל — בשני המקרים הגליף נמרח בין שני פיקסלים. נמדד ב-dist
+ * הארוז לפני התיקון: `--font-size-ui` היה 14.04px, ותווית כפתור ישבה ב-
+ * y=132.41.
+ *
+ * ההצהרה עם `round()` היא זו שמעגלת, וההצהרה שלפניה היא ה-fallback למנוע שאינו
+ * מכיר אותה. שתיהן חייבות להתקיים.
+ */
+describe('גדלי ממשק על רשת הפיקסלים', () => {
+  const tokens = () => CONTENT.get(join(SRC, 'styles/tokens.css')) ?? '';
+
+  it('כל טוקן ממשק נגזר מעוגל, עם fallback שלם לפניו', () => {
+    for (const token of ['--font-size-ui', '--line-height-ui']) {
+      const declarations = [...tokens().matchAll(/^\s*(--[\w-]+)\s*:\s*([^;]+);/gm)]
+        .filter((m) => m[1] === token)
+        .map((m) => m[2].trim());
+
+      // שתיים: fallback קבוע, ואחריו הגזירה המעוגלת שדורסת אותה.
+      expect(declarations).toHaveLength(2);
+      expect(declarations[0]).toMatch(/^\d+px$|^clamp\(\s*\d+px/);
+      expect(declarations[0]).not.toMatch(/round\(/);
+      expect(declarations[1]).toContain('round(');
+    }
+  });
+
+  it('אין גודל או גובה-שורה שברירי במקור ה-CSS', () => {
+    const fractional: string[] = [];
+
+    for (const file of [...STYLE_SHEETS, ...CODE_FILES]) {
+      const css = (CONTENT.get(file) ?? '').replace(/\/\*[\s\S]*?\*\//g, ' ');
+      for (const m of css.matchAll(/(font-size|line-height)\s*:\s*(\d+\.\d+)px/g)) {
+        fractional.push(`${m[1]}: ${m[2]}px (${short(file)})`);
+      }
+    }
+
+    expect(fractional).toEqual([]);
+  });
+});

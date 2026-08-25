@@ -951,6 +951,7 @@ const runShellAction = createShellActionRunner({
  * פעילה אינה מורכבת — ו-`Ctrl+K` חייב לעבוד מכל לשונית.
  */
 const linkDialog = createLinkDialog({
+  canOpen: () => hasDocument.value,
   readSelection: () => readDocSelection(activeSuperdoc.value, { includeText: true }),
   runLink: (payload) => void runShortcutCommand('link', payload),
   report: reportCommand,
@@ -997,6 +998,11 @@ async function runShortcutCommand(id: CommandId, payload?: unknown): Promise<voi
   reportCommand(await adapter.run(id, payload), id);
 }
 
+/** דיאלוג שמכריז `aria-modal`. מה שמאחוריו אינו זמין — גם לא לקיצור. */
+function isModalDialogOpen(): boolean {
+  return isAboutOpen.value || linkDialog.isOpen.value;
+}
+
 let shortcuts: ShortcutDispatcher | null = null;
 let directionShortcut: { dispose: () => void } | null = null;
 
@@ -1004,13 +1010,14 @@ onMounted(async () => {
   shortcuts = createShortcutDispatcher({
     runCommand: (id, payload) => void runShortcutCommand(id, payload),
     runAction: runShellAction,
-    // רק „אודות” חוסם: הוא מודאלי. מעל דיאלוג החיפוש עדיין מותר לשמור.
-    isModalOpen: () => isAboutOpen.value,
+    // מודאלי = `aria-modal`, וזה מה שקובע. „אודות” ודיאלוג הקישור מכריזים
+    // כך; דיאלוג החיפוש אינו מודאלי בכוונה, ומעליו עדיין מותר לערוך ולשמור.
+    isModalOpen: () => isModalDialogOpen(),
   });
 
   directionShortcut = createDirectionShortcut({
     runCommand: (id) => void runShortcutCommand(id),
-    isBlocked: (target) => isAboutOpen.value || isTextEntryTarget(target),
+    isBlocked: (target) => isModalDialogOpen() || isTextEntryTarget(target),
   });
 
   if (editorStackRef.value) {

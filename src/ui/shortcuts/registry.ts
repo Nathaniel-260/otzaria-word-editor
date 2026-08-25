@@ -82,8 +82,15 @@ export interface Shortcut {
    */
   code?: string | readonly string[];
   /**
-   * מקש לפי התו, לסימני פיסוק בלבד (`]`, `[`, `=`). שם דווקא ה-`code` הוא
-   * שנודד בין פריסות פיזיות, ולכן ההשוואה הפוכה.
+   * מקש לפי התו. **אין רשומה שמשתמשת בזה, ובכוונה.**
+   *
+   * ההנחה המקורית הייתה שסימני פיסוק יציבים יותר בתו מאשר במקש הפיזי. מדידה
+   * מול שלוש פריסות (US, עברית ישנה, עברית סטנדרטית) הראתה את ההפך: הפריסה
+   * העברית **ממשקפת** את הסוגריים — המקש הפיזי `BracketLeft` מפיק „]” —
+   * ולכן התאמה לפי תו הייתה הופכת את „הגדל” ו„הקטן” בפריסה עברית. גרוע מזה,
+   * `Ctrl+Shift+=` לא היה יורה לעולם, כי עם Shift התו הוא „+” ולא „=”.
+   *
+   * השדה נשאר כפתח מילוט מתועד; מי שמשתמש בו חייב למדוד קודם.
    */
   key?: string;
 
@@ -300,8 +307,7 @@ export const SHORTCUTS = [
     label: 'Ctrl+]',
     description: 'הגדלת הגופן',
     group: 'font',
-    // פיסוק, ולכן לפי `key`: ה-code של „]” נודד בין פריסות פיזיות.
-    key: ']',
+    code: 'BracketRight',
     ctrl: true,
     action: 'font-grow',
     repeatable: true,
@@ -311,7 +317,7 @@ export const SHORTCUTS = [
     label: 'Ctrl+[',
     description: 'הקטנת הגופן',
     group: 'font',
-    key: '[',
+    code: 'BracketLeft',
     ctrl: true,
     action: 'font-shrink',
     repeatable: true,
@@ -340,7 +346,7 @@ export const SHORTCUTS = [
     label: 'Ctrl+=',
     description: 'כתב תחתי',
     group: 'font',
-    key: '=',
+    code: 'Equal',
     ctrl: true,
     action: 'subscript',
   },
@@ -349,7 +355,9 @@ export const SHORTCUTS = [
     label: 'Ctrl+Shift+=',
     description: 'כתב עילי',
     group: 'font',
-    key: '=',
+    // `code` ולא `key`: עם Shift התו הוא „+”, ולכן התאמה לפי תו לא הייתה
+    // יורה לעולם — בשום פריסה.
+    code: 'Equal',
     ctrl: true,
     shift: true,
     action: 'superscript',

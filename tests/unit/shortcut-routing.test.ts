@@ -76,14 +76,19 @@ describe('עיצוב תו', () => {
     expect(press({ key: '[', code: 'BracketLeft', ctrlKey: true }).actions).toEqual(['font-shrink']);
   });
 
-  it('הגדלה והקטנה מותאמות לפי התו, ולכן עובדות בכל פריסה פיזית', () => {
-    // ב-code שונה לגמרי — מקלדת שבה „]” יושב במקום אחר.
-    expect(press({ key: ']', code: 'Digit9', ctrlKey: true }).actions).toEqual(['font-grow']);
+  it('הסוגריים לפי המקש הפיזי — בפריסה עברית התווים מתהפכים', () => {
+    // מדוד: בפריסה העברית `BracketLeft` מפיק „]” ו-`BracketRight` מפיק „[”.
+    // התאמה לפי תו הייתה מחליפה בין „הגדל” ל„הקטן” בדיוק בפריסה שהתוסף נועד
+    // לה. המקש הפיזי נשאר במקומו, כמו בכל שאר הקיצורים.
+    expect(press({ key: '[', code: 'BracketRight', ctrlKey: true }).actions).toEqual(['font-grow']);
+    expect(press({ key: ']', code: 'BracketLeft', ctrlKey: true }).actions).toEqual(['font-shrink']);
   });
 
   it('Ctrl+= ו-Ctrl+Shift+= — תחתי ועילי', () => {
     expect(press({ key: '=', code: 'Equal', ctrlKey: true }).actions).toEqual(['subscript']);
-    expect(press({ key: '=', code: 'Equal', ctrlKey: true, shiftKey: true }).actions).toEqual([
+    // עם Shift הדפדפן מדווח `key: '+'` בכל הפריסות שנמדדו. רשומה שנשענה על
+    // התו לא הייתה יורה לעולם — וזה בדיוק מה שקרה כאן עד שנמדד.
+    expect(press({ key: '+', code: 'Equal', ctrlKey: true, shiftKey: true }).actions).toEqual([
       'superscript',
     ]);
   });

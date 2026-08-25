@@ -110,6 +110,17 @@ describe('חוזה הרשימה', () => {
     expect(clashes).toEqual([]);
   });
 
+  it('הכול לפי המקש הפיזי — אין רשומה שנשענת על התו', () => {
+    // מדידה מול שלוש פריסות (US, עברית ישנה, עברית סטנדרטית) הראתה שהתו נודד
+    // גם הוא: הפריסה העברית ממשקפת את הסוגריים, ו-Shift+`=` הוא „+” בכולן.
+    // רשומה חדשה שתשען על `key` חייבת מדידה משלה — ולכן היא נעצרת כאן.
+    const byCharacter = ENTRIES.filter((shortcut) => shortcut.key !== undefined).map(
+      (shortcut) => shortcut.id,
+    );
+
+    expect(byCharacter).toEqual([]);
+  });
+
   it('כל רשומה מריצה בדיוק דבר אחד', () => {
     const broken = ENTRIES.filter((shortcut) => {
       const targets = [shortcut.command, shortcut.action, shortcut.native].filter(Boolean);
