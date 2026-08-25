@@ -77,7 +77,10 @@
         @open-find="$emit('open-find')"
         @open-replace="$emit('open-replace')"
       />
-      <InsertTab v-else-if="activeTabId === 'insert'" />
+      <InsertTab
+        v-else-if="activeTabId === 'insert'"
+        @open-link="$emit('open-link')"
+      />
       <LayoutTab v-else-if="activeTabId === 'layout'" />
       <ReferencesTab v-else-if="activeTabId === 'references'" />
       <ReviewTab v-else-if="activeTabId === 'review'" />
@@ -160,6 +163,7 @@ defineEmits<{
   (e: 'exit-app'): void;
   (e: 'open-find'): void;
   (e: 'open-replace'): void;
+  (e: 'open-link'): void;
   (e: 'toggle-focus-mode'): void;
   (e: 'insert-citation'): void;
   (e: 'search-otzaria'): void;

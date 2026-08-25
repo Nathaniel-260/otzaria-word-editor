@@ -21,6 +21,7 @@ export interface ShellActionDeps {
   openDocument: () => void;
   selectAll: () => void;
   pageBreak: () => void;
+  openLink: () => void;
 }
 
 /**
@@ -60,6 +61,9 @@ export function createShellActionRunner(deps: ShellActionDeps): (action: ShellAc
         return true;
       case 'page-break':
         deps.pageBreak();
+        return true;
+      case 'link':
+        deps.openLink();
         return true;
     }
   };

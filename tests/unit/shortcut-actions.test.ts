@@ -17,6 +17,7 @@ function setup(over: Partial<ShellActionDeps> = {}) {
     openDocument: vi.fn(),
     selectAll: vi.fn(),
     pageBreak: vi.fn(),
+    openLink: vi.fn(),
     ...over,
   };
   return { deps, run: createShellActionRunner(deps) };
@@ -78,7 +79,9 @@ describe('createShellActionRunner', () => {
     run('open-document');
     run('select-all');
     run('page-break');
+    run('link');
 
+    expect(deps.openLink).toHaveBeenCalledTimes(1);
     expect(deps.newDocument).toHaveBeenCalledTimes(1);
     expect(deps.openDocument).toHaveBeenCalledTimes(1);
     expect(deps.selectAll).toHaveBeenCalledTimes(1);

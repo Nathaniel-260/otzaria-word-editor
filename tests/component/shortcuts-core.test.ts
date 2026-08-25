@@ -343,6 +343,40 @@ describe('פעולות המעטפת', () => {
     expect(stub.confirms, 'הבחירה בוטלה — אין מה לשאול').toEqual([]);
   });
 
+  it('Ctrl+K פותח את דיאלוג הקישור — מכל לשונית', async () => {
+    // הלשונית הפעילה בעלייה היא „בית”, לא „הוספה”. עד שהדיאלוג עבר למעטפת
+    // הוא פשוט לא היה קיים ברגע הזה, ולכן הקיצור לא היה יכול לפתוח אותו.
+    const wrapper = await mountShell();
+    expect(document.querySelector('.link-dialog'), 'סגור בהתחלה').toBeNull();
+
+    const event = press({ code: 'KeyK', ctrlKey: true });
+    await settle();
+
+    expect(document.querySelector('.link-dialog'), 'נפתח').not.toBeNull();
+    expect(event.defaultPrevented).toBe(true);
+    expect(wrapper.findAll('[role="tabpanel"]').length, 'הלשונית לא הוחלפה').toBe(1);
+  });
+
+  it('Escape סוגר את דיאלוג הקישור', async () => {
+    await mountShell();
+    press({ code: 'KeyK', ctrlKey: true });
+    await settle();
+
+    press({ code: 'Escape' });
+    await settle();
+
+    expect(document.querySelector('.link-dialog')).toBeNull();
+  });
+
+  it('Ctrl+K קורא את הבחירה מהמסמך לפני שהוא פותח', async () => {
+    await mountShell();
+
+    press({ code: 'KeyK', ctrlKey: true });
+    await settle();
+
+    expect(superdoc.ops()).toContain('selection.current');
+  });
+
   it('F12 הוא „שמור בשם”', async () => {
     await mountShell();
 
