@@ -135,12 +135,29 @@ describe('createFocusRing', () => {
     });
     documentArea.querySelector('button')!.focus();
 
-    // מוסתר: אין לאן ללכת מלבד המסמך עצמו, והוא כבר ממוקד.
-    expect(ring.move()).toBe('document');
+    // מוסתר: אין לאן ללכת. „מעבר” לאזור שהפוקוס כבר בו אינו מעבר, והחזרת
+    // הצלחה הייתה בולעת את F6 בלי שקרה דבר.
+    expect(ring.move()).toBeNull();
     expect(document.activeElement).toBe(documentArea.querySelector('button'));
 
     hidden = false;
     expect(ring.move()).toBe('statusbar');
+  });
+
+  it('F6 כשאין אזור אחר זמין אינו „מטופל”', () => {
+    // המצב הרגיל במצב מיקוד: שלושת פסי המעטפת מוסתרים, נשאר רק המסמך.
+    const documentArea = region('document');
+    const ribbon = region('ribbon');
+    const ring = createFocusRing({
+      regions: [
+        { id: 'ribbon', element: () => ribbon, isAvailable: () => false },
+        { id: 'document', element: () => documentArea },
+      ],
+    });
+    documentArea.querySelector('button')!.focus();
+
+    expect(ring.move()).toBeNull();
+    expect(ring.move('prev')).toBeNull();
   });
 
   it('פוקוס מחוץ לכל האזורים — F6 נכנס לראשון', () => {
@@ -180,19 +197,26 @@ describe('createFocusRing', () => {
     expect(focus).toHaveBeenCalledOnce();
   });
 
-  it('כשהמנוע אינו יכול לקבל מיקוד — נופלים לפקד הראשון באזור', () => {
+  it('כשהמנוע אינו יכול לקבל מיקוד — האזור מדולג, ואין חיטוט ב-DOM שלו', () => {
+    // אזור שהצהיר על מיקוד משלו נכנס רק דרכו. הנפילה הקודמת —
+    // `querySelector` בתוך אזור המסמך — הייתה שאילתה מ-`ui/` על ה-DOM
+    // הפנימי של המנוע. סלקטור גנרי חומק מ-engine-boundaries, ולכן הכלל
+    // נאכף כאן: בלי מסמך פתוח, האזור פשוט אינו יעד.
     const documentArea = region('document');
     const ribbon = region('ribbon');
+    const engineControl = documentArea.querySelector('button')!;
     const ring = createFocusRing({
       regions: [
         { id: 'ribbon', element: () => ribbon },
         { id: 'document', element: () => documentArea, focus: () => false },
       ],
     });
-    ribbon.querySelector('button')!.focus();
+    const start = ribbon.querySelector('button')!;
+    start.focus();
 
-    expect(ring.move()).toBe('document');
-    expect(document.activeElement).toBe(documentArea.querySelector('button'));
+    expect(ring.move()).toBeNull();
+    expect(document.activeElement, 'הפוקוס לא זז').toBe(start);
+    expect(document.activeElement).not.toBe(engineControl);
   });
 });
 

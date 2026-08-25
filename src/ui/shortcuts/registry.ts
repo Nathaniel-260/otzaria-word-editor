@@ -680,6 +680,11 @@ export const SHORTCUTS = [
     code: ['Slash', 'NumpadDivide'],
     ctrl: true,
     action: 'shortcuts-help',
+    // מתג: אותו צירוף שפותח גם סוגר. בלי `inModal` הרשומה הייתה נחסמת ברגע
+    // שהדיאלוג נפתח — כלומר הצירוף היה פותח בלבד, בניגוד למה שמשתמש מצפה
+    // ממקש שהוא זה עתה לחץ. מעל דיאלוג **אחר** הוא אינו פועל; ההכרעה הזאת
+    // ב-`App.vue`, מפני שרק שם ידוע איזה חלון פתוח.
+    inModal: true,
   },
   {
     id: 'focus-next-region',

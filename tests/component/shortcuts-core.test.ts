@@ -730,6 +730,34 @@ describe('מה שהקיצורים אינם עושים', () => {
   });
 });
 
+describe('Ctrl+K והכפתור נחסמים באותו תנאי', () => {
+  /**
+   * הליקוי: הקיצור נשען על „יש מסמך” והכפתור על `linkCmd.enabled`. במצב
+   * שבו הפקודה מנוטרלת, Ctrl+K פתח דיאלוג שהאישור בו נכשל — בעברית, אבל
+   * רק אחרי שהמשתמש כבר הקליד כתובת.
+   */
+  it('פקודת „קישור” מנוטרלת — הקיצור אינו פותח דיאלוג', async () => {
+    adapter = createCommandDouble({ states: { link: { enabled: false } } });
+    stub.adapter = adapter;
+    await mountShell();
+
+    press({ code: 'KeyK', ctrlKey: true });
+    await settle();
+
+    expect(document.querySelector('.link-dialog')).toBeNull();
+  });
+
+  it('פקודת „קישור” זמינה — הקיצור פותח', async () => {
+    // הבקרה: בלעדיה הבדיקה שמעליה עוברת גם אם Ctrl+K הפסיק לעבוד לגמרי.
+    await mountShell();
+
+    press({ code: 'KeyK', ctrlKey: true });
+    await settle();
+
+    expect(document.querySelector('.link-dialog')).not.toBeNull();
+  });
+});
+
 describe('הפוקוס בתוך המסמך', () => {
   /**
    * הבאג שנמדד בדפדפן אמיתי, ולא בשום בדיקה: משטח ההקלדה של המנוע הוא

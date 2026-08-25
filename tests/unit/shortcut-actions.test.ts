@@ -28,7 +28,7 @@ function setup(over: Partial<ShellActionDeps> = {}) {
     insertCitation: vi.fn(),
     searchOtzaria: vi.fn(),
     openLibrary: vi.fn(),
-    openShortcutsHelp: vi.fn(),
+    toggleShortcutsHelp: vi.fn(() => true),
     moveFocusRegion: vi.fn(() => true),
     ...over,
   };
@@ -36,11 +36,18 @@ function setup(over: Partial<ShellActionDeps> = {}) {
 }
 
 describe('createShellActionRunner', () => {
-  it('shortcuts-help פותח את רשימת הקיצורים', () => {
+  it('shortcuts-help מחליף את מצב רשימת הקיצורים', () => {
     const { deps, run } = setup();
 
     expect(run('shortcuts-help')).toBe(true);
-    expect(deps.openShortcutsHelp).toHaveBeenCalledOnce();
+    expect(deps.toggleShortcutsHelp).toHaveBeenCalledOnce();
+  });
+
+  it('shortcuts-help מעל דיאלוג אחר אינו נבלע', () => {
+    // המעטפת מסרבת לפתוח חלון שני, והצירוף חייב להמשיך הלאה.
+    const { run } = setup({ toggleShortcutsHelp: () => false });
+
+    expect(run('shortcuts-help')).toBe(false);
   });
 
   it('F6 מעביר אזור, ומדווח שטופל', () => {

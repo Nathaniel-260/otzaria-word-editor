@@ -217,6 +217,41 @@ describe('דיאלוג הקיצורים', () => {
     expect(wrapper.find('.shortcuts-dialog').exists()).toBe(false);
   });
 
+  it('Ctrl+/ הוא מתג — אותו צירוף גם סוגר', async () => {
+    // בלי `inModal` הרשומה נחסמה ברגע שהדיאלוג נפתח, כלומר הצירוף פתח
+    // בלבד — בניגוד למה שמשתמש מצפה ממקש שהוא זה עתה לחץ.
+    const wrapper = await openHelp();
+    expect(wrapper.find('.shortcuts-dialog').exists()).toBe(true);
+
+    press(HELP);
+    await settle();
+
+    expect(wrapper.find('.shortcuts-dialog').exists()).toBe(false);
+  });
+
+  it('Ctrl+/ מעל דיאלוג אחר אינו פותח חלון שני, ואינו נבלע', async () => {
+    const wrapper = await mountShell();
+    press({ code: 'Escape' });
+    await settle();
+    // „אודות” נפתח מהרצועה; הוא `aria-modal`, כמו דיאלוג הקישור.
+    const tab = wrapper.findAll('[role="tab"]').find((item) => item.text() === 'קובץ');
+    await tab!.trigger('click');
+    await settle();
+    const about = wrapper
+      .findAll('button')
+      .find((node) => node.attributes('title')?.startsWith('אודות'));
+    await about!.trigger('click');
+    await settle();
+    expect(wrapper.find('.about-dialog').exists(), '„אודות” פתוח').toBe(true);
+
+    const event = press(HELP);
+    await settle();
+
+    expect(wrapper.find('.shortcuts-dialog').exists(), 'לא נפתח חלון שני').toBe(false);
+    expect(wrapper.find('.about-dialog').exists(), '„אודות” נשאר').toBe(true);
+    expect(event.defaultPrevented, 'הצירוף לא נבלע').toBe(false);
+  });
+
   it('הלוכסן של הספרון פותח גם הוא', async () => {
     // למשתמש זה „אותו מקש”; רק הדפדפן יודע שאלה שני code שונים.
     const wrapper = await mountShell();
@@ -548,6 +583,20 @@ describe('מצב מיקוד', () => {
     const statusbar = wrapper.find('.word-statusbar').element;
     expect(ribbon.contains(document.activeElement), 'הרצועה').toBe(false);
     expect(statusbar.contains(document.activeElement), 'שורת המצב').toBe(false);
+  });
+
+  it('F6 במצב מיקוד אינו נבלע — אין לאן לעבור', async () => {
+    // שלושת פסי המעטפת אינם זמינים, והפוקוס כבר במסמך. בליעת המקש הייתה
+    // לוקחת מהמשתמש את F6 של הדפדפן בלי לתת לו כלום בתמורה.
+    const wrapper = await mountShell();
+    surface(wrapper).focus();
+    press({ code: 'F11' });
+    await settle();
+
+    const event = press({ code: 'F6' });
+    await settle();
+
+    expect(event.defaultPrevented).toBe(false);
   });
 
   it('מחוץ למצב מיקוד F6 כן מגיע לרצועה', async () => {

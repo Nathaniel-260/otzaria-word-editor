@@ -951,8 +951,16 @@ const runShellAction = createShellActionRunner({
   insertCitation: () => void onInsertCitation(),
   searchOtzaria: () => void onSearchOtzaria(),
   openLibrary: () => void onOpenLibrary(),
-  openShortcutsHelp: () => {
+  toggleShortcutsHelp: () => {
+    if (isShortcutsHelpOpen.value) {
+      isShortcutsHelpOpen.value = false;
+      return true;
+    }
+    // מעל „אודות” או דיאלוג הקישור אין לפתוח חלון שני. הרשומה מסומנת
+    // `inModal` כדי שתגיע לכאן בכלל — וההכרעה מי פתוח היא של המעטפת.
+    if (isModalDialogOpen()) return false;
     isShortcutsHelpOpen.value = true;
+    return true;
   },
   moveFocusRegion: (direction) => focusRing.move(direction) !== null,
   // „אודות” הוא `aria-modal`, ולכן הוא זה שנסגר כשהוא פתוח. החיפוש אינו מודאלי
@@ -992,7 +1000,10 @@ const runShellAction = createShellActionRunner({
  * פעילה אינה מורכבת — ו-`Ctrl+K` חייב לעבוד מכל לשונית.
  */
 const linkDialog = createLinkDialog({
-  canOpen: () => hasDocument.value,
+  // אותו תנאי בדיוק שמנטרל את הכפתור ברצועה (`linkCmd.enabled`), ולא
+  // „יש מסמך”. שני תנאים שונים לאותה פעולה פירושם ש-Ctrl+K פותח דיאלוג
+  // שהאישור בו ייכשל — בעברית, אבל רק אחרי שהמשתמש כבר הקליד כתובת.
+  canOpen: () => commandAdapter.value?.getState('link').enabled === true,
   readSelection: () => readDocSelection(activeSuperdoc.value, { includeText: true }),
   runLink: (payload) => void runShortcutCommand('link', payload),
   report: reportCommand,
