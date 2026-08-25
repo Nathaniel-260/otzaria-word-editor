@@ -185,6 +185,7 @@ import {
   shrunkFontSize,
 } from './engine/payloads';
 import { toggleVertAlign } from './engine/vert-align';
+import { insertNote } from './engine/footnotes';
 import { startParagraphOnNewPage } from './engine/page-break';
 import { createLinkDialog } from './composables/use-link-dialog';
 import { createShellActionRunner } from './ui/shortcuts/actions';
@@ -927,6 +928,10 @@ const runShellAction = createShellActionRunner({
   growFont: () => void runFontStep(grownFontSize),
   shrinkFont: () => void runFontStep(shrunkFontSize),
   vertAlign: (kind) => void runVertAlign(kind),
+  insertNote: (type) => void runInsertNote(type),
+  toggleTrackChanges: () => void runToggleTrackChanges(),
+  toggleFocusMode,
+  findAgain,
   // „אודות” הוא `aria-modal`, ולכן הוא זה שנסגר כשהוא פתוח. החיפוש אינו מודאלי
   // ואפשר להמשיך לערוך מתחתיו, ולכן הוא נסגר רק כשאין חלון מעליו.
   closeTopmost: () => {
@@ -974,6 +979,41 @@ async function runFontStep(step: (current: number) => number): Promise<void> {
   if (payload === null) return;
 
   reportCommand(await adapter.run('font-size', payload), 'font-size');
+}
+
+async function runInsertNote(type: 'footnote' | 'endnote'): Promise<void> {
+  reportCommand(await insertNote(activeSuperdoc.value, type), `footnotes-insert-${type}`);
+}
+
+/**
+ * מעקב שינויים. אין פקודה נפרדת: `document-mode` עם `'suggesting'` **הוא**
+ * מצב המעקב, ולכן המצב הנוכחי נקרא מהמנוע — בדיוק כמו שהמתג ב„סקירה” עושה.
+ */
+async function runToggleTrackChanges(): Promise<void> {
+  const adapter = commandAdapter.value;
+  if (!adapter) {
+    setStatus('המסמך עדיין נטען', true);
+    return;
+  }
+
+  const suggesting = adapter.getState('document-mode').value === 'suggesting';
+  const payload = { mode: suggesting ? 'editing' : 'suggesting' };
+  reportCommand(await adapter.run('document-mode', payload), 'document-mode');
+}
+
+/**
+ * „המופע הבא/הקודם”. בלי דיאלוג פתוח או בלי שאילתה — פותחים את החיפוש, כי
+ * `F3` על מסמך שלא חיפשו בו הוא בקשה להתחיל לחפש ולא כשל.
+ */
+function findAgain(direction: 'next' | 'prev'): boolean {
+  const query = searchState.value.query;
+  if (!isFindOpen.value || query === '') {
+    openFindDialog('find');
+    return true;
+  }
+
+  reportSearch(searchAdapter?.find(query, direction));
+  return true;
 }
 
 async function runVertAlign(kind: 'superscript' | 'subscript'): Promise<void> {

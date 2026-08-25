@@ -170,7 +170,7 @@ describe('תצוגה ומצב', () => {
     const harness = mountUi(ReviewTab, { adapter });
     await settle();
 
-    const button = harness.wrapper.find('button[title="הפעלת מצב מעקב אחר שינויים במסמך"]');
+    const button = buttonByTitle(harness.wrapper, 'הפעלת מצב מעקב אחר שינויים במסמך');
     await button.trigger('click');
     await settle();
     expect(adapter.payloads('document-mode')).toEqual([{ mode: 'suggesting' }]);
@@ -179,9 +179,7 @@ describe('תצוגה ומצב', () => {
     adapter.setState('document-mode', { value: 'suggesting' });
     await settle();
 
-    await harness.wrapper
-      .find('button[title="כיבוי מצב מעקב אחר שינויים"]')
-      .trigger('click');
+    await buttonByTitle(harness.wrapper, 'כיבוי מצב מעקב אחר שינויים').trigger('click');
     await settle();
 
     expect(adapter.payloads('document-mode')).toEqual([

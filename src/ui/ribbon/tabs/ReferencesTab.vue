@@ -59,6 +59,7 @@
       <RibbonButton
         icon="footnote"
         label="הערת שוליים"
+        shortcut-id="footnote"
         variant="large"
         :tooltip="noteTooltip('הוספת הערת שוליים בתחתית העמוד')"
         :disabled="!canInsertNote || noteBusy"
@@ -67,6 +68,7 @@
       <RibbonButton
         icon="footnote"
         label="הערת סיום"
+        shortcut-id="endnote"
         variant="large"
         :tooltip="noteTooltip('הוספת הערת סיום בסוף המסמך')"
         :disabled="!canInsertNote || noteBusy"

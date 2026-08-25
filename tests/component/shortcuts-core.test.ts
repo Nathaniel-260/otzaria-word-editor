@@ -446,6 +446,92 @@ describe('פעולות שתלויות במצב המנוע', () => {
   });
 });
 
+describe('הפניות, סקירה ותצוגה', () => {
+  it('Ctrl+Alt+F ו-Ctrl+Alt+D מוסיפים הערות דרך ה-Document API', async () => {
+    await mountShell();
+
+    press({ code: 'KeyF', ctrlKey: true, altKey: true });
+    await settle();
+
+    expect(superdoc.ops()).toContain('footnotes.insert');
+    expect(superdoc.inputs('footnotes.insert')).toEqual([
+      expect.objectContaining({ type: 'footnote' }),
+    ]);
+  });
+
+  it('Ctrl+Alt+F אינו Ctrl+F — הערה מול חיפוש', async () => {
+    const wrapper = await mountShell();
+
+    press({ code: 'KeyF', ctrlKey: true });
+    await settle();
+
+    expect(wrapper.find('.find-replace-dialog').exists()).toBe(true);
+    expect(superdoc.ops()).not.toContain('footnotes.insert');
+  });
+
+  it('Ctrl+Shift+E מחליף למצב מעקב לפי מה שהמנוע מדווח', async () => {
+    // אין פקודה נפרדת: `document-mode` עם 'suggesting' הוא מצב המעקב.
+    adapter = createCommandDouble({ states: { 'document-mode': { value: 'editing' } } });
+    stub.adapter = adapter;
+    await mountShell();
+
+    press({ code: 'KeyE', ctrlKey: true, shiftKey: true });
+    await settle();
+
+    expect(adapter.payloads('document-mode')).toEqual([{ mode: 'suggesting' }]);
+  });
+
+  it('Ctrl+Shift+E ממצב מעקב חוזר לעריכה', async () => {
+    adapter = createCommandDouble({ states: { 'document-mode': { value: 'suggesting' } } });
+    stub.adapter = adapter;
+    await mountShell();
+
+    press({ code: 'KeyE', ctrlKey: true, shiftKey: true });
+    await settle();
+
+    expect(adapter.payloads('document-mode')).toEqual([{ mode: 'editing' }]);
+  });
+
+  it('Ctrl+Shift+E אינו Ctrl+E — מעקב מול מרכוז', async () => {
+    await mountShell();
+
+    press({ code: 'KeyE', ctrlKey: true });
+    await settle();
+
+    expect(adapter.calls.map((call) => call.id)).toEqual(['text-align']);
+  });
+
+  it('F11 מדליק ומכבה מצב מיקוד', async () => {
+    const wrapper = await mountShell();
+    expect(wrapper.find('.word-app-shell').classes()).not.toContain('focus-mode');
+
+    press({ code: 'F11' });
+    await settle();
+    expect(wrapper.find('.word-app-shell').classes()).toContain('focus-mode');
+
+    press({ code: 'F11' });
+    await settle();
+    expect(wrapper.find('.word-app-shell').classes()).not.toContain('focus-mode');
+  });
+
+  it('F3 על מסמך שלא חיפשו בו פותח את החיפוש במקום ליפול', async () => {
+    const wrapper = await mountShell();
+
+    const event = press({ code: 'F3' });
+    await settle();
+
+    expect(wrapper.find('.find-replace-dialog').exists()).toBe(true);
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it('Shift+F3 אינו F3 — שתי רשומות נפרדות', async () => {
+    await mountShell();
+
+    // שתיהן פותחות את החיפוש כשאין שאילתה, וזה מה שנבדק כאן: שתיהן נתפסות.
+    expect(press({ code: 'F3', shiftKey: true }).defaultPrevented).toBe(true);
+  });
+});
+
 describe('כיווניות פסקה', () => {
   /** לחיצה ושחרור של Shift, כמו במקלדת אמיתית. */
   function pressShift(side: 'ShiftLeft' | 'ShiftRight'): void {

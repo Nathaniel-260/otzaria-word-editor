@@ -23,7 +23,7 @@ async function chooseFromMenu(
   buttonTitle: string,
   itemLabel: string,
 ): Promise<void> {
-  await harness.wrapper.find(`button[title="${buttonTitle}"]`).trigger('click');
+  await buttonByTitle(harness.wrapper, buttonTitle).trigger('click');
   const item = harness.wrapper
     .findAll('[role="menuitem"]')
     .find((candidate) => candidate.text().includes(itemLabel));
@@ -182,7 +182,7 @@ describe('כשל של Document API', () => {
     });
     await settle();
 
-    await harness.wrapper.find('button[title="הוספת הערת שוליים בתחתית העמוד"]').trigger('click');
+    await buttonByTitle(harness.wrapper, 'הוספת הערת שוליים בתחתית העמוד').trigger('click');
     await settle();
 
     expect(harness.failures()).toEqual([

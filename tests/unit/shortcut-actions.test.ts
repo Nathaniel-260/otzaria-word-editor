@@ -21,6 +21,10 @@ function setup(over: Partial<ShellActionDeps> = {}) {
     growFont: vi.fn(),
     shrinkFont: vi.fn(),
     vertAlign: vi.fn(),
+    insertNote: vi.fn(),
+    toggleTrackChanges: vi.fn(),
+    toggleFocusMode: vi.fn(),
+    findAgain: vi.fn(() => true),
     ...over,
   };
   return { deps, run: createShellActionRunner(deps) };
@@ -93,6 +97,20 @@ describe('createShellActionRunner', () => {
     expect(deps.shrinkFont).toHaveBeenCalledTimes(1);
     expect(deps.vertAlign).toHaveBeenNthCalledWith(1, 'superscript');
     expect(deps.vertAlign).toHaveBeenNthCalledWith(2, 'subscript');
+
+    run('footnote');
+    run('endnote');
+    run('track-changes');
+    run('focus-mode');
+    run('find-next');
+    run('find-prev');
+
+    expect(deps.insertNote).toHaveBeenNthCalledWith(1, 'footnote');
+    expect(deps.insertNote).toHaveBeenNthCalledWith(2, 'endnote');
+    expect(deps.toggleTrackChanges).toHaveBeenCalledTimes(1);
+    expect(deps.toggleFocusMode).toHaveBeenCalledTimes(1);
+    expect(deps.findAgain).toHaveBeenNthCalledWith(1, 'next');
+    expect(deps.findAgain).toHaveBeenNthCalledWith(2, 'prev');
     expect(deps.newDocument).toHaveBeenCalledTimes(1);
     expect(deps.openDocument).toHaveBeenCalledTimes(1);
     expect(deps.selectAll).toHaveBeenCalledTimes(1);
