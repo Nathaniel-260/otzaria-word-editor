@@ -30,7 +30,13 @@
  */
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { mount } from '@vue/test-utils';
-import { autoUnmount, createCommandDouble, createSuperdocDouble, settle } from './harness';
+import {
+  autoUnmount,
+  createCommandDouble,
+  createSuperdocDouble,
+  settle,
+  type SuperdocDouble,
+} from './harness';
 import type { SaveCoordinatorDeps, SaveSnapshot } from '../../src/sessions/save-coordinator';
 
 /**
@@ -53,6 +59,8 @@ const stub = vi.hoisted(() => ({
   saveDeps: null as SaveCoordinatorDeps | null,
   /** ה-session שה-swap „פתח”. מוגדר בכל בדיקה מחדש. */
   session: null as unknown,
+  /** כפיל המופע שבתוך ה-session, כדי לראות מה המעטפת ביקשה מהמנוע. */
+  superdoc: null as SuperdocDouble | null,
   /** האדפטר שהמעטפת תזריק לרצועה. */
   adapter: null as unknown,
 }));
@@ -188,8 +196,9 @@ beforeEach(() => {
   stub.storedAutosave = true;
   stub.saveDeps = null;
   stub.adapter = createCommandDouble();
+  stub.superdoc = createSuperdocDouble();
   stub.session = {
-    superdoc: createSuperdocDouble().host,
+    superdoc: stub.superdoc.host,
     // ה-controller המזויף: רק מה שהמעטפת נוגעת בו ישירות. שאר הקוראים
     // (`observeZoom`, `observeFontOptions`, `observeStyleGallery`) מתוכננים
     // ליפול לברירת מחדל כשה-handle חסר, וזה מה שנמדד בבדיקות שלהם.
@@ -209,6 +218,31 @@ describe('הרכבת המעטפת', () => {
     expect(wrapper.find('.editor-stack').exists()).toBe(true);
     expect(stub.saveDeps, 'הקואורדינטור הוקם').not.toBeNull();
     expect(stub.resetCalls, 'הפתיחה איפסה את מצב השמירה').toBe(1);
+  });
+
+  it('המסמך שנפתח מקבל את הסמן — אפשר להקליד בלי קליק מקדים', async () => {
+    // הבאג שהתיקון בא לו: העורך נפתח, ההקלדה לא הגיעה לשום מקום, והמשתמש היה
+    // צריך ללחוץ עם העכבר בגוף הטקסט לפני שיכול היה לכתוב מילה.
+    await mountShell();
+
+    expect(stub.superdoc?.ops(), 'הפתיחה ביקשה מהמנוע להחזיר את הסמן').toContain('focus');
+  });
+
+  it('פתיחה אינה חוטפת את הפוקוס משדה שמקלידים בו', async () => {
+    // הפתיחה אסינכרונית ויכולה להימשך שניות. אם בינתיים המשתמש הקליד בשורת
+    // החיפוש (שאינה מודאלית ונשארת פתוחה מעל המסמך), קפיצה לגוף המסמך הייתה
+    // מוחקת לו את ההקלדה באמצע.
+    const wrapper = await mountShell();
+    await wrapper.find('.search-box').trigger('click');
+    await settle();
+    document.querySelector<HTMLInputElement>('#fr-search-input')?.focus();
+    stub.superdoc?.reset();
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'n', code: 'KeyN', ctrlKey: true }));
+    await settle(12);
+
+    expect(stub.resetCalls, 'המסמך החדש אכן נפתח').toBe(2);
+    expect(stub.superdoc?.ops(), 'הפוקוס נשאר בשדה החיפוש').not.toContain('focus');
   });
 });
 
