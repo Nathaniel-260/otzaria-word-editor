@@ -137,6 +137,54 @@
       />
     </RibbonGroup>
 
+    <!--
+      „ציטוטים וביבליוגרפיה”. חמישה פקדים מתוך ארבעה של Word: „הוסף ציטוט”,
+      „נהל מקורות” ו„ביבליוגרפיה” הם שלושת הראשונים שם, „עדכן” ו„הסר” הם
+      פיצול של אותו „ביבליוגרפיה”, ו„סגנון” אינו כאן — ראו הערת הפתיחה.
+    -->
+    <RibbonGroup title="ציטוטים וביבליוגרפיה">
+      <RibbonButton
+        icon="comment"
+        label="הוסף ציטוט"
+        variant="large"
+        :tooltip="tip('canInsertCitation', 'הוספת ציטוט למקור במקום הסמן')"
+        :disabled="!can('canInsertCitation')"
+        @click="onOpenInsertCitationDialog"
+      />
+      <RibbonButton
+        icon="book"
+        label="נהל מקורות"
+        variant="large"
+        :tooltip="tip('canManageCitationSources', 'הוספה, עריכה ומחיקה של המקורות שבמסמך')"
+        :disabled="!can('canManageCitationSources')"
+        @click="onOpenSourceDialog"
+      />
+      <RibbonButton
+        icon="toc"
+        label="ביבליוגרפיה"
+        variant="large"
+        :tooltip="tip('canInsertBibliography', 'הוספת רשימת המקורות בסוף המסמך')"
+        :disabled="!can('canInsertBibliography')"
+        @click="onInsertBibliography"
+      />
+      <RibbonButton
+        icon="updateFields"
+        label="עדכן ביבליוגרפיה"
+        variant="large"
+        :tooltip="bibRebuildTooltip"
+        :disabled="!can('canRebuildBibliography')"
+        @click="onRebuildBibliography"
+      />
+      <RibbonButton
+        icon="reject"
+        label="הסר ביבליוגרפיה"
+        variant="large"
+        :tooltip="bibRemoveTooltip"
+        :disabled="!can('canRemoveBibliography')"
+        @click="onRemoveBibliography"
+      />
+    </RibbonGroup>
+
     <TocDialog
       :is-open="tocDialogOpen"
       :levels="toc.levels"
@@ -169,6 +217,22 @@
       @close="indexEntryDialogOpen = false"
       @mark="onMarkIndexEntry"
       @unmark="onUnmarkIndexEntry"
+    />
+
+    <CitationSourceDialog
+      :is-open="sourceDialogOpen"
+      :sources="citations.sources"
+      @close="sourceDialogOpen = false"
+      @add="onAddSource"
+      @update="onUpdateSource"
+      @remove="onRemoveSource"
+    />
+
+    <InsertCitationDialog
+      :is-open="insertCitationDialogOpen"
+      :sources="citations.sources"
+      @close="insertCitationDialogOpen = false"
+      @insert="onInsertCitation"
     />
   </div>
 </template>
@@ -239,6 +303,30 @@
  * באמת כותב ניתנות לשינוי אחר כך ב„הגדרות מפתח”, ודיאלוג שחוסם את הפעולה
  * בשביל שתי ברירות מחדל הוא מס. ההנמקה המלאה, כולל מה שנשאר בחוץ ולמה,
  * ב-engine/index-field.ts.
+ *
+ * ## קבוצת „ציטוטים וביבליוגרפיה”, ולמה אין בה „סגנון”
+ *
+ * זו הקבוצה הראשונה מאז גל 3 שנשלחת בלי הסתייגות על קוד השדה: שני השדות
+ * שהיא כותבת למסמך, `CITATION <tag>` ו-`BIBLIOGRAPHY` חשוף, אומתו בתוך
+ * ה-docx המיוצא מול חלק הביבליוגרפיה שנכתב לצידם — `<b:Tag>` שתואם את
+ * ארגומנט השדה, בסכימת OOXML, עם הרלציה וה-Content-Type שלה. זה ההפך
+ * מ-`REF SDXREF` של גל 5 ומ-`TA` בלי `\l` של גל 6.
+ *
+ * מה שאין כאן הוא „סגנון”, והוא הפקד הרביעי בקבוצה של Word.
+ * `bibliography.configure` אכן כותב את הסגנון למקום הנכון
+ * (`SelectedStyle="/CHICAGO.XSL"`), אבל באותה קריאה הוא כותב גם
+ * `BIBLIOGRAPHY \sdStyle "Chicago"` — ו-`\sdStyle` אינו מתג של Word. אין
+ * דרך לבקש את הראשון בלי השני, ולכן הסגנון נשאר ברירת המחדל שגם Word
+ * מתחיל בה. ההנמקה המלאה, כולל המדידה, ב-engine/citations.ts.
+ *
+ * „הוסף ציטוט” ו„נהל מקורות” הם שני דיאלוגים ולא אחד: הראשון הוא הפעולה
+ * שחוזרת עשרות פעמים בספר, והוא רשימה ולחיצה; השני הוא טופס בן שבעה שדות
+ * שנפתח לעיתים רחוקות. איחוד שלהם היה מטיל את מחיר השני על הראשון.
+ *
+ * „עדכן ביבליוגרפיה” ו„הסר ביבליוגרפיה” עובדים גם על מסמך שהגיע **מ-Word**:
+ * הכתובת נמצאת דרך `fields.list`, שמחזיר `fieldType: 'BIBLIOGRAPHY'` בלי
+ * קשר למי יצר את השדה. `blocks.list` דווקא **אינו** מסמן אותה, וגם
+ * ל-`citations.bibliography` אין `list` משלה.
  */
 import { computed, inject, ref, shallowRef, watch } from 'vue';
 import type { SuperDoc } from 'superdoc';
@@ -285,10 +373,25 @@ import {
   type IndexSettings,
   type IndexState,
 } from '../../../engine/index-field';
+import {
+  addCitationSource,
+  emptyCitationsState,
+  insertBibliography,
+  insertCitation,
+  readCitationsState,
+  rebuildBibliography,
+  removeBibliography,
+  removeCitationSource,
+  updateCitationSource,
+  type CitationSourceDraft,
+  type CitationsState,
+} from '../../../engine/citations';
 import TocDialog from '../../panels/TocDialog.vue';
 import TocEntryDialog from '../../panels/TocEntryDialog.vue';
 import IndexDialog from '../../panels/IndexDialog.vue';
 import IndexEntryDialog from '../../panels/IndexEntryDialog.vue';
+import CitationSourceDialog from '../../panels/CitationSourceDialog.vue';
+import InsertCitationDialog from '../../panels/InsertCitationDialog.vue';
 
 const tocCmd = useCommand('table-of-contents-insert');
 
@@ -312,6 +415,9 @@ const toc = shallowRef<TocState>(emptyTocState());
 /** מצב המפתח: כמה מפתחות, מה ההגדרות שלהם, ואילו ערכים סומנו. */
 const indexState = shallowRef<IndexState>(emptyIndexState());
 
+/** מצב הציטוטים: המקורות שבמסמך, כמה ציטוטים ישנם, וכמה ביבליוגרפיות. */
+const citations = shallowRef<CitationsState>(emptyCitationsState());
+
 const tocDialogOpen = ref(false);
 const entryDialogOpen = ref(false);
 /** הטקסט שהמשתמש סימן בעורך ברגע פתיחת הדיאלוג, כהצעה לטקסט הערך. */
@@ -319,6 +425,8 @@ const entrySuggestion = ref('');
 const indexDialogOpen = ref(false);
 const indexEntryDialogOpen = ref(false);
 const indexEntrySuggestion = ref('');
+const sourceDialogOpen = ref(false);
+const insertCitationDialogOpen = ref(false);
 
 /** ראו LayoutTab: קריאת היכולות א-סינכרונית, ותשובה של מסמך קודם לא תדרוס. */
 let generation = 0;
@@ -331,17 +439,20 @@ watch(
     crossRefs.value = emptyCrossRefsState();
     toc.value = emptyTocState();
     indexState.value = emptyIndexState();
-    const [result, refs, tocState, indexSnapshot] = await Promise.all([
+    citations.value = emptyCitationsState();
+    const [result, refs, tocState, indexSnapshot, citationsSnapshot] = await Promise.all([
       readDocCapabilities(host),
       readCrossRefsState(host),
       readTocState(host),
       readIndexState(host),
+      readCitationsState(host),
     ]);
     if (mine !== generation) return;
     capabilities.value = result;
     crossRefs.value = refs;
     toc.value = tocState;
     indexState.value = indexSnapshot;
+    citations.value = citationsSnapshot;
   },
   { immediate: true }
 );
@@ -596,6 +707,97 @@ async function onMarkIndexEntry(entry: IndexEntryDraft): Promise<void> {
 async function onUnmarkIndexEntry(address: unknown): Promise<void> {
   report(await removeIndexEntry(superdoc.value, address), 'index-unmark-entry');
   await refreshIndex();
+}
+/* ------------------------------------------------------------------ */
+/* ציטוטים וביבליוגרפיה                                                */
+/* ------------------------------------------------------------------ */
+
+const bibRebuildTooltip = computed(() =>
+  tip(
+    'canRebuildBibliography',
+    citations.value.bibliographyCount > 0
+      ? 'בניית הביבליוגרפיה מחדש מהמקורות שבמסמך'
+      : 'אין במסמך ביבליוגרפיה לעדכן'
+  )
+);
+
+const bibRemoveTooltip = computed(() =>
+  tip(
+    'canRemoveBibliography',
+    citations.value.bibliographyCount > 0
+      ? 'מחיקת הביבליוגרפיה מהמסמך. המקורות עצמם נשארים'
+      : 'אין במסמך ביבליוגרפיה להסיר'
+  )
+);
+
+/**
+ * קוראת מחדש את מצב הציטוטים. נדרשת גם אחרי כשל, מאותו טעם כמו `refreshToc`,
+ * ובנוסף מטעם ייחודי כאן: „מחק מקור” מסרב לפי מספר הציטוטים שמפנים אליו,
+ * ורשימה שהתיישנה הייתה מציגה כפתור מחיקה פעיל על מקור שכבר מצוטט.
+ * **קוראת** את המונה ואינה מקדמת אותו — ראו ההסבר ב-InsertTab.
+ */
+async function refreshCitations(): Promise<void> {
+  const mine = generation;
+  const next = await readCitationsState(superdoc.value);
+  if (mine === generation) citations.value = next;
+}
+
+/** קוראת את המקורות מהמסמך ברגע הפתיחה. אותו טעם כמו ב-`onOpenTocDialog`. */
+async function onOpenSourceDialog(): Promise<void> {
+  await refreshCitations();
+  sourceDialogOpen.value = true;
+}
+
+/**
+ * פותחת את דיאלוג הציטוט. אינה קוראת את הבחירה מראש, שלא כמו דיאלוגי
+ * הערכים: `insertCitation` מכווץ את הבחירה בעצמו ברגע השליחה, ותצלום
+ * שנלקח בפתיחה היה מתיישן ברגע שהמשתמש בוחר מקור ברשימה.
+ */
+async function onOpenInsertCitationDialog(): Promise<void> {
+  await refreshCitations();
+  insertCitationDialogOpen.value = true;
+}
+
+/**
+ * הדיאלוג נשאר פתוח אחרי הוספה, כמו דיאלוג הסימניות: אותו מקור מצוטט
+ * במקומות רבים בספר אחד.
+ */
+async function onInsertCitation(sourceId: string): Promise<void> {
+  report(await insertCitation(superdoc.value, sourceId), 'citations-insert');
+  await refreshCitations();
+}
+
+async function onAddSource(draft: CitationSourceDraft): Promise<void> {
+  report(await addCitationSource(superdoc.value, draft), 'citations-source-add');
+  await refreshCitations();
+}
+
+async function onUpdateSource(payload: { id: string; draft: CitationSourceDraft }): Promise<void> {
+  report(
+    await updateCitationSource(superdoc.value, payload.id, payload.draft),
+    'citations-source-update'
+  );
+  await refreshCitations();
+}
+
+async function onRemoveSource(id: string): Promise<void> {
+  report(await removeCitationSource(superdoc.value, id), 'citations-source-remove');
+  await refreshCitations();
+}
+
+async function onInsertBibliography(): Promise<void> {
+  report(await insertBibliography(superdoc.value), 'bibliography-insert');
+  await refreshCitations();
+}
+
+async function onRebuildBibliography(): Promise<void> {
+  report(await rebuildBibliography(superdoc.value), 'bibliography-rebuild');
+  await refreshCitations();
+}
+
+async function onRemoveBibliography(): Promise<void> {
+  report(await removeBibliography(superdoc.value), 'bibliography-remove');
+  await refreshCitations();
 }
 </script>
 

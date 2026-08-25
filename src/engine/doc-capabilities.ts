@@ -169,6 +169,32 @@ const CAPABILITY_SPECS = {
   canMarkIndexEntry: {
     operation: ['index.entries.list', 'index.entries.insert', 'index.entries.remove'],
   },
+  // ציטוטים וביבליוגרפיה. שלוש הבחנות כאן, וכולן נמדדו:
+  //
+  // 1. `citations.list` הוא חלק מ-`canManageCitationSources` ואינו קישוט.
+  //    „מחק מקור” מסרב כשיש למקור ציטוט במסמך, והרשימה הזאת היא הדרך
+  //    היחידה לדעת. מנוע בלעדיה היה מוחק מקור ומשאיר שדה `CITATION` מצביע
+  //    לתג שאינו קיים — נמדד שזה בדיוק מה שקורה. ההנמקה ב-engine/citations.ts.
+  // 2. `fields.list` הוא חלק מהעדכון ומההסרה, וגם הוא אינו קישוט: אין
+  //    ל-`citations.bibliography` פעולת `list`, ו-`blocks.list` מציג את
+  //    הביבליוגרפיה כפסקה רגילה (נמדד). `fields.list` הוא המסלול היחיד
+  //    שמחזיר `fieldType: 'BIBLIOGRAPHY'` ואת הכתובת שאפשר לפעול עליה.
+  // 3. `citations.bibliography.configure` **אינו** נשאל: הוא כותב
+  //    `BIBLIOGRAPHY \sdStyle "…"`, ו-`\sdStyle` אינו מתג של Word. אין לו
+  //    פקד, ושאלה בלי פקד היא הצהרת יכולת שאיש אינו קורא.
+  canManageCitationSources: {
+    operation: [
+      'citations.list',
+      'citations.sources.list',
+      'citations.sources.insert',
+      'citations.sources.update',
+      'citations.sources.remove',
+    ],
+  },
+  canInsertCitation: { operation: ['citations.sources.list', 'citations.insert'] },
+  canInsertBibliography: { operation: 'citations.bibliography.insert' },
+  canRebuildBibliography: { operation: ['fields.list', 'citations.bibliography.rebuild'] },
+  canRemoveBibliography: { operation: ['fields.list', 'citations.bibliography.remove'] },
   // סקירה
   canAddComment: { operation: 'comments.create', global: 'comments' },
   canTrackChanges: { global: 'trackChanges' },

@@ -300,6 +300,24 @@ export interface SuperdocDoubleOptions {
     /** ערכי `XE` שסומנו במסמך. הכתובת מיקומית, כמו במנוע האמיתי. */
     entries?: readonly { blockId: string; offset: number; text: string; subEntry?: string }[];
   };
+  /**
+   * הציטוטים שבמסמך. אותה החלטה כמו ב-`toc` וב-`index`: מסמך **בלי** מקורות,
+   * בלי ציטוטים ובלי ביבליוגרפיה. זה המצב שבו „עדכן ביבליוגרפיה” אמור לומר
+   * למה הוא אינו יכול, ומסמך שכבר יש בו אחת היה מסתיר את ההבדל בין „נוצרה”
+   * ל„הייתה שם”.
+   */
+  citations?: {
+    /** המקורות בחלק הביבליוגרפיה. */
+    sources?: readonly { sourceId: string; type?: string; title?: string; year?: string }[];
+    /** שדות `CITATION` שבמסמך, כל אחד והמקור שהוא מפנה אליו. */
+    cited?: readonly string[];
+    /**
+     * מזהי הבלוקים של הביבליוגרפיות. יותר מאחד = המצב הדו-משמעי שההסרה
+     * מסרבת לו. מוצגים דרך `fields.list` ולא דרך `blocks.list`, בדיוק כמו
+     * במנוע האמיתי — ראו engine/citations.ts.
+     */
+    bibliographyIds?: readonly string[];
+  };
 }
 
 export interface SuperdocDouble {
@@ -387,6 +405,9 @@ export function createSuperdocDouble(options: SuperdocDoubleOptions = {}): Super
   const tocEntries = options.toc?.entries ?? [];
   const indexIds = options.index?.ids ?? [];
   const indexEntries = options.index?.entries ?? [];
+  const citationSources = options.citations?.sources ?? [];
+  const citedSourceIds = options.citations?.cited ?? [];
+  const bibliographyIds = options.citations?.bibliographyIds ?? [];
 
   /**
    * הבלוקים שבמסמך, במבנה שהמנוע האמיתי מחזיק: **בלוק אחד** מסוג
@@ -467,7 +488,17 @@ export function createSuperdocDouble(options: SuperdocDoubleOptions = {}): Super
      * מסתיר את ההבדל בין „הוכנס” ל„היה שם”.
      */
     fields: {
-      list: route('fields.list', () => ({ items: [] })),
+      // הביבליוגרפיות מגיעות מכאן ולא מ-`blocks.list`, בדיוק כמו במנוע
+      // האמיתי: אין ל-`citations.bibliography` פעולת `list`, והבלוק מופיע
+      // ב-`blocks.list` כפסקה רגילה. ההנמקה ב-engine/citations.ts.
+      list: route('fields.list', () => ({
+        items: bibliographyIds.map((nodeId) => ({
+          address: { kind: 'field', blockId: nodeId, occurrenceIndex: 0, nestingDepth: 0 },
+          instruction: 'BIBLIOGRAPHY',
+          fieldType: 'BIBLIOGRAPHY',
+        })),
+        total: bibliographyIds.length,
+      })),
       insert: route('fields.insert', () => {
         const result = receipt('fields.insert');
         // הקבלה של `fields.insert` נושאת את כתובת השדה שנוצר; היא מה שמאפשר
@@ -583,6 +614,53 @@ export function createSuperdocDouble(options: SuperdocDoubleOptions = {}): Super
         if (from !== -1 && to !== -1) blocks.splice(from, to - from + 1);
         return receipt('blocks.deleteRange');
       }),
+    },
+    /**
+     * ציטוטים. שתי הבחנות מכוונות מול השכנים, ושתיהן נמדדו במנוע האמיתי:
+     * המקורות הם **ישויות** ולא בלוקים (`kind: 'entity'`), והביבליוגרפיה
+     * נמצאת דרך `fields.list` בלבד. ההנמקה המלאה ב-engine/citations.ts.
+     */
+    citations: {
+      list: route('citations.list', () => ({
+        items: citedSourceIds.map((sourceId) => ({
+          address: { kind: 'inline', nodeType: 'citation' },
+          sourceIds: [sourceId],
+          instruction: `CITATION ${sourceId}`,
+        })),
+        total: citedSourceIds.length,
+      })),
+      insert: route('citations.insert', () => receipt('citations.insert')),
+      sources: {
+        list: route('citations.sources.list', () => ({
+          items: citationSources.map((source) => ({
+            id: source.sourceId,
+            address: {
+              kind: 'entity',
+              entityType: 'citationSource',
+              sourceId: source.sourceId,
+            },
+            sourceId: source.sourceId,
+            tag: source.title ?? source.sourceId,
+            type: source.type ?? 'book',
+            fields: { title: source.title ?? '', year: source.year ?? '' },
+          })),
+          total: citationSources.length,
+        })),
+        insert: route('citations.sources.insert', () => receipt('citations.sources.insert')),
+        update: route('citations.sources.update', () => receipt('citations.sources.update')),
+        remove: route('citations.sources.remove', () => receipt('citations.sources.remove')),
+      },
+      bibliography: {
+        insert: route('citations.bibliography.insert', () =>
+          receipt('citations.bibliography.insert'),
+        ),
+        rebuild: route('citations.bibliography.rebuild', () =>
+          receipt('citations.bibliography.rebuild'),
+        ),
+        remove: route('citations.bibliography.remove', () =>
+          receipt('citations.bibliography.remove'),
+        ),
+      },
     },
     /** אותה החלטה כמו ב-`fields`: מסמך בלי הפניות מקושרות. */
     crossRefs: {

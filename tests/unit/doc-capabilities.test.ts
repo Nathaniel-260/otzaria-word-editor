@@ -69,6 +69,16 @@ function fullCapabilities() {
       'index.entries.remove': { available: true },
       'blocks.list': { available: true },
       'blocks.deleteRange': { available: true },
+      'fields.list': { available: true },
+      'citations.list': { available: true },
+      'citations.insert': { available: true },
+      'citations.sources.list': { available: true },
+      'citations.sources.insert': { available: true },
+      'citations.sources.update': { available: true },
+      'citations.sources.remove': { available: true },
+      'citations.bibliography.insert': { available: true },
+      'citations.bibliography.rebuild': { available: true },
+      'citations.bibliography.remove': { available: true },
       'comments.create': { available: true },
       'clipboard.serializeSelection': { available: true },
       'clipboard.insert': { available: true },
@@ -420,6 +430,37 @@ describe('readDocCapabilities', () => {
     expect(
       (await readDocCapabilities(hostWith(() => fullCapabilities()))).can('canMarkIndexEntry'),
     ).toBe(true);
+  });
+
+  it('„מחק מקור” נשען על `citations.list`, ו„עדכן ביבליוגרפיה” על `fields.list`', async () => {
+    // שתי התלויות האלה נראות עקיפות ושתיהן נמדדו כהכרחיות: בלי `citations.list`
+    // אי אפשר לדעת אילו ציטוטים מפנים אל מקור, והמחיקה הייתה משאירה שדה
+    // `CITATION` מצביע לתג שאינו קיים; ובלי `fields.list` אין בכלל דרך למצוא
+    // ביבליוגרפיה במסמך — `citations.bibliography` חסר `list`, ו-`blocks.list`
+    // מציג אותה כפסקה רגילה. ההנמקה המלאה ב-engine/citations.ts.
+    const withoutCitations = fullCapabilities();
+    withoutCitations.operations['citations.list'] = { available: false } as never;
+    const first = await readDocCapabilities(hostWith(() => withoutCitations));
+    expect(first.can('canManageCitationSources')).toBe(false);
+    // ואילו „הוסף ציטוט” אינו נשען עליה — הוא כותב ואינו סופר.
+    expect(first.can('canInsertCitation')).toBe(true);
+
+    const withoutFields = fullCapabilities();
+    withoutFields.operations['fields.list'] = { available: false } as never;
+    const second = await readDocCapabilities(hostWith(() => withoutFields));
+    expect(second.can('canRebuildBibliography')).toBe(false);
+    expect(second.can('canRemoveBibliography')).toBe(false);
+    // ואילו ההוספה אינה צריכה למצוא כלום.
+    expect(second.can('canInsertBibliography')).toBe(true);
+  });
+
+  it('„סגנון הביבליוגרפיה” אינו שאלה בכלל', async () => {
+    // `citations.bibliography.configure` מוצהר זמין ועובד למחצה: הוא כותב את
+    // הסגנון למקום הנכון ובאותה קריאה גם מתג `\sdStyle` שאינו של Word. אין
+    // לו פקד, ושאלה בלי פקד היא הצהרת יכולת שאיש אינו קורא.
+    expect(
+      DOC_CAPABILITY_QUESTIONS.some((question) => question.toLowerCase().includes('style')),
+    ).toBe(false);
   });
 
   it('`available` שאינו בדיוק true אינו „כן”', async () => {
