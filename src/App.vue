@@ -543,6 +543,10 @@ async function openDocument(file?: UserFile): Promise<boolean> {
     })
   );
 
+  // אחרון, ובכוונה: מסמך חדש עובר כאן דרך גודל דף וכיווניות, ומיקוד שקודם
+  // להם היה מקבל סמן ואז פריסה שזזה תחתיו.
+  focusOpenedDocument(editor.superdoc);
+
   return true;
 }
 
@@ -1090,6 +1094,33 @@ function isDocumentSurface(target: EventTarget | null): boolean {
 /** דיאלוג שמכריז `aria-modal`. מה שמאחוריו אינו זמין — גם לא לקיצור. */
 function isModalDialogOpen(): boolean {
   return isAboutOpen.value || linkDialog.isOpen.value || isShortcutsHelpOpen.value;
+}
+
+/**
+ * מיקוד המסמך ברגע שנפתח, כדי שאפשר יהיה להקליד בלי קליק מקדים.
+ *
+ * בלי זה כל פתיחה — בעלייה, ב„מסמך חדש” וב„פתח קובץ” — מגיעה בלי סמן: העורך
+ * מוצג, המקלדת אינה שייכת לאיש, והמשתמש חייב ללחוץ עם העכבר בגוף הטקסט לפני
+ * שיוכל לכתוב מילה.
+ *
+ * דרך המנוע ולא דרך ה-`<main>` שמארח אותו: מיקוד המארח מזיז את הפוקוס אבל
+ * אינו מחזיר את הסמן לטקסט (ראו `engine/focus.ts`).
+ *
+ * שני שערים, ומאותו טעם: הפתיחה אסינכרונית ויכולה להימשך שניות, ובזמן הזה
+ * המשתמש כבר עלול להיות במקום אחר.
+ *
+ *   * דיאלוג מודאלי פתוח — מה שמאחוריו אינו זמין, וחטיפת הפוקוס ממנו שוברת
+ *     את מלכודת המיקוד שלו.
+ *   * הפוקוס בשדה טקסט של הממשק (שורת החיפוש אינה מודאלית ונשארת פתוחה מעל
+ *     המסמך) — שם המשתמש מקליד עכשיו, וקפיצה לגוף המסמך הייתה קוטעת אותו.
+ */
+function focusOpenedDocument(superdoc: SuperDoc): void {
+  if (isModalDialogOpen()) return;
+
+  const active = document.activeElement;
+  if (isTextEntryTarget(active) && !isDocumentSurface(active)) return;
+
+  focusDocument(superdoc);
 }
 
 /**

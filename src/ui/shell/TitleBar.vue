@@ -247,8 +247,7 @@ defineEmits<{
 }
 
 .autosave-label {
-  font-size: 12px;
-  line-height: var(--line-height-control);
+  font-size: 11px;
   color: var(--color-on-surface);
   white-space: nowrap;
 }
@@ -371,7 +370,7 @@ defineEmits<{
   background: transparent;
   border: none;
   color: var(--color-on-surface);
-  font-family: var(--font-ui);
+  font-family: var(--font-main);
   font-size: 13px;
   font-weight: 600;
   outline: none;
@@ -410,7 +409,7 @@ defineEmits<{
   max-width: 100%;
   cursor: text;
   color: var(--color-on-surface-variant);
-  font-family: var(--font-ui);
+  font-family: var(--font-main);
   font-size: 12px;
   transition: border-color 0.1s, box-shadow 0.1s;
 }
