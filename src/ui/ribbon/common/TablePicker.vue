@@ -24,7 +24,9 @@
     -->
     <div
       v-if="isOpen"
+      ref="popoverRef"
       class="table-picker-popover"
+      :style="popoverStyle"
       @pointerdown.prevent.stop
     >
       <!-- role="status" כדי שהמידות ייקראו גם למי שאינו רואה את ההדגשה -->
@@ -96,6 +98,7 @@
 import { computed, ref, onMounted, onUnmounted } from 'vue';
 import RibbonButton from './RibbonButton.vue';
 import { menuString } from '../i18n';
+import { usePopoverPosition } from '../../../composables/popover-position';
 
 const MAX_ROWS = 10;
 const MAX_COLS = 10;
@@ -109,8 +112,13 @@ const emit = defineEmits<{
 }>();
 
 const containerRef = ref<HTMLElement | null>(null);
+const popoverRef = ref<HTMLElement | null>(null);
 const gridRef = ref<HTMLElement | null>(null);
 const isOpen = ref(false);
+
+// `.word-ribbon-body` חותך אנכית, ולכן הפופאובר `position: fixed` בקואורדינטות
+// שנמדדות ולא `top: 100%`. ראו composables/popover-position.ts.
+const { popoverStyle } = usePopoverPosition(containerRef, popoverRef, isOpen);
 
 /** המידות שמעל הסמן או שהמקלדת בחרה. 0 = טרם נבחר דבר. */
 const hoveredRows = ref(0);
@@ -257,17 +265,18 @@ onUnmounted(() => {
   display: inline-flex;
 }
 
+/* `top` / `left` / `max-height` מגיעים מ-`:style` — ראו popover-position.ts.
+   `overflow-y: auto` הוא הצד השני של אותה החלטה: כשאין מקום לגובה המלא הבורר
+   נגלל בתוך עצמו, ולא נחתך. */
 .table-picker-popover {
-  position: absolute;
-  top: 100%;
-  inset-inline-start: 0;
+  position: fixed;
   z-index: 1000;
   background: var(--color-surface);
   border: 1px solid var(--color-outline);
   border-radius: var(--radius-sm);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.16);
   padding: 8px;
-  margin-top: 2px;
+  overflow-y: auto;
 }
 
 .table-picker-header {

@@ -14,7 +14,8 @@
  * שני הפופאוברים האחרונים חולקים מכניקה אחת, וזו הסיבה שהם באותו קובץ:
  * `@pointerdown.prevent` על הפקד (בלעדיו הלחיצה גוזלת את המיקוד מהעורך והבחירה
  * במסמך אובדת), `.stop` על התוכן כדי שהמאזין הגלובלי לא יסגור אותו ברגע
- * שנוגעים בו, ו-Escape שסוגר ומחזיר מיקוד.
+ * שנוגעים בו, ו-Escape שסוגר ומחזיר מיקוד. מאז שהמיקום עבר לקוד
+ * (composables/popover-position.ts) הם חולקים גם אותו — וזה נבדק בסוף הקובץ.
  */
 import { describe, expect, it, vi } from 'vitest';
 import ColorPickerPopover from '../../src/ui/ribbon/common/ColorPickerPopover.vue';
@@ -22,6 +23,7 @@ import RibbonMenuButton from '../../src/ui/ribbon/common/RibbonMenuButton.vue';
 import TablePicker from '../../src/ui/ribbon/common/TablePicker.vue';
 import StyleGallery from '../../src/ui/ribbon/common/StyleGallery.vue';
 import { GALLERY_SCROLL_STEP_PX, type StyleGalleryState } from '../../src/engine/style-gallery';
+import { POPOVER_GAP_PX } from '../../src/composables/popover-position';
 import { autoUnmount, clickOutside, mountUi, settle } from './harness';
 
 autoUnmount();
@@ -531,4 +533,115 @@ describe('TablePicker', () => {
     expect(harness.wrapper.find('.table-picker-popover').exists()).toBe(false);
     expect(harness.wrapper.emitted('select')).toBeUndefined();
   });
+});
+
+/* ------------------------------------------------------------------ */
+/* מיקום הפופאוברים                                                   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * שלושת הפופאוברים היו `position: absolute; top: 100%` בתוך
+ * `.word-ribbon-body`, שמוגדר `overflow-x: auto; overflow-y: hidden` — כלומר
+ * ההורה חותך אנכית בגובה הרצועה, וכל מה שמתחתיו לא נראה. מהפלטה, שגובהה
+ * ~150px, הוצגה בפועל רק שורת „ללא צבע”.
+ *
+ * החשבון עצמו נבדק ב-tests/unit/popover-position.test.ts. מה שנמדד כאן הוא
+ * **החיווט**: שהמלבן של הכפתור באמת מגיע לפופאובר כ-`style`. חיווט שנשבר
+ * (`ref` שלא נקשר, `:style` שנשמט) אינו נראה בבדיקה הטהורה בכלל.
+ */
+describe('מיקום הפופאוברים ברצועה', () => {
+  const POPOVERS = [
+    {
+      name: 'פלטת הצבעים',
+      component: ColorPickerPopover,
+      props: { icon: 'fontColor', title: 'צבע גופן' },
+      opener: '.color-arrow-btn',
+      container: '.color-picker-container',
+      popover: '.color-palette-popover',
+    },
+    {
+      name: 'תפריט הכפתור',
+      component: RibbonMenuButton,
+      props: {
+        icon: 'margins',
+        label: 'שוליים',
+        items: [{ id: 'normal', label: 'רגיל' }],
+      },
+      opener: 'button',
+      container: '.ribbon-menu',
+      popover: '.ribbon-menu__popover',
+    },
+    {
+      name: 'בורר הטבלה',
+      component: TablePicker,
+      props: {},
+      opener: 'button',
+      container: '.table-picker-container',
+      popover: '.table-picker-popover',
+    },
+  ] as const;
+
+  /** כפתור בשליש התחתון של חלון נמוך — בדיוק המצב שבו הפופאובר נחתך. */
+  const ANCHOR = { top: 400, bottom: 424, left: 900, right: 960 };
+  const SIZE = { width: 200, height: 150 };
+  const VIEWPORT = { width: 1000, height: 500 };
+
+  /**
+   * jsdom אינו מודד פריסה: כל `getBoundingClientRect` מחזיר אפסים, ולכן שם כל
+   * פופאובר „נכנס למטה” ואף החלטת מיקום אינה נצפית. הזרקת מלבנים לפי סלקטור היא
+   * מה שמעמיד את המצב האמיתי.
+   */
+  function fakeLayout(container: string, popover: string): () => void {
+    const rects: Record<string, DOMRect> = {
+      [container]: { ...ANCHOR, width: 60, height: 24, x: ANCHOR.left, y: ANCHOR.top } as DOMRect,
+      [popover]: { top: 0, bottom: 0, left: 0, right: 0, x: 0, y: 0, ...SIZE } as DOMRect,
+    };
+    const originalRect = Element.prototype.getBoundingClientRect;
+    Element.prototype.getBoundingClientRect = function (this: Element): DOMRect {
+      for (const [selector, rect] of Object.entries(rects)) {
+        if (this.matches(selector)) return rect;
+      }
+      return originalRect.call(this);
+    };
+
+    const window_ = { width: window.innerWidth, height: window.innerHeight };
+    const resize = (width: number, height: number): void => {
+      Object.defineProperty(window, 'innerWidth', { value: width, configurable: true });
+      Object.defineProperty(window, 'innerHeight', { value: height, configurable: true });
+    };
+    resize(VIEWPORT.width, VIEWPORT.height);
+
+    // האפליקציה רצה ב-`<html dir="rtl">` (index.html), ובלי זה ההצמדה כאן
+    // הייתה נמדדת לקצה השמאלי — כלומר בדיקה שמאשרת את הכיוון ההפוך.
+    const dir = document.documentElement.getAttribute('dir');
+    document.documentElement.setAttribute('dir', 'rtl');
+
+    return () => {
+      Element.prototype.getBoundingClientRect = originalRect;
+      resize(window_.width, window_.height);
+      if (dir === null) document.documentElement.removeAttribute('dir');
+      else document.documentElement.setAttribute('dir', dir);
+    };
+  }
+
+  for (const popover of POPOVERS) {
+    it(`${popover.name}: נפתח בקואורדינטות חלון, ולא בתוך המכל שחותך`, async () => {
+      const restore = fakeLayout(popover.container, popover.popover);
+      try {
+        const harness = mountUi(popover.component, { props: popover.props });
+        await harness.wrapper.find(popover.opener).trigger('click');
+        await settle();
+
+        const element = harness.wrapper.find(popover.popover).element as HTMLElement;
+        expect(element.style.position).toBe('fixed');
+        // אין מקום מתחת לכפתור בחלון בגובה 500, ולכן הפופאובר מתהפך למעלה
+        // ונוגע בקצה העליון של הכפתור.
+        expect(element.style.top).toBe(`${ANCHOR.top - POPOVER_GAP_PX - SIZE.height}px`);
+        // RTL: הקצה הימני של הפופאובר מיושר לקצה הימני של הכפתור.
+        expect(element.style.left).toBe(`${ANCHOR.right - SIZE.width}px`);
+      } finally {
+        restore();
+      }
+    });
+  }
 });
