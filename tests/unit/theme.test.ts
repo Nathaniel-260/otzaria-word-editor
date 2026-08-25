@@ -61,6 +61,44 @@ describe('applyTheme', () => {
     expect(cssVar('--line-height')).toBe('1.7');
   });
 
+  /**
+   * הרגרסיה שהתיקון הזה נולד ממנה: הרצועה נצבעה ב---font-main, ולכן כפתורי
+   * הממשק רונדרו בגופן הקריאה שהמשתמש בחר באוצריא — גופן סריפי, בלי hinting,
+   * בגודל 11px. התוצאה הייתה טקסט מטושטש. applyTheme מותר לו לגעת בגופן
+   * המסמך בלבד.
+   */
+  it('אינו נוגע בגופן הממשק — --font-ui אינו זז עם בחירת המשתמש', () => {
+    applyTheme(FULL);
+
+    expect(cssVar('--font-ui')).toBe('');
+    expect(cssVar('--font-main')).toContain('FrankRuhlCLM');
+  });
+
+  /**
+   * גודל שברירי פירושו ppem שברירי, כלומר גליף שנמרח בין שני פיקסלים. 22 × 0.78
+   * הוא 17.16 שנחתך ל-16, ו-18 × 0.78 הוא 14.04 שמתעגל ל-14 — הערך השבור שנמדד
+   * ב-dist הארוז לפני התיקון.
+   */
+  it('גוזר גדלי ממשק בפיקסלים שלמים בלבד', () => {
+    applyTheme(FULL);
+    expect(cssVar('--font-size-ui')).toBe('16px');
+    // זוגי, לא רק שלם: מרכוז ב-flex של תיבה זוגית במיכל זוגי נוחת על פיקסל
+    // שלם, וערבוב הזוגיות הוא שגלגל חצי פיקסל במורד עץ המעטפת.
+    expect(cssVar('--line-height-ui')).toBe('28px'); // 16 × 1.7 = 27.2
+
+    applyTheme({ ...FULL, typography: { ...FULL.typography, fontSize: 18, lineHeight: 1.5 } });
+    expect(cssVar('--font-size-ui')).toBe('14px'); // ולא 14.04
+    expect(cssVar('--line-height-ui')).toBe('22px'); // 14 × 1.5 = 21, מעוגל לזוגי
+  });
+
+  it('מצמיד את גודל הממשק לתחום 12..16 גם בקצוות', () => {
+    applyTheme({ ...FULL, typography: { ...FULL.typography, fontSize: 8 } });
+    expect(cssVar('--font-size-ui')).toBe('12px');
+
+    applyTheme({ ...FULL, typography: { ...FULL.typography, fontSize: 40 } });
+    expect(cssVar('--font-size-ui')).toBe('16px');
+  });
+
   it('בחירת המשתמש קודמת לגופן הארוז, והארוז קודם ל-fallback', () => {
     // הסדר הוא ההתנהגות: אם 'Assistant' יעלה לפני בחירת המשתמש, הבחירה שלו
     // בהגדרות אוצריא תפסיק להשפיע על הממשק. 'David' נשאר אחרון כ-fallback

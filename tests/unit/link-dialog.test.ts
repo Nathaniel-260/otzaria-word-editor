@@ -18,6 +18,7 @@ function setup(over: Partial<LinkDialogDeps> = {}) {
   const runLink = vi.fn();
   const reports: Array<{ outcome: CommandOutcome; id: string }> = [];
   const deps: LinkDialogDeps = {
+    canOpen: () => true,
     readSelection: async () => snapshot(),
     runLink,
     report: (outcome, id) => reports.push({ outcome, id }),
@@ -117,6 +118,16 @@ describe('createLinkDialog', () => {
 
     expect(dialog.isOpen.value).toBe(false);
     expect(runLink).not.toHaveBeenCalled();
+  });
+
+  it('בלי מסמך פתוח — אין דיאלוג ריק, יש הודעה', async () => {
+    const { dialog, reports } = setup({ canOpen: () => false });
+
+    await dialog.open();
+
+    expect(dialog.isOpen.value).toBe(false);
+    expect(reports).toHaveLength(1);
+    expect(reports[0]!.outcome.ok).toBe(false);
   });
 
   it('פתיחה חוזרת מצלמת מחדש', async () => {

@@ -25,6 +25,7 @@ export interface ModifierEventLike {
   location?: number;
   ctrlKey: boolean;
   metaKey: boolean;
+  altKey?: boolean;
 }
 
 /** `DOM_KEY_LOCATION_LEFT` / `_RIGHT`, כשאין `code`. */
@@ -48,6 +49,11 @@ export interface DirectionDetector {
   keydown: (event: ModifierEventLike) => void;
   /** הכיוון שיש להחיל, או `null`. */
   keyup: (event: ModifierEventLike) => ParagraphDirection | null;
+  /**
+   * מבטל חימוש שנתקע. נדרש כשהחלון מאבד פוקוס: ה-`keyup` מגיע לחלון האחר,
+   * ובלי האיפוס הכיוון היה מתהפך כשהמשתמש חוזר ומשחרר.
+   */
+  reset: () => void;
 }
 
 export function createDirectionDetector(): DirectionDetector {
@@ -58,7 +64,12 @@ export function createDirectionDetector(): DirectionDetector {
     keydown(event) {
       const side = shiftSide(event);
       if (side) {
-        armed = event.ctrlKey || event.metaKey ? side : null;
+        // החימוש אינו דורש ש-`Ctrl` כבר יהיה לחוץ: סדר הלחיצה אינו משהו
+        // שמשתמש חושב עליו, ומי שלחץ Shift ואז Ctrl התכוון לאותו דבר בדיוק.
+        // מה ש**כן** נבדק הוא ה-`keyup`, שם `Ctrl` חייב עדיין להיות לחוץ.
+        //
+        // `Alt` פוסל: AltGr מדווח `ctrl+alt`, והוא שכבת תווים ולא צירוף שלנו.
+        armed = event.altKey === true ? null : side;
         return;
       }
 
@@ -74,8 +85,13 @@ export function createDirectionDetector(): DirectionDetector {
       if (!side || shiftSide(event) !== side) return null;
       // `Ctrl` שוחרר לפני ה-`Shift` — המשתמש התחרט, או שזה היה צירוף אחר.
       if (!event.ctrlKey && !event.metaKey) return null;
+      if (event.altKey === true) return null;
 
       return side === 'ShiftRight' ? 'rtl' : 'ltr';
+    },
+
+    reset() {
+      armed = null;
     },
   };
 }
@@ -110,8 +126,13 @@ export function createDirectionShortcut(deps: DirectionShortcutDeps): { dispose:
     deps.runCommand(DIRECTION_COMMANDS[direction]);
   };
 
+  // אובדן פוקוס באמצע: ה-`keyup` יגיע לחלון האחר, והחימוש היה נשאר תלוי
+  // באוויר עד שהמשתמש חוזר ומשחרר Shift — ואז הכיוון מתהפך בלי שביקש.
+  const onBlur = () => detector.reset();
+
   target?.addEventListener('keydown', onKeyDown);
   target?.addEventListener('keyup', onKeyUp);
+  target?.addEventListener('blur', onBlur);
 
   let disposed = false;
   return {
@@ -120,6 +141,7 @@ export function createDirectionShortcut(deps: DirectionShortcutDeps): { dispose:
       disposed = true;
       target?.removeEventListener('keydown', onKeyDown);
       target?.removeEventListener('keyup', onKeyUp);
+      target?.removeEventListener('blur', onBlur);
     },
   };
 }

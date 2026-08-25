@@ -17,6 +17,8 @@ import { emptySelectionSnapshot, type DocSelectionSnapshot } from '../engine/doc
 import { LINK_HREF_HINT, linkPayload } from '../engine/payloads';
 
 export interface LinkDialogDeps {
+  /** האם יש מסמך שאפשר לקשר בו. בלעדיו הדיאלוג לא נפתח כלל. */
+  canOpen: () => boolean;
   /** קורא את הבחירה הנוכחית מהמסמך. */
   readSelection: () => Promise<DocSelectionSnapshot>;
   /** מריץ את פקודת `link` עם ה-payload. */
@@ -42,6 +44,13 @@ export function createLinkDialog(deps: LinkDialogDeps): LinkDialogState {
   const selection = shallowRef<DocSelectionSnapshot>(emptySelectionSnapshot());
 
   async function open(): Promise<void> {
+    // בלי מסמך הדיאלוג היה נפתח ריק, והאישור היה נכשל סגור אחרי שהמשתמש כבר
+    // הקליד כתובת. עדיף לומר זאת מראש.
+    if (!deps.canOpen()) {
+      deps.report({ ok: false, message: 'אין מסמך פתוח להוספת קישור', reason: 'not-ready' }, 'link');
+      return;
+    }
+
     selection.value = await deps.readSelection();
     isOpen.value = true;
   }
