@@ -53,23 +53,20 @@ describe('applyTheme', () => {
     expect(cssVar('--color-outline')).toBe('#938f99');
   });
 
-  it('מגדיר גופן, גודל ורווח שורות מהטיפוגרפיה', () => {
+  it('מגדיר גודל ורווח שורות מהטיפוגרפיה', () => {
     applyTheme(FULL);
 
-    expect(cssVar('--font-main')).toContain('FrankRuhlCLM');
     expect(cssVar('--font-size-base')).toBe('22px');
     expect(cssVar('--line-height')).toBe('1.7');
   });
 
-  it('בחירת המשתמש קודמת לגופן הארוז, והארוז קודם ל-fallback', () => {
-    // הסדר הוא ההתנהגות: אם 'Assistant' יעלה לפני בחירת המשתמש, הבחירה שלו
-    // בהגדרות אוצריא תפסיק להשפיע על הממשק. 'David' נשאר אחרון כ-fallback
-    // למתווים שאין גם בגופן הארוז.
+  it('גופן הקריאה של אוצריא אינו נדחף אל גופן הממשק', () => {
+    // הרגרסיה: FrankRuhlCLM הוא גופן ספרים מצויר ל-25px, ו-`--font-main`
+    // מוחל על כפתורי הרצועה בני 12px — שם התגיות שלו נמרחות.
+    // tokens.css כבר בוחר Assistant, ו-applyTheme אינו רשאי לדרוס אותו.
     applyTheme(FULL);
 
-    const chain = cssVar('--font-main');
-    expect(chain.indexOf('FrankRuhlCLM')).toBeLessThan(chain.indexOf('Assistant'));
-    expect(chain.indexOf('Assistant')).toBeLessThan(chain.indexOf('David'));
+    expect(cssVar('--font-main')).toBe('');
   });
 
   it('גוזר את גוני ה-subtle מהצבעים', () => {

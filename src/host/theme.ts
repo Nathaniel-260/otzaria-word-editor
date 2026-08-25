@@ -113,17 +113,10 @@ export function applyTheme(theme: ThemePayload): void {
     if (filledHover) root.style.setProperty('--color-primary-filled-hover', filledHover);
   }
 
-  // הגופנים של אוצריא מוזרקים כ-@font-face לפני plugin.boot — אין לארוז אותם.
-  // מה שכן ארוז הוא 'Assistant' (styles/fonts.ts), והוא יושב **אחרי** בחירת
-  // המשתמש: הבחירה שלו קודמת. יש בו עברית, ולכן משם והלאה השרשרת כבר לא
-  // תלויה במערכת; 'David' ו-serif נשארים בסוף בשביל מה שאין בו.
+  // גופן הקריאה של אוצריא (`typography.fontFamily`) אינו מוחל על הממשק: הוא
+  // גופן ספרים מצויר ל-25px, ובכפתור בן 12px התגיות שלו נמרחות.
+  // `--font-main` נשאר Assistant מ-tokens.css — sans שנשאר חד בקטן.
   const typography = theme.typography;
-  if (typography?.fontFamily) {
-    root.style.setProperty(
-      '--font-main',
-      `'${typography.fontFamily}', 'Assistant', 'David', serif`,
-    );
-  }
   if (typeof typography?.fontSize === 'number' && typography.fontSize > 0) {
     root.style.setProperty('--font-size-base', `${typography.fontSize}px`);
   }
