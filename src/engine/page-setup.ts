@@ -47,6 +47,96 @@
  * המנוע מחזיר `success: false, failure.code: 'NO_OP'` כשהערכים המבוקשים כבר
  * מוגדרים. מבחינת המשתמש זו הצלחה — הוא בחר „רגיל” והשוליים רגילים. הודעת
  * שגיאה במצב הזה הייתה גורמת לו לחשוב שהפקד שבור.
+ *
+ * ## גל 10 — פריסת עמוד מתקדמת, ומה נמדד לפניה
+ *
+ * Chrome headless על ה-dist הארוז, חמישה סבבים, וכל סבב פורק את ה-zip של
+ * `export.toDocx` וקורא את ה-`sectPr` עצמו. הממצא הראשון הפוך מכל תשעת הגלים
+ * שקדמו: **`doc.sections` הוא ה-namespace שכן מאמת קלט.** ערך שאינו ב-union
+ * **נזרק** ואינו נבלע:
+ *
+ *     setLineNumbering.restart: 'zigzag'  → „must be one of: continuous, newPage, newSection.”
+ *     setLineNumbering.countBy: 0 / -3 / 2.5 → „must be a positive integer.”
+ *     setVerticalAlign.value: 'zigzag'    → „must be one of: top, center, bottom, both.”
+ *     setBreakType.breakType: 'nextColumn'→ „must be one of: continuous, nextPage, evenPage, oddPage.”
+ *     setPageNumbering.format: 'hebrew1'  → „must be one of: decimal, lowerLetter, upperLetter,
+ *                                            lowerRoman, upperRoman, numberInDash.”
+ *
+ * ולכן `applyToSections` שעוטף כל קריאה ב-try אינו זהירות יתר כאן אלא המסלול
+ * הרגיל: קלט פסול הוא חריגה, לא קבלה.
+ *
+ * **מספור עמודים עברי אינו אפשרי.** זו ההפך מ-`footnotes.configure`, שבו
+ * `numFmt` נכתב גולמית ו-`'hebrew1'` היה מייצר OOXML תקני (ולא נשלח רק מפני
+ * שהערך אינו בטיפוסים). כאן ה-union נאכף בזמן ריצה, ואין דרך ציבורית לכתוב
+ * `<w:pgNumType w:fmt="hebrew1"/>`. הממצא מדווח ב-docs/engine-gaps.md.
+ *
+ * ### מה שנכתב, ונמדד ב-docx
+ *
+ *     <w:type w:val="oddPage"/>
+ *     <w:pgBorders w:display="allPages" w:offsetFrom="text" w:zOrder="front">
+ *       <w:top w:val="double" w:sz="12" w:space="24" w:color="FF0000"/>…</w:pgBorders>
+ *     <w:lnNumType w:countBy="5" w:start="1" w:distance="360" w:restart="newPage"/>
+ *     <w:pgNumType w:start="3" w:fmt="upperRoman"/>
+ *     <w:vAlign w:val="center"/>
+ *     <w:pgMar … w:header="1008" w:footer="864"/>
+ *
+ * הכול קנוני, בסדר האלמנטים ש-`CT_SectPr` דורש, ובאותה יחידה: **אינצ'ים**
+ * ב-API, twips ב-XML (`0.7` → `1008`, `0.25` → `360`) — אותה המרה בדיוק
+ * שמתועדת למעלה על השוליים.
+ *
+ * ### ומה שכן נבלע — כלומר איפה הוולידציה שלנו
+ *
+ * האכיפה עוצרת ב-enum. מה שעבר אותו נכתב כמות שהוא:
+ *
+ * - `setPageBorders.borders.*.style` הוא `string` חופשי בחוזה, ו-`'zigzag'`
+ *   נכתב `<w:top w:val="zigzag"/>`; `style: ''` מייצר `<w:top w:sz="8"/>` —
+ *   כלומר גבול **בלי `w:val`**, ו-`w:val` הוא תכונה נדרשת ב-`CT_Border`.
+ * - `size: 999` → `w:sz="999"`, `size: 2.5` → `w:sz="2.5"` (ערך שאינו שלם
+ *   בתכונה שהיא `ST_EighthPointMeasure`), `space: 999` → `w:space="999"`
+ *   בעוד שהתקרה של Word היא 31.
+ * - `color: '#FF0000'` → `w:color="#FF0000"`, ו-`'zigzag'` נכתב אף הוא —
+ *   `ST_HexColor` הוא שש ספרות הקסה או `auto` בלבד.
+ * - `setHeaderFooterMargins.header: 99` → `w:header="142560"`, כלומר כותרת
+ *   במרחק 2.5 מטר מקצה הדף.
+ * - `setLineNumbering.distance: 999` → `w:distance="1438560"`, ו-`countBy`
+ *   של מיליארד נכתב כמות שהוא.
+ * - `setPageNumbering.chapterStyle` ו-`chapterSeparator` **נבלעים לגמרי**:
+ *   `{chapterStyle:1,chapterSeparator:'colon'}` החזיר `success: true` וכתב
+ *   `<w:pgNumType/>` ריק. אין להם פקד.
+ *
+ * מה ש**כן** מוברח: מחרוזת עם גרשיים בתוך `style` נכתבת `&quot;` ואינה
+ * מזריקה XML. כלומר הסיכון הוא ערך לא חוקי, לא הזרקה.
+ *
+ * ### ההפיכות נמדדה, ולא הונחה
+ *
+ * `setLineNumbering({enabled:false})` **מוריד את `<w:lnNumType>` כולו**,
+ * ו-`clearPageBorders` מוריד את `<w:pgBorders>` (וקריאה שנייה מוחזרת
+ * `NO_OP`). לעומתם `<w:pgNumType>` אינו ניתן להסרה: `setPageNumbering` דורש
+ * לפחות שדה אחד ואין לו `clear`, כלומר „המשך מהמקטע הקודם” של Word אינו
+ * ניתן להשגה מכאן. זה כתוב בדיאלוג עצמו, ולא נבלע.
+ *
+ * ### כל קריאה מחליפה את האלמנט כולו
+ *
+ * `setLineNumbering({enabled:true,countBy:1,distance:0})` השאיר
+ * `<w:lnNumType w:countBy="1" w:distance="0"/>` — `start` ו-`restart` ירדו.
+ * זו בדיוק הסיבה ש-`footnotes.configure` לא נשלח בגל 9. כאן הוא כן נשלח,
+ * מפני שכאן **יש קריאה**: `sections.list()` מחזיר `lineNumbering` מלא, ולכן
+ * הבחירה „רציף” משמרת את `countBy`/`start`/`distance` שהמשתמש קבע ב-Word
+ * במקום למחוק אותם.
+ *
+ * וההשלמה נקראת מאותו תצלום שהכתובת נלקחה ממנו — `sections.list()` אחד,
+ * בלי קריאה שנייה. פעולה שקוראת מצב ואז משנה אותו היא TOCTOU, וכאן החלון
+ * נסגר במבנה ולא בבדיקה נוספת. הנעילה שמונעת פעולה שנייה בזמן שהראשונה
+ * באוויר יושבת ב-LayoutTab.vue.
+ *
+ * ### `setBreakType` — לא נשלח
+ *
+ * הפעולה עובדת וכותבת `<w:type w:val="oddPage"/>` קנונית. מה שאין לה הוא
+ * פקד שאפשר להציג: כל פעולות המודול הזה חלות על **כל** המקטעים (ראו „על מה
+ * זה מוחל”), ובמסמך בעל מקטע יחיד — היחיד שהתוסף עצמו יודע לייצר — ה-`w:type`
+ * היחיד שנכתב מתאר איך **המסמך** מתחיל, כלומר אינו עושה דבר. במסמך מרובה
+ * מקטעים הוא הופך פקד של מקטע אחד לסריקה שמשכתבת את כל מעברי המקטע שהמשתמש
+ * קבע ב-Word. שתי ההתנהגויות שגויות, ולכן דווח ולא נשלח.
  */
 import type { SuperDoc } from 'superdoc';
 import type { CommandOutcome } from './command-adapter';
@@ -114,10 +204,28 @@ export const COLUMN_CHOICES: readonly { count: number; label: string; hint: stri
 /** 720 twips = חצי אינץ'. זה הרווח שהמסמך הריק נושא (`w:cols w:space="720"`) וזה שWord קובע ב-presets. */
 export const COLUMN_GAP_TWIPS = 720;
 
-/** מה שנקרא מ-`sections.list()`. `pageSetup` נדרש רק כדי לזהות מקטע שהוא לרוחב. */
+/**
+ * מה שנקרא מ-`sections.list()`.
+ *
+ * `pageSetup` נדרש כדי לזהות מקטע שהוא לרוחב, ו-`lineNumbering` כדי לשמר את
+ * מה שהמשתמש קבע ב-Word: כל קריאה ל-`setLineNumbering` מחליפה את
+ * `<w:lnNumType>` כולו (נמדד), ולכן בחירת „רציף” בלי הערכים הקיימים הייתה
+ * מוחקת `countBy` ו-`start` שאיש לא ביקש למחוק. שאר השדות נקראים לצורך
+ * הדיאלוגים בלבד — ראו `readPageLayoutState`.
+ */
 interface SectionItem {
   address?: unknown;
   pageSetup?: { width?: number; height?: number; orientation?: string };
+  lineNumbering?: {
+    enabled?: boolean;
+    countBy?: number;
+    start?: number;
+    distance?: number;
+    restart?: string;
+  };
+  headerFooterMargins?: { header?: number; footer?: number };
+  pageNumbering?: { start?: number; format?: string };
+  verticalAlign?: string;
 }
 
 export interface PageSetupDocumentApi {
@@ -143,7 +251,48 @@ export interface PageSetupDocumentApi {
       gap?: number;
       equalWidth?: boolean;
     }) => MaybePromise<DocReceipt>;
+    setLineNumbering?: (input: {
+      target: unknown;
+      enabled: boolean;
+      countBy?: number;
+      start?: number;
+      distance?: number;
+      restart?: LineNumberRestart;
+    }) => MaybePromise<DocReceipt>;
+    setVerticalAlign?: (input: { target: unknown; value: VerticalAlign }) => MaybePromise<DocReceipt>;
+    setHeaderFooterMargins?: (input: {
+      target: unknown;
+      header?: number;
+      footer?: number;
+    }) => MaybePromise<DocReceipt>;
+    setPageNumbering?: (input: {
+      target: unknown;
+      start?: number;
+      format?: PageNumberFormat;
+    }) => MaybePromise<DocReceipt>;
+    setPageBorders?: (input: {
+      target: unknown;
+      borders: PageBordersInput;
+    }) => MaybePromise<DocReceipt>;
+    clearPageBorders?: (input: { target: unknown }) => MaybePromise<DocReceipt>;
   };
+}
+
+/** צד אחד של `<w:pgBorders>`, בשמות של החוזה. `style` הוא `string` חופשי בו — ראו הערת הפתיחה. */
+export interface PageBorderSide {
+  style: string;
+  size: number;
+  space: number;
+  color: string;
+}
+
+export interface PageBordersInput {
+  display: 'allPages' | 'firstPage' | 'notFirstPage';
+  offsetFrom: 'page' | 'text';
+  top: PageBorderSide;
+  right: PageBorderSide;
+  bottom: PageBorderSide;
+  left: PageBorderSide;
 }
 
 /** מה שנדרש מ-SuperDoc: רק הפאסדה של המסמך. ראו document-defaults.ts. */
@@ -335,4 +484,479 @@ export function applyColumns(
         equalWidth: true,
       });
   });
+}
+
+/* ------------------------------------------------------------------ */
+/* מספרי שורות                                                        */
+/* ------------------------------------------------------------------ */
+
+/** `ST_LineNumberRestart` — שלושת האסימונים של Word, ואותם שלושה שה-union אוכף. */
+export type LineNumberRestart = 'continuous' | 'newPage' | 'newSection';
+
+export interface LineNumberChoice {
+  id: string;
+  label: string;
+  hint: string;
+  /** `null` = „ללא”, כלומר `enabled: false`. */
+  restart: LineNumberRestart | null;
+}
+
+/**
+ * ארבע האפשרויות שבתפריט „מספרי שורות” של Word העברי, באותו סדר.
+ *
+ * „אפשרויות מספור שורות” של Word אינו כאן: הוא פותח את דיאלוג „הגדרת עמוד”
+ * ומאפשר לקבוע `countBy`, `start` ו„מהטקסט”. שלושת אלה **נשמרים** כאן ואינם
+ * ניתנים לעריכה — ראו `preservedLineNumbering`. פקד שמאפשר לקבוע אותם היה
+ * טופס רביעי בלשונית, ומה שהוא נותן מעבר לזה הוא נישה; מה שהוא **לוקח** —
+ * מחיקה בשוגג של הגדרות שהגיעו מהמסמך — כבר קרה, וזה מה שנמנע כאן.
+ */
+export const LINE_NUMBER_CHOICES: readonly LineNumberChoice[] = [
+  { id: 'none', label: 'ללא', hint: 'בלי מספרי שורות', restart: null },
+  { id: 'continuous', label: 'רציף', hint: 'המספור נמשך לאורך כל המסמך', restart: 'continuous' },
+  { id: 'newPage', label: 'התחל מחדש בכל עמוד', hint: 'כל עמוד מתחיל מ-1', restart: 'newPage' },
+  { id: 'newSection', label: 'התחל מחדש בכל מקטע', hint: 'כל מקטע מתחיל מ-1', restart: 'newSection' },
+];
+
+/** התקרה של Word ל„ספור לפי”. מעליה המנוע כותב את הערך כמות שהוא (נמדד: מיליארד). */
+export const LINE_COUNT_BY_MAX = 100;
+
+/** התקרה של Word למספר התחלה, וגם ל„התחל ב” של מספור העמודים. */
+export const NUMBER_START_MAX = 32767;
+
+/** התקרה של Word למרחק מהטקסט ולמרחק הכותרת מקצה הדף: 22 אינץ' = 55.88 ס"מ. */
+export const DISTANCE_MAX_INCHES = 22;
+
+export const CM_PER_INCH = 2.54;
+
+export function inchesToCm(inches: number): number {
+  return inches * CM_PER_INCH;
+}
+
+export function cmToInches(cm: number): number {
+  return cm / CM_PER_INCH;
+}
+
+export function findLineNumberChoice(id: string): LineNumberChoice | undefined {
+  return LINE_NUMBER_CHOICES.find((choice) => choice.id === id);
+}
+
+/** מספר שלם בטווח, או `undefined` — כלומר השדה לא יישלח כלל. */
+function boundedInteger(raw: unknown, min: number, max: number): number | undefined {
+  return Number.isInteger(raw) && (raw as number) >= min && (raw as number) <= max
+    ? (raw as number)
+    : undefined;
+}
+
+/** מידה סופית אי-שלילית בטווח, או `undefined`. */
+function boundedMeasure(raw: unknown, max: number): number | undefined {
+  return typeof raw === 'number' && Number.isFinite(raw) && raw >= 0 && raw <= max
+    ? raw
+    : undefined;
+}
+
+/**
+ * הערכים שיישלחו חזרה למנוע יחד עם ה-`restart` החדש.
+ *
+ * מה שנקרא מהמסמך **עובר את אותה ולידציה** שערך שהמשתמש היה מקליד עובר, ולא
+ * מוחזר בעיוורון: מסמך שהגיע מכלי אחר עשוי לשאת `w:countBy="1000000000"`, ו-
+ * החזרה שלו הייתה הופכת אותנו לכותבי הערך הפסול. ערך שאינו קביל נופל לברירת
+ * המחדל של Word (`countBy: 1`, `start: 1`), ו„מהטקסט” שאינו קביל פשוט אינו
+ * נשלח — בהיעדרו Word מחשב את המרחק בעצמו, וזו ברירת המחדל שלו.
+ */
+function preservedLineNumbering(section: SectionItem): {
+  countBy: number;
+  start: number;
+  distance?: number;
+} {
+  const current = section.lineNumbering;
+  return {
+    countBy: boundedInteger(current?.countBy, 1, LINE_COUNT_BY_MAX) ?? 1,
+    start: boundedInteger(current?.start, 1, NUMBER_START_MAX) ?? 1,
+    distance: boundedMeasure(current?.distance, DISTANCE_MAX_INCHES),
+  };
+}
+
+/**
+ * „מספרי שורות” — מדליקה, מכבה או משנה את מדיניות האיפוס.
+ *
+ * הכיבוי מוריד את `<w:lnNumType>` כולו (נמדד), ולכן „ללא” הוא באמת ללא ולא
+ * „מספור שקוף”.
+ */
+export function applyLineNumbering(host: PageSetupTarget, choiceId: string): Promise<CommandOutcome> {
+  const choice = findLineNumberChoice(choiceId);
+  if (!choice) {
+    // באג בקוד שלנו, לא מצב של המסמך: הפקד לא היה צריך להציע את הערך הזה.
+    return Promise.resolve({
+      ok: false,
+      message: `שינוי מספרי השורות נכשל: אין אפשרות בשם ${choiceId}`,
+      reason: 'unknown-line-numbering',
+    });
+  }
+
+  const failedAction =
+    choice.restart === null
+      ? 'ביטול מספרי השורות נכשל'
+      : `שינוי מספרי השורות ל„${choice.label}” נכשל`;
+
+  return applyToSections(host, failedAction, (sections) => {
+    const setLineNumbering = sections.setLineNumbering;
+    if (!setLineNumbering) return null;
+    if (choice.restart === null) {
+      return (_section, target) => setLineNumbering({ target, enabled: false });
+    }
+    const restart = choice.restart;
+    return (section, target) =>
+      setLineNumbering({ target, enabled: true, restart, ...preservedLineNumbering(section) });
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/* גבולות עמוד                                                        */
+/* ------------------------------------------------------------------ */
+
+export interface PageBorderPreset {
+  id: string;
+  label: string;
+  hint: string;
+  /** `null` = „ללא גבול”, כלומר `clearPageBorders`. */
+  style: string | null;
+  /** `w:sz` — שמיניות נקודה. `4` = חצי נקודה, ברירת המחדל של Word. */
+  size: number;
+}
+
+/**
+ * חמישה סגנונות `ST_Border` שקיימים ב-Word, ועוד „ללא”.
+ *
+ * רשימה סגורה ולא בורר סגנונות חופשי, מפני ש-`style` הוא `string` בחוזה וכל
+ * מחרוזת נכתבת ל-`w:val` כמות שהיא (נמדד: `'zigzag'`, וגם `''` שמייצר גבול
+ * בלי `w:val` בכלל). מחוץ לרשימה הזאת אין מה שיעצור ערך שיפיל את הקובץ.
+ */
+export const PAGE_BORDER_PRESETS: readonly PageBorderPreset[] = [
+  { id: 'none', label: 'ללא גבול', hint: 'הסרת הגבול מהעמוד', style: null, size: 0 },
+  { id: 'single', label: 'קו יחיד', hint: 'חצי נקודה', style: 'single', size: 4 },
+  { id: 'thick', label: 'קו עבה', hint: 'שלוש נקודות', style: 'single', size: 24 },
+  { id: 'double', label: 'קו כפול', hint: 'שני קווים דקים', style: 'double', size: 6 },
+  { id: 'dashed', label: 'מקווקו', hint: 'קו מקווקו דק', style: 'dashed', size: 4 },
+  { id: 'dotted', label: 'מנוקד', hint: 'קו מנוקד דק', style: 'dotted', size: 4 },
+];
+
+/** `w:space` — נקודות מקצה הדף. 24 היא ברירת המחדל של Word, והתקרה שלו היא 31. */
+export const PAGE_BORDER_SPACE_POINTS = 24;
+
+/** `w:color="auto"` — צבע הטקסט של הנושא, וזה מה ש-Word כותב בגבול ברירת המחדל. */
+export const PAGE_BORDER_COLOR = 'auto';
+
+export function findPageBorderPreset(id: string): PageBorderPreset | undefined {
+  return PAGE_BORDER_PRESETS.find((preset) => preset.id === id);
+}
+
+/**
+ * „גבולות עמוד” — מקיפה את הדף בארבעה צדדים, או מסירה את הגבול.
+ *
+ * ארבעת הצדדים ולא צד אחד: „גבולות עמוד” ב-Word הוא מסגרת, והפקד הזה הוא
+ * גלריית מסגרות. `offsetFrom: 'page'` הוא ברירת המחדל של Word — המסגרת נמדדת
+ * מקצה הנייר ולא מהטקסט, וזה מה שמייצר את המסגרת שרואים בשער של ספר.
+ */
+export function applyPageBorders(host: PageSetupTarget, presetId: string): Promise<CommandOutcome> {
+  const preset = findPageBorderPreset(presetId);
+  if (!preset) {
+    return Promise.resolve({
+      ok: false,
+      message: `שינוי גבול העמוד נכשל: אין סגנון בשם ${presetId}`,
+      reason: 'unknown-page-border',
+    });
+  }
+
+  if (preset.style === null) {
+    return applyToSections(host, 'הסרת גבול העמוד נכשלה', (sections) => {
+      const clearPageBorders = sections.clearPageBorders;
+      if (!clearPageBorders) return null;
+      return (_section, target) => clearPageBorders({ target });
+    });
+  }
+
+  const side: PageBorderSide = {
+    style: preset.style,
+    size: preset.size,
+    space: PAGE_BORDER_SPACE_POINTS,
+    color: PAGE_BORDER_COLOR,
+  };
+
+  return applyToSections(host, `הוספת גבול העמוד „${preset.label}” נכשלה`, (sections) => {
+    const setPageBorders = sections.setPageBorders;
+    if (!setPageBorders) return null;
+    return (_section, target) =>
+      setPageBorders({
+        target,
+        borders: {
+          display: 'allPages',
+          offsetFrom: 'page',
+          top: side,
+          right: side,
+          bottom: side,
+          left: side,
+        },
+      });
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/* יישור אנכי                                                          */
+/* ------------------------------------------------------------------ */
+
+/** `ST_VerticalJc`. ארבעת האסימונים, וה-union אוכף אותם בזמן ריצה. */
+export type VerticalAlign = 'top' | 'center' | 'both' | 'bottom';
+
+export const VERTICAL_ALIGNS: readonly { id: VerticalAlign; label: string; hint: string }[] = [
+  { id: 'top', label: 'למעלה', hint: 'הטקסט מתחיל בראש העמוד' },
+  { id: 'center', label: 'מרכז', hint: 'הטקסט ממורכז בין הכותרות' },
+  { id: 'both', label: 'מיושר', hint: 'הפסקאות נפרשות על גובה העמוד' },
+  { id: 'bottom', label: 'למטה', hint: 'הטקסט צמוד לתחתית העמוד' },
+];
+
+export function findVerticalAlign(id: string): { id: VerticalAlign; label: string } | undefined {
+  return VERTICAL_ALIGNS.find((item) => item.id === id);
+}
+
+/**
+ * „יישור אנכי” — איפה יושב הטקסט בגובה העמוד.
+ *
+ * זה הפקד ששער של ספר תורני נשען עליו: „מרכז” על מקטע בעל עמוד אחד הוא בדיוק
+ * הדרך שבה Word ממרכז דף שער.
+ */
+export function applyVerticalAlign(host: PageSetupTarget, value: string): Promise<CommandOutcome> {
+  const choice = findVerticalAlign(value);
+  if (!choice) {
+    return Promise.resolve({
+      ok: false,
+      message: `שינוי היישור האנכי נכשל: אין יישור בשם ${value}`,
+      reason: 'unknown-vertical-align',
+    });
+  }
+
+  return applyToSections(host, `שינוי היישור האנכי ל„${choice.label}” נכשל`, (sections) => {
+    const setVerticalAlign = sections.setVerticalAlign;
+    if (!setVerticalAlign) return null;
+    return (_section, target) => setVerticalAlign({ target, value: choice.id });
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/* מספור עמודים                                                        */
+/* ------------------------------------------------------------------ */
+
+export type PageNumberFormat =
+  | 'decimal'
+  | 'lowerLetter'
+  | 'upperLetter'
+  | 'lowerRoman'
+  | 'upperRoman'
+  | 'numberInDash';
+
+/**
+ * ששת הפורמטים שה-union מתיר, וכולם אסימוני `ST_NumberFormat` תקניים.
+ *
+ * **אין כאן מספור עברי.** `format: 'hebrew1'` — המספור שספר תורני רוצה —
+ * נזרק בזמן ריצה עם רשימת ה-union, ואין דרך ציבורית אחרת לכתוב את התכונה.
+ * זו הבחנה מול הערות השוליים, שבהן אותו ערך דווקא מגיע ל-XML; ההנמקה בהערת
+ * הפתיחה ובמסמך הפערים.
+ */
+export const PAGE_NUMBER_FORMATS: readonly { id: PageNumberFormat; label: string }[] = [
+  { id: 'decimal', label: '1, 2, 3' },
+  { id: 'upperLetter', label: 'A, B, C' },
+  { id: 'lowerLetter', label: 'a, b, c' },
+  { id: 'upperRoman', label: 'I, II, III' },
+  { id: 'lowerRoman', label: 'i, ii, iii' },
+  { id: 'numberInDash', label: '- 1 -, - 2 -, - 3 -' },
+];
+
+export const PAGE_NUMBER_START_HINT = `מספר ההתחלה חייב להיות מספר שלם בין 1 ל-${NUMBER_START_MAX}`;
+
+export function isPageNumberFormat(value: unknown): value is PageNumberFormat {
+  return PAGE_NUMBER_FORMATS.some((item) => item.id === value);
+}
+
+/**
+ * מספר ההתחלה כפי שיישלח, או `null` כשהוא פסול.
+ *
+ * `0` פסול כאן מפני שהמנוע דוחה אותו („must be a positive integer”), ולא
+ * מפני שהחלטנו כך — ומספר שאינו שלם, שלילי או מעל התקרה של Word נדחה אצלנו
+ * לפני שהוא מגיע לשם, כדי שההודעה תהיה בעברית ותאמר מה הטווח.
+ */
+export function normalizePageNumberStart(raw: unknown): number | null {
+  // ריק אינו מספר, ו-`Number('')` הוא `0`. כאן זה נדחה גם בלי הבדיקה
+  // המקדימה (0 אינו בטווח), והבדיקה קיימת כדי שהכוונה תהיה כתובה.
+  if (typeof raw === 'string' && raw.trim() === '') return null;
+  const value = typeof raw === 'string' ? Number(raw.trim()) : raw;
+  return boundedInteger(value, 1, NUMBER_START_MAX) ?? null;
+}
+
+export interface PageNumberingSettings {
+  format: PageNumberFormat;
+  /** `null` = לא לגעת במספר ההתחלה. */
+  start: number | null;
+}
+
+/**
+ * „עיצוב מספרי עמודים” — הפורמט, ואם התבקש גם המספר שממנו מתחילים.
+ *
+ * „המשך מהמקטע הקודם” של Word אינו כאן, ולא מפני ששכחנו: `setPageNumbering`
+ * דורש לפחות שדה אחד ואין לו פעולת ניקוי, ולכן אין דרך למחוק `w:start` שכבר
+ * נכתב. הדיאלוג אומר את זה למשתמש לפני שהוא מאשר.
+ */
+export function applyPageNumbering(
+  host: PageSetupTarget,
+  settings: PageNumberingSettings,
+): Promise<CommandOutcome> {
+  const failedAction = 'שינוי מספור העמודים נכשל';
+
+  if (!isPageNumberFormat(settings?.format)) {
+    return Promise.resolve({
+      ok: false,
+      message: `${failedAction}: אין פורמט מספור בשם ${settings?.format}`,
+      reason: 'unknown-page-number-format',
+    });
+  }
+
+  // `null` הוא „אל תיגע”, ולכן הוא אינו נבדק. כל ערך אחר חייב לעבור.
+  if (settings.start !== null && normalizePageNumberStart(settings.start) === null) {
+    return Promise.resolve({
+      ok: false,
+      message: `${failedAction}: ${PAGE_NUMBER_START_HINT}`,
+      reason: 'invalid-page-number-start',
+    });
+  }
+
+  const { format, start } = settings;
+  return applyToSections(host, failedAction, (sections) => {
+    const setPageNumbering = sections.setPageNumbering;
+    if (!setPageNumbering) return null;
+    return (_section, target) =>
+      setPageNumbering(start === null ? { target, format } : { target, format, start });
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/* מרחק הכותרת מקצה הדף                                                */
+/* ------------------------------------------------------------------ */
+
+export const HEADER_DISTANCE_MAX_CM = Math.round(inchesToCm(DISTANCE_MAX_INCHES) * 100) / 100;
+
+export const HEADER_DISTANCE_HINT = `המרחק חייב להיות מספר בין 0 ל-${HEADER_DISTANCE_MAX_CM} ס"מ`;
+
+/** ברירת המחדל של Word בעברית: 1.25 ס"מ, שהם 720 twips בדיוק כמו במסמך הריק. */
+export const HEADER_DISTANCE_DEFAULT_CM = 1.25;
+
+/**
+ * המרחק כפי שיישלח (באינצ'ים), או `null` כשהוא פסול.
+ *
+ * הקלט בסנטימטרים מפני שזו היחידה שהמשתמש העברי מקליד, וההמרה נעשית כאן ולא
+ * בממשק: המנוע בולע `header: 99` וכותב `w:header="142560"` — כותרת במרחק
+ * 2.5 מטר מקצה הדף, עם `success: true`. התקרה כאן היא זו של Word.
+ */
+export function normalizeHeaderDistanceCm(raw: unknown): number | null {
+  // `Number('')` הוא `0`, ולכן שדה שרוקן היה נשלח כ„אפס” — כלומר כותרת
+  // שנדחפת לקצה הדף במסלול שהמשתמש קורא לו „לא נגעתי”. ריק אינו מידה.
+  if (typeof raw === 'string' && raw.trim() === '') return null;
+  const cm = typeof raw === 'string' ? Number(raw.trim().replace(',', '.')) : raw;
+  if (typeof cm !== 'number' || !Number.isFinite(cm) || cm < 0 || cm > HEADER_DISTANCE_MAX_CM) {
+    return null;
+  }
+  return cmToInches(cm);
+}
+
+export interface HeaderDistanceSettings {
+  /**
+   * סנטימטרים, כפי שהוקלדו — **גם כמחרוזת, ובכוונה**.
+   *
+   * `normalizeHeaderDistanceCm` מקבל מחרוזת עם רווחים ועם פסיק עשרוני, ולכן
+   * הטופס יכול לאשר קלט ש-`Number()` יהפוך ל-`NaN`. דיאלוג שהיה ממיר בעצמו
+   * לפני השליחה היה שולח `NaN` על ערך שהוא עצמו סימן כתקין — כפתור פעיל
+   * שמסתיים בהודעת שגיאה. הטיפוס מתיר את הטקסט הגולמי כדי שהפונקציה שהכריעה
+   * בטופס תהיה גם הפונקציה שממירה כאן, ולא שתי נוסחאות לאותה שאלה.
+   */
+  headerCm: number | string;
+  footerCm: number | string;
+}
+
+/** „מרחק מקצה הדף” — הכותרת העליונה והתחתונה, בדיאלוג „הגדרת עמוד → פריסה”. */
+export function applyHeaderDistance(
+  host: PageSetupTarget,
+  settings: HeaderDistanceSettings,
+): Promise<CommandOutcome> {
+  const failedAction = 'שינוי מרחק הכותרת מקצה הדף נכשל';
+
+  const header = normalizeHeaderDistanceCm(settings?.headerCm);
+  const footer = normalizeHeaderDistanceCm(settings?.footerCm);
+  if (header === null || footer === null) {
+    return Promise.resolve({
+      ok: false,
+      message: `${failedAction}: ${HEADER_DISTANCE_HINT}`,
+      reason: 'invalid-header-distance',
+    });
+  }
+
+  return applyToSections(host, failedAction, (sections) => {
+    const setHeaderFooterMargins = sections.setHeaderFooterMargins;
+    if (!setHeaderFooterMargins) return null;
+    return (_section, target) => setHeaderFooterMargins({ target, header, footer });
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/* קריאת המצב, בשביל הדיאלוגים                                        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * מה שהדיאלוגים נפתחים עליו.
+ *
+ * **מהמקטע הראשון**, מפני שזה מה ש„החל על כל המסמך” אומר: הפעולות כאן חלות
+ * על כל המקטעים, ולכן הערך שיוצג הוא הערך שיידרס. במסמך רגיל יש מקטע אחד.
+ * כל שדה עשוי להיות `null` — מסמך שאין בו `w:pgNumType` הוא המצב הרגיל,
+ * ולא תקלה.
+ */
+export interface PageLayoutState {
+  headerDistanceCm: { header: number; footer: number } | null;
+  pageNumberFormat: PageNumberFormat | null;
+  pageNumberStart: number | null;
+}
+
+export function emptyPageLayoutState(): PageLayoutState {
+  return { headerDistanceCm: null, pageNumberFormat: null, pageNumberStart: null };
+}
+
+/**
+ * קוראת את מצב המקטע הראשון. לעולם אינה זורקת: כשל של קריאה מחזיר „אין”,
+ * כלומר הדיאלוג ייפתח על ברירות המחדל של Word — ולא ימציא ערכים.
+ */
+export async function readPageLayoutState(host: PageSetupTarget): Promise<PageLayoutState> {
+  const list = (host as PageSetupHost | null | undefined)?.activeEditor?.doc?.sections?.list;
+  if (typeof list !== 'function') return emptyPageLayoutState();
+
+  let first: SectionItem | undefined;
+  try {
+    first = (await list())?.items?.[0];
+  } catch {
+    return emptyPageLayoutState();
+  }
+  if (!first) return emptyPageLayoutState();
+
+  const header = boundedMeasure(first.headerFooterMargins?.header, DISTANCE_MAX_INCHES);
+  const footer = boundedMeasure(first.headerFooterMargins?.footer, DISTANCE_MAX_INCHES);
+  const start = boundedInteger(first.pageNumbering?.start, 1, NUMBER_START_MAX);
+
+  return {
+    // שני הערכים יחד או אף אחד: הדיאלוג מציג שתי שורות, ואי אפשר להציג אחת
+    // מהמסמך ואחת מברירת מחדל בלי לומר איזו היא איזו.
+    headerDistanceCm:
+      header === undefined || footer === undefined
+        ? null
+        : { header: inchesToCm(header), footer: inchesToCm(footer) },
+    // פורמט שאינו ב-union אינו מוצג: הוא היה נבחר בטופס ונשלח בחזרה, ואז
+    // נזרק על ידי המנוע — כלומר דיאלוג שאי אפשר לאשר.
+    pageNumberFormat: isPageNumberFormat(first.pageNumbering?.format)
+      ? first.pageNumbering.format
+      : null,
+    pageNumberStart: start ?? null,
+  };
 }

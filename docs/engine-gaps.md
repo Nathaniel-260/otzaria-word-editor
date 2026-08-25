@@ -215,6 +215,87 @@ Word ובדיוק המספור שספר תורני רוצה. `'hebrew1'` אינ�
 `CAPABILITY_UNAVAILABLE` („section-scoped note configuration is not
 supported by v2 yet”).
 
+## `doc.sections` — ה-namespace היחיד שכן מאמת קלט
+
+נמדד בגל 10 (פריסת עמוד מתקדמת), Chrome headless על ה-dist הארוז, כולל פירוק
+ה-zip של `export.toDocx`. זו ההפך מכל תשעת הגלים שקדמו: ערך שאינו ב-union
+**נזרק** בזמן ריצה ואינו נבלע.
+
+    setLineNumbering.restart: 'zigzag'  → „must be one of: continuous, newPage, newSection.”
+    setLineNumbering.countBy: 0/-3/2.5  → „must be a positive integer.”
+    setLineNumbering.enabled חסר        → „must be a boolean.”
+    setVerticalAlign.value: 'zigzag'    → „must be one of: top, center, bottom, both.”
+    setBreakType.breakType:'nextColumn' → „must be one of: continuous, nextPage, evenPage, oddPage.”
+    setPageNumbering.format: 'hebrew1'  → „must be one of: decimal, lowerLetter, upperLetter,
+                                            lowerRoman, upperRoman, numberInDash.”
+    setPageBorders.borders.display      → „must be one of: allPages, firstPage, notFirstPage.”
+    sections.list limit: -3             → „limit must be a positive integer.”
+    target מומצא                        → קבלה `TARGET_NOT_FOUND` („Section 'section-99' was not found.”)
+
+וכל אסימון שכן ב-union **הוא אסימון Word תקני**: שלושת ערכי
+`ST_LineNumberRestart`, ארבעת ערכי `ST_VerticalJc`, ארבעת ערכי `ST_SectionMark`
+וששת ערכי `ST_NumberFormat` — אין כאן `eachSection` מול `eachSect`. זו
+הקבוצה הראשונה שאין בה אף אסימון פנימי.
+
+### מה שנכתב, ונמדד ב-docx
+
+    <w:type w:val="oddPage"/>
+    <w:pgBorders w:display="allPages" w:offsetFrom="text" w:zOrder="front">
+      <w:top w:val="double" w:sz="12" w:space="24" w:color="FF0000" w:shadow="0" w:frame="0"/>…
+    <w:lnNumType w:countBy="5" w:start="1" w:distance="360" w:restart="newPage"/>
+    <w:pgNumType w:start="3" w:fmt="upperRoman"/>
+    <w:vAlign w:val="center"/>
+    <w:pgMar … w:header="1008" w:footer="864"/>
+
+הכול קנוני ובסדר האלמנטים של `CT_SectPr`, ובאותה יחידה כמו השוליים:
+**אינצ'ים** ב-API, twips ב-XML. גרשיים בתוך `style` מוברחים ל-`&quot;` —
+אין הזרקת XML.
+
+### מספור עמודים עברי — **אינו אפשרי**, בניגוד להערות השוליים
+
+זה ההבדל המדויק מול `footnotes.configure`: שם `numFmt` נכתב גולמית ו-
+`'hebrew1'` היה מייצר `<w:numFmt w:val="hebrew1"/>` תקני (ולא נשלח רק מפני
+שהערך אינו בטיפוסים הציבוריים). כאן ה-union **נאכף בזמן ריצה**, ואין דרך
+ציבורית לכתוב `<w:pgNumType w:fmt="hebrew1"/>`. `SectionPageNumberingFormat`
+הוא שש אפשרויות בלבד, וכולן לטיניות.
+
+`readPageLayoutState` בכל זאת מסנן פורמט שאינו ב-union: מסמך שנוצר ב-Word
+עם מספור עברי **כן** מחזיר `format: 'hebrew1'` מ-`sections.list`, וטופס
+שהיה מציג אותו כערך נבחר היה נזרק באישור.
+
+### ההפיכות נמדדה
+
+`setLineNumbering({enabled:false})` מוריד את `<w:lnNumType>` כולו, ו-
+`clearPageBorders` מוריד את `<w:pgBorders>` (קריאה שנייה → `NO_OP`). לעומתם
+**`<w:pgNumType>` אינו ניתן להסרה**: `setPageNumbering` דורש לפחות שדה אחד
+ואין לו `clear`, כלומר „המשך מהמקטע הקודם” של Word אינו ניתן להשגה מהתוסף.
+זה כתוב בדיאלוג לפני האישור.
+
+### כל קריאה מחליפה את האלמנט כולו
+
+`setLineNumbering({enabled:true,countBy:1,distance:0})` אחרי קריאה מלאה
+השאיר `<w:lnNumType w:countBy="1" w:distance="0"/>` — `start` ו-`restart`
+ירדו. זו בדיוק הסיבה ש-`footnotes.configure` לא נשלח בגל 9, ומה שמבדיל כאן
+הוא ש**יש קריאה**: `sections.list` מחזיר `lineNumbering`, `pageNumbering`,
+`headerFooterMargins`, `verticalAlign` ו-`pageBorders` מלאים, ולכן הפקד משמר
+את `countBy`/`start`/`distance` שנקבעו ב-Word במקום למחוק אותם. ההשלמה
+נקראת מאותו `sections.list` שהכתובת נלקחה ממנו — ולכן אין חלון TOCTOU בין
+הקריאה למוטציה.
+
+### `setBreakType` — עובד, ולא נשלח
+
+כותב `<w:type w:val="oddPage"/>` קנונית ומשנה מקטע קיים (אין צורך ב-
+`create.sectionBreak`). מה שאין לו הוא פקד שאפשר להציג: פעולות המקטע חלות
+על **כל** המקטעים, ובמסמך בעל מקטע יחיד ה-`w:type` היחיד מתאר איך המסמך
+מתחיל — כלומר אינו עושה דבר; ובמסמך מרובה מקטעים הוא הופך פקד של מקטע אחד
+לסריקה שמשכתבת את כל מעברי המקטע שנקבעו ב-Word.
+
+### `chapterStyle` ו-`chapterSeparator` נבלעים לגמרי
+
+`setPageNumbering({chapterStyle:1,chapterSeparator:'colon'})` החזיר
+`success: true` וכתב `<w:pgNumType/>` **ריק**. שני השדות אינם מגיעים לשום
+מקום, ו-`sections.get` אינו מדווח אותם. אין להם פקד.
+
 ## פעולות שבולעות קלט בשקט
 
 בכל אלה המנוע מחזיר `success: true` על ערך שאינו בחוזה, אינו חוקי, או
@@ -237,6 +318,10 @@ supported by v2 yet”).
 | `footnotes.update` | `patch: {}` ו-`patch` עם שדה שאינו בחוזה — `success: true` בלי `NO_OP` ובלי שינוי |
 | `footnotes.configure` | `format:'zigzag'` → `<w:numFmt w:val="zigzag"/>`; `start` של `0`, `-5`, `2.5` ו-`'א'` — כולם נכתבים גולמית ל-`w:numStart`; `position:'zigzag'` → `<w:pos w:val="zigzag"/>`; `restartPolicy:'eachZigzag'` נכתב אף הוא |
 | `footnotes.list` | `limit: -3` מחזיר `total` נכון ורשימה ריקה |
+| `sections.setPageBorders` | `style` הוא `string` חופשי: `'zigzag'` → `<w:top w:val="zigzag"/>`, ו-`style: ''` מייצר `<w:top w:sz="8"/>` — גבול **בלי `w:val`**, שהיא תכונה נדרשת ב-`CT_Border`. `size: 999` → `w:sz="999"` (התקרה 96), `size: 2.5` → `w:sz="2.5"` בתכונה שהיא מספר שלם, `space: 999` → `w:space="999"` (התקרה 31), `color: '#FF0000'` ו-`color: 'zigzag'` נכתבים כמות שהם ואינם `ST_HexColor` |
+| `sections.setHeaderFooterMargins` | `header: 99` → `w:header="142560"`, כלומר כותרת במרחק 2.5 מטר מקצה הדף. אין תקרה |
+| `sections.setLineNumbering` | `distance: 999` → `w:distance="1438560"`, ו-`countBy`/`start` של מיליארד נכתבים כמות שהם. `enabled: true` בלי שדה נוסף מייצר `<w:lnNumType/>` ריק |
+| `sections.setPageNumbering` | `chapterStyle` ו-`chapterSeparator` — `success: true`, ואינם נכתבים כלל; `{chapterStyle:1}` לבדו מייצר `<w:pgNumType/>` ריק |
 
 ## מתג שכן עובד
 
@@ -348,6 +433,29 @@ supported by v2 yet”).
   אי אפשר להעביר את הסמן אל גוף הכותרת העליונה או אל הכותרת התחתונה.
 - **`selection.current` אינו מדווח מקטע**, ואין מיפוי ציבורי סמן→מקטע.
   לכן פעולות מקטע חלות על כל המקטעים.
+- **כתובת מקטע היא `section-<index>`, ו-`refStability` שלה `'ephemeral'` —
+  ובכל זאת היא יציבה.** `create.sectionBreak` תומך ב-v2 **רק** ב-
+  `documentEnd` (`at: {kind:'before', …}` מוחזר `INVALID_TARGET`:
+  „supports body documentEnd targets on v2”), ולכן מקטע חדש מקבל תמיד את
+  האינדקס הבא ואינו מזיז את הקיימים. נמדד: תצלום של הכתובות שרד מוטציה על
+  מקטע אחר וגם הוספת מקטע — `snap[1]` המשיך להיפתר לאותו מקטע עם אותם
+  ערכים. כלומר החלון שהיה הופך את הלוגו של „החל על כל המקטעים” ל-TOCTOU
+  סגור מצד המנוע, ולא מצידנו.
+- **`sections.list` הוא `DiscoveryOutput` עם `limit` של 250, ו-`applyToSections`
+  קורא עמוד אחד — פער **קיים**, לא פער של גל 10.** `list()` מחזיר
+  `page: { limit: 250, offset: 0, returned: N }` (נמדד), `SectionsListQuery`
+  **כן** חושף `offset` (`{limit:1,offset:1}` החזיר את המקטע השני עם `total`
+  מלא), ו-`limit: -3` **זורק** ואינו מוחזר ריק כמו ב-`footnotes.list`.
+  `applyToSections` שב-`page-setup.ts` קורא `list()` בלי ארגומנטים, **אינו
+  משווה `items.length` ל-`total`, ואינו מדפדף** — כלומר במסמך של 251 מקטעים
+  ומעלה הפעולה חלה על 250 בלבד והמשתמש מקבל „בוצע”.
+
+  **הסיווג חשוב:** זו התנהגות של `applyToSections` מגל 1, והיא חלה באותה
+  מידה על ארבעת הפקדים שקדמו — שוליים, כיוון, גודל נייר ועמודות. חמשת
+  הפקדים של גל 10 יורשים אותה ואינם מקורה. **הפער לא נסגר כאן בכוונה**,
+  והוכרע לגל נפרד: התיקון משנה את התנהגותו של המודול כולו, ודורש הכרעה
+  שאינה טכנית — מה מדווחים כשמקטע נכשל באמצע דפדוף, אחרי שעמודים שלמים
+  כבר שונו ואין `rollback`.
 - **פסקת כיתוב נכתבת בלי `<w:bidi/>`.** `captions.insert` כותב
   `<w:pPr><w:pStyle w:val="Caption"/></w:pPr>` ותו לא, בעוד שהפסקה הרגילה
   שלצידה במסמך העברי כן נושאת אותו — כלומר הכיתוב ייפתח ב-Word משמאל

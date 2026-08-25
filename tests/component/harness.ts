@@ -287,6 +287,22 @@ export interface SuperdocDoubleOptions {
   /** מה שהבחירה במסמך מדווחת. */
   selection?: { blockId?: string | null; hasRange?: boolean; text?: string };
   /**
+   * מה שהמקטע במסמך **כבר** נושא. שני השדות האלה הם היחידים שהתוסף קורא
+   * מהמקטע ואז שולח בחזרה, ולכן הם היחידים שכפיל חייב לדעת לייצר: מקטע
+   * שיש בו `countBy: 5` הוא בדיוק המקרה שבו „מספרי שורות → רציף” שאינו
+   * משמר מוחק את מה שנקבע ב-Word.
+   */
+  sections?: {
+    lineNumbering?: {
+      enabled?: boolean;
+      countBy?: number;
+      start?: number;
+      distance?: number;
+      restart?: string;
+    };
+    pageNumbering?: { start?: number; format?: string };
+  };
+  /**
    * תוכן העניינים שבמסמך. ברירת המחדל היא מסמך **בלי** טבלה — ראו ההסבר
    * ליד מסלולי `toc` למטה — ומי שבודק את הקבוצה מעמיד כאן מסמך שיש בו אחת.
    */
@@ -539,12 +555,26 @@ export function createSuperdocDouble(options: SuperdocDoubleOptions = {}): Super
     capabilities: {
       get: route('capabilities.get', () => ({ operations, global: globalFlags })),
     },
+    /**
+     * המקטע שהכפיל מציג נושא גם את ההגדרות שנקראות ממנו, ולא רק את מידות
+     * הדף: `lineNumbering` הוא מה ש„מספרי שורות” משמר במקום למחוק,
+     * ו-`headerFooterMargins`/`pageNumbering` הם מה ששני הדיאלוגים נפתחים
+     * עליו. כפיל שמחזיר מקטע בלי השדות האלה היה מאשר בירוק דיאלוג שנפתח
+     * תמיד על ברירות המחדל — כלומר בדיוק הבאג שהקריאה נועדה למנוע.
+     *
+     * הערכים באינצ'ים, כמו שהמנוע האמיתי מחזיר: `0.5"` = 720 twips,
+     * ו-`headerFooterMargins` של המסמך הריק הוא בדיוק זה.
+     */
     sections: {
       list: route('sections.list', () => ({
         items: [
           {
             address: { sectionIndex: 0 },
             pageSetup: { width: 11906, height: 16838, orientation: 'portrait' },
+            headerFooterMargins: { header: 0.5, footer: 0.5 },
+            lineNumbering: options.sections?.lineNumbering,
+            pageNumbering: options.sections?.pageNumbering,
+            verticalAlign: 'top',
           },
         ],
       })),
@@ -554,6 +584,22 @@ export function createSuperdocDouble(options: SuperdocDoubleOptions = {}): Super
       setTitlePage: route('sections.setTitlePage', () => receipt('sections.setTitlePage')),
       setOddEvenHeadersFooters: route('sections.setOddEvenHeadersFooters', () =>
         receipt('sections.setOddEvenHeadersFooters'),
+      ),
+      setLineNumbering: route('sections.setLineNumbering', () =>
+        receipt('sections.setLineNumbering'),
+      ),
+      setVerticalAlign: route('sections.setVerticalAlign', () =>
+        receipt('sections.setVerticalAlign'),
+      ),
+      setHeaderFooterMargins: route('sections.setHeaderFooterMargins', () =>
+        receipt('sections.setHeaderFooterMargins'),
+      ),
+      setPageNumbering: route('sections.setPageNumbering', () =>
+        receipt('sections.setPageNumbering'),
+      ),
+      setPageBorders: route('sections.setPageBorders', () => receipt('sections.setPageBorders')),
+      clearPageBorders: route('sections.clearPageBorders', () =>
+        receipt('sections.clearPageBorders'),
       ),
     },
     /**

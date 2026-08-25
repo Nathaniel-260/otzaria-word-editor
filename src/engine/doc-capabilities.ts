@@ -73,7 +73,21 @@ const CAPABILITY_SPECS = {
   canSetColumns: { operation: 'sections.setColumns' },
   canSetSectionDirection: { operation: 'sections.setSectionDirection' },
   canSetSectionBreak: { operation: 'sections.setBreakType' },
-  canSetPageBorders: { operation: 'sections.setPageBorders' },
+  // „גבולות עמוד” הוא כפתור תפריט אחד שגם מקיף וגם מסיר, ולכן הוא שואל על
+  // שתי הפעולות. השאלה כבר הייתה כאן על `setPageBorders` לבדה, מהזמן שלא היה
+  // לה פקד; מרגע שיש פקד, השאלה חייבת למנות את מה שהוא **באמת** מריץ —
+  // אחרת „ללא גבול” נלחץ על מנוע שאין בו `clearPageBorders` ומחזיר כשל.
+  canSetPageBorders: { operation: ['sections.setPageBorders', 'sections.clearPageBorders'] },
+  // ארבע השאלות הבאות הן ארבעת הפקדים החדשים של „פריסה”. אף אחת מהן אינה
+  // מונה את `sections.list`, בדיוק כמו ארבע השאלות שמעליהן: `list` ו-
+  // `set*` הם אותו adapter אופציונלי, ומנוע שמצהיר על האחד ולא על השני אינו
+  // צורה שקיימת — הצהרה חסרה מסמנת את **כל** ה-namespace יחד
+  // (`NAMESPACE_UNAVAILABLE`). המודול עצמו נכשל סגור על היעדר `list` בלי
+  // קשר לשאלה כאן.
+  canSetLineNumbering: { operation: 'sections.setLineNumbering' },
+  canSetVerticalAlign: { operation: 'sections.setVerticalAlign' },
+  canSetPageNumbering: { operation: 'sections.setPageNumbering' },
+  canSetHeaderFooterMargins: { operation: 'sections.setHeaderFooterMargins' },
   // גופן. `format.vertAlign` הוא alias ציבורי של `format.apply` על מפתח אחד
   // ב-`InlineRunPatch`, והוא `OperationId` בקטלוג — ולכן הוא נשאל כמו כל פעולה
   // אחרת. ראו engine/vert-align.ts: אין לו פקודה ב-registry של ה-controller,
