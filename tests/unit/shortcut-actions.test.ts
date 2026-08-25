@@ -28,12 +28,37 @@ function setup(over: Partial<ShellActionDeps> = {}) {
     insertCitation: vi.fn(),
     searchOtzaria: vi.fn(),
     openLibrary: vi.fn(),
+    openShortcutsHelp: vi.fn(),
+    moveFocusRegion: vi.fn(() => true),
     ...over,
   };
   return { deps, run: createShellActionRunner(deps) };
 }
 
 describe('createShellActionRunner', () => {
+  it('shortcuts-help פותח את רשימת הקיצורים', () => {
+    const { deps, run } = setup();
+
+    expect(run('shortcuts-help')).toBe(true);
+    expect(deps.openShortcutsHelp).toHaveBeenCalledOnce();
+  });
+
+  it('F6 מעביר אזור, ומדווח שטופל', () => {
+    const { deps, run } = setup();
+
+    expect(run('focus-next-region')).toBe(true);
+    expect(run('focus-prev-region')).toBe(true);
+    expect(deps.moveFocusRegion).toHaveBeenNthCalledWith(1, 'next');
+    expect(deps.moveFocusRegion).toHaveBeenNthCalledWith(2, 'prev');
+  });
+
+  it('F6 שלא היה לו לאן לעבור אינו נבלע', () => {
+    // אחרת היינו לוקחים מהמשתמש את מקש הניווט של הדפדפן בלי לתת לו דבר.
+    const { run } = setup({ moveFocusRegion: () => false });
+
+    expect(run('focus-next-region')).toBe(false);
+  });
+
   it('save שומר, save-as פותח „שמור בשם”', () => {
     const { deps, run } = setup();
 
