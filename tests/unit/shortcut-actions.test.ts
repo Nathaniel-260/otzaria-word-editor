@@ -18,6 +18,9 @@ function setup(over: Partial<ShellActionDeps> = {}) {
     selectAll: vi.fn(),
     pageBreak: vi.fn(),
     openLink: vi.fn(),
+    growFont: vi.fn(),
+    shrinkFont: vi.fn(),
+    vertAlign: vi.fn(),
     ...over,
   };
   return { deps, run: createShellActionRunner(deps) };
@@ -80,8 +83,16 @@ describe('createShellActionRunner', () => {
     run('select-all');
     run('page-break');
     run('link');
+    run('font-grow');
+    run('font-shrink');
+    run('superscript');
+    run('subscript');
 
     expect(deps.openLink).toHaveBeenCalledTimes(1);
+    expect(deps.growFont).toHaveBeenCalledTimes(1);
+    expect(deps.shrinkFont).toHaveBeenCalledTimes(1);
+    expect(deps.vertAlign).toHaveBeenNthCalledWith(1, 'superscript');
+    expect(deps.vertAlign).toHaveBeenNthCalledWith(2, 'subscript');
     expect(deps.newDocument).toHaveBeenCalledTimes(1);
     expect(deps.openDocument).toHaveBeenCalledTimes(1);
     expect(deps.selectAll).toHaveBeenCalledTimes(1);

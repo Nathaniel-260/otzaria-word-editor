@@ -22,6 +22,15 @@ export interface ShellActionDeps {
   selectAll: () => void;
   pageBreak: () => void;
   openLink: () => void;
+  /**
+   * גודל הגופן תלוי במה שהמנוע מדווח על הבחירה הנוכחית, ולכן הוא פעולה ולא
+   * רשומה עם payload קבוע: „הגדל” הוא הערך הבא בסולם של Word מעל מה שיש, לא
+   * מספר שאפשר לכתוב מראש.
+   */
+  growFont: () => void;
+  shrinkFont: () => void;
+  /** כתב עילי/תחתי אינם פקודות ה-controller אלא Document API ישיר. */
+  vertAlign: (kind: 'superscript' | 'subscript') => void;
 }
 
 /**
@@ -64,6 +73,16 @@ export function createShellActionRunner(deps: ShellActionDeps): (action: ShellAc
         return true;
       case 'link':
         deps.openLink();
+        return true;
+      case 'font-grow':
+        deps.growFont();
+        return true;
+      case 'font-shrink':
+        deps.shrinkFont();
+        return true;
+      case 'superscript':
+      case 'subscript':
+        deps.vertAlign(action);
         return true;
     }
   };

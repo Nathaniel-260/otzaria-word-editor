@@ -177,6 +177,14 @@ import {
 } from './host/settings';
 import { revealZone, type RevealZone } from './composables/focus-mode';
 import { selectWholeDocument } from './engine/clipboard';
+import {
+  DEFAULT_FONT_SIZE_PT,
+  fontSizePayload,
+  grownFontSize,
+  parseFontSizePt,
+  shrunkFontSize,
+} from './engine/payloads';
+import { toggleVertAlign } from './engine/vert-align';
 import { startParagraphOnNewPage } from './engine/page-break';
 import { createLinkDialog } from './composables/use-link-dialog';
 import { createShellActionRunner } from './ui/shortcuts/actions';
@@ -914,6 +922,9 @@ const runShellAction = createShellActionRunner({
   // הכפתורים המקבילים ברצועה — ולכן אותה פונקציה, ואותו דיווח.
   selectAll: () => void runSelectAll(),
   pageBreak: () => void runPageBreak(),
+  growFont: () => void runFontStep(grownFontSize),
+  shrinkFont: () => void runFontStep(shrunkFontSize),
+  vertAlign: (kind) => void runVertAlign(kind),
   // „אודות” הוא `aria-modal`, ולכן הוא זה שנסגר כשהוא פתוח. החיפוש אינו מודאלי
   // ואפשר להמשיך לערוך מתחתיו, ולכן הוא נסגר רק כשאין חלון מעליו.
   closeTopmost: () => {
@@ -942,6 +953,29 @@ const linkDialog = createLinkDialog({
   runLink: (payload) => void runShortcutCommand('link', payload),
   report: reportCommand,
 });
+
+/**
+ * „הגדל/הקטן גופן”. הגודל נקרא **מהמנוע** ולא נשמר אצלנו: מונה מקומי היה
+ * מטפס גם כשהמסמך דוחה את הפקודה, ואז הלחיצה הבאה הייתה מחשבת מגודל שאינו
+ * במסמך. אותו כלל בדיוק שהכפתורים ברצועה עובדים לפיו.
+ */
+async function runFontStep(step: (current: number) => number): Promise<void> {
+  const adapter = commandAdapter.value;
+  if (!adapter) {
+    setStatus('המסמך עדיין נטען', true);
+    return;
+  }
+
+  const current = parseFontSizePt(adapter.getState('font-size').value) ?? DEFAULT_FONT_SIZE_PT;
+  const payload = fontSizePayload(step(current));
+  if (payload === null) return;
+
+  reportCommand(await adapter.run('font-size', payload), 'font-size');
+}
+
+async function runVertAlign(kind: 'superscript' | 'subscript'): Promise<void> {
+  reportCommand(await toggleVertAlign(activeSuperdoc.value, kind), `vert-align-${kind}`);
+}
 
 async function runSelectAll(): Promise<void> {
   reportCommand(await selectWholeDocument(activeSuperdoc.value), 'select-all');

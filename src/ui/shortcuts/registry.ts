@@ -12,7 +12,7 @@
  * עוקף למנוע — קיצור שנכשל מדבר עברית בשורת המצב בדיוק כמו כפתור שנכשל.
  */
 import type { CommandId } from '../../engine/capabilities';
-import { stylePayload } from '../../engine/payloads';
+import { alignmentPayload, lineHeightPayload, stylePayload } from '../../engine/payloads';
 
 /** החלוקה שלפיה דיאלוג „קיצורי מקלדת” מקבץ את הרשומות. */
 export type ShortcutGroup =
@@ -57,7 +57,11 @@ export type ShellAction =
   | 'open-document'
   | 'select-all'
   | 'page-break'
-  | 'link';
+  | 'link'
+  | 'font-grow'
+  | 'font-shrink'
+  | 'superscript'
+  | 'subscript';
 
 export interface Shortcut {
   /** מזהה יציב. משמש את הרצועה, את הבדיקות ואת דיאלוג העזרה. */
@@ -284,6 +288,177 @@ export const SHORTCUTS = [
     code: 'KeyU',
     ctrl: true,
     command: 'underline',
+  },
+  {
+    id: 'font-grow',
+    label: 'Ctrl+]',
+    description: 'הגדלת הגופן',
+    group: 'font',
+    // פיסוק, ולכן לפי `key`: ה-code של „]” נודד בין פריסות פיזיות.
+    key: ']',
+    ctrl: true,
+    action: 'font-grow',
+    repeatable: true,
+  },
+  {
+    id: 'font-shrink',
+    label: 'Ctrl+[',
+    description: 'הקטנת הגופן',
+    group: 'font',
+    key: '[',
+    ctrl: true,
+    action: 'font-shrink',
+    repeatable: true,
+  },
+  {
+    id: 'clear-formatting',
+    label: 'Ctrl+Space',
+    description: 'ניקוי עיצוב התו',
+    group: 'font',
+    code: 'Space',
+    ctrl: true,
+    command: 'clear-formatting',
+  },
+  {
+    id: 'strikethrough',
+    label: 'Ctrl+Shift+X',
+    description: 'קו חוצה',
+    group: 'font',
+    code: 'KeyX',
+    ctrl: true,
+    shift: true,
+    command: 'strikethrough',
+  },
+  {
+    id: 'subscript',
+    label: 'Ctrl+=',
+    description: 'כתב תחתי',
+    group: 'font',
+    key: '=',
+    ctrl: true,
+    action: 'subscript',
+  },
+  {
+    id: 'superscript',
+    label: 'Ctrl+Shift+=',
+    description: 'כתב עילי',
+    group: 'font',
+    key: '=',
+    ctrl: true,
+    shift: true,
+    action: 'superscript',
+  },
+  {
+    id: 'format-painter',
+    label: 'Ctrl+Shift+C',
+    description: 'העתקת עיצוב',
+    group: 'font',
+    code: 'KeyC',
+    ctrl: true,
+    shift: true,
+    command: 'copy-format',
+  },
+  {
+    id: 'style-normal',
+    label: 'Ctrl+Shift+N',
+    description: 'סגנון רגיל',
+    group: 'paragraph',
+    code: 'KeyN',
+    ctrl: true,
+    shift: true,
+    command: 'linked-style',
+    payload: stylePayload('Normal'),
+  },
+  {
+    id: 'align-right',
+    label: 'Ctrl+R',
+    description: 'יישור לימין',
+    group: 'paragraph',
+    code: 'KeyR',
+    ctrl: true,
+    command: 'text-align',
+    payload: alignmentPayload('right'),
+  },
+  {
+    id: 'align-center',
+    label: 'Ctrl+E',
+    description: 'מרכוז',
+    group: 'paragraph',
+    code: 'KeyE',
+    ctrl: true,
+    command: 'text-align',
+    payload: alignmentPayload('center'),
+  },
+  {
+    id: 'align-left',
+    label: 'Ctrl+L',
+    description: 'יישור לשמאל',
+    group: 'paragraph',
+    code: 'KeyL',
+    ctrl: true,
+    command: 'text-align',
+    payload: alignmentPayload('left'),
+  },
+  {
+    id: 'align-justify',
+    label: 'Ctrl+J',
+    description: 'יישור לשני הצדדים',
+    group: 'paragraph',
+    code: 'KeyJ',
+    ctrl: true,
+    command: 'text-align',
+    payload: alignmentPayload('justify'),
+  },
+  {
+    id: 'indent-increase',
+    label: 'Ctrl+M',
+    description: 'הגדלת הכניסה',
+    group: 'paragraph',
+    code: 'KeyM',
+    ctrl: true,
+    command: 'indent-increase',
+    repeatable: true,
+  },
+  {
+    id: 'indent-decrease',
+    label: 'Ctrl+Shift+M',
+    description: 'הקטנת הכניסה',
+    group: 'paragraph',
+    code: 'KeyM',
+    ctrl: true,
+    shift: true,
+    command: 'indent-decrease',
+    repeatable: true,
+  },
+  {
+    id: 'line-height-1',
+    label: 'Ctrl+1',
+    description: 'ריווח שורות רגיל',
+    group: 'paragraph',
+    code: 'Digit1',
+    ctrl: true,
+    command: 'line-height',
+    payload: lineHeightPayload(1),
+  },
+  {
+    id: 'line-height-2',
+    label: 'Ctrl+2',
+    description: 'ריווח שורות כפול',
+    group: 'paragraph',
+    code: 'Digit2',
+    ctrl: true,
+    command: 'line-height',
+    payload: lineHeightPayload(2),
+  },
+  {
+    id: 'line-height-15',
+    label: 'Ctrl+5',
+    description: 'ריווח שורות וחצי',
+    group: 'paragraph',
+    code: 'Digit5',
+    ctrl: true,
+    command: 'line-height',
+    payload: lineHeightPayload(1.5),
   },
   {
     id: 'heading-1',
