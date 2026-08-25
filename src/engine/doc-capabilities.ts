@@ -111,6 +111,23 @@ const CAPABILITY_SPECS = {
   // שמוחקים טקסט — ושאלה בלי פקד היא הצהרת יכולת שאיש אינו קורא.
   canInsertField: { operation: ['fields.insert', 'fields.rebuild'] },
   canRebuildFields: { operation: 'fields.rebuild' },
+  // סימניות. שאלה אחת לפקד אחד, כמו ב„כותרת עליונה”: „סימנייה” הוא כפתור
+  // שפותח דיאלוג שמוסיף, מוחק ומשנה שם, ופקד מנוטרל למחצה אינו מצב שאפשר
+  // להציג. `list` הוא חלק מהשאלה ולא קישוט — בלי רשימת השמות אין מה למחוק
+  // ואין ממה לשנות שם, והדיאלוג היה נפתח ריק על מסמך מלא סימניות.
+  canManageBookmarks: {
+    operation: ['bookmarks.list', 'bookmarks.insert', 'bookmarks.rename', 'bookmarks.remove'],
+  },
+  // הפניות מקושרות. שתי הפעולות נדרשות מאותו טעם כמו ב-`canInsertField`:
+  // `rebuild` מקבל כתובת של הפניה מסוימת, ואין דרך אחרת להשיג אותה מלבד
+  // `list`. מנוע שיודע לחשב מחדש ואינו יודע למנות — הכפתור אצלו ילחץ ולא
+  // יעדכן דבר, ויחזיר „בוצע”.
+  //
+  // `crossRefs.insert` **אינו** נשאל: הוא מוצהר זמין, מחזיר `success: true`,
+  // וכותב שדה שגם Word וגם המנוע עצמו אינם יודעים לפתור. אין לו פקד, ושאלה
+  // בלי פקד היא הצהרת יכולת שאיש אינו קורא. ההנמקה המלאה, כולל המדידה,
+  // ב-engine/cross-refs.ts.
+  canRebuildCrossRefs: { operation: ['crossRefs.list', 'crossRefs.rebuild'] },
   // סקירה
   canAddComment: { operation: 'comments.create', global: 'comments' },
   canTrackChanges: { global: 'trackChanges' },

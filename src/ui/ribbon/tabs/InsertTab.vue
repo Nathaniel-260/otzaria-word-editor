@@ -47,6 +47,19 @@
         :disabled="!linkCmd.enabled.value"
         @click="onOpenLinkDialog"
       />
+      <!--
+        „סימנייה” יושבת כאן מפני שזה מקומה ב-Word העברי: הפקד השני בקבוצה
+        „קישורים” של לשונית „הוספה”, ליד „קישור” ו„הפניה מקושרת”. הפקד
+        השלישי אינו כאן — ראו engine/cross-refs.ts.
+      -->
+      <RibbonButton
+        icon="bookmark"
+        label="סימנייה"
+        variant="large"
+        :tooltip="bookmarkTooltip"
+        :disabled="!can('canManageBookmarks')"
+        @click="onOpenBookmarkDialog"
+      />
     </RibbonGroup>
 
     <!-- קבוצה 5: כותרת עליונה ותחתונה -->
@@ -156,6 +169,15 @@
       @close="linkDialogOpen = false"
       @submit="onSubmitLink"
     />
+
+    <BookmarkDialog
+      :is-open="bookmarkDialogOpen"
+      :names="bookmarks.names"
+      @close="bookmarkDialogOpen = false"
+      @add="onAddBookmark"
+      @remove="onRemoveBookmark"
+      @rename="onRenameBookmark"
+    />
   </div>
 </template>
 
@@ -212,6 +234,18 @@
  * ולכן התפריט מציע את שני השדות בנפרד. ההנמקה המלאה, כולל מדידת מתגי הפורמט
  * של התאריך במנוע האמיתי, ב-engine/fields.ts.
  *
+ * ## הסימנייה, ומה שאין לצידה
+ *
+ * „סימנייה” יושבת בקבוצה „קישורים”, כמו ב-Word העברי. השכנה שלה שם — „הפניה
+ * מקושרת” — **אינה כאן**, ולא מפני שנשכחה: `crossRefs.insert` כותב קוד שדה
+ * שאינו קוד Word, ושגם המנוע עצמו מחזיר עליו טקסט ריק אחרי `rebuild`. נמדד,
+ * וההנמקה המלאה ב-engine/cross-refs.ts.
+ *
+ * שם סימנייה בעברית עובד במלואו (נמדד), אבל המנוע אינו אוכף על השם דבר מלבד
+ * „אינו ריק” — הוא יכתוב למסמך שם עם רווחים שהוא פסול ב-Word. הוולידציה
+ * שהדיאלוג מציג באה לכן מ-`normalizeBookmarkName` ולא מהמנוע. היא נשענת על
+ * הכללים של Word ומחמירה עליהם בנקודה אחת במודע — ההנמקה ב-engine/bookmarks.ts.
+ *
  * ## המצב הקודם
  *
  * שלושת הפקדים כאן לא עשו כלום: `imageCmd.run()` ו-`linkCmd.run()` נקראו **בלי
@@ -227,6 +261,7 @@ import RibbonButton from '../common/RibbonButton.vue';
 import RibbonMenuButton from '../common/RibbonMenuButton.vue';
 import TablePicker from '../common/TablePicker.vue';
 import LinkDialog from '../../panels/LinkDialog.vue';
+import BookmarkDialog from '../../panels/BookmarkDialog.vue';
 import { useCommand } from '../../../composables/useCommand';
 import { COMMAND_REPORTER, type CommandReporter } from '../../../composables/keys';
 import type { CommandOutcome } from '../../../engine/command-adapter';
@@ -266,6 +301,14 @@ import {
   rebuildAllFields,
   type FieldsState,
 } from '../../../engine/fields';
+import {
+  emptyBookmarksState,
+  insertBookmark,
+  readBookmarks,
+  removeBookmark,
+  renameBookmark,
+  type BookmarksState,
+} from '../../../engine/bookmarks';
 import { LINK_HREF_HINT, imagePayload, linkPayload } from '../../../engine/payloads';
 import { pickImageFile, readImageAsDataUrl } from '../../../host/files';
 
@@ -645,6 +688,66 @@ function onInsertDate(): void {
 
 function onRebuildFields(): void {
   void runFields('fields-rebuild', rebuildAllFields(superdoc.value));
+}
+
+/* ------------------------------------------------------------------ */
+/* סימניות                                                             */
+/* ------------------------------------------------------------------ */
+
+const bookmarkDialogOpen = ref(false);
+
+/**
+ * שמות הסימניות שבמסמך. נקראים כשהדיאלוג נפתח ואחרי כל פעולה, ולא מוחזקים
+ * כרשימה מקומית: הרשימה הזאת היא **המסמך**, ורשימה שנבנית מהפעולות שהמשתמש
+ * עשה בסשן הזה הייתה מציגה מסמך שנפתח עם סימניות כאילו אין בו אף אחת.
+ */
+const bookmarks = shallowRef<BookmarksState>(emptyBookmarksState());
+
+const bookmarkTooltip = computed(() =>
+  tip('canManageBookmarks', 'סימון הפסקה שבה הסמן בשם, לניווט ולהפניות מתוך Word')
+);
+
+/**
+ * קוראת מחדש את הסימניות. משתמשת במונה הדורות של הקבוצה שמעל ומאותו טעם:
+ * **קוראת** אותו ואינה מקדמת אותו, כדי לא לבטל את הקריאה של ה-watch. ההסבר
+ * המלא ב-`runHeaderFooter`.
+ */
+async function refreshBookmarks(): Promise<void> {
+  const mine = headerFooterGeneration;
+  const state = await readBookmarks(superdoc.value);
+  if (mine === headerFooterGeneration) bookmarks.value = state;
+}
+
+/**
+ * הרשימה נקראת בלחיצה ולא מוחזקת עדכנית ברקע: דיאלוג הסימניות נפתח לעיתים
+ * רחוקות, ומנוי שסורק את כל הסימניות בכל הקלדה במסמך הוא מחיר על מידע שאיש
+ * אינו רואה.
+ */
+async function onOpenBookmarkDialog(): Promise<void> {
+  await refreshBookmarks();
+  bookmarkDialogOpen.value = true;
+}
+
+/**
+ * מריצה פעולת סימנייה, מדווחת עליה, וקוראת מחדש את הרשימה — גם בכשל. הדיאלוג
+ * נשאר פתוח: הוא מציג את הרשימה המעודכנת, וזה בדיוק מה שהמשתמש צריך לראות
+ * אחרי הפעולה.
+ */
+async function runBookmark(id: string, action: Promise<CommandOutcome>): Promise<void> {
+  report(await action, id);
+  await refreshBookmarks();
+}
+
+function onAddBookmark(name: string): void {
+  void runBookmark('bookmark-insert', insertBookmark(superdoc.value, name));
+}
+
+function onRemoveBookmark(name: string): void {
+  void runBookmark('bookmark-remove', removeBookmark(superdoc.value, name));
+}
+
+function onRenameBookmark(change: { from: string; to: string }): void {
+  void runBookmark('bookmark-rename', renameBookmark(superdoc.value, change.from, change.to));
 }
 </script>
 

@@ -428,6 +428,22 @@ export function createSuperdocDouble(options: SuperdocDoubleOptions = {}): Super
       }),
       rebuild: route('fields.rebuild', () => receipt('fields.rebuild')),
     },
+    /**
+     * המסמך של הכפיל נפתח **בלי** סימניות: `bookmarks.list` ריק. זה המצב
+     * שהפקד נמדד בו — „אין סימניות, הדיאלוג מוסיף אחת” — ומסמך שכבר יש בו
+     * סימניות היה מסתיר את ההבדל בין „נוספה” ל„הייתה שם”.
+     */
+    bookmarks: {
+      list: route('bookmarks.list', () => ({ items: [], total: 0 })),
+      insert: route('bookmarks.insert', () => receipt('bookmarks.insert')),
+      rename: route('bookmarks.rename', () => receipt('bookmarks.rename')),
+      remove: route('bookmarks.remove', () => receipt('bookmarks.remove')),
+    },
+    /** אותה החלטה כמו ב-`fields`: מסמך בלי הפניות מקושרות. */
+    crossRefs: {
+      list: route('crossRefs.list', () => ({ items: [], total: 0 })),
+      rebuild: route('crossRefs.rebuild', () => receipt('crossRefs.rebuild')),
+    },
     format: {
       paragraph: {
         setFlowOptions: route('format.paragraph.setFlowOptions', () =>

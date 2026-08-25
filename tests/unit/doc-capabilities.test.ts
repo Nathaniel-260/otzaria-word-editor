@@ -46,6 +46,12 @@ function fullCapabilities() {
       'headerFooters.refs.setLinkedToPrevious': { available: true },
       'fields.insert': { available: true },
       'fields.rebuild': { available: true },
+      'bookmarks.list': { available: true },
+      'bookmarks.insert': { available: true },
+      'bookmarks.rename': { available: true },
+      'bookmarks.remove': { available: true },
+      'crossRefs.list': { available: true },
+      'crossRefs.rebuild': { available: true },
       'comments.create': { available: true },
       'clipboard.serializeSelection': { available: true },
       'clipboard.insert': { available: true },
@@ -271,6 +277,56 @@ describe('readDocCapabilities', () => {
 
     expect(report.can('canInsertField')).toBe(false);
     expect(report.can('canRebuildFields')).toBe(true);
+  });
+
+  it('פעולת סימניות אחת שחסרה מנטרלת את כל הפקד', async () => {
+    // „סימנייה” הוא כפתור אחד שפותח דיאלוג שמוסיף, מוחק ומשנה שם. פקד מנוטרל
+    // למחצה אינו מצב שאפשר להציג, ולכן השאלה דורשת את כל ארבע הפעולות —
+    // וכאן נמדד שגם היעדר `rename` לבדו מספיק כדי לכבות אותו.
+    const raw = fullCapabilities();
+    raw.operations['bookmarks.rename'] = {
+      available: false,
+      reasons: ['OPERATION_UNAVAILABLE'],
+    } as never;
+
+    const report = await readDocCapabilities(hostWith(() => raw));
+
+    expect(report.can('canManageBookmarks')).toBe(false);
+    expect(report.explain('canManageBookmarks')).toBe('הפעולה אינה זמינה בגרסה הזאת של המנוע');
+  });
+
+  it('כל פעולות הסימניות קיימות — הפקד פעיל', async () => {
+    const report = await readDocCapabilities(hostWith(() => fullCapabilities()));
+
+    expect(report.can('canManageBookmarks')).toBe(true);
+    expect(report.explain('canManageBookmarks')).toBe('');
+  });
+
+  it('„עדכן הפניות” דורש גם מנייה וגם חישוב מחדש', async () => {
+    // `crossRefs.rebuild` מקבל כתובת של הפניה מסוימת, ואין דרך אחרת להשיג
+    // אותה מלבד `crossRefs.list`. מנוע שיודע לחשב ואינו יודע למנות היה
+    // מדווח „בוצע” בלי לעדכן דבר. אותה תלות בדיוק כמו ב-`canInsertField`.
+    const withoutList = fullCapabilities();
+    withoutList.operations['crossRefs.list'] = {
+      available: false,
+      reasons: ['NAMESPACE_UNAVAILABLE'],
+    } as never;
+    expect(
+      (await readDocCapabilities(hostWith(() => withoutList))).can('canRebuildCrossRefs'),
+    ).toBe(false);
+
+    const withoutRebuild = fullCapabilities();
+    withoutRebuild.operations['crossRefs.rebuild'] = {
+      available: false,
+      reasons: ['NAMESPACE_UNAVAILABLE'],
+    } as never;
+    expect(
+      (await readDocCapabilities(hostWith(() => withoutRebuild))).can('canRebuildCrossRefs'),
+    ).toBe(false);
+
+    expect(
+      (await readDocCapabilities(hostWith(() => fullCapabilities()))).can('canRebuildCrossRefs'),
+    ).toBe(true);
   });
 
   it('`available` שאינו בדיוק true אינו „כן”', async () => {
