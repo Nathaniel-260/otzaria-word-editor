@@ -26,8 +26,13 @@ export interface FocusRegion {
   /** האלמנט שמגדיר את גבולות האזור. `null` = האזור אינו מורכב כרגע. */
   element: () => HTMLElement | null;
   /**
-   * מיקוד מותאם לאזור. `false` פירושו „לא הצלחתי”, ואז נופלים לפקד הראשון
-   * שבתוכו. אזור המסמך משתמש בזה: רק המנוע יכול להחזיר את הסמן לטקסט.
+   * מיקוד מותאם לאזור, ו**הדרך היחידה להיכנס אליו**. אזור המסמך משתמש בזה:
+   * רק המנוע יכול להחזיר את הסמן לטקסט.
+   *
+   * `false` פירושו „האזור אינו מוכן”, והמעגל מדלג עליו. אין נפילה לחיפוש פקד
+   * בתוכו, ובכוונה: בתוך אזור המסמך כל מה שיש הוא ה-DOM הפנימי של המנוע,
+   * ושאילתה עליו מ-`ui/` היא בדיוק הגבול ש-tests/unit/engine-boundaries
+   * שומר עליו. סלקטור גנרי חומק מהשער הזה — ולכן הכלל כאן ולא שם.
    */
   focus?: () => boolean;
   /**
@@ -85,7 +90,8 @@ export function createFocusRing(deps: FocusRingDeps): FocusRing {
   /** מנסה למקד אזור. `false` = אין בו למה למקד, וממשיכים לבא אחריו. */
   function focusRegion(region: FocusRegion): boolean {
     if (region.isAvailable?.() === false) return false;
-    if (region.focus?.() === true) return true;
+    // אזור שהצהיר על מיקוד משלו נכנס רק דרכו. ראו ההסבר ב-`FocusRegion`.
+    if (region.focus !== undefined) return region.focus();
 
     const element = region.element();
     if (!element) return false;
@@ -119,7 +125,12 @@ export function createFocusRing(deps: FocusRingDeps): FocusRing {
     const from = at === -1 ? (step > 0 ? -1 : 0) : at;
 
     for (let offset = 1; offset <= regions.length; offset += 1) {
-      const region = regions[wrap(from + step * offset, regions.length)]!;
+      const index = wrap(from + step * offset, regions.length);
+      // האזור שהפוקוס כבר בו אינו יעד: „מעבר” אליו אינו מעבר, והחזרת הצלחה
+      // הייתה בולעת את המקש בלי שקרה דבר. במצב מיקוד זה המצב הרגיל — שלושת
+      // פסי המעטפת אינם זמינים, ונשאר רק המסמך עצמו.
+      if (index === at) continue;
+      const region = regions[index]!;
       if (focusRegion(region)) return region.id;
     }
     return null;
