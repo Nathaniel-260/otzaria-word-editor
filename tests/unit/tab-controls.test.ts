@@ -123,22 +123,22 @@ describe('פקדי לשונית „קובץ”', () => {
   const FILE_TAB = readFileSync(join(TABS, 'FileTab.vue'), 'utf8');
 
   /**
-   * הפקד היחיד בלי `:disabled`, ובכוונה: דיאלוג „אודות” הוא של התוסף, אינו
-   * נוגע במסמך ואינו נוגע במנוע. `:disabled="false"` קבוע היה נראה כמו תנאי
-   * ואינו תנאי, וזה גרוע מהיעדרו.
+   * שני הפקדים בלי `:disabled`, ובכוונה: „אודות” ו„קיצורים” הם דיאלוגים של
+   * התוסף, אינם נוגעים במסמך ואינם נוגעים במנוע. `:disabled="false"` קבוע
+   * היה נראה כמו תנאי ואינו תנאי, וזה גרוע מהיעדרו.
    */
-  const UNCONDITIONAL = 'אודות';
+  const UNCONDITIONAL = ['אודות', 'קיצורים'];
 
-  it('נמצאו שמונה פקדים', () => {
-    expect(controls(FILE_TAB)).toHaveLength(8);
+  it('נמצאו תשעה פקדים', () => {
+    expect(controls(FILE_TAB)).toHaveLength(9);
   });
 
-  it('לכל פקד יש חיווט של disabled — חוץ מ„אודות”', () => {
+  it('לכל פקד יש חיווט של disabled — חוץ מ„אודות” ומ„קיצורים”', () => {
     const unguarded = controls(FILE_TAB)
       .filter((control) => !/:disabled=/.test(control))
       .map((control) => labelOf(control));
 
-    expect(unguarded).toEqual([UNCONDITIONAL]);
+    expect(unguarded).toEqual(UNCONDITIONAL);
   });
 
   it('התנאי הוא מצב המעטפת, ולא `true` קשיח', () => {
