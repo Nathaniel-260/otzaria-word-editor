@@ -318,6 +318,28 @@ export interface SuperdocDoubleOptions {
      */
     bibliographyIds?: readonly string[];
   };
+  /**
+   * הכיתובים שבמסמך, בסדר הופעתם. אותה החלטה כמו ב-`toc` וב-`citations`:
+   * מסמך **בלי** כיתובים. המספור אינו נמסר כאן אלא מחושב ב-`captions.list`
+   * מסדר הפריטים — בדיוק כמו במנוע האמיתי, שבו כיתוב שנוסף באמצע מזיז את
+   * המספרים שאחריו. כפיל שהיה מקבל את המספר מבחוץ לא היה מודד את זה.
+   */
+  captions?: {
+    /**
+     * `tableBefore` שם לפני הכיתוב בלוק `tbl:*` מסוג `table`, ו-`tableAfter`
+     * אחריו. הראשון הוא הצורה השכיחה של כיתוב במסמך אמיתי — „טבלה 1: …”
+     * שמתחת ללוח — וזו שנמדדה: העוגן הטבעי הוא אז הטבלה, ו-`captions.insert`
+     * מקבל כתובת של פסקה בלבד. שניהם יחד הם המצב שאין לו עוגן כלל. כפיל של
+     * פסקאות בלבד לא היה מודד אף אחד מהמסלולים האלה.
+     */
+    items?: readonly {
+      nodeId: string;
+      label: string;
+      text?: string;
+      tableBefore?: boolean;
+      tableAfter?: boolean;
+    }[];
+  };
 }
 
 export interface SuperdocDouble {
@@ -408,6 +430,15 @@ export function createSuperdocDouble(options: SuperdocDoubleOptions = {}): Super
   const citationSources = options.citations?.sources ?? [];
   const citedSourceIds = options.citations?.cited ?? [];
   const bibliographyIds = options.citations?.bibliographyIds ?? [];
+  /** מונה מזהים לכיתוב שנוצר בכפיל. `nodeId` של פסקה הוא כתובת חולפת. */
+  let captionSeq = 0;
+  /** משתנה: `captions.insert` ו-`captions.remove` מוסיפים ומורידים ממנו. */
+  const captionItems = (options.captions?.items ?? []).map((item) => ({
+    nodeId: item.nodeId,
+    label: item.label,
+    text: item.text ?? '',
+  }));
+  const captionOptions = options.captions?.items ?? [];
 
   /**
    * הבלוקים שבמסמך, במבנה שהמנוע האמיתי מחזיק: **בלוק אחד** מסוג
@@ -425,6 +456,20 @@ export function createSuperdocDouble(options: SuperdocDoubleOptions = {}): Super
       })),
     ])
     .concat([{ nodeId: 'block-1', nodeType: 'paragraph', styleId: 'Normal' }])
+    // הכיתובים הם פסקאות ככל פסקה אחרת, ובאות **אחרי** `block-1`: זה מה
+    // שהופך את „ערוך כיתוב” לבדיקה אמיתית — העריכה מחזירה את הכיתוב לפי
+    // הבלוק שלפניו, וכיתוב ראשון ברשימה נשען על `block-1` ולא על עצמו.
+    .concat(
+      captionOptions.flatMap((item) => [
+        ...(item.tableBefore
+          ? [{ nodeId: `tbl:${item.nodeId}-before`, nodeType: 'table', styleId: '' }]
+          : []),
+        { nodeId: item.nodeId, nodeType: 'paragraph', styleId: 'Caption' },
+        ...(item.tableAfter
+          ? [{ nodeId: `tbl:${item.nodeId}-after`, nodeType: 'table', styleId: '' }]
+          : []),
+      ]),
+    )
     .map((block, ordinal) => ({ ...block, ordinal }));
 
   const clipboardPayload = {
@@ -614,6 +659,100 @@ export function createSuperdocDouble(options: SuperdocDoubleOptions = {}): Super
         if (from !== -1 && to !== -1) blocks.splice(from, to - from + 1);
         return receipt('blocks.deleteRange');
       }),
+    },
+    /**
+     * כיתובים. שלוש הבחנות מכוונות, וכולן נמדדו במנוע האמיתי:
+     *
+     * 1. **המספור מחושב ולא נמסר.** כל תווית מנהלת רצף משלה, לפי סדר
+     *    הכיתובים במסמך. זה מה שהופך „הוסף באמצע” ו„הסר” לבדיקות.
+     * 2. **`list` מכבד `limit`/`offset` באמת.** engine/captions.ts שואב
+     *    עמודים עד `total`, וכפיל שמחזיר תמיד את הכול היה מאשר בירוק
+     *    שאיבה שאינה קיימת.
+     * 3. **`captions.update` אינו כאן בכלל.** המודול אינו קורא לו — הוא
+     *    מוסיף את הטקסט החדש על הישן במקום להחליף אותו — ומסלול בכפיל
+     *    לפעולה שאיש אינו קורא לה הוא הזמנה לקרוא לה.
+     */
+    captions: {
+      list: route('captions.list', (input) => {
+        const query = (input ?? {}) as { label?: string; limit?: number; offset?: number };
+        const counters = new Map<string, number>();
+        const numbered = captionItems.map((item) => {
+          const next = (counters.get(item.label) ?? 0) + 1;
+          counters.set(item.label, next);
+          return {
+            id: item.nodeId,
+            address: { kind: 'block', nodeType: 'paragraph', nodeId: item.nodeId },
+            label: item.label,
+            number: next,
+            text: item.text,
+            instruction: `SEQ ${item.label} \\* ARABIC`,
+          };
+        });
+        const matching =
+          query.label === undefined
+            ? numbered
+            : numbered.filter((item) => item.label === query.label);
+        const offset = query.offset ?? 0;
+        const end = query.limit === undefined ? undefined : offset + query.limit;
+        return { items: matching.slice(offset, end), total: matching.length };
+      }),
+      insert: route('captions.insert', (input) => {
+        const failed = receipt('captions.insert');
+        if (!failed.success) return failed;
+        const { adjacentTo, position, label, text } = input as {
+          adjacentTo: { nodeId: string };
+          position: 'above' | 'below';
+          label: string;
+          text?: string;
+        };
+        const at = blocks.findIndex((block) => block.nodeId === adjacentTo.nodeId);
+        // בלוק שאינו פסקה נדחה כמו בלוק שאינו קיים, וזה מה שנמדד במנוע
+        // האמיתי: `adjacentTo` של `tbl:*` מוחזר `TARGET_NOT_FOUND` באותו
+        // נוסח בדיוק.
+        if (at === -1 || blocks[at].nodeType !== 'paragraph') {
+          return {
+            success: false,
+            failure: {
+              code: 'TARGET_NOT_FOUND',
+              message: `target paragraph ${adjacentTo.nodeId} was not found`,
+            },
+          };
+        }
+        const nodeId = `caption-${++captionSeq}`;
+        const index = position === 'above' ? at : at + 1;
+        blocks.splice(index, 0, { nodeId, nodeType: 'paragraph', styleId: 'Caption', ordinal: index });
+        // הכיתובים נשמרים בסדר שבו הם יושבים בבלוקים, ולא בסדר ההוספה:
+        // המספור נגזר מהמסמך, ורשימה שמסודרת אחרת הייתה ממציאה אותו.
+        const before = blocks
+          .slice(0, index)
+          .filter((block) => captionItems.some((item) => item.nodeId === block.nodeId)).length;
+        captionItems.splice(before, 0, { nodeId, label, text: text ?? '' });
+        return { success: true, caption: { kind: 'block', nodeType: 'paragraph', nodeId } };
+      }),
+      remove: route('captions.remove', (input) => {
+        const failed = receipt('captions.remove');
+        if (!failed.success) return failed;
+        const { target } = input as { target: { nodeId: string } };
+        const index = captionItems.findIndex((item) => item.nodeId === target.nodeId);
+        if (index === -1) {
+          return {
+            success: false,
+            failure: { code: 'TARGET_NOT_FOUND', message: `caption "${target.nodeId}" was not found.` },
+          };
+        }
+        captionItems.splice(index, 1);
+        blocks = blocks.filter((block) => block.nodeId !== target.nodeId);
+        return { success: true, caption: target };
+      }),
+    },
+    /**
+     * `paragraphs.setDirection` — הצעד שמסובב את פסקת הכיתוב לימין-לשמאל.
+     * המנוע האמיתי כותב פסקת `Caption` **בלי** `<w:bidi/>` (נמדד ב-docx),
+     * והמודול מוסיף אותו. כאן הוא רק מוקלט: מה שנבדק הוא שהוא נשלח, ושכשל
+     * שלו אינו מפיל את הכיתוב.
+     */
+    paragraphs: {
+      setDirection: route('paragraphs.setDirection', () => receipt('paragraphs.setDirection')),
     },
     /**
      * ציטוטים. שתי הבחנות מכוונות מול השכנים, ושתיהן נמדדו במנוע האמיתי:

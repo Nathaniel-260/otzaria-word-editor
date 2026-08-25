@@ -72,6 +72,11 @@ function fullCapabilities() {
       'fields.list': { available: true },
       'citations.list': { available: true },
       'citations.insert': { available: true },
+      'captions.list': { available: true },
+      'captions.insert': { available: true },
+      'captions.remove': { available: true },
+      'captions.update': { available: true },
+      'captions.configure': { available: true },
       'citations.sources.list': { available: true },
       'citations.sources.insert': { available: true },
       'citations.sources.update': { available: true },
@@ -452,6 +457,38 @@ describe('readDocCapabilities', () => {
     expect(second.can('canRemoveBibliography')).toBe(false);
     // ואילו ההוספה אינה צריכה למצוא כלום.
     expect(second.can('canInsertBibliography')).toBe(true);
+  });
+
+  it('„הוסף כיתוב” דורש את ארבע הפעולות שהדיאלוג מריץ — כולל `blocks.list`', async () => {
+    // `blocks.list` נראה עקיף וגם הוא נמדד כהכרחי: העריכה היא `remove`+`insert`
+    // (`captions.update` מוסיף את הטקסט החדש על הישן), והמקום שאליו הכיתוב
+    // חוזר נגזר מהבלוק שלפניו. ההנמקה המלאה ב-engine/captions.ts.
+    for (const operation of ['captions.list', 'captions.insert', 'captions.remove', 'blocks.list']) {
+      const raw = fullCapabilities();
+      raw.operations[operation as 'captions.list'] = {
+        available: false,
+        reasons: ['NAMESPACE_UNAVAILABLE'],
+      } as never;
+      expect(
+        (await readDocCapabilities(hostWith(() => raw))).can('canManageCaptions'),
+        operation,
+      ).toBe(false);
+    }
+
+    expect(
+      (await readDocCapabilities(hostWith(() => fullCapabilities()))).can('canManageCaptions'),
+    ).toBe(true);
+  });
+
+  it('„מספור הכיתובים” אינו שאלה בכלל', async () => {
+    // `captions.configure` מוצהר זמין, מחזיר `success: true`, ואינו משנה דבר
+    // בקוד השדה (נמדד — `format: 'upperRoman'` נבלע, וכך גם `'zigzag'`). אין
+    // לו פקד, ושאלה בלי פקד היא הצהרת יכולת שאיש אינו קורא. וכך גם
+    // `captions.update`, שהמודול אינו קורא לו כלל.
+    const raw = fullCapabilities();
+    raw.operations['captions.configure'] = { available: false } as never;
+    raw.operations['captions.update'] = { available: false } as never;
+    expect((await readDocCapabilities(hostWith(() => raw))).can('canManageCaptions')).toBe(true);
   });
 
   it('„סגנון הביבליוגרפיה” אינו שאלה בכלל', async () => {

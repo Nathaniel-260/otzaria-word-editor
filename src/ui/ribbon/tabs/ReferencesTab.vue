@@ -185,6 +185,21 @@
       />
     </RibbonGroup>
 
+    <!--
+      „כיתובים”. פקד אחד מתוך ארבעה של Word, וההנמקה לשלושה שאינם כאן
+      בהערת הפתיחה.
+    -->
+    <RibbonGroup title="כיתובים">
+      <RibbonButton
+        icon="image"
+        label="הוסף כיתוב"
+        variant="large"
+        :tooltip="tip('canManageCaptions', 'הוספת כיתוב ממוספר לתמונה, לטבלה או לתרשים')"
+        :disabled="!can('canManageCaptions')"
+        @click="onOpenCaptionDialog"
+      />
+    </RibbonGroup>
+
     <TocDialog
       :is-open="tocDialogOpen"
       :levels="toc.levels"
@@ -233,6 +248,16 @@
       :sources="citations.sources"
       @close="insertCitationDialogOpen = false"
       @insert="onInsertCitation"
+    />
+
+    <CaptionDialog
+      :is-open="captionDialogOpen"
+      :captions="captions.captions"
+      :labels="captions.labels"
+      @close="captionDialogOpen = false"
+      @insert="onInsertCaption"
+      @update="onUpdateCaption"
+      @remove="onRemoveCaption"
     />
   </div>
 </template>
@@ -327,6 +352,27 @@
  * הכתובת נמצאת דרך `fields.list`, שמחזיר `fieldType: 'BIBLIOGRAPHY'` בלי
  * קשר למי יצר את השדה. `blocks.list` דווקא **אינו** מסמן אותה, וגם
  * ל-`citations.bibliography` אין `list` משלה.
+ *
+ * ## קבוצת „כיתובים”, ולמה יש בה פקד אחד
+ *
+ * ב-Word העברי הקבוצה נושאת ארבעה פקדים, וכאן יש אחד. השלושה שאינם כאן
+ * אינם השמטה, וכל אחד מהם נפל על סיבה אחרת:
+ *
+ * - **„הוסף טבלת איורים”** ו„עדכן טבלה” שלה עוברים דרך `create.tableOfContents`
+ *   עם `TOC \c "איור"`. המסלול נמדד ועובד — השדה נכתב קנונית, ו-`toc.list`
+ *   מחזיר אותו עם `preserved.seqFieldIdentifier: 'איור'` — אבל הפקד שייך
+ *   ל-engine/toc.ts, שאינו בהיקף הגל הזה. מה שכן ראוי לדעת לפני שייכתב:
+ *   המנוע אינו אוסף את הכיתובים לתוכה, ו-`entryCount` נשאר 0 גם אחרי
+ *   `toc.update`. Word ימלא אותה בפתיחה, בדיוק כמו את המפתח.
+ * - **„הפניה מקושרת”** אינה כאן מאותה סיבה שהיא אינה בקבוצת „הפניות
+ *   מקושרות”: `crossRefs.insert` כותב `REF SDXREF`. ראו למעלה.
+ *
+ * מה שכן כאן — „הוסף כיתוב” — נשלח אחרי אימות ב-docx: פסקה בסגנון `Caption`
+ * עם `<w:fldSimple w:instr="SEQ איור \* ARABIC">`, כלומר **התווית העברית
+ * נכנסת אל תוך קוד השדה כמו שהיא**. זו הנקודה שהפילה את טבלת המקורות בגל 6,
+ * וכאן היא עוברת. הדיאלוג מוסיף, עורך ומסיר — ו„עורך” הוא הסרה והוספה
+ * מחדש, מפני ש-`captions.update` מוסיף את הטקסט החדש על הישן במקום להחליף
+ * אותו. ההנמקה המלאה, כולל המדידה, ב-engine/captions.ts.
  */
 import { computed, inject, ref, shallowRef, watch } from 'vue';
 import type { SuperDoc } from 'superdoc';
@@ -386,12 +432,22 @@ import {
   type CitationSourceDraft,
   type CitationsState,
 } from '../../../engine/citations';
+import {
+  emptyCaptionsState,
+  insertCaption,
+  readCaptionsState,
+  removeCaption,
+  updateCaption,
+  type CaptionDraft,
+  type CaptionsState,
+} from '../../../engine/captions';
 import TocDialog from '../../panels/TocDialog.vue';
 import TocEntryDialog from '../../panels/TocEntryDialog.vue';
 import IndexDialog from '../../panels/IndexDialog.vue';
 import IndexEntryDialog from '../../panels/IndexEntryDialog.vue';
 import CitationSourceDialog from '../../panels/CitationSourceDialog.vue';
 import InsertCitationDialog from '../../panels/InsertCitationDialog.vue';
+import CaptionDialog from '../../panels/CaptionDialog.vue';
 
 const tocCmd = useCommand('table-of-contents-insert');
 
@@ -418,6 +474,9 @@ const indexState = shallowRef<IndexState>(emptyIndexState());
 /** מצב הציטוטים: המקורות שבמסמך, כמה ציטוטים ישנם, וכמה ביבליוגרפיות. */
 const citations = shallowRef<CitationsState>(emptyCitationsState());
 
+/** מצב הכיתובים: מה יש במסמך, ואילו תוויות כבר בשימוש בו. */
+const captions = shallowRef<CaptionsState>(emptyCaptionsState());
+
 const tocDialogOpen = ref(false);
 const entryDialogOpen = ref(false);
 /** הטקסט שהמשתמש סימן בעורך ברגע פתיחת הדיאלוג, כהצעה לטקסט הערך. */
@@ -427,6 +486,7 @@ const indexEntryDialogOpen = ref(false);
 const indexEntrySuggestion = ref('');
 const sourceDialogOpen = ref(false);
 const insertCitationDialogOpen = ref(false);
+const captionDialogOpen = ref(false);
 
 /** ראו LayoutTab: קריאת היכולות א-סינכרונית, ותשובה של מסמך קודם לא תדרוס. */
 let generation = 0;
@@ -440,19 +500,23 @@ watch(
     toc.value = emptyTocState();
     indexState.value = emptyIndexState();
     citations.value = emptyCitationsState();
-    const [result, refs, tocState, indexSnapshot, citationsSnapshot] = await Promise.all([
-      readDocCapabilities(host),
-      readCrossRefsState(host),
-      readTocState(host),
-      readIndexState(host),
-      readCitationsState(host),
-    ]);
+    captions.value = emptyCaptionsState();
+    const [result, refs, tocState, indexSnapshot, citationsSnapshot, captionsSnapshot] =
+      await Promise.all([
+        readDocCapabilities(host),
+        readCrossRefsState(host),
+        readTocState(host),
+        readIndexState(host),
+        readCitationsState(host),
+        readCaptionsState(host),
+      ]);
     if (mine !== generation) return;
     capabilities.value = result;
     crossRefs.value = refs;
     toc.value = tocState;
     indexState.value = indexSnapshot;
     citations.value = citationsSnapshot;
+    captions.value = captionsSnapshot;
   },
   { immediate: true }
 );
@@ -798,6 +862,44 @@ async function onRebuildBibliography(): Promise<void> {
 async function onRemoveBibliography(): Promise<void> {
   report(await removeBibliography(superdoc.value), 'bibliography-remove');
   await refreshCitations();
+}
+
+/* ------------------------------------------------------------------ */
+/* כיתובים                                                             */
+/* ------------------------------------------------------------------ */
+
+/**
+ * קוראת מחדש את מצב הכיתובים. נדרשת גם אחרי כשל, מאותו טעם כמו `refreshToc`,
+ * ובנוסף מטעם ייחודי כאן: המספור נגזר מסדר הכיתובים במסמך, וכיתוב שנוסף
+ * באמצע מזיז את כל המספרים שאחריו. רשימה שהתיישנה הייתה מציגה „איור 3” על
+ * מה שכבר הפך ל„איור 4”. **קוראת** את המונה ואינה מקדמת אותו — ראו ההסבר
+ * ב-InsertTab.
+ */
+async function refreshCaptions(): Promise<void> {
+  const mine = generation;
+  const next = await readCaptionsState(superdoc.value);
+  if (mine === generation) captions.value = next;
+}
+
+/** קוראת את הכיתובים מהמסמך ברגע הפתיחה. אותו טעם כמו ב-`onOpenTocDialog`. */
+async function onOpenCaptionDialog(): Promise<void> {
+  await refreshCaptions();
+  captionDialogOpen.value = true;
+}
+
+async function onInsertCaption(draft: CaptionDraft): Promise<void> {
+  report(await insertCaption(superdoc.value, draft), 'captions-insert');
+  await refreshCaptions();
+}
+
+async function onUpdateCaption(payload: { id: string; draft: CaptionDraft }): Promise<void> {
+  report(await updateCaption(superdoc.value, payload.id, payload.draft), 'captions-update');
+  await refreshCaptions();
+}
+
+async function onRemoveCaption(id: string): Promise<void> {
+  report(await removeCaption(superdoc.value, id), 'captions-remove');
+  await refreshCaptions();
 }
 </script>
 

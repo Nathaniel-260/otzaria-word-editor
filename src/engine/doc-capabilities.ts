@@ -192,6 +192,22 @@ const CAPABILITY_SPECS = {
     ],
   },
   canInsertCitation: { operation: ['citations.sources.list', 'citations.insert'] },
+  // כיתובים. שאלה אחת לפקד אחד, כמו ב„סימנייה”: „הוסף כיתוב” הוא כפתור
+  // שפותח דיאלוג שמוסיף, עורך ומסיר, ופקד מנוטרל למחצה אינו מצב שאפשר
+  // להציג. שלוש הבחנות כאן, וכולן נמדדו:
+  //
+  // 1. `captions.update` **אינו** ברשימה, ולא מפני ששכחנו: נמדד שהוא מוסיף
+  //    את הטקסט החדש על הישן במקום להחליף אותו („אלף” → „אלף: בית”), ולכן
+  //    העריכה כאן היא `remove`+`insert`. שאלה על פעולה שהפקד אינו מריץ
+  //    הייתה מנטרלת אותו בגלל משהו שאינו נוגע לו.
+  // 2. `blocks.list` **הוא** חלק מהשאלה ואינו קישוט: העריכה מחזירה את
+  //    הכיתוב למקומו לפי הבלוק שלפניו, ובלי הרשימה אין דרך לדעת מיהו.
+  // 3. `captions.configure` אינו נשאל: הוא מחזיר `success: true` ואינו
+  //    משנה דבר בקוד השדה (נמדד — `format: 'upperRoman'` נבלע). אין לו
+  //    פקד, ושאלה בלי פקד היא הצהרת יכולת שאיש אינו קורא.
+  canManageCaptions: {
+    operation: ['captions.list', 'captions.insert', 'captions.remove', 'blocks.list'],
+  },
   canInsertBibliography: { operation: 'citations.bibliography.insert' },
   canRebuildBibliography: { operation: ['fields.list', 'citations.bibliography.rebuild'] },
   canRemoveBibliography: { operation: ['fields.list', 'citations.bibliography.remove'] },
