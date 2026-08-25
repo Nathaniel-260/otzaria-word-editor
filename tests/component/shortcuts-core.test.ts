@@ -388,6 +388,64 @@ describe('פעולות המעטפת', () => {
   });
 });
 
+describe('פעולות שתלויות במצב המנוע', () => {
+  it('Ctrl+] מחשב מהגודל שהמנוע מדווח, ולא ממונה מקומי', async () => {
+    // מונה מקומי היה מטפס גם כשהמסמך דוחה את הפקודה, ואז הלחיצה הבאה הייתה
+    // מחשבת מגודל שאינו במסמך. זו בדיוק הרגרסיה שהכפתורים ברצועה סבלו ממנה.
+    adapter = createCommandDouble({ states: { 'font-size': { value: 12 } } });
+    stub.adapter = adapter;
+    await mountShell();
+
+    press({ key: ']', code: 'BracketRight', ctrlKey: true });
+    press({ key: ']', code: 'BracketRight', ctrlKey: true });
+    await settle();
+
+    // שתי הלחיצות מחשבות מ-12, כי המנוע לא זז.
+    expect(adapter.payloads('font-size')).toEqual([14, 14]);
+  });
+
+  it('Ctrl+[ יורד בסולם של Word', async () => {
+    adapter = createCommandDouble({ states: { 'font-size': { value: 14 } } });
+    stub.adapter = adapter;
+    await mountShell();
+
+    press({ key: '[', code: 'BracketLeft', ctrlKey: true });
+    await settle();
+
+    expect(adapter.payloads('font-size')).toEqual([12]);
+  });
+
+  it('גודל שהמנוע אינו מדווח נופל לברירת המחדל ולא ל-NaN', async () => {
+    adapter = createCommandDouble({ states: { 'font-size': { value: undefined } } });
+    stub.adapter = adapter;
+    await mountShell();
+
+    press({ key: ']', code: 'BracketRight', ctrlKey: true });
+    await settle();
+
+    expect(adapter.payloads('font-size')).toEqual([14]);
+  });
+
+  it('כתב עילי ותחתי עוברים ב-Document API ולא בפקודה', async () => {
+    // `toggleVertAlign` דורש טווח מסומן — בלעדיו הוא נכשל סגור לפני שהוא
+    // מגיע ל-`format.vertAlign`, וזו התנהגות נכונה שהבדיקה אינה מודדת כאן.
+    superdoc = createSuperdocDouble({ selection: { hasRange: true, text: 'טקסט' } });
+    stub.session = {
+      superdoc: superdoc.host,
+      ui: { selection: { observe: () => () => {} } },
+      onDispose: () => {},
+      destroy: () => {},
+    };
+    await mountShell();
+
+    press({ key: '=', code: 'Equal', ctrlKey: true });
+    await settle();
+
+    expect(superdoc.ops()).toContain('format.vertAlign');
+    expect(adapter.calls).toEqual([]);
+  });
+});
+
 describe('מה שהקיצורים אינם עושים', () => {
   it('פוקוס בשדה טקסט של הממשק: קיצור מסמך אינו נורה', async () => {
     const wrapper = await mountShell();
