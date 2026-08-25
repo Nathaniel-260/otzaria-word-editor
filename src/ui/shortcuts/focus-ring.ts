@@ -1,5 +1,5 @@
 /**
- * מעגל המיקוד של `F6` — הרצועה, המסמך ושורת המצב.
+ * מעגל המיקוד של `F6` — סרגל הכותרת, הרצועה, המסמך ושורת המצב.
  *
  * ## למה זה נחוץ
  *
@@ -11,12 +11,13 @@
  * ## למה מודול ולא כמה שורות ב-`App.vue`
  *
  * ההכרעה „באיזה אזור אני עכשיו” היא הכלה ב-DOM, וההכרעה „לאן לקפוץ” היא מעגל
- * שצריך לדלג על אזור שאין בו למה למקד (שורת המצב במצב מיקוד מוסתרת). שתיהן
- * לוגיקה שאפשר לשבור בשקט, ולכן הן נבדקות בנפרד מהמעטפת.
+ * שצריך לדלג על אזור שאינו זמין — במצב מיקוד פסי המעטפת מוסתרים ב-`opacity`
+ * ונשארים ניתנים למיקוד. שתיהן לוגיקה שאפשר לשבור בשקט, ולכן הן נבדקות בנפרד
+ * מהמעטפת.
  */
 
 /** האזורים, בסדר שבו `F6` עובר ביניהם. */
-export type FocusRegionId = 'ribbon' | 'document' | 'statusbar';
+export type FocusRegionId = 'titlebar' | 'ribbon' | 'document' | 'statusbar';
 
 export type FocusDirection = 'next' | 'prev';
 
@@ -29,6 +30,16 @@ export interface FocusRegion {
    * שבתוכו. אזור המסמך משתמש בזה: רק המנוע יכול להחזיר את הסמן לטקסט.
    */
   focus?: () => boolean;
+  /**
+   * האם האזור זמין למיקוד עכשיו. ברירת המחדל: כן.
+   *
+   * **זה אינו „האם הוא ב-DOM”.** במצב מיקוד הרצועה ושורת המצב מוסתרות
+   * ב-`opacity: 0; pointer-events: none` — הן נשארות בעץ, נשארות ניתנות
+   * למיקוד, ו-`pointer-events` אינו חוסם מקלדת. בלי הדגל הזה `F6` היה
+   * ממקד כפתור שקוף: טבעת מיקוד שאינה נראית, הקלדה שאינה מגיעה למסמך,
+   * ו-`Enter` שמפעיל פקד בלתי נראה.
+   */
+  isAvailable?: () => boolean;
 }
 
 /** מה שאפשר למקד. `tabindex="-1"` אינו נכלל — הוא יעד תוכנה, לא תחנת Tab. */
@@ -73,6 +84,7 @@ export function createFocusRing(deps: FocusRingDeps): FocusRing {
 
   /** מנסה למקד אזור. `false` = אין בו למה למקד, וממשיכים לבא אחריו. */
   function focusRegion(region: FocusRegion): boolean {
+    if (region.isAvailable?.() === false) return false;
     if (region.focus?.() === true) return true;
 
     const element = region.element();

@@ -969,7 +969,14 @@ const runShellAction = createShellActionRunner({
       closeFindDialog();
       return true;
     }
-    // אין מה לסגור: `Escape` מהרצועה או משורת המצב מחזיר את הפוקוס למסמך.
+    // מצב מיקוד הוא „חלון” גם הוא: הוא מסתיר את הרצועה ואת שורת המצב, ו-
+    // `Escape` הוא המקש הראשון שכל משתמש מנסה כדי לצאת ממנו. בלי הענף הזה
+    // היציאה היחידה הייתה למצוא שוב את F11 או לרחף מעל קצה המסך.
+    if (isFocusMode.value) {
+      toggleFocusMode();
+      return true;
+    }
+    // אין מה לסגור: `Escape` מאחד מפסי המעטפת מחזיר את הפוקוס למסמך.
     // כשהוא כבר שם — `false`, והאירוע ממשיך למנוע ולדפדפן.
     return focusRing.toDocument();
   },
@@ -1085,17 +1092,34 @@ function isModalDialogOpen(): boolean {
 }
 
 /**
- * מעגל המיקוד של `F6`, בסדר של המסך: הרצועה, המסמך, שורת המצב.
+ * מעגל המיקוד של `F6`, בסדר של המסך: סרגל הכותרת, הרצועה, המסמך, שורת המצב.
  *
  * אזור המסמך ממוקד דרך המנוע ולא דרך ה-`<main>` שמארח אותו: מיקוד המארח מזיז
  * את הפוקוס אבל אינו מחזיר את הסמן לטקסט, כלומר המשתמש היה מקבל „חזרה למסמך”
  * שאי אפשר להקליד אחריה.
+ *
+ * שלושת פסי המעטפת מסומנים כלא-זמינים במצב מיקוד. הם עדיין בעץ — ההסתרה היא
+ * `opacity: 0` — ולכן בלי הסימון `F6` היה ממקד פקד בלתי נראה. זה גם מה שנותן
+ * לשדה שם המסמך דרך יציאה: `Escape` ממנו מזהה שהפוקוס בסרגל הכותרת ומחזיר
+ * אותו למסמך.
  */
+function shellRegion(selector: string): HTMLElement | null {
+  return shellRef.value?.querySelector<HTMLElement>(selector) ?? null;
+}
+
+const outsideFocusMode = () => !isFocusMode.value;
+
 const focusRing = createFocusRing({
   regions: [
     {
+      id: 'titlebar',
+      element: () => shellRegion('.word-titlebar'),
+      isAvailable: outsideFocusMode,
+    },
+    {
       id: 'ribbon',
-      element: () => shellRef.value?.querySelector<HTMLElement>('.word-ribbon-container') ?? null,
+      element: () => shellRegion('.word-ribbon-container'),
+      isAvailable: outsideFocusMode,
     },
     {
       id: 'document',
@@ -1104,7 +1128,8 @@ const focusRing = createFocusRing({
     },
     {
       id: 'statusbar',
-      element: () => shellRef.value?.querySelector<HTMLElement>('.word-statusbar') ?? null,
+      element: () => shellRegion('.word-statusbar'),
+      isAvailable: outsideFocusMode,
     },
   ],
 });
