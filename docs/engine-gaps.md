@@ -543,3 +543,38 @@ Chrome headless על ה-dist הארוז; כל סבב מלווה בפירוק ה-
   `<w:keepLines/>`; `widowControl:false` נכתב `<w:widowControl w:val="0"/>`.
   סדר הילדים ב-`pPr` יוצא מהמנוע קנוני ועובר round-trip.
 
+## `format.apply` ומשפחת `format.<inlineKey>` — גל 12, מה שנמדד
+
+Chrome headless על ה-dist הארוז; פירוק zip לכל סבב. ההנמקות ב-
+engine/font-advanced.ts:
+
+- **היחידות — ה-API בנקודות:** `letterSpacing: 2` → `w:spacing="40"` (×20,
+  twips); `position: 3` → `w:position="6"`, `kerning: 12` → `w:kern="24"`,
+  `fontSizeCs: 12.5` → `szCs="25"` (×2, חצאי-נקודות — **חצאי נקודות
+  מקובלות**, כמו fontSize); `charScale` אחוזים כמות-שהוא.
+- **letterSpacing ו-position חתומים:** שלילי עובר (`-20` → `-400`) וזה
+  חוקי — „מכווץ"/„מונמך". לעומתם `charScale` ו-`kerning` דורשים שער:
+  - `charScale: 9999` → `success:true` ו-`w:w="9999"` — Word תחום
+    1..600 אחוז.
+  - `kerning: -5` → `success:true` ו-`w:kern="-10"` — ST_HpsMeasure
+    אינו חתום.
+- **הליבה העברית נכתבת קנונית:** `rtl/cs/bCs/iCs` → `<w:rtl/>` וכו';
+  `fontSizeCs` → `szCs`; `lang {bidi:'he-IL'}` → `<w:lang w:bidi=...>`;
+  `rFonts {cs:'David'}` → `<w:rFonts w:cs="David"/>`.
+- **פער במנוע — `bold` על עברית כותב `w:b` בלבד, בלי `w:bCs`.** Word מציג
+  הדגשה של טקסט מורכב מ-`bCs`; ריצה עברית עם `b` לבד אינה תוצג מודגשת.
+  פקד ה-bold (דרך הפקודה) וגם `format.bold` מתנהגים כך. עקיפה אצלנו:
+  הדיאלוג מציע „מודגש (מורכב)" דרך `bCs`. הפער עצמו מדווח כאן.
+- **NO_OP מופיע רק ב-`format.apply`:** ה-alias הבודדים החזירו
+  `success:true` גם על חזרה זהה; `apply` מחזיר NO_OP ("produced no
+  change") כשה-patch לא משנה דבר.
+- **`format.<key>` דורש SelectionTarget** ואינו מקבל TextTarget
+  („target must be a SelectionTarget object") — וב-headless `view` הוא
+  null ואין בחירה חיה, כלומר היעד מגיע תמיד מהממשק (vert-align.ts).
+- **`vanish:false` כותב `w:vanish w:val="0"`** — הסרה מפורשת בדיוק כמו
+  Word, ולא הסרת האלמנט; round-trip תקין.
+- **`rStyle` לא נשלח** — נוגע בסגנונות תו; גל 13 (סגנונות) הוא בעליו,
+  ושני מסלולים לאותה כתיבה הם באג. גם `webHidden` דילג: אין לו משמעות
+  ממשק מחוץ לתשתית ההסתרה של Word.
+
+

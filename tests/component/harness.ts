@@ -1031,6 +1031,8 @@ export function createSuperdocDouble(options: SuperdocDoubleOptions = {}): Super
         ),
       },
       vertAlign: route('format.vertAlign', () => receipt('format.vertAlign')),
+      // גל 12 — „גופן מתקדם". החתימה: { target: SelectionTarget, inline }.
+      apply: route('format.apply', () => receipt('format.apply')),
     },
     /**
      * `doc.get` — המסמך במודל SDM/1, מצומצם לבלוק אחד שהבחירה מצביעה עליו.

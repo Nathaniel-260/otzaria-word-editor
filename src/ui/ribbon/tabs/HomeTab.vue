@@ -92,6 +92,20 @@
           :disabled="!clearFormatCmd.enabled.value"
           @click="clearFormatCmd.run()"
         />
+
+        <!--
+          „גופן מתקדם" — פתח הדיאלוג, כמו פתח ה„גופן" של Word בקצה הקבוצה.
+          הדיאלוג עצמו נכשל סגור כשאין Document API, ולכן הכפתור נשאר לחיץ
+          והפתיחה מסבירה. `@pointerdown.prevent` מונע גזילת המיקוד מהעורך —
+          הבחירה חייבת לשרוד עד החלת העיצוב.
+        -->
+        <RibbonButton
+          label="מתקדם"
+          variant="small"
+          tooltip="גופן מתקדם: ריווח תווים, מיקום, אפקטים וגופן מורכב"
+          :disabled="fontAdvInFlight"
+          @click="onOpenFontAdvanced"
+        />
       </div>
 
       <!-- שורה תחתונה: B, I, U, S, sub, super, highlight, color -->
@@ -362,6 +376,13 @@
       @tab-remove="onParagraphTabRemove"
       @tabs-clear="onParagraphTabsClear"
     />
+
+    <FontAdvancedDialog
+      :is-open="fontAdvOpen"
+      :busy="fontAdvInFlight"
+      @close="fontAdvOpen = false"
+      @submit="onFontAdvancedSubmit"
+    />
   </div>
 </template>
 
@@ -392,6 +413,7 @@ import {
   type VertAlignSupport,
 } from '../../../engine/vert-align';
 import ParagraphDialog from '../../panels/ParagraphDialog.vue';
+import FontAdvancedDialog from '../../panels/FontAdvancedDialog.vue';
 import {
   TWIPS_PER_CM,
   TWIPS_PER_PT,
@@ -405,6 +427,10 @@ import {
   removeParagraphTabStop,
   type TabStop,
 } from '../../../engine/paragraph-format';
+import {
+  applyFontAdvanced,
+  type FontAdvancedPatch,
+} from '../../../engine/font-advanced';
 import {
   DEFAULT_FONT_SIZE_PT,
   DEFAULT_LINE_HEIGHT,
@@ -941,6 +967,39 @@ function onParagraphTabsClear(): void {
     const outcome = await clearAllParagraphTabStops(superdoc.value, paraTarget);
     report(outcome, 'paragraph-tabs-clear');
   });
+}
+
+/* ------------------------------------------------------------------ */
+/* גופן מתקדם                                                          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * דיאלוג „גופן מתקדם" — קריאה אחת ל-`format.apply` (engine/font-advanced.ts).
+ * אין לו פקודה ב-registry, ולכן המסלול הוא Document API — כמו פעולות הלוח
+ * ותפריט הפסקה מעל.
+ */
+const fontAdvOpen = shallowRef(false);
+const fontAdvInFlight = shallowRef(false);
+
+function onOpenFontAdvanced(): void {
+  // אין קריאת מצב לפני הפתיחה: format.apply הוא patch לפי מפתח, ואין
+  // קריאה ציבורית של עיצוב ריצות בבחירה (ראו vert-align.ts). הדיאלוג
+  // נפתח על „ללא שינוי" ושולח רק מה שהמשתמש מילא.
+  if (fontAdvInFlight.value) return;
+  fontAdvOpen.value = true;
+}
+
+function onFontAdvancedSubmit(patch: FontAdvancedPatch): void {
+  fontAdvOpen.value = false;
+  if (fontAdvInFlight.value) return;
+  fontAdvInFlight.value = true;
+  void (async () => {
+    try {
+      report(await applyFontAdvanced(superdoc.value, patch), 'font-advanced');
+    } finally {
+      fontAdvInFlight.value = false;
+    }
+  })();
 }
 </script>
 

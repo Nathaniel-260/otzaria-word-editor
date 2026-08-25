@@ -107,6 +107,9 @@ async function probe(
     reports: harness.reports.length,
     emitted: emittedCount(harness.wrapper),
     html: harness.wrapper.html(),
+    // דיאלוגים מרונדרים ב-Teleport לגוף הדף ואינם נראים ב-wrapper.html().
+    // בלי הצצה ל-body, כפתור שכל מה שהוא עושה הוא פתיחת דיאלוג נמדד כמת.
+    bodyHtml: document.body.innerHTML,
   };
 
   await button.trigger('click');
@@ -118,6 +121,7 @@ async function probe(
   if (emittedCount(harness.wrapper) > before.emitted) effects.push('event');
   if (harness.reports.length > before.reports) effects.push('דיווח');
   if (harness.wrapper.html() !== before.html) effects.push('DOM');
+  if (document.body.innerHTML !== before.bodyHtml) effects.push('DOM-teleport');
 
   return { name, disabled, effects, count: buttons.length };
 }
