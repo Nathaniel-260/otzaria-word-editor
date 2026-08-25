@@ -932,6 +932,9 @@ const runShellAction = createShellActionRunner({
   toggleTrackChanges: () => void runToggleTrackChanges(),
   toggleFocusMode,
   findAgain,
+  insertCitation: () => void onInsertCitation(),
+  searchOtzaria: () => void onSearchOtzaria(),
+  openLibrary: () => void onOpenLibrary(),
   // „אודות” הוא `aria-modal`, ולכן הוא זה שנסגר כשהוא פתוח. החיפוש אינו מודאלי
   // ואפשר להמשיך לערוך מתחתיו, ולכן הוא נסגר רק כשאין חלון מעליו.
   closeTopmost: () => {
@@ -1125,7 +1128,7 @@ async function resolveLastDocument(): Promise<UserFile | undefined> {
   overflow: hidden;
   background: var(--color-surface);
   color: var(--color-on-surface);
-  font-family: var(--font-ui);
+  font-family: var(--font-main);
   direction: rtl;
 }
 

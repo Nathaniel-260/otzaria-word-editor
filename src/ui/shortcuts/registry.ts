@@ -67,7 +67,10 @@ export type ShellAction =
   | 'track-changes'
   | 'focus-mode'
   | 'find-next'
-  | 'find-prev';
+  | 'find-prev'
+  | 'insert-citation'
+  | 'search-otzaria'
+  | 'open-library';
 
 export interface Shortcut {
   /** מזהה יציב. משמש את הרצועה, את הבדיקות ואת דיאלוג העזרה. */
@@ -603,6 +606,36 @@ export const SHORTCUTS = [
     ctrl: true,
     shift: true,
     command: 'formatting-marks',
+  },
+  {
+    id: 'insert-citation',
+    label: 'Ctrl+Shift+Q',
+    description: 'ציטוט מהקורא של אוצריא',
+    group: 'otzaria',
+    code: 'KeyQ',
+    ctrl: true,
+    shift: true,
+    action: 'insert-citation',
+  },
+  {
+    id: 'search-otzaria',
+    label: 'Ctrl+Shift+F',
+    description: 'חיפוש הטקסט המסומן בספרייה',
+    group: 'otzaria',
+    code: 'KeyF',
+    ctrl: true,
+    shift: true,
+    action: 'search-otzaria',
+  },
+  {
+    id: 'open-library',
+    label: 'Ctrl+Shift+O',
+    description: 'פתיחת הספרייה',
+    group: 'otzaria',
+    code: 'KeyO',
+    ctrl: true,
+    shift: true,
+    action: 'open-library',
   },
   {
     id: 'direction-rtl',

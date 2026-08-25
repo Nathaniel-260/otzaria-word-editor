@@ -575,6 +575,39 @@ describe('כיווניות פסקה', () => {
   });
 });
 
+describe('אוצריא', () => {
+  it('Ctrl+Shift+F אינו Ctrl+F — חיפוש בספרייה מול חיפוש במסמך', async () => {
+    const wrapper = await mountShell();
+
+    press({ code: 'KeyF', ctrlKey: true, shiftKey: true });
+    await settle();
+
+    // בלי מאחז אוצריא הפעולה נכשלת סגור ומדווחת — ומה שחשוב כאן הוא שהיא
+    // **לא** פתחה את דיאלוג החיפוש במסמך.
+    expect(wrapper.find('.find-replace-dialog').exists()).toBe(false);
+  });
+
+  it('Ctrl+Shift+O אינו Ctrl+O — ספרייה מול בורר קבצים', async () => {
+    await mountShell();
+
+    press({ code: 'KeyO', ctrlKey: true, shiftKey: true });
+    await settle();
+
+    expect(stub.pickCalls, 'בורר הקבצים לא נפתח').toBe(0);
+  });
+
+  it('Ctrl+Shift+Q מבקש את הבחירה מהקורא ולא מהמסמך', async () => {
+    const wrapper = await mountShell();
+
+    const event = press({ code: 'KeyQ', ctrlKey: true, shiftKey: true });
+    await settle();
+
+    expect(event.defaultPrevented).toBe(true);
+    // אין מאחז אוצריא בבדיקות, ולכן זו הודעה בעברית ולא חריגה.
+    expect(wrapper.find('.status-message').text().length).toBeGreaterThan(0);
+  });
+});
+
 describe('מה שהקיצורים אינם עושים', () => {
   it('פוקוס בשדה טקסט של הממשק: קיצור מסמך אינו נורה', async () => {
     const wrapper = await mountShell();
