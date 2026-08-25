@@ -11,6 +11,7 @@ interface FakeConfig {
   document?: unknown;
   ui: false;
   telemetry: { enabled: boolean };
+  measurementUnit?: string;
   workerUrls?: unknown;
   modules?: unknown;
   onEditorUpdate?: () => void;
@@ -38,6 +39,12 @@ vi.mock('superdoc/ui', () => ({ createSuperDocUI }));
 vi.mock('superdoc/style.css', () => ({}));
 
 const { createEditor, exceptionToError } = await import('../../src/engine/create-editor');
+const { headerFooterChrome, textOf } = await import('../support/hf-chrome-dom');
+
+/** המתנה למעבר של ה-MutationObserver שהעברות מתקינה. */
+function flush(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
 
 /** המופע האחרון שנבנה. lib היא ES2020 — בכוונה, כמו ה-build — ולכן אין Array.at. */
 function lastInstance(): FakeSuperDoc | undefined {
@@ -118,6 +125,34 @@ describe('createEditor', () => {
     const { instance } = mount();
 
     expect(instance.config.modules).toEqual({ surfaces: { passwordPrompt: false } });
+  });
+
+  it('מודד בסנטימטרים', () => {
+    // ברירת המחדל של המנוע היא `'in'` — ברירת המחדל של Word en-US — וזו הסיבה
+    // שפאנל הכותרות שלו הציג „0.49 in” על 1.25 ס"מ. כל הממשק שלנו בסנטימטרים.
+    const { instance } = mount();
+
+    expect(instance.config.measurementUnit).toBe('cm');
+  });
+
+  it('מעברת את שכבת הכותרות של המנוע, ומפסיק בפירוק', async () => {
+    // החיווט, לא הנוסח: הנוסח נמדד ב-hf-chrome.test.ts. מה שנמדד כאן הוא
+    // שהעברות מותקנת על ה-container הנכון ושהיא נרשמת כ-disposer — observer
+    // ששרד את הפירוק היה קורא DOM של מנוע שכבר נפרק.
+    const { container, session, instance } = mount();
+    instance.config.onReady({ superdoc: instance });
+    const editor = await session;
+
+    container.append(headerFooterChrome());
+    await flush();
+    expect(textOf(container, '[data-sd-hf-label] > span')).toBe('כותרת עליונה');
+
+    editor.destroy();
+    container.textContent = '';
+    container.append(headerFooterChrome({ label: 'Footer', region: 'footer' }));
+    await flush();
+
+    expect(textOf(container, '[data-sd-hf-label] > span')).toBe('Footer');
   });
 
   it('פתיחה שאינה מסתיימת נכשלת בזמן קצוב ומפרקת את המנוע', async () => {

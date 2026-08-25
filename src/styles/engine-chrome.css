@@ -1,0 +1,62 @@
+/* עברות ה-chrome של המנוע: פאנל „אפשרויות” של הכותרת העליונה והתחתונה.
+
+   ה-DOM כאן אינו שלנו. `ui: false` מכבה את ה-toolbar, הדיאלוגים והפופאוברים
+   של SuperDoc, אבל שכבת ה-overlay שמצוירת מעל בד העימוד אינה חלק מ-`ui` —
+   היא של מנוע ה-DOCX (`V2HeaderFooterOverlay` ב-@superdoc/docx-engine), והיא
+   ממשיכה לצייר את עצמה באנגלית: „Different First Page”, „Header from Top”
+   וכן הלאה. אין לה מתג ב-`modules.surfaces` כמו שהיה לדיאלוג הסיסמה, ואין לה
+   הגדרת טקסטים כמו ש-`findReplace` ו-`passwordPrompt` מקבלים — המחרוזות
+   מוטמעות קשיח באריזה שלה. הרישיון הקנייני של המנוע אוסר לשנות את האריזה,
+   ו-`npm install` היה מוחק כל תיקון כזה בלי סימן. לכן העברות היא מבחוץ.
+
+   למה CSS ולא JavaScript: ארבע התוויות בפאנל הן static-hoisted vnodes של Vue
+   — המנוע בונה אותן פעם אחת ומשבט אותן בכל פתיחה של הפאנל. החלפת טקסט ב-JS
+   מתאפסת בכל פתיחה, ו-MutationObserver מגיע ב-microtask שאחריה, כלומר פריים
+   של אנגלית בכל לחיצה על „אפשרויות”. כלל CSS אינו מהבהב, ואינו רץ בכלל.
+   מה ש-CSS אינו יכול — `title`, `aria-label`, ותווית שנושאת מספר מקטע —
+   יושב ב-engine/hf-chrome.ts. ההפרדה מכוונת: אף תווית אינה מתורגמת בשני
+   המקומות, ולכן אין כאן „מי כתב אחרון”.
+
+   העיגון הוא בתכונות `data-sd-hf-option` — מזהים סמנטיים שהמנוע מסמן בהם כל
+   שורה בפאנל — ולא במחלקות (שנושאות hash של scope: `[data-v-57503068]`) ולא
+   במקום בסדר. שורה שתחליף מקום תקבל את התווית שלה ולא של שכנתה, וזה ההפרש
+   בין „הטקסט לא תורגם” ל„המתג הלא נכון מסומן”.
+   tests/contract/engine-hf-chrome.test.ts מאמת שכל מזהה כאן עדיין קיים
+   באריזת המנוע: שדרוג שישנה אותם ייפול שם, ולא אצל המשתמש כאנגלית שחזרה.
+
+   הנוסח הוא של Word העברי, וזהה למה שהרצועה שלנו אומרת על אותם מתגים בדיוק
+   („שונה בעמוד ראשון” ב-InsertTab.vue, „מרחק הכותרת מקצה הדף”
+   ב-HeaderDistanceDialog.vue). שני נוסחים לאותו מתג הם באג בפני עצמו. */
+
+/* שני המתגים. `> span` הוא כל תוכן התווית של המנוע, ו-`::after` נכנס במקומו
+   אחרי תיבת הסימון — אותו סדר שהיה, מפני ש-`.v2-hf-option` הוא inline-flex
+   והפסאודו הוא פשוט הפריט האחרון בו. */
+[data-sd-hf-option='different-first-page'] > span,
+[data-sd-hf-option='different-odd-even'] > span {
+  display: none;
+}
+
+[data-sd-hf-option='different-first-page']::after {
+  content: 'שונה בעמוד ראשון';
+}
+
+[data-sd-hf-option='different-odd-even']::after {
+  content: 'שונה בעמודים זוגיים ואי-זוגיים';
+}
+
+/* שתי שורות המרחק. כאן התווית היא הילד הראשון (אחריה תיבת המספר ואחריה
+   יחידת המידה), ולכן `::before` ולא `::after` — אחרת התווית הייתה נוחתת מעבר
+   לתיבה. `span:first-child` הוא התווית בלבד: את יחידת המידה מעברתת
+   hf-chrome.ts, מפני שהיא תלויה ב-`measurementUnit` ומשתנה בזמן ריצה. */
+[data-sd-hf-option='header-from-top'] > span:first-child,
+[data-sd-hf-option='footer-from-bottom'] > span:first-child {
+  display: none;
+}
+
+[data-sd-hf-option='header-from-top']::before {
+  content: 'כותרת עליונה מקצה הדף';
+}
+
+[data-sd-hf-option='footer-from-bottom']::before {
+  content: 'כותרת תחתונה מקצה הדף';
+}
