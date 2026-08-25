@@ -156,6 +156,8 @@ describe('הרשימה כולה', () => {
 
     for (const shortcut of ENTRIES) {
       if (shortcut.native) continue;
+      // כיווניות מזוהה בשחרור מודיפייר — נבדקת ב-shortcut-direction.test.ts.
+      if (shortcut.onKeyUp) continue;
       const codes =
         shortcut.code === undefined
           ? ['']

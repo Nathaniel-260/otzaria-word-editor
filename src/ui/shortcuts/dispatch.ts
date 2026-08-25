@@ -59,6 +59,10 @@ export function createShortcutDispatcher(deps: ShortcutDispatcherDeps): Shortcut
     const shortcut = matchAny(event, shortcuts);
     if (!shortcut) return false;
 
+    // כיווניות פסקה מזוהה בשחרור ה-Shift, ב-`direction.ts`. כאן היא הייתה
+    // נורית ברגע שהמשתמש לוחץ Shift — כלומר גם באמצע `Ctrl+Shift+X`.
+    if (shortcut.onKeyUp) return false;
+
     // צירוף שהדפדפן מטפל בו מתועד אצלנו כדי שהתווית תהיה אמיתית, אבל אסור
     // לגעת בו: `preventDefault` על Ctrl+V היה מבטל את ההדבקה עצמה.
     if (shortcut.native) return false;

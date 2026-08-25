@@ -446,6 +446,49 @@ describe('פעולות שתלויות במצב המנוע', () => {
   });
 });
 
+describe('כיווניות פסקה', () => {
+  /** לחיצה ושחרור של Shift, כמו במקלדת אמיתית. */
+  function pressShift(side: 'ShiftLeft' | 'ShiftRight'): void {
+    const init = { code: side, key: 'Shift', ctrlKey: true, bubbles: true, cancelable: true };
+    window.dispatchEvent(new KeyboardEvent('keydown', init));
+    window.dispatchEvent(new KeyboardEvent('keyup', init));
+  }
+
+  it('Ctrl + Shift ימני הופך את הפסקה ל-RTL', async () => {
+    await mountShell();
+
+    pressShift('ShiftRight');
+    await settle();
+
+    expect(adapter.calls.map((call) => call.id)).toEqual(['direction-rtl']);
+  });
+
+  it('Ctrl + Shift שמאלי הופך אותה ל-LTR', async () => {
+    await mountShell();
+
+    pressShift('ShiftLeft');
+    await settle();
+
+    expect(adapter.calls.map((call) => call.id)).toEqual(['direction-ltr']);
+  });
+
+  it('Ctrl+Shift+X אינו נוגע בכיווניות', async () => {
+    // הצירוף שהכי קל להיכשל בו: הוא נגמר בשחרור של אותו Shift בדיוק.
+    await mountShell();
+
+    const init = { ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true };
+    window.dispatchEvent(
+      new KeyboardEvent('keydown', { code: 'ShiftLeft', key: 'Shift', ...init }),
+    );
+    window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyX', key: 'x', ...init }));
+    window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyX', key: 'x', ...init }));
+    window.dispatchEvent(new KeyboardEvent('keyup', { code: 'ShiftLeft', key: 'Shift', ...init }));
+    await settle();
+
+    expect(adapter.calls.map((call) => call.id)).toEqual(['strikethrough']);
+  });
+});
+
 describe('מה שהקיצורים אינם עושים', () => {
   it('פוקוס בשדה טקסט של הממשק: קיצור מסמך אינו נורה', async () => {
     const wrapper = await mountShell();
