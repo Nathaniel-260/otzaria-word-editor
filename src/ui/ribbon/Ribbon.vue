@@ -70,6 +70,7 @@
         @export-doc="$emit('export-doc')"
         @print-doc="$emit('print-doc')"
         @about="$emit('about')"
+        @shortcuts-help="$emit('shortcuts-help')"
         @exit-app="$emit('exit-app')"
       />
       <HomeTab
@@ -160,6 +161,7 @@ defineEmits<{
   (e: 'export-doc'): void;
   (e: 'print-doc'): void;
   (e: 'about'): void;
+  (e: 'shortcuts-help'): void;
   (e: 'exit-app'): void;
   (e: 'open-find'): void;
   (e: 'open-replace'): void;

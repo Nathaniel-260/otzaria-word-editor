@@ -85,6 +85,17 @@
         tooltip="אודות עורך Word לאוצריא"
         @click="$emit('about')"
       />
+      <!-- דיאלוג שמגיעים אליו רק בקיצור הוא דיאלוג שאיש לא ימצא: הוא **כל
+           הרשימה** של הקיצורים, כלומר בדיוק מה שמי שאינו יודע אותם מחפש.
+           ה-tooltip מציג את הצירוף מהרג'יסטרי, ולכן הכפתור גם מלמד אותו. -->
+      <RibbonButton
+        icon="book"
+        label="קיצורים"
+        variant="large"
+        tooltip="רשימת קיצורי המקלדת"
+        shortcut-id="shortcuts-help"
+        @click="$emit('shortcuts-help')"
+      />
     </RibbonGroup>
   </div>
 </template>
@@ -159,6 +170,7 @@ defineEmits<{
   (e: 'export-doc'): void;
   (e: 'print-doc'): void;
   (e: 'about'): void;
+  (e: 'shortcuts-help'): void;
   (e: 'exit-app'): void;
 }>();
 

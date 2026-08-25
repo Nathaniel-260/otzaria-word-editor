@@ -39,6 +39,7 @@
       @export-doc="onExportDocx"
       @print-doc="onPrint"
       @about="isAboutOpen = true"
+      @shortcuts-help="isShortcutsHelpOpen = true"
       @exit-app="onExit"
       @open-find="openFindDialog('find')"
       @open-replace="openFindDialog('replace')"

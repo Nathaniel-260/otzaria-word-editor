@@ -674,7 +674,10 @@ export const SHORTCUTS = [
     description: 'רשימת כל קיצורי המקלדת',
     group: 'app',
     // המקש הפיזי, כרגיל: בפריסה העברית אותו מקש מפיק „.” ולא „/”.
-    code: 'Slash',
+    //
+    // גם הלוכסן של הספרון, מאותו טעם ש-`Ctrl+Enter` מקבל גם `NumpadEnter`:
+    // למשתמש זה „אותו מקש”, ורק הדפדפן יודע שאלה שני `code` שונים.
+    code: ['Slash', 'NumpadDivide'],
     ctrl: true,
     action: 'shortcuts-help',
   },

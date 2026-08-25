@@ -217,6 +217,48 @@ describe('דיאלוג הקיצורים', () => {
     expect(wrapper.find('.shortcuts-dialog').exists()).toBe(false);
   });
 
+  it('הלוכסן של הספרון פותח גם הוא', async () => {
+    // למשתמש זה „אותו מקש”; רק הדפדפן יודע שאלה שני code שונים.
+    const wrapper = await mountShell();
+
+    press({ code: 'NumpadDivide', ctrlKey: true });
+    await settle();
+
+    expect(wrapper.find('.shortcuts-dialog').exists()).toBe(true);
+  });
+
+  /** הרצועה מרכיבה לשונית רק כשהיא פעילה, ולכן צריך לפתוח את „קובץ” קודם. */
+  async function shortcutsButton(wrapper: ReturnType<typeof mount>) {
+    const tab = wrapper.findAll('[role="tab"]').find((item) => item.text() === 'קובץ');
+    await tab!.trigger('click');
+    await settle();
+    return wrapper
+      .findAll('button')
+      .find((node) => node.attributes('title')?.startsWith('רשימת קיצורי המקלדת'));
+  }
+
+  it('יש כפתור ברצועה שפותח את הרשימה', async () => {
+    // דיאלוג שמגיעים אליו רק בקיצור הוא דיאלוג שאיש לא ימצא — והוא **כל
+    // הרשימה** של הקיצורים, כלומר בדיוק מה שמי שאינו יודע אותם מחפש.
+    const wrapper = await mountShell();
+
+    const button = await shortcutsButton(wrapper);
+
+    expect(button, 'הכפתור קיים בלשונית „קובץ”').toBeDefined();
+    await button!.trigger('click');
+    await settle();
+
+    expect(wrapper.find('.shortcuts-dialog').exists()).toBe(true);
+  });
+
+  it('ה-tooltip של הכפתור מלמד את הצירוף, מהרג׳יסטרי', async () => {
+    const wrapper = await mountShell();
+
+    const button = await shortcutsButton(wrapper);
+
+    expect(button!.attributes('title')).toContain('Ctrl+/');
+  });
+
   it('Ctrl+/ בפריסה עברית פותח גם הוא', async () => {
     // אותו מקש פיזי מפיק „.” בפריסה העברית.
     const wrapper = await mountShell();
