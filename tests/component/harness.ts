@@ -286,6 +286,8 @@ export interface SuperdocDoubleOptions {
   deferred?: readonly string[];
   /** מה שהבחירה במסמך מדווחת. */
   selection?: { blockId?: string | null; hasRange?: boolean; text?: string };
+  /** קישורים קיימים ש-`hyperlinks.list` ידווח (גל 22). */
+  hyperlinks?: readonly Record<string, unknown>[];
   /**
    * מה שהמקטע במסמך **כבר** נושא. שני השדות האלה הם היחידים שהתוסף קורא
    * מהמקטע ואז שולח בחזרה, ולכן הם היחידים שכפיל חייב לדעת לייצר: מקטע
@@ -1042,6 +1044,14 @@ export function createSuperdocDouble(options: SuperdocDoubleOptions = {}): Super
       restartAt: route('lists.restartAt', () => receipt('lists.restartAt')),
       continuePrevious: route('lists.continuePrevious', () => receipt('lists.continuePrevious')),
       convertToText: route('lists.convertToText', () => receipt('lists.convertToText')),
+    },
+    // גל 22 — ניהול קישורים. list מחזיר stories; remove לפי within.
+    hyperlinks: {
+      list: route('hyperlinks.list', () => ({
+        stories: [{ storyId: 'main', hyperlinks: options.hyperlinks ?? [] }],
+      })),
+      wrap: route('hyperlinks.wrap', () => receipt('hyperlinks.wrap')),
+      remove: route('hyperlinks.remove', () => receipt('hyperlinks.remove')),
     },
     /**
      * `doc.get` — המסמך במודל SDM/1, מצומצם לבלוק אחד שהבחירה מצביעה עליו.

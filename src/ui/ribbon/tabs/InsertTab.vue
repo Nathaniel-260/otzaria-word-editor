@@ -47,6 +47,16 @@
         :disabled="!linkCmd.enabled.value"
         @click="onOpenLinkDialog"
       />
+      <!-- גל 22: „הסר קישור" — hyperlinks.remove על הטווח המסומן. -->
+      <RibbonButton
+        icon="link"
+        label="הסר קישור"
+        variant="large"
+        tooltip="הסרת ההיפר-קישור מהטקסט המסומן (הטקסט נשמר)"
+        :disabled="removeLinkInFlight"
+        @click="onRemoveHyperlink"
+      />
+
       <!--
         „סימנייה” יושבת כאן מפני שזה מקומה ב-Word העברי: הפקד השני בקבוצה
         „קישורים” של לשונית „הוספה”, ליד „קישור” ו„הפניה מקושרת”. הפקד
@@ -264,6 +274,7 @@ import LinkDialog from '../../panels/LinkDialog.vue';
 import BookmarkDialog from '../../panels/BookmarkDialog.vue';
 import { useCommand } from '../../../composables/useCommand';
 import { COMMAND_REPORTER, type CommandReporter } from '../../../composables/keys';
+import { removeHyperlink } from '../../../engine/hyperlinks-manage';
 import type { CommandOutcome } from '../../../engine/command-adapter';
 import { ACTIVE_SUPERDOC } from '../../../engine/document-api';
 import {
@@ -410,6 +421,22 @@ const linkSelection = shallowRef<DocSelectionSnapshot>(emptySelectionSnapshot())
 async function onOpenLinkDialog(): Promise<void> {
   linkSelection.value = await readDocSelection(superdoc.value, { includeText: true });
   linkDialogOpen.value = true;
+}
+
+/**
+ * „הסר קישור" (גל 22) — `hyperlinks.remove` על הטווח המסומן
+ * (engine/hyperlinks-manage.ts). אין לו פקודה בקטלוג, ולכן Document API.
+ */
+const removeLinkInFlight = shallowRef(false);
+
+async function onRemoveHyperlink(): Promise<void> {
+  if (removeLinkInFlight.value) return;
+  removeLinkInFlight.value = true;
+  try {
+    report(await removeHyperlink(superdoc.value), 'hyperlink-remove');
+  } finally {
+    removeLinkInFlight.value = false;
+  }
 }
 
 function onSubmitLink(link: { href: string; text: string }): void {
