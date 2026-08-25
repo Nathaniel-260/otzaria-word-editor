@@ -27,6 +27,14 @@ const stub = vi.hoisted(() => ({
   session: null as unknown,
   adapter: null as unknown,
   pickCalls: 0,
+  /** מצב השמירה שהקואורדינטור מדווח. בדיקה יכולה להפוך אותו למלוכלך. */
+  isDirty: false,
+  /** מה שנשאל בדיאלוג האישור של אוצריא, לפי הסדר. */
+  confirms: [] as string[],
+  /** התשובה של המשתמש בדיאלוג. */
+  confirmAnswer: false,
+  /** כמה פעמים מצב השמירה אופס — כלומר מסמך חדש נפתח. */
+  resets: 0,
 }));
 
 vi.mock('../../src/engine/create-editor', () => ({
@@ -50,18 +58,22 @@ vi.mock('../../src/sessions/editor-swap', () => ({
 vi.mock('../../src/sessions/save-coordinator', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../src/sessions/save-coordinator')>()),
   createSaveCoordinator: (_deps: SaveCoordinatorDeps) => ({
-    snapshot: {
-      state: 'idle',
-      isDirty: false,
-      isSaving: false,
-      targetToken: null,
-      name: null,
-      lastError: null,
+    get snapshot() {
+      return {
+        state: 'idle',
+        isDirty: stub.isDirty,
+        isSaving: false,
+        targetToken: null,
+        name: null,
+        lastError: null,
+      };
     },
     markDirty: () => {},
     setAutosaveEnabled: () => {},
     adoptTarget: () => {},
-    reset: () => {},
+    reset: () => {
+      stub.resets += 1;
+    },
     saveNow: async (options?: { forceSaveAs?: boolean }) => {
       stub.saveNowCalls.push(options);
       return { status: 'saved', token: 'token-1', name: 'מסמך.docx' };
@@ -122,6 +134,15 @@ vi.mock('../../src/host/settings', () => ({
   saveAutosaveEnabled: async () => {},
 }));
 
+vi.mock('../../src/host/otzaria-client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/host/otzaria-client')>()),
+  confirm: async (question: { title: string }) => {
+    stub.confirms.push(question.title);
+    return stub.confirmAnswer;
+  },
+  notifyError: () => {},
+}));
+
 vi.mock('../../src/host/files', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../src/host/files')>()),
   pickDocxFile: async () => {
@@ -152,7 +173,11 @@ function press(over: Partial<KeyboardEventInit> & { code: string }): KeyboardEve
 
 beforeEach(() => {
   stub.saveNowCalls.length = 0;
+  stub.confirms.length = 0;
   stub.pickCalls = 0;
+  stub.resets = 0;
+  stub.isDirty = false;
+  stub.confirmAnswer = false;
   adapter = createCommandDouble();
   superdoc = createSuperdocDouble();
   stub.adapter = adapter;
@@ -279,6 +304,45 @@ describe('פעולות המעטפת', () => {
     expect(stub.pickCalls).toBe(1);
   });
 
+  it('Ctrl+N פותח מסמך חדש', async () => {
+    await mountShell();
+    stub.resets = 0;
+
+    const event = press({ code: 'KeyN', ctrlKey: true });
+    await settle();
+
+    expect(stub.resets, 'מסמך חדש נפתח').toBe(1);
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it('Ctrl+N על מסמך מלוכלך שואל לפני שהוא מוחק עבודה', async () => {
+    // המסלול המסוכן בשלב הזה: קיצור שמוחק את מה שהמשתמש כתב. הוא חייב לעבור
+    // באותה הכרעה בדיוק שהכפתור עובר בה — `decideDocumentSwitch` — ולא לקצר.
+    await mountShell();
+    stub.isDirty = true;
+    stub.resets = 0;
+
+    press({ code: 'KeyN', ctrlKey: true });
+    await settle();
+
+    // אותה שרשרת שאלות בדיוק שהכפתור „מסמך חדש” עובר בה.
+    expect(stub.confirms, 'המשתמש נשאל').toEqual(['המסמך לא נשמר', 'לפתוח בלי לשמור?']);
+    expect(stub.resets, 'ובלי אישור — לא נפתח מסמך חדש').toBe(0);
+  });
+
+  it('Ctrl+O עובר באותו מסלול של הכפתור: קודם בורר הקבצים', async () => {
+    // ב-`onPickAndOpen` הבחירה קודמת לשאלה על השינויים שלא נשמרו, ולכן ביטול
+    // בבורר אינו מגיע לשאלה בכלל. הקיצור אינו מקצר את המסלול הזה.
+    await mountShell();
+    stub.isDirty = true;
+
+    press({ code: 'KeyO', ctrlKey: true });
+    await settle();
+
+    expect(stub.pickCalls, 'בורר הקבצים נפתח').toBe(1);
+    expect(stub.confirms, 'הבחירה בוטלה — אין מה לשאול').toEqual([]);
+  });
+
   it('F12 הוא „שמור בשם”', async () => {
     await mountShell();
 
@@ -319,6 +383,75 @@ describe('מה שהקיצורים אינם עושים', () => {
 
     expect(event.defaultPrevented).toBe(false);
     expect(superdoc.ops()).not.toContain('ranges.resolve');
+  });
+
+  it('כל צירוף מוכר בולע את ברירת המחדל של הדפדפן', async () => {
+    // בלי זה ה-WebView פותח את הדיאלוגים שלו („שמירת דף”, „הדפסה”) מעל התוסף.
+    await mountShell();
+
+    const combos: Array<Partial<KeyboardEventInit> & { code: string }> = [
+      { code: 'KeyZ', ctrlKey: true },
+      { code: 'KeyY', ctrlKey: true },
+      { code: 'KeyB', ctrlKey: true },
+      { code: 'KeyI', ctrlKey: true },
+      { code: 'KeyU', ctrlKey: true },
+      { code: 'KeyA', ctrlKey: true },
+      { code: 'KeyN', ctrlKey: true },
+      { code: 'KeyO', ctrlKey: true },
+      { code: 'KeyP', ctrlKey: true },
+      { code: 'Enter', ctrlKey: true },
+      { code: 'NumpadEnter', ctrlKey: true },
+      { code: 'Digit8', ctrlKey: true, shiftKey: true },
+      { code: 'Digit1', ctrlKey: true, altKey: true },
+      { code: 'F12' },
+    ];
+
+    const swallowed = combos.filter((init) => press(init).defaultPrevented);
+    await settle();
+
+    expect(swallowed).toHaveLength(combos.length);
+  });
+
+  it('Ctrl+Shift+8 הוא מתג: כל לחיצה שולחת את הפקודה מחדש', async () => {
+    await mountShell();
+
+    press({ code: 'Digit8', ctrlKey: true, shiftKey: true });
+    press({ code: 'Digit8', ctrlKey: true, shiftKey: true });
+    await settle();
+
+    expect(adapter.calls.map((call) => call.id)).toEqual([
+      'formatting-marks',
+      'formatting-marks',
+    ]);
+  });
+
+  it('Escape בלי חלון פתוח אינו נבלע', async () => {
+    // נסיגה שנמצאה ב-QA: בליעה גורפת של Escape הייתה חוסמת את ה-Escape של
+    // המנוע ושל הדפדפן, גם כשלא היה לנו מה לסגור.
+    await mountShell();
+
+    const event = press({ code: 'Escape' });
+    await settle();
+
+    expect(event.defaultPrevented).toBe(false);
+  });
+
+  it('צירוף שכבר טופל אינו רץ פעם שנייה', async () => {
+    // המאזין שלנו יושב על window אחרי ה-keymap של המנוע. אם המנוע כבר טיפל
+    // ב-Ctrl+B, הרצה נוספת שלנו הייתה מבטלת את ההדגשה שהוא זה עתה החיל.
+    await mountShell();
+
+    const event = new KeyboardEvent('keydown', {
+      code: 'KeyB',
+      ctrlKey: true,
+      cancelable: true,
+      bubbles: true,
+    });
+    event.preventDefault();
+    window.dispatchEvent(event);
+    await settle();
+
+    expect(adapter.calls).toEqual([]);
   });
 
   it('צירוף שאינו ברשימה אינו נבלע', async () => {

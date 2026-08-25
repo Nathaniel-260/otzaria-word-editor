@@ -12,6 +12,7 @@
  * עוקף למנוע — קיצור שנכשל מדבר עברית בשורת המצב בדיוק כמו כפתור שנכשל.
  */
 import type { CommandId } from '../../engine/capabilities';
+import { stylePayload } from '../../engine/payloads';
 
 /** החלוקה שלפיה דיאלוג „קיצורי מקלדת” מקבץ את הרשומות. */
 export type ShortcutGroup =
@@ -70,8 +71,11 @@ export interface Shortcut {
    * המקש הפיזי. **זה ברירת המחדל לכל אות.** `event.code` אינו תלוי בפריסת
    * המקלדת, ואילו `event.key` מחזיר את תו הפריסה — ב-Ctrl+S בפריסה עברית הוא
    * `ד`. זה היה הבאג: ששת הקיצורים שהיו כאן מתו ברגע שהמשתמש כתב עברית.
+   *
+   * רשימה = כמה מקשים פיזיים לאותה פעולה. `Enter` ו-`NumpadEnter` הם המקרה:
+   * שניהם „Enter” למשתמש, ורק אחד מהם מדווח `code: 'Enter'`.
    */
-  code?: string;
+  code?: string | readonly string[];
   /**
    * מקש לפי התו, לסימני פיסוק בלבד (`]`, `[`, `=`). שם דווקא ה-`code` הוא
    * שנודד בין פריסות פיזיות, ולכן ההשוואה הפוכה.
@@ -289,7 +293,9 @@ export const SHORTCUTS = [
     ctrl: true,
     alt: true,
     command: 'linked-style',
-    payload: { style: 'Heading1' },
+    // הבנאי הקנוני, ולא אובייקט כתוב ביד: `unwrapScalar` של המנוע מכיר את
+    // המפתח `style`, ורק ב-payloads.ts כתוב מה הוא.
+    payload: stylePayload('Heading1'),
   },
   {
     id: 'heading-2',
@@ -300,7 +306,9 @@ export const SHORTCUTS = [
     ctrl: true,
     alt: true,
     command: 'linked-style',
-    payload: { style: 'Heading2' },
+    // הבנאי הקנוני, ולא אובייקט כתוב ביד: `unwrapScalar` של המנוע מכיר את
+    // המפתח `style`, ורק ב-payloads.ts כתוב מה הוא.
+    payload: stylePayload('Heading2'),
   },
   {
     id: 'heading-3',
@@ -311,14 +319,16 @@ export const SHORTCUTS = [
     ctrl: true,
     alt: true,
     command: 'linked-style',
-    payload: { style: 'Heading3' },
+    // הבנאי הקנוני, ולא אובייקט כתוב ביד: `unwrapScalar` של המנוע מכיר את
+    // המפתח `style`, ורק ב-payloads.ts כתוב מה הוא.
+    payload: stylePayload('Heading3'),
   },
   {
     id: 'page-break',
     label: 'Ctrl+Enter',
     description: 'התחלת פסקה בעמוד חדש',
     group: 'insert',
-    code: 'Enter',
+    code: ['Enter', 'NumpadEnter'],
     ctrl: true,
     action: 'page-break',
   },

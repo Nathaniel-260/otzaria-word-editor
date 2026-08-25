@@ -23,37 +23,44 @@ export interface ShellActionDeps {
   pageBreak: () => void;
 }
 
-export function createShellActionRunner(deps: ShellActionDeps): (action: ShellAction) => void {
+/**
+ * מריצה פעולה, ומחזירה האם היא **טופלה**.
+ *
+ * ערך ההחזרה אינו קישוט: המנתב בולע את ההתנהגות של הדפדפן רק כשהוא טיפל.
+ * `Escape` שלא היה לו מה לסגור חייב להמשיך הלאה — הוא `Escape` של המנוע או
+ * של הדפדפן, ובליעתו הייתה שוברת אותם בשקט. שמירה בזמן שמירה היא ההפך:
+ * היא כן „טופלה” (התעלמנו בכוונה), והבליעה נחוצה כדי שה-WebView לא יפתח את
+ * דיאלוג „שמירת דף” שלו.
+ */
+export function createShellActionRunner(deps: ShellActionDeps): (action: ShellAction) => boolean {
   return (action) => {
     switch (action) {
       case 'save':
       case 'save-as':
-        // בזמן שמירה לא מריצים שנייה. הבליעה כבר נעשתה במנתב.
-        if (deps.isSaving()) return;
-        deps.save(action === 'save-as');
-        return;
+        // בזמן שמירה לא מריצים שנייה — אבל כן בולעים.
+        if (!deps.isSaving()) deps.save(action === 'save-as');
+        return true;
       case 'print':
         deps.print();
-        return;
+        return true;
       case 'find':
       case 'replace':
         deps.openFind(action);
-        return;
+        return true;
       case 'escape':
-        deps.closeTopmost();
-        return;
+        return deps.closeTopmost();
       case 'new-document':
         deps.newDocument();
-        return;
+        return true;
       case 'open-document':
         deps.openDocument();
-        return;
+        return true;
       case 'select-all':
         deps.selectAll();
-        return;
+        return true;
       case 'page-break':
         deps.pageBreak();
-        return;
+        return true;
     }
   };
 }

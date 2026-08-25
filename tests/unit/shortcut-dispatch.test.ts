@@ -72,7 +72,7 @@ function fakeTarget() {
 
 function setup(over: Partial<ShortcutDispatcherDeps> = {}) {
   const runCommand = vi.fn();
-  const runAction = vi.fn();
+  const runAction = vi.fn(() => true);
   const target = fakeTarget();
   const dispatcher = createShortcutDispatcher({
     runCommand,
@@ -215,6 +215,34 @@ describe('המנתב', () => {
 
     target.fire(event({ code: 'KeyB', ctrlKey: true }));
     expect(runCommand).toHaveBeenCalledTimes(1);
+  });
+
+  it('אירוע שכבר טופל אינו רץ שוב', () => {
+    // המאזין יושב על window בשלב ה-bubble, כלומר אחרי ה-keymap של מנוע
+    // העריכה. בלי הבדיקה הזאת צירוף שהמנוע קושר בעצמו היה מופעל פעמיים —
+    // והמשתמש היה רואה הדגשה שמתבטלת מיד.
+    const { dispatcher, runCommand } = setup();
+    const keyEvent = event({ code: 'KeyB', ctrlKey: true, defaultPrevented: true });
+
+    expect(dispatcher.handle(keyEvent)).toBe(false);
+    expect(runCommand).not.toHaveBeenCalled();
+  });
+
+  it('פעולה שלא טיפלה אינה בולעת את ברירת המחדל', () => {
+    // `Escape` בלי חלון פתוח: אם נבלע אותו, שברנו את ה-Escape של המנוע.
+    const { dispatcher } = setup({ runAction: vi.fn(() => false) });
+    const keyEvent = event({ code: 'Escape' });
+
+    expect(dispatcher.handle(keyEvent)).toBe(false);
+    expect(keyEvent.preventDefault).not.toHaveBeenCalled();
+  });
+
+  it('פעולה שטיפלה בולעת', () => {
+    const { dispatcher } = setup({ runAction: vi.fn(() => true) });
+    const keyEvent = event({ code: 'Escape' });
+
+    expect(dispatcher.handle(keyEvent)).toBe(true);
+    expect(keyEvent.preventDefault).toHaveBeenCalled();
   });
 
   it('dispose חוזר אינו נופל', () => {

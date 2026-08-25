@@ -52,7 +52,11 @@ export function matchShortcut(event: KeyEventLike, shortcut: Shortcut): boolean 
   if (event.shiftKey !== (shortcut.shift === true)) return false;
   if (event.altKey !== (shortcut.alt === true)) return false;
 
-  if (shortcut.code) return event.code === shortcut.code;
+  if (shortcut.code) {
+    return typeof shortcut.code === 'string'
+      ? event.code === shortcut.code
+      : shortcut.code.includes(event.code);
+  }
   if (shortcut.key) return event.key.toLowerCase() === shortcut.key.toLowerCase();
 
   // רשומה בלי מקש אינה מתאימה לכלום. בדיקת החוזה מונעת אותה מלכתחילה.

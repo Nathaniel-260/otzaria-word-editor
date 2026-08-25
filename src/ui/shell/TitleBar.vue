@@ -39,7 +39,7 @@
           type="button"
           class="qa-btn"
           :disabled="isSaving"
-          :title="isDirty ? 'שמור (ישנם שינויים שלא נשמרו) Ctrl+S' : 'שמור Ctrl+S'"
+          :title="saveTitle"
           @pointerdown.prevent
           @click="$emit('save')"
         >
@@ -55,7 +55,7 @@
         <button
           type="button"
           class="qa-btn"
-          title="בטל Ctrl+Z"
+          :title="`בטל ${label('undo')}`"
           :disabled="!canUndo"
           @pointerdown.prevent
           @click="$emit('undo')"
@@ -68,7 +68,7 @@
         <button
           type="button"
           class="qa-btn"
-          title="חזור Ctrl+Y"
+          :title="`חזור ${label('redo')}`"
           :disabled="!canRedo"
           @pointerdown.prevent
           @click="$emit('redo')"
@@ -110,7 +110,7 @@
         type="button"
         class="search-box"
         aria-label="חיפוש והחלפה במסמך"
-        title="חיפוש והחלפה Ctrl+F"
+        :title="`חיפוש והחלפה ${label('find')}`"
         @click="$emit('open-find')"
       >
         <SvgIcon
@@ -136,10 +136,12 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue';
 import SvgIcon from '../icons/SvgIcon.vue';
 import { docTitleWidthCh } from '../../composables/shell-format';
+import { shortcutLabel, type ShortcutId } from '../shortcuts/registry';
 
-withDefaults(
+const props = withDefaults(
   defineProps<{
     title?: string;
     isDirty?: boolean;
@@ -160,6 +162,21 @@ withDefaults(
     canUndo: true,
     canRedo: true,
   }
+);
+
+/**
+ * הצירוף בא מהרג'יסטרי, לא ממחרוזת כתובה כאן. סרגל הגישה המהירה הכריז שנתיים
+ * „בטל Ctrl+Z” בלי שאיש קשר את הצירוף — וזה בדיוק סוג ההבטחה שהרג'יסטרי בא
+ * למנוע. מזהה שגוי נופל ב-typecheck.
+ */
+function label(id: ShortcutId): string {
+  return shortcutLabel(id);
+}
+
+const saveTitle = computed(() =>
+  props.isDirty
+    ? `שמור (ישנם שינויים שלא נשמרו) ${label('save')}`
+    : `שמור ${label('save')}`,
 );
 
 defineEmits<{
@@ -230,7 +247,8 @@ defineEmits<{
 }
 
 .autosave-label {
-  font-size: 11px;
+  font-size: 12px;
+  line-height: var(--line-height-control);
   color: var(--color-on-surface);
   white-space: nowrap;
 }
@@ -353,7 +371,7 @@ defineEmits<{
   background: transparent;
   border: none;
   color: var(--color-on-surface);
-  font-family: var(--font-main);
+  font-family: var(--font-ui);
   font-size: 13px;
   font-weight: 600;
   outline: none;
@@ -392,7 +410,7 @@ defineEmits<{
   max-width: 100%;
   cursor: text;
   color: var(--color-on-surface-variant);
-  font-family: var(--font-main);
+  font-family: var(--font-ui);
   font-size: 12px;
   transition: border-color 0.1s, box-shadow 0.1s;
 }

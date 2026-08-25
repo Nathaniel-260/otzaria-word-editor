@@ -28,8 +28,8 @@ export function isTextEntryTarget(target: EventTarget | null): boolean {
 export interface ShortcutDispatcherDeps {
   /** מריצה פקודת מנוע. אותו מסלול בדיוק של לחיצת כפתור ברצועה. */
   runCommand: (id: CommandId, payload?: unknown) => void;
-  /** מריצה פעולת מעטפת. */
-  runAction: (action: ShellAction) => void;
+  /** מריצה פעולת מעטפת ומחזירה האם טופלה. */
+  runAction: (action: ShellAction) => boolean;
   /** האם דיאלוג מודאלי פתוח כרגע. */
   isModalOpen?: () => boolean;
   /** הרשומות. ברירת המחדל היא הרג'יסטרי; הבדיקות מזריקות רשימה משלהן. */
@@ -50,6 +50,12 @@ export function createShortcutDispatcher(deps: ShortcutDispatcherDeps): Shortcut
   const isModalOpen = deps.isModalOpen ?? (() => false);
 
   function handle(event: KeyboardEvent): boolean {
+    // מישהו כבר טיפל. המאזין שלנו יושב על `window` בשלב ה-bubble, כלומר
+    // **אחרי** ה-keymap של מנוע העריכה שיושב על אזור המסמך; בלי הבדיקה הזאת
+    // צירוף שהמנוע קושר בעצמו (Ctrl+B, למשל) היה מופעל פעמיים — הדגשה
+    // וביטולה — והמשתמש היה רואה „הקיצור לא עובד” בלי שום שגיאה.
+    if (event.defaultPrevented) return false;
+
     const shortcut = matchAny(event, shortcuts);
     if (!shortcut) return false;
 
@@ -60,13 +66,22 @@ export function createShortcutDispatcher(deps: ShortcutDispatcherDeps): Shortcut
     if (isModalOpen() && !shortcut.inModal) return false;
     if (!shortcut.inTextEntry && isTextEntryTarget(event.target)) return false;
 
-    // הבליעה קודמת להרצה, ובכוונה: `Ctrl+S` שאינו מריץ שמירה (כי שמירה כבר
-    // רצה) עדיין חייב למנוע מה-WebView לפתוח את דיאלוג „שמירת דף” שלו.
-    event.preventDefault();
+    // פקודת מנוע נחשבת מטופלת תמיד: גם סירוב של ה-controller הוא תשובה,
+    // והיא מגיעה למשתמש כהודעה בעברית. פעולת מעטפת מדווחת בעצמה — `Escape`
+    // שלא היה לו מה לסגור אינו „מטופל”, ואסור לבלוע אותו.
+    let handled = false;
+    if (shortcut.command) {
+      deps.runCommand(shortcut.command, shortcut.payload);
+      handled = true;
+    } else if (shortcut.action) {
+      handled = deps.runAction(shortcut.action);
+    }
 
-    if (shortcut.command) deps.runCommand(shortcut.command, shortcut.payload);
-    else if (shortcut.action) deps.runAction(shortcut.action);
-    return true;
+    // הבליעה אחרי ההרצה, ובכוונה: `Ctrl+S` שאינו מריץ שמירה (כי שמירה כבר
+    // רצה) עדיין נחשב מטופל, וחייב למנוע מה-WebView לפתוח את דיאלוג „שמירת
+    // דף” שלו.
+    if (handled) event.preventDefault();
+    return handled;
   }
 
   const target = deps.target ?? (typeof window === 'undefined' ? undefined : window);
