@@ -45,8 +45,9 @@
         label="קישור"
         variant="large"
         tooltip="הוספת היפר-קישור לכתובת אינטרנט או לדואר"
+        shortcut-id="link"
         :disabled="!linkCmd.enabled.value"
-        @click="onOpenLinkDialog"
+        @click="$emit('open-link')"
       />
       <!-- גל 22: „הסר קישור" — hyperlinks.remove על הטווח המסומן. -->
       <RibbonButton
@@ -173,14 +174,6 @@
       />
     </RibbonGroup>
 
-    <LinkDialog
-      :is-open="linkDialogOpen"
-      :has-range="linkSelection.hasRange"
-      :selected-text="linkSelection.text"
-      @close="linkDialogOpen = false"
-      @submit="onSubmitLink"
-    />
-
     <BookmarkDialog
       :is-open="bookmarkDialogOpen"
       :names="bookmarks.names"
@@ -208,14 +201,12 @@
  * תחתונה מקבל `in: resolveActiveHeaderFooterSlot(story)`. קריאה ישירה הייתה
  * מחייבת אותנו לשחזר את החישוב הזה, ולטעות בו בשקט.
  *
- * ## הקישור, והסיבה שיש דיאלוג
+ * ## הקישור, ולמה הוא כבר לא כאן
  *
- * `executeLinkCommand` דורש `href`, ולכן `linkCmd.run()` בלי payload נכשל סגור.
- * הדיאלוג הוא מה שמספק אותו — אבל הוא גם מה שמכניס את הבעיה: ברגע שמקלידים
- * בשדה, המיקוד אינו בעורך והבחירה החיה של ה-controller אינה `ready`. לכן
- * הבחירה נתפסת **בלחיצה** ונמסרת חזרה כ-`target`; זה המסלול שהמנוע עצמו בנה
- * (`readLinkPayloadTarget` נבדק לפני הבחירה החיה, ו-
- * `linkPayloadHasExplicitTarget` מכריז על הפקודה כמוכנה בלעדיה).
+ * הדיאלוג עבר למעטפת (`composables/use-link-dialog.ts`), כדי ש-`Ctrl+K` יפתח
+ * אותו מכל לשונית: לשונית שאינה פעילה אינה מורכבת, ודיאלוג שחי בתוכה אינו
+ * קיים. הכפתור כאן רק משדר `open-link`, וההנמקה על תצלום הבחירה — שבלעדיו
+ * הקישור נכתב על טווח שכבר אינו קיים — נמצאת שם.
  *
  * ## מעבר העמוד, ומה הוא באמת
  *
@@ -271,18 +262,12 @@ import RibbonGroup from '../common/RibbonGroup.vue';
 import RibbonButton from '../common/RibbonButton.vue';
 import RibbonMenuButton from '../common/RibbonMenuButton.vue';
 import TablePicker from '../common/TablePicker.vue';
-import LinkDialog from '../../panels/LinkDialog.vue';
 import BookmarkDialog from '../../panels/BookmarkDialog.vue';
 import { useCommand } from '../../../composables/useCommand';
 import { COMMAND_REPORTER, type CommandReporter } from '../../../composables/keys';
 import { removeHyperlink } from '../../../engine/hyperlinks-manage';
 import type { CommandOutcome } from '../../../engine/command-adapter';
 import { ACTIVE_SUPERDOC } from '../../../engine/document-api';
-import {
-  emptySelectionSnapshot,
-  readDocSelection,
-  type DocSelectionSnapshot,
-} from '../../../engine/doc-selection';
 import {
   readPageBreakSupport,
   startParagraphOnNewPage,
@@ -321,8 +306,16 @@ import {
   renameBookmark,
   type BookmarksState,
 } from '../../../engine/bookmarks';
-import { LINK_HREF_HINT, imagePayload, linkPayload } from '../../../engine/payloads';
+import { imagePayload } from '../../../engine/payloads';
 import { pickImageFile, readImageAsDataUrl } from '../../../host/files';
+
+/**
+ * „קישור” נפתח במעטפת ולא כאן. הדיאלוג עבר לשם כדי ש-Ctrl+K יוכל לפתוח אותו
+ * מכל לשונית — לשונית שאינה פעילה אינה מורכבת, ודיאלוג שחי בתוכה אינו קיים.
+ */
+defineEmits<{
+  (e: 'open-link'): void;
+}>();
 
 /** ברירת המחדל כשאין מדווח — הרכבה חלקית בבדיקות. זהה להתנהגות של `useCommand`. */
 const fallbackReporter: CommandReporter = (outcome, id) => {
@@ -406,23 +399,15 @@ async function pickImage(): ReturnType<typeof pickImageFile> {
 }
 
 /* ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------ */
 /* קישור                                                              */
 /* ------------------------------------------------------------------ */
 
-const linkDialogOpen = ref(false);
-
-/**
- * הבחירה כפי שהייתה **ברגע הלחיצה**, לא כפי שהיא כשהמשתמש מאשר. הדיאלוג גוזל
- * את המיקוד מהעורך ברגע שמקלידים בו, ובלי התצלום הזה הקישור היה נכתב על טווח
- * שאינו קיים או לא נכתב בכלל. `readLinkPayloadTarget` נבדק במנוע לפני הבחירה
- * החיה בדיוק בשביל המקרה הזה.
+/*
+ * הדיאלוג עצמו אינו כאן: הוא עבר למעטפת (`composables/use-link-dialog.ts`)
+ * כדי ש-`Ctrl+K` יפתח אותו מכל לשונית — לשונית שאינה פעילה אינה מורכבת.
+ * „הסר קישור” נשאר, מפני שהוא פעולה על הבחירה ואינו דורש דיאלוג.
  */
-const linkSelection = shallowRef<DocSelectionSnapshot>(emptySelectionSnapshot());
-
-async function onOpenLinkDialog(): Promise<void> {
-  linkSelection.value = await readDocSelection(superdoc.value, { includeText: true });
-  linkDialogOpen.value = true;
-}
 
 /**
  * „הסר קישור" (גל 22) — `hyperlinks.remove` על הטווח המסומן
@@ -439,31 +424,6 @@ async function onRemoveHyperlink(): Promise<void> {
     removeLinkInFlight.value = false;
   }
 }
-
-function onSubmitLink(link: { href: string; text: string }): void {
-  const snapshot = linkSelection.value;
-
-  const payload = linkPayload({
-    href: link.href,
-    // עם טווח מסומן המסלול הוא `hyperlinks.wrap`, שמתעלם מ-`text`. שליחתו
-    // הייתה יוצרת ציפייה שהטקסט המסומן יוחלף.
-    text: snapshot.hasRange ? undefined : link.text,
-    target: snapshot.target ?? undefined,
-  });
-
-  if (!payload) {
-    // הדיאלוג אינו מאפשר אישור של כתובת פסולה, ולכן זו הגנה על החוזה ולא
-    // מצב שאפשר להגיע אליו דרך הממשק.
-    report({ ok: false, message: LINK_HREF_HINT, reason: 'invalid-href' }, 'link');
-    return;
-  }
-
-  linkDialogOpen.value = false;
-  // `run` מדווח בעצמו על כשל של הפקודה — אין להוסיף כאן דיווח שני.
-  void linkCmd.run(payload);
-}
-
-/* ------------------------------------------------------------------ */
 /* התחלה בעמוד חדש                                                     */
 /* ------------------------------------------------------------------ */
 

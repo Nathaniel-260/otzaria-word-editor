@@ -41,6 +41,7 @@
       @exit-app="onExit"
       @open-find="openFindDialog('find')"
       @open-replace="openFindDialog('replace')"
+      @open-link="() => void linkDialog.open()"
       @toggle-focus-mode="toggleFocusMode"
       @insert-citation="onInsertCitation"
       @search-otzaria="onSearchOtzaria"
@@ -51,6 +52,14 @@
     <main
       ref="editorStackRef"
       class="editor-stack"
+    />
+
+    <LinkDialog
+      :is-open="linkDialog.isOpen.value"
+      :has-range="linkDialog.selection.value.hasRange"
+      :selected-text="linkDialog.selection.value.text"
+      @close="linkDialog.close()"
+      @submit="linkDialog.submit"
     />
 
     <!-- שורת מצב תחתונה -->
@@ -96,6 +105,7 @@ import Ribbon from './ui/ribbon/Ribbon.vue';
 import StatusBar from './ui/shell/StatusBar.vue';
 import FindReplaceDialog from './ui/panels/FindReplaceDialog.vue';
 import AboutDialog from './ui/panels/AboutDialog.vue';
+import LinkDialog from './ui/panels/LinkDialog.vue';
 
 import { createCommandAdapter, type CommandAdapter, type CommandOutcome } from './engine/command-adapter';
 import type { CommandId } from './engine/capabilities';
@@ -168,6 +178,7 @@ import {
 import { revealZone, type RevealZone } from './composables/focus-mode';
 import { selectWholeDocument } from './engine/clipboard';
 import { startParagraphOnNewPage } from './engine/page-break';
+import { createLinkDialog } from './composables/use-link-dialog';
 import { createShellActionRunner } from './ui/shortcuts/actions';
 import {
   createShortcutDispatcher,
@@ -896,6 +907,7 @@ const runShellAction = createShellActionRunner({
   save: (saveAs) => void onSave(saveAs),
   print: () => void onPrint(),
   openFind: (mode) => openFindDialog(mode),
+  openLink: () => void linkDialog.open(),
   newDocument: () => void onNewDocument(),
   openDocument: () => void onPickAndOpen(),
   // שני אלה אינם פקודות של ה-controller אלא Document API ישיר, בדיוק כמו
@@ -909,12 +921,26 @@ const runShellAction = createShellActionRunner({
       isAboutOpen.value = false;
       return true;
     }
+    if (linkDialog.isOpen.value) {
+      linkDialog.close();
+      return true;
+    }
     if (isFindOpen.value) {
       closeFindDialog();
       return true;
     }
     return false;
   },
+});
+
+/**
+ * דיאלוג הקישור. הוא יושב במעטפת ולא בלשונית „הוספה” מפני שלשונית שאינה
+ * פעילה אינה מורכבת — ו-`Ctrl+K` חייב לעבוד מכל לשונית.
+ */
+const linkDialog = createLinkDialog({
+  readSelection: () => readDocSelection(activeSuperdoc.value, { includeText: true }),
+  runLink: (payload) => void runShortcutCommand('link', payload),
+  report: reportCommand,
 });
 
 async function runSelectAll(): Promise<void> {

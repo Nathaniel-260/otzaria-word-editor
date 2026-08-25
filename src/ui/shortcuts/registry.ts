@@ -56,7 +56,8 @@ export type ShellAction =
   | 'new-document'
   | 'open-document'
   | 'select-all'
-  | 'page-break';
+  | 'page-break'
+  | 'link';
 
 export interface Shortcut {
   /** מזהה יציב. משמש את הרצועה, את הבדיקות ואת דיאלוג העזרה. */
@@ -322,6 +323,15 @@ export const SHORTCUTS = [
     // הבנאי הקנוני, ולא אובייקט כתוב ביד: `unwrapScalar` של המנוע מכיר את
     // המפתח `style`, ורק ב-payloads.ts כתוב מה הוא.
     payload: stylePayload('Heading3'),
+  },
+  {
+    id: 'link',
+    label: 'Ctrl+K',
+    description: 'הוספת קישור',
+    group: 'insert',
+    code: 'KeyK',
+    ctrl: true,
+    action: 'link',
   },
   {
     id: 'page-break',
