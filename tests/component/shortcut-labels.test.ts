@@ -7,8 +7,11 @@ import { describe, it, expect } from 'vitest';
 import { mount } from '@vue/test-utils';
 import RibbonButton from '../../src/ui/ribbon/common/RibbonButton.vue';
 import FileTab from '../../src/ui/ribbon/tabs/FileTab.vue';
+import HomeTab from '../../src/ui/ribbon/tabs/HomeTab.vue';
+import InsertTab from '../../src/ui/ribbon/tabs/InsertTab.vue';
+import ViewTab from '../../src/ui/ribbon/tabs/ViewTab.vue';
 import { SHORTCUTS, shortcutLabel } from '../../src/ui/shortcuts/registry';
-import { autoUnmount, mountUi } from './harness';
+import { autoUnmount, mountUi, settle } from './harness';
 
 autoUnmount();
 
@@ -53,15 +56,29 @@ describe('הרצועה מציגה את הצירופים האמיתיים', () =>
     expect(titles).toContain('הדפסת המסמך (Ctrl+P)');
   });
 
-  it('אין ברצועה tooltip עם צירוף שאינו ברשימה', async () => {
-    const { wrapper } = mountUi(FileTab, { props: { hasDocument: true } });
+  it('אין באף לשונית tooltip עם צירוף שאינו ברשימה', async () => {
+    // הבדיקה רצה על כל הלשוניות שיש בהן קיצור, ולא על אחת: התוויות שהיו
+    // שקריות ישבו דווקא ב„בית”.
     const labels = new Set(SHORTCUTS.map((shortcut) => shortcut.label));
+    const tabs = [FileTab, HomeTab, InsertTab, ViewTab];
+    let checked = 0;
 
-    for (const button of wrapper.findAll('button')) {
-      const title = button.attributes('title') ?? '';
-      const match = /\(([^)]+)\)$/.exec(title);
-      if (!match) continue;
-      expect(labels, title).toContain(match[1]);
+    for (const tab of tabs) {
+      const { wrapper } = mountUi(tab, { props: { hasDocument: true } });
+      await settle();
+
+      for (const button of wrapper.findAll('button')) {
+        const title = button.attributes('title') ?? '';
+        const match = /\(([^)]+)\)$/.exec(title);
+        // סוגריים בסוף אינם בהכרח קיצור: „הוספת תמונה מקובץ (PNG או JPEG)”.
+        // נבדק רק מה שמתיימר להיות צירוף מקשים.
+        if (!match || !/^(?:Ctrl|Alt|Shift|Esc|F\d)/i.test(match[1]!)) continue;
+        checked += 1;
+        expect(labels, title).toContain(match[1]);
+      }
     }
+
+    // אחרת הלולאה עוברת על ריק ואינה בודקת דבר.
+    expect(checked).toBeGreaterThan(8);
   });
 });
