@@ -28,6 +28,25 @@ export interface ModifierEventLike {
   altKey?: boolean;
 }
 
+/**
+ * `Ctrl` ו-`Meta` — המודיפיירים שאינם מבטלים חימוש.
+ *
+ * לחיצת `Ctrl` היא אירוע `keydown` ככל אחר, ולכן „כל מקש אחר מבטל” ניקה
+ * בגללה את החימוש — ומי שלחץ `Shift` ואז `Ctrl` לא קיבל כלום. הסדר ההפוך
+ * עבד, ולכן זה נראה תקין. `Alt` **אינו** ברשימה בכוונה: AltGr מדווח
+ * `ctrl+alt`, והוא שכבת תווים ולא צירוף שלנו.
+ */
+function isNeutralModifier(event: ModifierEventLike): boolean {
+  if (event.key === 'Control' || event.key === 'Meta') return true;
+  const code = event.code;
+  return (
+    code === 'ControlLeft' ||
+    code === 'ControlRight' ||
+    code === 'MetaLeft' ||
+    code === 'MetaRight'
+  );
+}
+
 /** `DOM_KEY_LOCATION_LEFT` / `_RIGHT`, כשאין `code`. */
 const LOCATION_LEFT = 1;
 const LOCATION_RIGHT = 2;
@@ -72,6 +91,11 @@ export function createDirectionDetector(): DirectionDetector {
         armed = event.altKey === true ? null : side;
         return;
       }
+
+      // `Ctrl` או `Meta` שנלחצים **אחרי** ה-Shift אינם „מקש אחר”: הם בדיוק
+      // מה שהצירוף מחכה לו. בלי החריגה הזאת ההבטחה שבהערה למעלה — שסדר
+      // הלחיצה אינו משנה — לא התקיימה.
+      if (isNeutralModifier(event)) return;
 
       // כל מקש אחר מבטל: `Ctrl+Shift+X` הוא קו חוצה, ושחרור ה-Shift אחריו
       // אינו אמור להפוך גם את כיוון הפסקה.
