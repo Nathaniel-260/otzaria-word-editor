@@ -677,6 +677,70 @@ operationId לפני שאפשר לשלוח מאקרו. mutations.preview/apply �
 `d.contentControls` ו-`d.customXml` קיימים. 54 פעולות לקהל שאינו
 קהל התוסף — ההשקעה גרועה, כפי שהמדריך קובע.
 
+## הסרגל — שלושה ממצאים, ומה נגזר מהם
+
+נמדד ב-Chrome headless על ה-`dist` הארוז, עם קליק אמיתי בתוך הפסקה
+(`Input.dispatchMouseEvent`) והקלדה אמיתית (`Input.insertText`), ואחר כך
+מדידה של המלבנים שהמנוע צייר בפועל.
+
+### `w:ind` — `left`/`right` ממופים לוגית, `firstLine`/`hanging` לא
+
+בפסקה עברית (`bidi: true`), שוליים של 2.54 ס"מ:
+
+    setIndentation({left: 1440})   → הקצה הימני של הטקסט מ-96px ל-192px  ✔ צד ההתחלה
+    setIndentation({right: 1440})  → הקצה השמאלי נכנס פנימה               ✔ צד הסוף
+    setIndentation({firstLine: 1440}) → הקצה הימני של השורה הראשונה מ-96px
+                                        ל-**0** — כלומר החוצה, אל תוך השוליים
+    setIndentation({left:1440, hanging:720}) → השורה הראשונה **עמוק יותר**
+                                        מהשאר (240px מול 192px)
+
+כלומר `left`/`right` מתנהגים כמו `w:start`/`w:end` של OOXML — הצד הלוגי —
+ואילו שני האחרים מצוירים בסמנטיקה פיזית, כלומר הפוכה. „כניסת שורה ראשונה”
+של Word בפסקה עברית אינה ניתנת להשגה: `firstLine` מצייר החוצה, ולערך שלילי
+המנוע עונה „must be a non-negative integer”.
+
+**מה נגזר:** הסרגל מציג שני סמני כניסה — התחלה וסוף — ואינו מציג את סמן
+השורה הראשונה ואת הסמן התלוי. סמן שגורר ערך שמצויר הפוך גרוע מסמן שאינו
+קיים. ראו engine/page-ruler.ts.
+
+### `doc.get()` אינו מחזיר את עצירות הטאב
+
+`format.paragraph.setTabStop({position:2880, alignment:'right', leader:'dot'})`
+מחזיר `success: true`, אבל תכונות הפסקה שחוזרות מ-`doc.get()` הן
+`{ indent: {...}, spacing: {...}, bidi: true }` — בלי `tabs`, וגם בלי
+`keepWithNext`/`keepLines`/`widowControl` אחרי `setKeepOptions` מוצלח.
+
+**מה נגזר:** אין לסרגל דרך לצייר את העצירות הקיימות, ולכן אין בו עצירות
+טאב בכלל. סרגל שמראה רק את מה שנוסף בו עצמו, ומעלים את מה שהגיע מקובץ
+Word, מטעה יותר משהוא עוזר. אותו ממצא הוא גם הסיבה ש-`readParagraphFormat`
+מחזיר `tabs: []` ו-`keepNext: false` על מסמך שיש בו את שניהם.
+
+### מודל הפסקה: `paragraphIds.paraId` ו-`indent`
+
+הצומת שחוזר מ-`doc.get()` הוא
+
+    { kind: 'paragraph', paragraphIds: { paraId: '41964671' },
+      paragraph: { inlines: [...], props: { indent: {...}, bidi: true } } }
+
+— **בלי `id`**, ועם `indent` ולא `indentation`. הקוד שחיפש `node.id` ואת
+`props.indentation` החזיר אפסים על כל מסמך, ודיאלוג „פסקה” שנפתח עליהם
+ואושר מחק כניסות שהגיעו מ-Word (`setIndentation` מחליף את `<w:ind>` כולו).
+תוקן בגל הזה; `paraId` הוא בדיוק ה-`blockId` שהבחירה מחזירה.
+
+### מלבן העמוד אינו ניתן לחישוב מבחוץ
+
+זום מיושם ב-`width: 100/zoom%` + `transform: scale(zoom)` עם
+`transform-origin: top left`, ולכן העמוד ממורכז בתוך **תיבת הפריסה של
+ה-wrapper** ולא בתוך מיכל הגלילה. „רוחב עמוד כפול זום, ממורכז במיכל” נמדד
+כשגוי בכל זום שאינו 100% (ב-50% העמוד נמצא ב-‎-625px, והנוסחה נותנת 176px).
+אין API ציבורי שמחזיר את המלבן.
+
+**מה נגזר:** הסרגל מודד את המלבן דרך `ui.viewport.getHost()` ותכונת
+`data-page-index` שהמנוע מסמן בה עמוד. זו חריגה מתועדת מגבול ה-DOM, והיא
+נשמרת צרה בשני שערים: tests/unit/engine-boundaries.test.ts מוודא שרק
+engine/page-ruler.ts נוגע בעיגון ושהוא קורא בלבד, ו-
+tests/contract/engine-page-hooks.test.ts מוודא שהעיגון עדיין קיים באריזה.
+
 ## בחירה בעכבר — מה שנמדד
 
 שלוש התנהגויות של עכבר נמדדו מול המנוע ב-Chrome אמיתי, גם על המנוע לבדו
