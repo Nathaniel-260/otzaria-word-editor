@@ -294,6 +294,12 @@ export interface SuperdocDoubleOptions {
    * שיש בו `countBy: 5` הוא בדיוק המקרה שבו „מספרי שורות → רציף” שאינו
    * משמר מוחק את מה שנקבע ב-Word.
    */
+  /**
+   * מה שהמקטע במסמך **כבר** נושא. שני השדות האלה הם היחידים שהתוסף קורא
+   * מהמקטע ואז שולח בחזרה, ולכן הם היחידים שכפיל חייב לדעת לייצר: מקטע
+   * שיש בו `countBy: 5` הוא בדיוק המקרה שבו „מספרי שורות → רציף” שאינו
+   * משמר מוחק את מה שנקבע ב-Word.
+   */
   sections?: {
     lineNumbering?: {
       enabled?: boolean;
@@ -303,6 +309,13 @@ export interface SuperdocDoubleOptions {
       restart?: string;
     };
     pageNumbering?: { start?: number; format?: string };
+    /**
+     * מידות נייר ב**אינצ'ים**, בצורה שהמנוע האמיתי מפרויקט (ראו engine/print.ts:
+     * הפרויקציה הציבורית היא twips/1440). ברירת המחדל כאן היא צורת ה-twips
+     * הגולמית שאף צרן של `width` אינו קורא; מי שצריך מידה שמישה — A4 למשל —
+     * מציין אותה מפורשות.
+     */
+    pageSize?: { width?: number; height?: number };
   };
   /**
    * תכונות הפסקה שבה הסמן, במודל SDM/1 — **נקודות**, לא twips. אלה מה ש-
@@ -578,7 +591,11 @@ export function createSuperdocDouble(options: SuperdocDoubleOptions = {}): Super
         items: [
           {
             address: { sectionIndex: 0 },
-            pageSetup: { width: 11906, height: 16838, orientation: 'portrait' },
+            pageSetup: {
+              width: options.sections?.pageSize?.width ?? 11906,
+              height: options.sections?.pageSize?.height ?? 16838,
+              orientation: 'portrait',
+            },
             headerFooterMargins: { header: 0.5, footer: 0.5 },
             lineNumbering: options.sections?.lineNumbering,
             pageNumbering: options.sections?.pageNumbering,

@@ -151,7 +151,7 @@ export function createEditor(options: CreateEditorOptions): Promise<EditorSessio
         if (settled) return;
         settled = true;
         clearTimeout(timer);
-        resolve({
+        const session: EditorSession = {
           superdoc: ready,
           ui: ready.ui,
           onDispose(dispose) {
@@ -162,7 +162,13 @@ export function createEditor(options: CreateEditorOptions): Promise<EditorSessio
             disposers.push(dispose);
           },
           destroy: () => destroy(ready),
-        });
+        };
+        // ידית QA: סקריפטי השער ב-scripts/*.mjs (zoom-qa וכדומה) מריצים את
+        // ה-dist הארוז וצריכים להגיע למופע החי; Vue ב-production אינו חושף
+        // את עץ הרכיבים, ולכן אין דרך אחרת. אותו אובייקט session בדיוק —
+        // לא עותק, שלא ייווצרו שני חוזי פירוק. קוד האפליקציה אינו קורא כאן.
+        (window as unknown as { __otzariaEditor?: EditorSession }).__otzariaEditor = session;
+        resolve(session);
       },
 
       onException: (payload) => {
