@@ -15,6 +15,7 @@ import 'superdoc/style.css';
 // אחרי גיליון המנוע, ובכוונה: הכללים שם מעברתים את שכבת הכותרות שהוא מצייר.
 import '../styles/engine-chrome.css';
 import { localizeEngineChrome } from './hf-chrome';
+import { installWordSelection } from './word-selection';
 import { engineWorkerUrls } from './workers';
 
 export interface EditorSession {
@@ -179,6 +180,11 @@ export function createEditor(options: CreateEditorOptions): Promise<EditorSessio
         // את עץ הרכיבים, ולכן אין דרך אחרת. אותו אובייקט session בדיוק —
         // לא עותק, שלא ייווצרו שני חוזי פירוק. קוד האפליקציה אינו קורא כאן.
         (window as unknown as { __otzariaEditor?: EditorSession }).__otzariaEditor = session;
+        // לחיצה כפולה שבוחרת מילה שלמה גם בטקסט מנוקד, ושלוש לחיצות שבוחרות קטע —
+        // ראו word-selection.ts. כאן ולא ליד `localizeEngineChrome`, מפני שזה זקוק
+        // למופע עצמו: המופע מוכר רק ב-onReady, ו-`session.onDispose` הוא גם מה
+        // שמטפל במקרה שהפירוק כבר רץ.
+        session.onDispose(installWordSelection(container, ready).dispose);
         resolve(session);
       },
 
