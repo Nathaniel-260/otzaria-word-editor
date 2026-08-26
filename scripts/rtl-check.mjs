@@ -22,6 +22,14 @@
  *      ה-`SETTLE_MS` הקודם (9000) מדד רגע שבו לא היה מה לראות.
  *   3. אין שורת console של „כיווניות המסמך החדש לא הוחלה” — הנוסח שהאפליקציה
  *      כותבת ללוג של אוצריא כשההחלה נכשלה חלקית.
+ *   4. **הצד שסרגל הגלילה האנכי צויר בו.** הצד נגזר מכיווניות מיכל הגלילה
+ *      עצמו, ומיכל שיורש rtl מקבל סרגל בשמאל; `.editor-stack__host` מוצהר
+ *      `direction: ltr` בשביל זה בדיוק (ראו styles/shell.css). המדידה כאן היא
+ *      גם ההצהרה וגם הפיקסל — `clientLeft` על מיכל בלי גבול הוא רוחב הסרגל
+ *      כשהוא בשמאל ואפס כשהוא בימין. השער הזה הוא הבית של המדידה מפני
+ *      ש-`direction` על מיכל הגלילה הוא בדיוק מה שהוא מודד ממילא: אותה הצהרה
+ *      אחת קובעת גם את צד הסרגל וגם מה שפסקה יורשת, ובדיקה שתמדוד אותה בשני
+ *      מקומות תיפול פעמיים על אותו שינוי.
  *
  * מה **אינו** נמדד כאן, במפורש: התוסף אינו חושף את מופע SuperDoc ל-`window`,
  * ולכן השער אינו קורא את `sectionDirection` ואת `bidi` מהמסמך בעצמו, ואינו יוצר
@@ -102,9 +110,19 @@ writeFileSync(path, html.slice(0, afterLatch) + STUB + html.slice(afterLatch));
 
 const PROBE = `(function () {
   var fragments = [].slice.call(document.querySelectorAll('.superdoc-fragment'));
+  // מיכל הגלילה של המסמך. \`clientLeft\` הוא רוחב הגבול השמאלי ועוד רוחב הסרגל
+  // **כשהוא בשמאל** — ואפס כשהוא בימין. לא נמצא כאן גבול, ולכן הערך הוא מדידה
+  // ישירה של הצד שבו הדפדפן צייר את הסרגל, ולא הצהרה על עצמנו.
+  var host = document.querySelector('.editor-stack__host');
   return {
     direction: document.documentElement.getAttribute('data-document-direction'),
     status: (document.getElementById('status') || {}).textContent,
+    scroller: host === null ? null : {
+      direction: getComputedStyle(host).direction,
+      scrollable: host.scrollHeight > host.clientHeight,
+      barWidth: host.offsetWidth - host.clientWidth,
+      gutterStart: host.clientLeft
+    },
     rendered: fragments.map(function (el) {
       var style = getComputedStyle(el);
       return { dir: el.getAttribute('dir'), direction: style.direction, textAlign: style.textAlign };
@@ -156,14 +174,41 @@ for (const [index, fragment] of rendered.entries()) {
   }
 }
 
+// צד סרגל הגלילה. הוא נמדד כאן ולא בבדיקת יחידה מאותו טעם שכל השער הזה חי:
+// `direction: ltr` בגיליון הוא הצהרה, והצד שהדפדפן צייר בו את הסרגל הוא
+// הפיקסל. שתי המדידות נחוצות — ההצהרה מגנה מפני מחיקה בעריכה, והפיקסל מגן
+// מפני כלל אחר שידרוס אותה.
+const scroller = report?.scroller ?? null;
+if (scroller === null) {
+  errors.push('לא נמצא מיכל הגלילה (.editor-stack__host) — המעטפת לא עלתה, או שהמחלקה שונתה');
+} else {
+  if (scroller.direction !== 'ltr') {
+    errors.push(
+      `מיכל הגלילה ב-direction=${scroller.direction} — סרגל הגלילה האנכי יצויר בשמאל, ` +
+        'ראו את ההערה על .editor-stack__host ב-styles/shell.css',
+    );
+  }
+  if (scroller.gutterStart > 0) {
+    errors.push(`סרגל הגלילה תופס ${scroller.gutterStart}px בקצה השמאלי של המיכל, ולא בימני`);
+  }
+}
+
 for (const line of report?.log ?? []) {
   if (line.includes('כיווניות')) errors.push(`אזהרה מהתוסף: ${line}`);
 }
 
+// `barWidth=0` על מיכל שגולל אינו כשל — כך נראה סרגל overlay — אבל הוא כן
+// אומר שהמדידה של `gutterStart` לא הוכיחה דבר. מודפס כדי שלא ייקרא כירוק.
+const bar =
+  scroller === null
+    ? 'אין מיכל'
+    : `${scroller.direction} גולל=${scroller.scrollable ? 'כן' : 'לא'} ` +
+      `סרגל=${scroller.barWidth}px שמאל=${scroller.gutterStart}px`;
+
 console.log(
   `direction=${report?.direction ?? '?'} פסקות=${rendered.length} ` +
     `מרונדר=${rendered.map((f) => `${f.direction}/${f.textAlign}`).join(', ') || 'אין'} ` +
-    `status="${(report?.status ?? '').slice(0, 40)}"`,
+    `מיכל=${bar} status="${(report?.status ?? '').slice(0, 40)}"`,
 );
 
 if (errors.length) {

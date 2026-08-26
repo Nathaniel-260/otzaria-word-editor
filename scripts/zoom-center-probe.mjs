@@ -11,8 +11,10 @@
  *      חייב להישאר ממורכז. בלי התיקון מרכזו סוטה ב-199px, כי `margin: 0 auto`
  *      של המנוע קורס לאפס ברגע שקופסת הפריסה צרה מהעמוד.
  *   3. **הגדלה שגולשת (300%)** — העמוד רחב מהמאגס. „ממורכז” כבר אינו הגדרה,
- *      והדרישה היא שתחילת השורה תישאר בהישג יד: הקצה הימני של העמוד יושב על
- *      הקצה הימני של המאגס, ושני הקצוות נגישים בגלילה.
+ *      והדרישה מתפצלת לשתיים: כל העמוד נגיש בגלילה (הפריסה מצמידה את העודף
+ *      לצד ה-end של המיכל), והגלילה נחה על תחילת השורה מיד אחרי שינוי הזום
+ *      (הצמדה בקוד, ראו engine/zoom-center.ts). מיכל הגלילה הוא ltr — הצהרה
+ *      על צד פס הגלילה, ראו styles/shell.css — ולכן שני אלה אינם אותו דבר.
  *
  * הרקע המלא בהערות של engine/zoom-center.ts ו-styles/shell.css.
  *
@@ -61,6 +63,11 @@ writeFileSync(path, html.slice(0, latchEnd) + STUB + html.slice(latchEnd));
  * מודדת את העמוד מול תיבת התוכן של מיכל הגלילה, ובודקת נגישות בקצוות: גלילה
  * עד הסוף לכל צד ומדידה מה נראה שם. גלישה מעבר לקצה ההתחלה של מיכל גלילה
  * אינה נכנסת לאזור הגלילה, ולכן „נגיש” אינו נובע מ„קיים”.
+ *
+ * המדידה נייטרלית לכיווניות בכוונה: `clientLeft` הוא רוחב הגבול השמאלי ועוד
+ * רוחב פס הגלילה **כשהוא בשמאל**, ואפס כשהוא בימין — ולכן הוא, ולא הנחה על
+ * הצד, מה שמגדיר איפה תיבת התוכן מתחילה. הנחה קשיחה כאן הייתה מדווחת סטייה
+ * ברוחב פס הגלילה בכל פעם שהצד מתחלף, ומסתירה סטייה אמיתית באותו סדר גודל.
  */
 const MEASURE = `(async () => {
   const settle = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -75,22 +82,34 @@ const MEASURE = `(async () => {
     return { left: Math.round(b.left), right: Math.round(b.right), width: Math.round(b.width) };
   };
 
-  // תיבת התוכן של המיכל: ב-RTL פס הגלילה האנכי יושב בצד שמאל, ולכן ההתחלה
-  // היא הקצה הימני של קופסת הגבול והסוף מוסט פנימה ברוחב פס הגלילה.
+  // תיבת התוכן של המיכל, בלי להניח באיזה צד פס הגלילה יושב.
   const box = host.getBoundingClientRect();
-  const view = { right: Math.round(box.right), left: Math.round(box.right - host.clientWidth) };
+  const left = Math.round(box.left + host.clientLeft);
+  const view = { left, right: left + host.clientWidth };
+  const direction = getComputedStyle(host).direction;
+  // כיווניות **המסמך**, לא של המיכל: תחילת שורה עברית היא הקצה הימני של
+  // העמוד בכל מקרה. התכונה נכתבת ב-engine/document-defaults.ts.
+  const documentDirection = document.documentElement.getAttribute('data-document-direction');
 
+  // rest נמדד לפני שנוגעים בגלילה: זה מה שהמשתמש רואה מיד אחרי שינוי הזום,
+  // כלומר גם מה שההצמדה של zoom-center.ts קבעה.
   const rest = edges();
-  host.scrollLeft = 99999; await settle(200); const atStart = edges();
-  host.scrollLeft = -99999; await settle(200); const atEnd = edges();
+  const scroll = { left: Math.round(host.scrollLeft), max: host.scrollWidth - host.clientWidth };
+
+  // שני הקצוות של אזור הגלילה, בלי להניח לאיזה סימן scrollLeft נע: ב-ltr
+  // הוא 0..max, וב-rtl 0..-max.
+  host.scrollLeft = 99999; await settle(200); const atMax = edges();
+  host.scrollLeft = -99999; await settle(200); const atMin = edges();
   host.scrollLeft = 0; await settle(200);
 
   const cs = getComputedStyle(wrapper);
   return {
     view,
+    direction,
+    documentDirection,
     rest,
-    atStart,
-    atEnd,
+    scroll,
+    extremes: [atMax, atMin],
     origin: cs.transformOrigin,
     wrapperLayoutWidth: wrapper.offsetWidth,
   };
@@ -162,28 +181,45 @@ try {
       const drift = Math.abs(pageCenter - viewCenter);
       check(drift <= TOLERANCE, `${percent}%: העמוד נכנס למאגס וממורכז (סטייה ${Math.round(drift)}px)`);
     } else {
-      // גולש: הקצה הימני על הקצה הימני של המאגס, כדי שכל הגלישה תצא שמאלה —
-      // לשם אפשר לגלול. הצמדה הפוכה הייתה מסתירה את תחילת השורה לצמיתות.
-      const pinned = Math.abs(m.rest.right - m.view.right);
-      check(pinned <= TOLERANCE, `${percent}%: העמוד גולש ומוצמד לקצה ההתחלה (סטייה ${Math.round(pinned)}px)`);
+      // גולש. שתי דרישות נפרדות, וקל לבלבל ביניהן:
+      //
+      //   1. **נגישות** — כל העמוד חייב להיכנס לאזור הגלילה. גלישה מעבר לקצה
+      //      ההתחלה של מיכל הגלילה אינה נגישה לצמיתות, ולכן ההצמדה שבנוסחה
+      //      (shell.css) מאחדת את כל העודף בצד ה-end.
+      //   2. **נקודת פתיחה** — מה שנראה מיד אחרי שינוי הזום צריך להיות תחילת
+      //      השורה. במיכל ltr זהו הקצה הימני, ושם `scrollLeft` המקסימלי, ולכן
+      //      זו הצמדה שנעשית בקוד (engine/zoom-center.ts) ולא בפריסה.
+      // „נגיש” = קיימת עמדת גלילה שבה הקצה הזה מגיע לקצה המאגס. לכן מינימום
+      // על שני קצות אזור הגלילה, ולא איחוד שלהם: איחוד היה עובר גם על עמוד
+      // שחצי ממנו מחוץ להישג יד, שהרי הקצה הרחוק „קיים” באחת העמדות.
+      const closest = (edge) => Math.min(...m.extremes.map((e) => Math.abs(e[edge] - m.view[edge])));
       check(
-        Math.abs(m.atStart.right - m.view.right) <= TOLERANCE,
-        `${percent}%: הקצה הימני נגיש בגלילה (${m.atStart.right} מול ${m.view.right})`,
+        closest('right') <= TOLERANCE,
+        `${percent}%: הקצה הימני של העמוד נגיש בגלילה (סטייה ${Math.round(closest('right'))}px)`,
       );
       check(
-        Math.abs(m.atEnd.left - m.view.left) <= TOLERANCE,
-        `${percent}%: הקצה השמאלי נגיש בגלילה (${m.atEnd.left} מול ${m.view.left})`,
+        closest('left') <= TOLERANCE,
+        `${percent}%: הקצה השמאלי של העמוד נגיש בגלילה (סטייה ${Math.round(closest('left'))}px)`,
+      );
+      // נקודת הפתיחה: מה שנראה מיד אחרי שינוי הזום. תחילת שורה עברית היא הקצה
+      // הימני של העמוד — תכונה של המסמך ולא של המיכל — ומיכל ltr נח בקצה
+      // השמאלי, ולכן זו הצמדה שנעשית בקוד (engine/zoom-center.ts).
+      const lineStart = m.documentDirection === 'rtl' ? 'right' : 'left';
+      const opening = Math.abs(m.rest[lineStart] - m.view[lineStart]);
+      check(
+        opening <= TOLERANCE,
+        `${percent}%: אחרי שינוי הזום הגלילה נחה על תחילת השורה (סטייה ${Math.round(opening)}px)`,
       );
     }
 
-    // ה-origin הנכון הוא הקצה הימני של קופסת הפריסה (ראו shell.css): בפיקסלים
-    // זהו רוחב הפריסה של האלמנט עצמו. סטייה כאן = מישהו שינה את האנקור, וכל
-    // חישוב המרכוז נשען עליו.
-    const expected = m.wrapperLayoutWidth;
+    // ה-origin הנכון הוא פינת ההתחלה של קופסת הפריסה (ראו shell.css) — במיכל
+    // ltr הקצה השמאלי, כלומר אפס. אין כאן כלל CSS: זה מה שהמנוע כותב בעצמו,
+    // וכל חישוב המרכוז נשען עליו. סטייה כאן = הרגע להחזיר את ה-override.
+    const expected = m.direction === 'rtl' ? m.wrapperLayoutWidth : 0;
     const actual = Number.parseFloat(m.origin);
     check(
-      Boolean(expected) && !Number.isNaN(actual) && Math.abs(actual - expected) <= 2,
-      `${percent}%: transform-origin מעוגן בקצה הימני של קופסת הפריסה (${m.origin} מול ${expected}px)`,
+      !Number.isNaN(actual) && Math.abs(actual - expected) <= 2,
+      `${percent}%: transform-origin בפינת ההתחלה של קופסת הפריסה (${m.origin} מול ${expected}px)`,
     );
   }
 } catch (error) {

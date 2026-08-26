@@ -11,8 +11,9 @@
  * מכאן שתי התנהגויות מדודות:
  *
  * - **z < 1** — קופסת הפריסה רחבה מהעמוד, ה-`auto` מתחלק לשני הצדדים
- *   והעמוד ממורכז בתוכה. עם `transform-origin` בקצה ההתחלה (ראו shell.css)
- *   התוצאה ממורכזת גם על המסך. זה המצב שתוקן קודם, והוא נשאר נכון.
+ *   והעמוד ממורכז בתוכה. עם `transform-origin` בקצה ההתחלה של הקופסה — פינה
+ *   שהמנוע עצמו מעגן בה (ראו shell.css) — התוצאה ממורכזת גם על המסך. זה המצב
+ *   שתוקן קודם, והוא נשאר נכון.
  *
  * - **z > 1** — קופסת הפריסה **צרה** מהעמוד, המרווח הפנוי שלילי, ושני
  *   ה-`auto` קורסים לאפס. העמוד נדבק לקצה ההתחלה של הקופסה (בממשק עברי —
@@ -52,6 +53,21 @@
  * הרווח מהצורה הזאת הוא ש-`P` לעולם אינו נמדד ב-JS: הוא נכנס דרך האחוזים.
  * מסמך שמתחלק לעמודים אחרת, מקטע לרוחב, או ריבוי עמודים — כולם מקבלים את
  * המרכוז הנכון בלי שנקרא ולו אלמנט אחד של המנוע.
+ *
+ * ## הנוסחה אינה תלויה בכיווניות — נקודת הפתיחה כן
+ *
+ * `margin-inline-start` ופינת העיגון של ה-scale מתהפכים יחד עם כיווניות מיכל
+ * הגלילה, ולכן הנוסחה נשארה נכונה כשהמיכל עבר ל-`direction: ltr` (הצהרה על
+ * צד סרגל הגלילה, ראו shell.css). מה שאינו סימטרי הוא **איפה מיכל הגלילה נח**:
+ * מיכל ltr נח ב-`scrollLeft = 0`, כלומר בקצה השמאלי — ובמסמך עברי שגולש זהו
+ * צד **סופי** השורות. ההצמדה שבנוסחה מבטיחה שכל העמוד נגיש בגלילה, אבל היא
+ * אינה קובעת לאן הגלילה מצביעה.
+ *
+ * לכן `setZoom` מצמיד את הגלילה בחזרה לתחילת השורה — ורק בשלושה תנאים יחד:
+ * המסמך מוצהר RTL (`data-document-direction` על שורש ה-HTML, שנקבע
+ * ב-engine/document-defaults.ts רק כשכל שכבות הכיווניות הסכימו), המיכל אכן
+ * גולש אופקית, והשינוי בא משינוי זום ולא משינוי גודל — `refresh` אינו מצמיד,
+ * מפני שגרירת החלון אינה בקשה לזוז.
  */
 
 /**
@@ -79,6 +95,13 @@ export const VIEWPORT_WIDTH_VAR = '--otzaria-viewport-width';
  * ולכן המדידה כאן אינה נגיעה ב-DOM הפנימי של המנוע.
  */
 export const HOST_SELECTOR = '.editor-stack__host';
+
+/**
+ * הכיווניות שהאפליקציה מצהירה עליה על שורש ה-HTML. נקראת ולא נגזרת מחדש:
+ * engine/document-defaults.ts כותב אותה רק כששלוש שכבות הכיווניות של המנוע
+ * הסכימו, ושער check:rtl מודד אותה. גזירה עצמאית כאן הייתה מקור אמת שני.
+ */
+export const DOCUMENT_DIRECTION_ATTRIBUTE = 'data-document-direction';
 
 /** הערכים שהכלל ב-shell.css צורך. */
 export interface ZoomCenterVars {
@@ -116,6 +139,27 @@ type StackElement = Pick<HTMLElement, 'clientWidth'> & {
   style: Pick<CSSStyleDeclaration, 'setProperty'>;
 };
 
+/**
+ * האם המסמך המוצג מוצהר RTL. בסביבה בלי `document` — אין, ולכן אין הצמדה.
+ */
+function isRightToLeftDocument(): boolean {
+  if (typeof document === 'undefined') return false;
+  return document.documentElement.getAttribute(DOCUMENT_DIRECTION_ATTRIBUTE) === 'rtl';
+}
+
+/**
+ * מצמיד את הגלילה האופקית לתחילת השורה, במיכל ltr שמציג מסמך RTL.
+ *
+ * `scrollWidth - clientWidth` הוא ה-`scrollLeft` המקסימלי, ובמיכל ltr הוא
+ * הקצה הימני — כלומר תחילת השורה בעברית. מיכל שאינו גולש אופקית מחזיר אפס,
+ * וההשמה הופכת ל-no-op.
+ */
+function anchorToLineStart(host: HTMLElement): void {
+  if (!isRightToLeftDocument()) return;
+  const max = host.scrollWidth - host.clientWidth;
+  if (max > 0) host.scrollLeft = max;
+}
+
 /** הפקד שהאפליקציה מחזיקה. */
 export interface ZoomCenter {
   /** מעדכן את הזום ומחיל מחדש. נקרא מכל דיווח של `observeZoom`. */
@@ -148,6 +192,18 @@ export function createZoomCenter(stack: StackElement): ZoomCenter {
         })
       : null;
 
+  /**
+   * ההצמדה נדחית גם לפריים הבא, ולא רק מיד: המנוע מחיל את ה-`scale()` שלו
+   * בעצמו, ומדידה של `scrollWidth` באותו tick יכולה לקרוא את הרוחב שלפני
+   * השינוי. שתי הקריאות אידמפוטנטיות, ולכן הכפילות אינה עולה דבר.
+   */
+  function anchorSoon(host: HTMLElement): void {
+    anchorToLineStart(host);
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(() => anchorToLineStart(host));
+    }
+  }
+
   function apply(): void {
     const host = stack.querySelector(HOST_SELECTOR);
 
@@ -169,6 +225,9 @@ export function createZoomCenter(stack: StackElement): ZoomCenter {
     setZoom(next) {
       percent = next;
       apply();
+      // רק כאן, ולא ב-`refresh`: שינוי זום הוא בקשה לזוז, שינוי גודל אינו.
+      const host = stack.querySelector(HOST_SELECTOR);
+      if (host instanceof HTMLElement) anchorSoon(host);
     },
     refresh: apply,
     dispose() {

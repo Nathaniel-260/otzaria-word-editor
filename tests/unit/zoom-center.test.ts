@@ -8,6 +8,7 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 import {
+  DOCUMENT_DIRECTION_ATTRIBUTE,
   HOST_SELECTOR,
   VIEWPORT_WIDTH_VAR,
   ZOOM_INVERSE_VAR,
@@ -117,6 +118,66 @@ describe('createZoomCenter', () => {
       [ZOOM_INVERSE_VAR]: '0.6667',
       [VIEWPORT_WIDTH_VAR]: '885px',
     });
+  });
+
+  /**
+   * מיכל שגולש אופקית. `scrollWidth` הוא getter על האב-טיפוס, כמו
+   * `clientWidth`, ולכן נקבע בהגדרת מאפיין; `scrollLeft` הוא מאפיין רגיל
+   * ב-jsdom ולכן ההשמה עליו נמדדת ישירות.
+   */
+  function overflowing(host: Element, content: number): Element {
+    Object.defineProperty(host, 'scrollWidth', { value: content, configurable: true });
+    return host;
+  }
+
+  it('שינוי זום מחזיר את הגלילה לתחילת השורה במסמך RTL', () => {
+    // מיכל הגלילה הוא ltr (הצהרה על צד פס הגלילה, ראו shell.css), ולכן הוא
+    // נח ב-scrollLeft=0 — כלומר בסופי השורות העבריות. הנוסחה שב-CSS מבטיחה
+    // שכל העמוד נגיש; מה שמחזיר את הגלילה לתחילת השורה הוא כאן.
+    document.documentElement.setAttribute(DOCUMENT_DIRECTION_ATTRIBUTE, 'rtl');
+    const { stack } = stackWith(1425);
+    const host = overflowing(stack.querySelector(HOST_SELECTOR) as Element, 2400);
+
+    createZoomCenter(stack as never).setZoom(300);
+
+    expect(host.scrollLeft).toBe(2400 - 1425);
+    document.documentElement.removeAttribute(DOCUMENT_DIRECTION_ATTRIBUTE);
+  });
+
+  it('במסמך שאינו RTL הגלילה אינה נגעת — שם 0 הוא תחילת השורה', () => {
+    const { stack } = stackWith(1425);
+    const host = overflowing(stack.querySelector(HOST_SELECTOR) as Element, 2400);
+
+    createZoomCenter(stack as never).setZoom(300);
+
+    expect(host.scrollLeft).toBe(0);
+  });
+
+  it('מיכל שאינו גולש אופקית אינו מקבל השמה', () => {
+    document.documentElement.setAttribute(DOCUMENT_DIRECTION_ATTRIBUTE, 'rtl');
+    const { stack } = stackWith(1425);
+    const host = overflowing(stack.querySelector(HOST_SELECTOR) as Element, 1200);
+
+    createZoomCenter(stack as never).setZoom(60);
+
+    expect(host.scrollLeft).toBe(0);
+    document.documentElement.removeAttribute(DOCUMENT_DIRECTION_ATTRIBUTE);
+  });
+
+  it('שינוי גודל אינו מזיז את הגלילה — גרירת חלון אינה בקשה לזוז', () => {
+    // ההבחנה הזאת היא כל הטעם בכך שההצמדה יושבת ב-`setZoom` ולא ב-`apply`:
+    // משתמש שגלל לאמצע השורה וגרר את החלון אינו מבקש לחזור להתחלה.
+    document.documentElement.setAttribute(DOCUMENT_DIRECTION_ATTRIBUTE, 'rtl');
+    const { stack } = stackWith(1425);
+    const host = overflowing(stack.querySelector(HOST_SELECTOR) as Element, 2400);
+    const center = createZoomCenter(stack as never);
+    center.setZoom(300);
+    host.scrollLeft = 500;
+
+    center.refresh();
+
+    expect(host.scrollLeft).toBe(500);
+    document.documentElement.removeAttribute(DOCUMENT_DIRECTION_ATTRIBUTE);
   });
 
   it('dispose מנתק את ההאזנה', () => {
