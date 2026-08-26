@@ -16,11 +16,17 @@
       @click="toggle"
     />
 
+    <!--
+      `:style` ולא מיקום ב-CSS: `.word-ribbon-body` חותך אנכית, ולכן התפריט
+      `position: fixed` בקואורדינטות שנמדדות — composables/popover-position.ts.
+    -->
     <div
       v-if="isOpen"
+      ref="popoverRef"
       class="ribbon-menu__popover"
       role="menu"
       :aria-label="menuString(label)"
+      :style="popoverStyle"
       @pointerdown.prevent.stop
     >
       <button
@@ -62,6 +68,7 @@
 import { ref, onMounted, onUnmounted } from 'vue';
 import RibbonButton from './RibbonButton.vue';
 import { menuString } from '../i18n';
+import { usePopoverPosition } from '../../../composables/popover-position';
 
 /** פריט בתפריט. מקומי בכוונה: `<script setup>` אינו מייצא, והצרכן מעביר literal. */
 interface MenuItem {
@@ -84,7 +91,10 @@ const emit = defineEmits<{
 }>();
 
 const containerRef = ref<HTMLElement | null>(null);
+const popoverRef = ref<HTMLElement | null>(null);
 const isOpen = ref(false);
+
+const { popoverStyle } = usePopoverPosition(containerRef, popoverRef, isOpen);
 
 function close(): void {
   isOpen.value = false;
@@ -132,10 +142,11 @@ onUnmounted(() => {
   display: inline-flex;
 }
 
+/* `top` / `left` / `max-height` מגיעים מ-`:style` — ראו popover-position.ts.
+   `overflow-y: auto` הוא הצד השני של אותה החלטה: כשאין מקום לגובה המלא התפריט
+   נגלל בתוך עצמו, ולא נחתך. */
 .ribbon-menu__popover {
-  position: absolute;
-  top: 100%;
-  inset-inline-start: 0;
+  position: fixed;
   z-index: 1000;
   min-width: 200px;
   background: var(--color-surface);
@@ -143,10 +154,10 @@ onUnmounted(() => {
   border-radius: var(--radius-sm);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.16);
   padding: 4px;
-  margin-top: 2px;
   display: flex;
   flex-direction: column;
   gap: 1px;
+  overflow-y: auto;
 }
 
 .ribbon-menu__item {

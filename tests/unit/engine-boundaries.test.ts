@@ -6,7 +6,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { join, relative, sep } from 'node:path';
 
 // vitest רץ משורש המאגר, ולכן cwd הוא השורש.
 const SRC = join(process.cwd(), 'src');
@@ -75,6 +75,47 @@ describe('גבולות מול SuperDoc', () => {
   it('אין selector אל ה-DOM הפנימי של SuperDoc', () => {
     expect(hits(/(querySelector|querySelectorAll|closest)\s*\(\s*['"][^'"]*(\.sd-|superdoc)/i)).toEqual(
       [],
+    );
+  });
+});
+
+/**
+ * החריגה היחידה מהכלל שמעליו, ומנוסחת כאן במפורש ולא נשענת על כך שה-regex
+ * שלמעלה מחפש `.sd-`/`superdoc` ואינו תופס תכונות `data-`.
+ *
+ * מה שמצדיק אותה: שכבת הכותרות שהמנוע מצייר („Different First Page”, „Header
+ * from Top”) אינה חלק מ-`ui`, אין לה מתג ב-`modules.surfaces` ואין לה הגדרת
+ * טקסטים — והרישיון אוסר לשנות את האריזה. עברות מבחוץ היא הדרך היחידה, וכל
+ * מה שהיא עושה הוא להחליף תוויות תצוגה.
+ *
+ * מה שהחריגה **אינה** מתירה, וזה מה שנמדד: מקום שני שנוגע באותה שכבה, וכתיבה
+ * שאינה תווית. עריכת תוכן דרך ה-DOM היא בדיוק התוסף הישן שהתכנית באה להחליף.
+ */
+describe('עברות שכבת הכותרות', () => {
+  const LOCALIZER = 'engine/hf-chrome.ts';
+
+  /** הנתיבים ב-hits הם של המערכת; ההשוואה חייבת להיות אחידה. */
+  function normalize(path: string): string {
+    return path.split(sep).join('/');
+  }
+
+  it('רק hf-chrome.ts נוגע בעיגונים של השכבה', () => {
+    const offenders = hits(/data-sd-h(?:f|eader-footer)-/).filter(
+      (hit) => !normalize(hit).startsWith(LOCALIZER),
+    );
+
+    expect(offenders).toEqual([]);
+  });
+
+  it('העברות מחליפה תוויות בלבד — אינה בונה, מוחקת או מזיזה DOM', () => {
+    const localizer = sources.find(({ path }) => normalize(path) === LOCALIZER);
+    expect(localizer, LOCALIZER).toBeDefined();
+
+    const source = localizer?.text ?? '';
+    // מה שמותר: textContent ו-setAttribute. כל השאר הוא כבר עריכת DOM.
+    expect(source).toMatch(/textContent/);
+    expect(/innerHTML|insertAdjacent|appendChild|removeChild|createElement|\.remove\(/.test(source)).toBe(
+      false,
     );
   });
 });

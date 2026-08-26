@@ -12,6 +12,9 @@
 import { SuperDoc } from 'superdoc';
 import type { BorrowedSuperDocUI, SuperDocExceptionPayload } from 'superdoc';
 import 'superdoc/style.css';
+// אחרי גיליון המנוע, ובכוונה: הכללים שם מעברתים את שכבת הכותרות שהוא מצייר.
+import '../styles/engine-chrome.css';
+import { localizeEngineChrome } from './hf-chrome';
 import { engineWorkerUrls } from './workers';
 
 export interface EditorSession {
@@ -122,6 +125,14 @@ export function createEditor(options: CreateEditorOptions): Promise<EditorSessio
       // הממשק כולו שלנו — SuperDoc לא מרנדר שום toolbar, dialog או popover.
       ui: false,
 
+      // יחידת המידה של הסרגל ושל שדות המרחק. ברירת המחדל של המנוע היא
+      // `'in'` — ברירת המחדל של Word en-US — וזו הסיבה שפאנל הכותרות שלו הציג
+      // „0.49 in”: 1.25 ס"מ, שהם ברירת המחדל של Word העברי (ראו
+      // HEADER_DISTANCE_DEFAULT_CM ב-page-setup.ts), באינצ'ים. כל הממשק שלנו
+      // מקליד ומציג סנטימטרים, ושתי יחידות באותו מסמך הן מספר שהמשתמש קורא
+      // לא נכון — לא קוסמטיקה.
+      measurementUnit: 'cm',
+
       // התוסף עובד אופליין וללא הרשאת רשת; טלמטריה תיצור קריאות שייחסמו.
       telemetry: { enabled: false },
 
@@ -189,6 +200,11 @@ export function createEditor(options: CreateEditorOptions): Promise<EditorSessio
 
     instance = superdoc;
     if (pendingTeardown) destroy(superdoc);
+
+    // עברות שכבת הכותרות שהמנוע מצייר — ראו hf-chrome.ts ו-engine-chrome.css.
+    // מותקן על ה-container ולא על המסמך, ונרשם כ-disposer: destroy מפרק את
+    // ה-observer *לפני* המנוע, כדי שלא ירוץ על עץ שכבר נפרק.
+    disposers.push(localizeEngineChrome(container).dispose);
 
     if (settled) return;
     timer = setTimeout(() => {

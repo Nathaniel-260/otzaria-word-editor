@@ -39,10 +39,16 @@
       </button>
     </div>
 
-    <!-- פופאובר פלטת הצבעים של Office -->
+    <!--
+      פופאובר פלטת הצבעים של Office. `:style` ולא מיקום ב-CSS: `.word-ribbon-body`
+      חותך אנכית, ולכן הפופאובר `position: fixed` בקואורדינטות שנמדדות —
+      composables/popover-position.ts.
+    -->
     <div
       v-if="isOpen"
+      ref="popoverRef"
       class="color-palette-popover"
+      :style="popoverStyle"
       @pointerdown.stop
     >
       <div
@@ -130,6 +136,7 @@
 import { ref, onMounted, onUnmounted } from 'vue';
 import SvgIcon from '../../icons/SvgIcon.vue';
 import { menuString } from '../i18n';
+import { usePopoverPosition } from '../../../composables/popover-position';
 
 const THEME_COLUMNS = [
   ['#ffffff', '#f2f2f2', '#d9d9d9', '#bfbfbf', '#a6a6a6', '#7f7f7f'], // לבן/אפור בהיר
@@ -178,8 +185,11 @@ const emit = defineEmits<{
 }>();
 
 const containerRef = ref<HTMLElement | null>(null);
+const popoverRef = ref<HTMLElement | null>(null);
 const customColorRef = ref<HTMLInputElement | null>(null);
 const isOpen = ref(false);
+
+const { popoverStyle } = usePopoverPosition(containerRef, popoverRef, isOpen);
 
 function toggleDropdown(): void {
   if (props.disabled) return;
@@ -282,11 +292,11 @@ onUnmounted(() => {
   border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
 }
 
-/* פופאובר פלטת הצבעים */
+/* פופאובר פלטת הצבעים. `top` / `left` / `max-height` מגיעים מ-`:style` — ראו
+   popover-position.ts. `overflow-y: auto` הוא הצד השני של אותה החלטה: כשאין
+   מקום לגובה המלא הפופאובר נגלל בתוך עצמו, ולא נחתך. */
 .color-palette-popover {
-  position: absolute;
-  top: 100%;
-  inset-inline-start: 0;
+  position: fixed;
   z-index: 1000;
   background: var(--color-surface);
   border: 1px solid var(--color-outline);
@@ -294,7 +304,7 @@ onUnmounted(() => {
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.16);
   padding: 8px;
   min-width: 176px;
-  margin-top: 2px;
+  overflow-y: auto;
 }
 
 .palette-section {
