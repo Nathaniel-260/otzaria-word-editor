@@ -164,3 +164,42 @@ describe('הקבצים שנארזים', () => {
     expect(existsSync(join(process.cwd(), 'public/third-party/ASSISTANT-LICENSE.txt'))).toBe(true);
   });
 });
+
+describe('שרשרת --font-main', () => {
+  const CHAIN =
+    /--font-main:\s*([^;]+);/.exec(
+      readFileSync(join(process.cwd(), 'src', 'styles', 'tokens.css'), 'utf8'),
+    )?.[1] ?? '';
+
+  it('פותחת בגופן הארוז', () => {
+    // אף אחד לא דורס את `--font-main` בזמן ריצה (host/theme.ts), ולכן השרשרת
+    // כאן היא מה שהממשק מקבל בפועל. חוליה ראשונה שאינה הגופן הארוז פירושה
+    // ממשק שתלוי במערכת ההפעלה.
+    expect(CHAIN).not.toBe('');
+    expect(CHAIN.trimStart().startsWith(`'${BUNDLED_FAMILIES[0]}'`)).toBe(true);
+  });
+
+  it('אינה נופלת לגופן ספרים בשום חוליה', () => {
+    // הרגרסיה: גופן ספרים בכפתור בן 12px נמרח. אין די בכך שהחוליה הראשונה
+    // תקינה — חוליה שנייה כזאת היא אותו באג ברגע שהגופן הארוז לא נטען.
+    const BOOK_FONTS = [
+      'FrankRuhlCLM',
+      'Frank Ruhl',
+      'TaameyDavidCLM',
+      'TaameyAshkenaz',
+      'NotoRashiHebrew',
+      'NotoSerifHebrew',
+      'KeterYG',
+      'Shofar',
+      'Tinos',
+      'David',
+      'serif',
+    ];
+
+    for (const font of BOOK_FONTS) {
+      // `sans-serif` הוא ההיפך מ-serif ולכן אינו נחשב פגיעה.
+      const hits = CHAIN.replace(/sans-serif/g, '').includes(font);
+      expect(hits, `${font} בשרשרת`).toBe(false);
+    }
+  });
+});
