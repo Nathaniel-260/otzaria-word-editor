@@ -17,7 +17,8 @@
  * ## למה זה בטוח מול Vue
  *
  * המנוע מרנדר את השכבה הזאת בעצמו, ו-Vue יכתוב את הטקסט האנגלי בחזרה בכל
- * patch — למשל כשהסמן עובר מכותרת עליונה לתחתונה, או כשהיחידה מתחלפת. לכן זה
+ * patch — למשל כשהסמן עובר מכותרת עליונה לתחתונה, או כשהיחידה מתחלפת (התג
+ * ותא היחידה הם vnodes עם patchFlag של טקסט; נמדד באריזה). לכן זה
  * `MutationObserver` ולא מעבר חד-פעמי: אחרי כל כתיבה של המנוע אנחנו כותבים
  * שוב. שלוש הגנות מונעות לופ:
  *
@@ -36,7 +37,19 @@
  * אחד שאין בו תכונות: תגי ההמשך, ורק כדי לגזור מהם סוג ומספר מקטע.
  * הדקדוק שהמנוע בונה (`[First|Even|Odd] Page <Header|Footer>[ -Section N-]`)
  * מאומת ב-tests/contract/engine-hf-chrome.test.ts מול האריזה עצמה.
+ *
+ * ## שפת המשתמש
+ *
+ * הרצועה מוצגת באנגלית כששפת המשתמש אנגלית (ui/ribbon/i18n.ts, לפי
+ * `app.language` מ-`plugin.boot`), ולמשתמש כזה האנגלית של המנוע היא בדיוק מה
+ * שצריך: עברות שם הופכת תיקון לרגרסיה — רצועה אנגלית ושכבת כותרות עברית.
+ * לכן `localizeEngineChrome` מחזיר מפרק ריק ב-`'en'`, ואינו מתקין observer
+ * בכלל. הצד השני של העברות — styles/engine-chrome.css — נכבה מאותו סימן
+ * (`[data-menu-locale='en']` על שורש ה-HTML, שנכתב ב-`setMenuLocale`), ולכן
+ * שני החצאים נדלקים ונכבים יחד.
  */
+import type { SuperDocMeasurementUnit } from 'superdoc';
+import { menuLocale } from '../ui/ribbon/i18n';
 
 /** התכונות שהמנוע מסמן בהן את השכבה. בדיקת החוזה מאמתת שכולן עוד קיימות. */
 export const HF_HOOKS = {
@@ -102,15 +115,34 @@ type Region = keyof typeof REGION_TEXT;
 type Variant = keyof typeof VARIANT_TEXT;
 
 /**
- * היחידות שהמנוע כותב. מיוצא מפני שבדיקת החוזה משווה את המפתחות כאן ל-union
- * `SuperDocMeasurementUnit` שבטיפוסים של superdoc: יחידה שלישית שתיווסף שם
- * תיפול כאן, ולא תופיע אצל המשתמש כ-`mm` באמצע עברית. הנוסח הוא של
- * page-setup.ts, שכבר מקליד ומציג את אותן יחידות.
+ * המחלקה שהמנוע נותן לתא יחידת המידה בשורות המרחק.
+ *
+ * מחלקה ולא תכונה, שלא כמו כל השאר ב-HF_HOOKS, מפני שאין לתא הזה תכונה
+ * משלו — ומקום בסדר („ה-span האחרון בשורה”) היה נשען על סדר ילדים ולא על
+ * מזהה. הקבוע גם מה שמאפשר לגיליון (styles/engine-chrome.css) לתקן את רוחב
+ * התא: שער ההיגיינה (tests/unit/css-hygiene.test.ts) מחייב שכל מחלקה בסלקטור
+ * גלובלי תופיע בקוד. בדיקת החוזה מאמתת שהמחלקה עוד קיימת באריזה.
  */
-export const HF_UNIT_TEXT: Record<string, string> = {
+export const HF_UNIT_CLASS = 'v2-hf-distance-unit';
+
+/**
+ * היחידות שהמנוע כותב, והנוסח העברי לכל אחת.
+ *
+ * הטיפוס הוא ה-union הציבורי של superdoc ולא `Record<string, string>`,
+ * ובכוונה: יחידה שלישית שתיווסף לו תיפול כאן כשגיאת קומפילציה, ולא תופיע
+ * אצל המשתמש כ-`mm` באמצע עברית. בדיקת החוזה מודדת את אותו דבר מהצד השני —
+ * על ה-`.d.ts` הארוז — כדי שגם ה-union יהיה מכוסה אם הייבוא יתחלף. הנוסח
+ * הוא של page-setup.ts, שכבר מקליד ומציג את אותן יחידות.
+ */
+export const HF_UNIT_TEXT: Record<SuperDocMeasurementUnit, string> = {
   in: "אינץ'",
   cm: 'ס"מ',
 };
+
+/** האם המחרוזת שהמנוע כתב היא יחידה שיש לה נוסח. */
+function isUnit(value: string): value is SuperDocMeasurementUnit {
+  return value in HF_UNIT_TEXT;
+}
 
 /**
  * הדקדוק שהמנוע בונה בו את תווית התג. נקרא רק כשאין תכונות — כלומר בתגי
@@ -204,14 +236,25 @@ function firstSpan(element: Element): Element | null {
   return null;
 }
 
-/** ה-span האחרון בין ילדיו הישירים: יחידת המידה, אחרי תיבת המספר. */
-function lastSpan(element: Element): Element | null {
-  const spans = [...element.children].filter((child) => child.tagName === 'SPAN');
-  return spans.length === 0 ? null : spans[spans.length - 1];
+/**
+ * האם השכבה בכלל בעץ.
+ *
+ * ה-observer יושב על ה-container שהמנוע מרנדר לתוכו — כלומר על משטח העריכה —
+ * ולכן הוא מתעורר על כל שינוי DOM במסמך: כל הקלדה, כל עימוד מחדש. שכבת
+ * הכותרות קיימת רק בזמן שהסמן בכותרת, וזה מעט מהזמן. סלקטור אחד כאן חוסך
+ * שמונה מעברים על עץ המסמך בכל שאר הזמן.
+ *
+ * שתי התכונות ולא אחת: העוטף הפעיל דורש גם `anchorRegion`, ותגי ההמשך
+ * מרונדרים גם בלעדיו (נמדד באריזה). סלקטור אחד עם פסיק הוא עדיין מעבר אחד.
+ */
+function hasChrome(root: ParentNode): boolean {
+  return root.querySelector(`[${HF_HOOKS.activeGroup}],[${HF_HOOKS.continuationLabel}]`) !== null;
 }
 
 /** מעבר אחד על כל מה שקיים כרגע. אידמפוטנטי — ראו `relabel`. */
 function localizeOnce(root: ParentNode): void {
+  if (!hasChrome(root)) return;
+
   for (const group of [...root.querySelectorAll(`[${HF_HOOKS.activeGroup}]`)]) {
     setAttribute(group, 'aria-label', HF_TEXTS.groupLabel);
   }
@@ -244,9 +287,12 @@ function localizeOnce(root: ParentNode): void {
 
   const distanceRows = `[${HF_HOOKS.option}="header-from-top"],[${HF_HOOKS.option}="footer-from-bottom"]`;
   for (const row of [...root.querySelectorAll(distanceRows)]) {
-    const unit = lastSpan(row);
+    const unit = row.querySelector(`.${HF_UNIT_CLASS}`);
     if (unit === null) continue;
-    relabel(unit, (source) => HF_UNIT_TEXT[source.trim()] ?? null);
+    relabel(unit, (source) => {
+      const name = source.trim();
+      return isUnit(name) ? HF_UNIT_TEXT[name] : null;
+    });
   }
 }
 
@@ -264,6 +310,12 @@ export interface EngineChromeLocalizer {
  * מ-observer על כל המסמך לרוץ על כל הקלדה בממשק שלנו.
  */
 export function localizeEngineChrome(root: ParentNode): EngineChromeLocalizer {
+  // שפת המשתמש אנגלית — האנגלית של המנוע נכונה, ואין מה להתקין. ראו הערת
+  // הפתיחה: הגיליון נכבה מאותו סימן.
+  if (menuLocale() === 'en') {
+    return { refresh: () => {}, dispose: () => {} };
+  }
+
   localizeOnce(root);
 
   // ב-jsdom יש MutationObserver, אבל סביבת בדיקה מצומצמת עשויה לא לספק אותו,

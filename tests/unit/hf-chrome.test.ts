@@ -11,9 +11,12 @@
  *      השער על ההפרדה הזאת, ולא פספוס.
  *   3. **מה שקורה אחרי ש-Vue כותב מחדש.** זה כל הטעם ב-MutationObserver:
  *      המנוע כותב את האנגלית בחזרה בכל patch, והבדיקה מדמה בדיוק את זה.
+ *   4. **שפת המשתמש.** באנגלית העברות כולה כבויה — האנגלית של המנוע היא
+ *      הנכונה שם, ורצועה אנגלית עם שכבת כותרות עברית היא רגרסיה.
  */
 import { describe, it, expect, afterEach } from 'vitest';
 import { hebrewLabel, localizeEngineChrome, HF_TEXTS } from '../../src/engine/hf-chrome';
+import { setMenuLocale } from '../../src/ui/ribbon/i18n';
 import { headerFooterChrome, textOf, type ChromeOptions } from '../support/hf-chrome-dom';
 import type { EngineChromeLocalizer } from '../../src/engine/hf-chrome';
 
@@ -40,6 +43,8 @@ afterEach(() => {
   active?.dispose();
   active = null;
   document.body.innerHTML = '';
+  // השפה גלובלית, ולכן חייבת לחזור: בדיקה שמשאירה 'en' מפילה את הבאות.
+  setMenuLocale('he');
 });
 
 describe('נוסח התווית', () => {
@@ -207,5 +212,65 @@ describe('החזקה מול patch של המנוע', () => {
     await flush();
 
     expect(chip.textContent).toBe('Footer');
+  });
+});
+
+describe('שפת המשתמש', () => {
+  it('באנגלית שום דבר אינו מתורגם — גם לא התג ולא היחידה', () => {
+    // הרצועה כולה אנגלית שם (ui/ribbon/i18n.ts), והאנגלית של המנוע היא בדיוק
+    // מה שצריך. עברות כאן הייתה יוצרת מסך בשתי שפות.
+    setMenuLocale('en');
+    const { root } = localize({ region: 'header', variant: 'first', label: 'First Page Header' });
+
+    expect(textOf(root, '[data-sd-hf-label] > span')).toBe('First Page Header');
+    expect(textOf(root, '[data-sd-hf-options]')).toBe('Options ▾');
+    expect(root.querySelector('[data-sd-hf-options]')?.getAttribute('title')).toBe(
+      'Header and footer options',
+    );
+    expect(root.querySelector('[data-sd-header-footer-active]')?.getAttribute('aria-label')).toBe(
+      'Header and footer controls',
+    );
+    expect(textOf(root, '.v2-hf-distance-unit')).toBe('cm');
+  });
+
+  it('באנגלית גם ה-observer אינו מותקן — patch של המנוע אינו מתורגם', async () => {
+    setMenuLocale('en');
+    const { root } = localize();
+    const chip = root.querySelector('[data-sd-hf-label] > span')!;
+
+    chip.textContent = 'Footer';
+    await flush();
+
+    expect(chip.textContent).toBe('Footer');
+  });
+
+  it("'he-IL' ושפה שלא דווחה הם עברית — התוסף מעברת בברירת מחדל", () => {
+    setMenuLocale('he-IL');
+    expect(textOf(localize().root, '[data-sd-hf-label] > span')).toBe('כותרת עליונה');
+
+    active?.dispose();
+    document.body.innerHTML = '';
+    setMenuLocale(undefined);
+    expect(textOf(localize().root, '[data-sd-hf-label] > span')).toBe('כותרת עליונה');
+  });
+});
+
+describe('השער שחוסך מעברים', () => {
+  it('עץ בלי שכבת כותרות אינו נסרק — ה-observer יושב על משטח העריכה', () => {
+    // ה-observer מתעורר על כל הקלדה במסמך; השכבה קיימת רק כשהסמן בכותרת.
+    // הבדיקה מודדת את השער עצמו: סלקטור אחד במקום שמונה מעברים.
+    const root = document.createElement('div');
+    root.innerHTML = '<p>פסקה רגילה במסמך</p>';
+    document.body.append(root);
+    const scanned: string[] = [];
+    const original = root.querySelectorAll.bind(root);
+    root.querySelectorAll = ((selector: string) => {
+      scanned.push(selector);
+      return original(selector);
+    }) as typeof root.querySelectorAll;
+
+    active = localizeEngineChrome(root);
+
+    expect(scanned).toEqual([]);
   });
 });

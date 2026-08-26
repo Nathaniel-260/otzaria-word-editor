@@ -31,8 +31,10 @@ import {
   HF_HOOKS,
   HF_OPTION_ROWS,
   HF_TEXTS,
+  HF_UNIT_CLASS,
   HF_UNIT_TEXT,
 } from '../../src/engine/hf-chrome';
+import { MENU_LOCALE_ATTRIBUTE } from '../../src/ui/ribbon/i18n';
 
 /** vitest רץ משורש המאגר. */
 const ENGINE = join(process.cwd(), 'node_modules/@superdoc/docx-engine/dist/docx-engine.es.js');
@@ -51,6 +53,13 @@ const bundle = readFileSync(ENGINE, 'utf8').replace(
 );
 
 const sheet = readFileSync(STYLE_SHEET, 'utf8');
+
+/**
+ * הגיליון בלי ההערות. הספירות שמתחת מודדות הצהרות, וההערה בקובץ מסבירה
+ * מדוע — כלומר מצטטת `justify-content` ו-`display` בתוך פרוזה. גיליון
+ * שנספר עם ההערות היה נכשל על שיפור תיעוד ועובר על כלל שנמחק.
+ */
+const declarations = sheet.replace(/\/\*[\s\S]*?\*\//g, '');
 
 /** כל קובצי הטיפוסים של superdoc — הנתיב הפנימי אינו חוזה, ולכן סורקים. */
 function typeDeclarations(dir = SUPERDOC_TYPES): string {
@@ -127,15 +136,15 @@ describe('יחידת המידה', () => {
 describe('חלוקת העבודה בין הגיליון ל-JS', () => {
   it('לכל שורה בפאנל יש נוסח עברי בגיליון', () => {
     for (const row of HF_OPTION_ROWS) {
-      expect(sheet, row).toContain(row);
+      expect(declarations, row).toContain(row);
     }
     // ארבע תוויות, ולכן ארבעה כללי content — ולא שלושה שנראים כמו ארבעה.
-    expect([...sheet.matchAll(/content:/g)]).toHaveLength(HF_OPTION_ROWS.length);
+    expect([...declarations.matchAll(/content:/g)]).toHaveLength(HF_OPTION_ROWS.length);
   });
 
   it('הגיליון מסתיר את הטקסט של המנוע ולא מצייר עליו', () => {
     // בלי ההסתרה שתי התוויות יופיעו זו לצד זו — אנגלית ועברית.
-    expect([...sheet.matchAll(/display:\s*none/g)]).toHaveLength(2);
+    expect([...declarations.matchAll(/display:\s*none/g)]).toHaveLength(2);
   });
 
   it('אף עיגון שה-JS מחזיק אינו מתורגם גם בגיליון', () => {
@@ -148,9 +157,26 @@ describe('חלוקת העבודה בין הגיליון ל-JS', () => {
       HF_HOOKS.activeGroup,
       HF_HOOKS.variant,
     ];
-    const overlap = jsOwned.filter((hook) => new RegExp(`\\[${hook}`).test(sheet));
+    const overlap = jsOwned.filter((hook) => new RegExp(`\\[${hook}`).test(declarations));
 
     expect(overlap).toEqual([]);
+  });
+
+  it('מחלקת יחידת המידה עדיין קיימת במנוע, ומשמשת בשני הצדדים', () => {
+    // היחידה היא התא היחיד שאין לו תכונה משלו: המחלקה היא המזהה, ה-JS מחליף
+    // בה נוסח והגיליון מתקן בה רוחב (המנוע קובע `width: 18px`, מכויל ל-„cm”).
+    expect(bundle).toContain(HF_UNIT_CLASS);
+    expect(declarations).toContain(HF_UNIT_CLASS);
+  });
+
+  it('שני חצאי העברות נכבים מאותו סימן שפה', () => {
+    // רצועה באנגלית עם שכבת כותרות בעברית היא רגרסיה, לא תיקון. שער השפה
+    // חייב לחול על **כל** כלל בגיליון: כלל אחד בלי שער נשאר עברי באנגלית.
+    const rules = declarations.split('}').filter((rule) => rule.includes('{'));
+    const ungated = rules.filter((rule) => !rule.includes(`${MENU_LOCALE_ATTRIBUTE}='en'`));
+
+    expect(ungated).toEqual([]);
+    expect(rules.length).toBeGreaterThan(0);
   });
 
   it('הטקסטים הקבועים אינם ריקים', () => {

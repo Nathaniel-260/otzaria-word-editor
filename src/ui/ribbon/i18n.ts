@@ -25,6 +25,19 @@ import { ref } from 'vue';
 
 export type MenuLocale = 'he' | 'en';
 
+/**
+ * השפה גם על שורש ה-HTML, ולא רק ב-`ref`.
+ *
+ * הצריכה היחידה מבחוץ היא styles/engine-chrome.css: העברות של שכבת הכותרות
+ * שהמנוע מצייר חייבת להיות CSS (ראו ההסבר שם), ו-CSS אינו יכול לקרוא `ref`.
+ * שכבה שמתורגמת בחצי CSS וחצי JS מחייבת שהשניים ייכבו יחד, ותכונה על השורש
+ * היא האות המשותפת. `engine/hf-chrome.ts` קורא את אותו סימן.
+ *
+ * היעדר התכונה הוא עברית — שפת המקור — ולכן לפני האתחול ובבדיקות שאינן קוראות
+ * ל-`setMenuLocale` הכללים חלים, כמו קודם.
+ */
+export const MENU_LOCALE_ATTRIBUTE = 'data-menu-locale';
+
 const locale = ref<MenuLocale>('he');
 
 /**
@@ -36,6 +49,14 @@ const locale = ref<MenuLocale>('he');
 export function setMenuLocale(language: string | null | undefined): void {
   const code = (language ?? '').toLowerCase().split(/[-_]/)[0];
   locale.value = code === 'en' ? 'en' : 'he';
+  if (typeof document !== 'undefined') {
+    document.documentElement.setAttribute(MENU_LOCALE_ATTRIBUTE, locale.value);
+  }
+}
+
+/** השפה שנקבעה. נקראת ממי שאינו תבנית — ראו `engine/hf-chrome.ts`. */
+export function menuLocale(): MenuLocale {
+  return locale.value;
 }
 
 /** התרגומים לאנגלית, לפי מחרוזת המקור העברית. */
