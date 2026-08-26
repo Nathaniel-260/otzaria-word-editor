@@ -113,9 +113,13 @@ export function applyTheme(theme: ThemePayload): void {
     if (filledHover) root.style.setProperty('--color-primary-filled-hover', filledHover);
   }
 
-  // גופן הקריאה של אוצריא (`typography.fontFamily`) אינו מוחל על הממשק: הוא
-  // גופן ספרים מצויר ל-25px, ובכפתור בן 12px התגיות שלו נמרחות.
-  // `--font-main` נשאר Assistant מ-tokens.css — sans שנשאר חד בקטן.
+  // גופן הקריאה של אוצריא (`typography.fontFamily`) אינו מוחל על הממשק. שתי
+  // סיבות נצפו יחד בכפתורי הרצועה: אוצריא מזריקה למשפחה `@font-face` אחד בלי
+  // דסקריפטור `font-weight` כלל, ולכן כל בולד בממשק עבר סינתוז של הדפדפן —
+  // ציור מרוח ולא ציור האות הבולד (מתוקן בצד אוצריא ב-otzaria#986); ובנוסף
+  // גופן ספרים בן 12px מצייר את קוויו הדקים דקים מפיקסל, והמסך צובע אותם אפור.
+  // `--font-main` נשאר Assistant מ-tokens.css: נארז איתנו בארבעה משקלים
+  // אמיתיים, ולכן גם הבולד שלו אמיתי, והוא sans שנשאר חד בקטן.
   const typography = theme.typography;
   if (typeof typography?.fontSize === 'number' && typography.fontSize > 0) {
     root.style.setProperty('--font-size-base', `${typography.fontSize}px`);
