@@ -49,8 +49,18 @@
   --word-group-label-color: var(--color-on-surface-variant);
   --word-group-border: var(--color-outline-variant);
 
-  /* גופנים */
-  --font-main: 'Assistant', 'FrankRuhlCLM', 'David', Arial, sans-serif;
+  /* גופנים.
+
+     `--font-main` הוא גופן ה*ממשק*, ולא גופן הקריאה של אוצריא: `applyTheme`
+     אינו דורס אותו (host/theme.ts), ולכן השרשרת כאן היא מה שהממשק מקבל בפועל.
+     כל חוליה בה היא sans בכוונה — גופן ספרים בכפתור בן 12px הוא הרגרסיה
+     שהובילה לכאן, ואין טעם להעמיד אותו כחוליה שנייה.
+
+     'Assistant' נארז עם התוסף (styles/fonts.ts) בארבעה משקלים אמיתיים, ולכן
+     בולד בממשק אינו מסונתז. גופני אוצריא המובנים מוזרקים כ-@font-face ל-WebView
+     לפני plugin.boot — אין לארוז אותם; מהם 'Rubik' הוא ה-sans, והוא החוליה
+     הבאה. Arial סוגר את השרשרת: יש בו עברית בווינדוס וב-macOS. */
+  --font-main: 'Assistant', 'Rubik', Arial, sans-serif;
   --font-size-base: 18px;
   --line-height: 1.5;
   --font-size-ui: clamp(12px, calc(var(--font-size-base) * 0.78), 16px);
