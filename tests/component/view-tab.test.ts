@@ -12,6 +12,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import ViewTab from '../../src/ui/ribbon/tabs/ViewTab.vue';
+import { ZOOM_PERCENT_MAX } from '../../src/engine/zoom';
 import {
   autoUnmount,
   buttonByTitle,
@@ -24,7 +25,7 @@ import {
 autoUnmount();
 
 const FIT_TITLE = 'התאם את תצוגת העמוד לרוחב החלון';
-const HUNDRED_TITLE = 'הצג את המסמך בגודל 100%';
+const HUNDRED_TITLE = 'הצג את המסמך בגודלו האמיתי (100%)';
 const RULER_TITLE = 'הצג או הסתר את סרגל המידות';
 const MARKS_TITLE = 'הצג סימני פסקאות ותווים נסתרים';
 
@@ -81,8 +82,8 @@ describe('כפתורי לשונית „תצוגה”', () => {
     }
   });
 
-  it('„רוחב עמוד” בחלון רחב מגדיל, ונעצר בתקרה שברירת המחדל מתירה', async () => {
-    // לכפיל אין `getZoomState`, ואז נופלים לגבולות ברירת המחדל (50–200):
+  it('„רוחב עמוד” בחלון רחב מגדיל מעבר ל-100%', async () => {
+    // לכפיל אין `getZoomState`, ואז נופלים לגבולות ברירת המחדל (10–500):
     // 1480px מול A4 → 186%, בתוך הטווח.
     const removeStack = installEditorStack(1480);
     try {
@@ -93,6 +94,23 @@ describe('כפתורי לשונית „תצוגה”', () => {
       await settle();
 
       expect(harness.adapter.payloads('zoom')).toEqual([186]);
+    } finally {
+      removeStack();
+    }
+  });
+
+  it('„רוחב עמוד” נצמד לתקרת ההיקף של Word (500%)', async () => {
+    // 4200px מול A4 → 529% → התקרה. ה-max שהמנוע מדווח הוא גבול ה-fit-width
+    // שלו ולא מגבלת זום ידני (setZoom אינו מצמצם), ולכן התקרה שלנו היא 500.
+    const removeStack = installEditorStack(4200);
+    try {
+      const harness = mountWithPageWidth(A4_WIDTH_IN);
+      await settle();
+
+      await buttonByTitle(harness.wrapper, FIT_TITLE).trigger('click');
+      await settle();
+
+      expect(harness.adapter.payloads('zoom')).toEqual([ZOOM_PERCENT_MAX]);
     } finally {
       removeStack();
     }

@@ -40,14 +40,20 @@
     <!-- זום -->
     <RibbonGroup title="שינוי גודל תצוגה">
       <!--
+        שני פקדים עם שני תפקידים נבדלים, שניהם דרך פקודת `zoom`:
+        • „גודל אמיתי” — `setZoom(100)`: אחוז קבוע, פיקסל מול פיקסל (96dpi),
+          בדיוק ה-„100%” של Word. לא תלוי בחלון.
+        • „רוחב עמוד” — אחוז **מחושב** מרוחב החלון מול מידות הדף
+          (engine/fit-width.ts): 740px מול A4 → 95%; חלון רחב → יותר.
+        הם נראים זהים כשהחלון בעל רוחב A4 בערך — ואז זו גם המשמעות.
         `zoomPayload(100)` ולא `{ zoom: 1 }`: הזום הוא **אחוזים**, ואובייקט
         נדחה עוד לפני `SuperDoc.setZoom`. ראו engine/payloads.ts.
       -->
       <RibbonButton
         icon="zoom"
-        label="100%"
+        label="גודל אמיתי"
         variant="large"
-        tooltip="הצג את המסמך בגודל 100%"
+        tooltip="הצג את המסמך בגודלו האמיתי (100%)"
         :disabled="!zoomCmd.enabled.value"
         @click="zoomCmd.run(zoomPayload(100))"
       />
@@ -72,7 +78,7 @@ import { useCommand } from '../../../composables/useCommand';
 import { COMMAND_REPORTER, type CommandReporter } from '../../../composables/keys';
 import { ACTIVE_SUPERDOC } from '../../../engine/document-api';
 import { editorStackWidth, fitWidthPercent } from '../../../engine/fit-width';
-import { FALLBACK_ZOOM } from '../../../engine/zoom';
+import { zoomBounds } from '../../../engine/zoom';
 import { zoomPayload } from '../../../engine/payloads';
 
 defineEmits<{
@@ -106,22 +112,14 @@ async function runFitPageWidth(): Promise<void> {
     return;
   }
 
-  // הגבולות מהמנוע ולא מקודדים — אותו מקור של הסליידר בשורת המצב.
+  // הגבולות מהמנוע דרך אותו נרמול של הסליידר בשורת המצב (כולל הרחבת
+  // התקרה להיקף Word) — מקור אחד, לא קידוד נפרד כאן.
   const state =
     typeof (host as { getZoomState?: () => { min?: unknown; max?: unknown } }).getZoomState ===
     'function'
       ? (host as { getZoomState: () => { min?: unknown; max?: unknown } }).getZoomState()
       : null;
-  const bounds = {
-    min:
-      typeof state?.min === 'number' && Number.isFinite(state.min)
-        ? state.min
-        : FALLBACK_ZOOM.min,
-    max:
-      typeof state?.max === 'number' && Number.isFinite(state.max)
-        ? state.max
-        : FALLBACK_ZOOM.max,
-  };
+  const bounds = zoomBounds(state);
 
   const percent = await fitWidthPercent(host, editorStackWidth(), bounds);
   if (percent === null) {

@@ -153,12 +153,12 @@ describe('פסקה', () => {
 });
 
 describe('תצוגה ומצב', () => {
-  it('„100%” שולח מספר אחוזים — לא `{ zoom: 1 }`', async () => {
+  it('„גודל אמיתי” שולח מספר אחוזים — לא `{ zoom: 1 }`', async () => {
     // הזום הוא הפקד שהוכח חי: התווית זזה ל-„150%” ורוחב העמוד בצילום נשאר זהה.
     const harness = mountUi(ViewTab);
     await settle();
 
-    await harness.wrapper.find('button[title="הצג את המסמך בגודל 100%"]').trigger('click');
+    await harness.wrapper.find('button[title="הצג את המסמך בגודלו האמיתי (100%)"]').trigger('click');
     await settle();
 
     expect(harness.adapter.payloads('zoom')).toEqual([100]);

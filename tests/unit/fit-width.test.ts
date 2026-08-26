@@ -28,6 +28,12 @@ describe('computeFitPercent', () => {
     expect(computeFitPercent(1480, A4_INCHES, max)).toBe(186);
   });
 
+  it('עיגול כלפי מטה: לעולם לא עמוד רחב מהמאגס', () => {
+    // 1425 / (8.268 × 96) = 179.53… — עיגול לשלם הקרוב היה נותן 180%, כלומר
+    // עמוד רחב ב-4px מהמקום שיש לו וגלילה אופקית מיד אחרי הלחיצה.
+    expect(computeFitPercent(1425, A4_INCHES, { min: 10, max: 500 })).toBe(179);
+  });
+
   it('התוצאה נצמדת לגבולות שהמנוע מתיר', () => {
     // 1620px מול A4 → 204% → התקרה; 300px → 38% → הרצפה.
     expect(computeFitPercent(1620, A4_INCHES, BOUNDS)).toBe(200);
@@ -60,6 +66,22 @@ describe('editorStackWidth', () => {
     host.append(stack, other);
 
     expect(editorStackWidth({ querySelector: (sel: string) => host.querySelector(sel) } as unknown as Document)).toBe(1234);
+  });
+
+  it('מיכל הגלילה קודם ל-<main>: פס הגלילה גורע רק ממנו', () => {
+    // בלעדיו „רוחב עמוד” מכוון לעמוד רחב ב-15px מהמקום שיש לו, ומייצר בדיוק
+    // את הגלילה האופקית שהחישוב בא למנוע.
+    const root = document.createElement('div');
+    const stack = document.createElement('main');
+    stack.className = 'editor-stack';
+    Object.defineProperty(stack, 'clientWidth', { value: 1440 });
+    const scroller = document.createElement('div');
+    scroller.className = 'editor-stack__host';
+    Object.defineProperty(scroller, 'clientWidth', { value: 1425 });
+    stack.append(scroller);
+    root.append(stack);
+
+    expect(editorStackWidth({ querySelector: (sel: string) => root.querySelector(sel) } as unknown as Document)).toBe(1425);
   });
 
   it('בלי מאגס, או עם רוחב אפס — מוחזר 0 ולא נזרקת חריגה', () => {

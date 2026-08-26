@@ -1,5 +1,6 @@
 /**
- * QA חי לשני פקדי הזום בלשונית „תצוגה”: „100%” ו„רוחב עמוד”.
+ * QA חי לשני פקדי הזום בלשונית „תצוגה”: „גודל אמיתי” ו„רוחב עמוד”,
+ * ולתקרת ההיקף של Word (500%) בסליידר שורת המצב.
  *
  * הבדיקות המורכבות מוכיחות את ה-payload; הן אינן יכולות להוכיח שהמנוע **עשה**
  * משהו עם ה-payload. כאן הכפתור נלחץ על ה-dist הארוז, במנוע חי, ונמדדים:
@@ -73,7 +74,12 @@ const expr = `(async () => {
     await settle(250);
   }
 
-  // סריקה: כל מה שעבר transform בתוך המנוע + מצב הזום המדווח.
+  // סריקה: מה שהמשתמש רואה בפועל. שני תיקונים למדידה:
+  // • העמודים הנראים (מחלקת superdoc-page) ולא תיבת ה-layout: המנוע מפצה את
+  //   רוחב הפריסה על ה-scale (width = container/zoom), ולכן תיבת ה-layout
+  //   אינה משתנה עם הזום בכלל — העדות הוויזואלית היא ב-rect של העמוד.
+  // • scaled נשאר לאבחון בלבד: נוכחות transform אינה ראיה לשינוי, כי
+  //   scale(1) גם הוא matrix ולא none.
   function scan(tag) {
     const sdoc = q('.superdoc');
     const scaled = [];
@@ -89,12 +95,18 @@ const expr = `(async () => {
         }
       }
     }
+    const visible = qa('.superdoc-page').map((el) => {
+      const b = el.getBoundingClientRect();
+      return { left: Math.round(b.left), width: Math.round(b.width) };
+    });
     const page = q('.superdoc__sub-document');
     return {
       tag,
       label: q('.zoom-pct-btn') ? q('.zoom-pct-btn').textContent.trim() : null,
       zoomState: typeof sd.getZoomState === 'function' ? sd.getZoomState() : null,
+      sliderMax: q('.zoom-slider') ? q('.zoom-slider').getAttribute('max') : null,
       pageRect: page ? Math.round(page.getBoundingClientRect().width) : null,
+      visible,
       scaled,
       warns: (window.__qaConsole ?? []).splice(0).slice(-5),
     };
@@ -123,15 +135,15 @@ const expr = `(async () => {
   if (!(await clickTab('תצוגה'))) return { fatal: 'לשונית תצוגה לא נמצאה' };
 
   const fitBtn = q('button[title="התאם את תצוגת העמוד לרוחב החלון"]');
-  const hundredBtn = q('button[title="הצג את המסמך בגודל 100%"]');
+  const hundredBtn = q('button[title="הצג את המסמך בגודלו האמיתי (100%)"]');
   out.buttonStates = { fitDisabled: fitBtn?.disabled ?? null, hundredDisabled: hundredBtn?.disabled ?? null };
 
   const fit = await clickZoomButton('התאם את תצוגת העמוד לרוחב החלון');
   out.steps.push({ button: 'רוחב עמוד', ...fit });
   out.steps.push(scan('after-fit-width'));
 
-  const hundred = await clickZoomButton('הצג את המסמך בגודל 100%');
-  out.steps.push({ button: '100%', ...hundred });
+  const hundred = await clickZoomButton('הצג את המסמך בגודלו האמיתי (100%)');
+  out.steps.push({ button: 'גודל אמיתי', ...hundred });
   out.steps.push(scan('after-100'));
 
   // בקרה: מסלול מנוע טהור, בלי הממשק שלנו. האם setZoom בכלל משנה רינדור?
@@ -139,6 +151,11 @@ const expr = `(async () => {
     sd.setZoom(60);
     await settle(2000);
     out.steps.push(scan('after-direct-setZoom-60'));
+    // בקרת התקרה: 500% — מעבר ל-max שהמנוע מדווח (גבול ה-fit-width שלו).
+    // setZoom אינו מצמצם (נמדד ב-bundle), ולכן הסליידר שלנו מציע עד 500.
+    sd.setZoom(500);
+    await settle(2000);
+    out.steps.push(scan('after-direct-setZoom-500'));
     sd.setZoomMode('fit-width');
     await settle(2000);
     out.steps.push(scan('after-direct-fit-width'));
@@ -170,8 +187,11 @@ try {
       failures += 1;
     }
 
+    // מה משתנה ויזואלית: התווית (הערך שהמנוע מדווח) והעמודים ה**נראים**.
+    // תיבת ה-layout ונוכחות transform אינן ראיה — המנוע מפצה את הרוחב
+    // (`width: container/zoom`) ומשאיר scale(1) גם ב-100%.
     const changed = (a, b) =>
-      JSON.stringify([a?.pageRect, a?.scaled]) !== JSON.stringify([b?.pageRect, b?.scaled]);
+      a?.label !== b?.label || JSON.stringify(a?.visible) !== JSON.stringify(b?.visible);
 
     if (!changed(base, fit)) {
       console.error('✗ „רוחב עמוד”: הרינדור לא השתנה בכלל');
@@ -199,6 +219,29 @@ try {
       failures += 1;
     } else if (direct60) {
       console.log('✓ בקרה: setZoom ישיר משנה רינדור');
+    }
+
+    // תקרת ההיקף של Word: הסליידר מציע עד 500%, ו-setZoom(500) בפועל
+    // מגדיל את העמוד הנראה פי ~5 לעומת 100%.
+    if (hundred?.sliderMax !== '500') {
+      console.error(`✗ הסליידר בשורת המצב מדווח max=${hundred?.sliderMax} במקום 500`);
+      failures += 1;
+    } else {
+      console.log('✓ הסליידר בשורת המצב מציע עד 500%');
+    }
+    const fivehundred = byTag['after-direct-setZoom-500'];
+    if (fivehundred) {
+      const w100 = hundred?.visible?.[0]?.width ?? 0;
+      const w500 = fivehundred.visible?.[0]?.width ?? 0;
+      if (!(w100 > 0) || !(w500 > 0)) {
+        console.error('✗ בקרת 500%: לא נמדד רוחב עמוד נראה');
+        failures += 1;
+      } else if (w500 / w100 < 3) {
+        console.error(`✗ בקרת 500%: רוחב העמוד עבר מ-${w100}px ל-${w500}px בלבד — ההגדלה לא הוחלה`);
+        failures += 1;
+      } else {
+        console.log(`✓ בקרת 500%: העמוד הנראה גדל ${w100}px → ${w500}px (פי ${(w500 / w100).toFixed(1)})`);
+      }
     }
     // תיעוד חי של באג המנוע שבגללו „רוחב עמוד” מחושב אצלנו: מסלול
     // zoom-fit-width של המנוע עצמו מתכווץ לרצפה. לא נכשל בגללו — הוא לא

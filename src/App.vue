@@ -157,6 +157,7 @@ import {
   type DocMetricsAdapter,
 } from './engine/doc-metrics';
 import { FALLBACK_ZOOM, observeZoom, type ZoomState } from './engine/zoom';
+import { createZoomCenter, type ZoomCenter } from './engine/zoom-center';
 import {
   applyHebrewDocumentDefaults,
   applyHebrewPaperSize,
@@ -302,6 +303,9 @@ let save: SaveCoordinator | null = null;
 let searchAdapter: SearchAdapter | null = null;
 /** מודד את המסמך הפתוח. מוחלף בכל מעבר מסמך, כמו אדפטר החיפוש. */
 let metrics: DocMetricsAdapter | null = null;
+
+/** מרכוז העמוד בזום. יחיד למאגס — אינו מוחלף בין מסמכים. */
+let zoomCenter: ZoomCenter | null = null;
 
 const saveStateMessage = computed(() => {
   const state = saveSnapshot.value.state;
@@ -477,6 +481,10 @@ async function openDocument(file?: UserFile): Promise<boolean> {
   editor.onDispose(
     observeZoom(editor.ui, (state) => {
       zoom.value = state;
+      // אותו דיווח מזין גם את המרכוז: הוא יורה על כל שינוי, כולל שינוי שלא
+      // בא מאיתנו, ולכן העמוד אינו נשאר ממורכז לפי אחוז ישן. ראו
+      // engine/zoom-center.ts.
+      zoomCenter?.setZoom(state.value);
     })
   );
 
@@ -842,8 +850,9 @@ async function onReplaceAllText(replacement: string): Promise<void> {
  * `instanceCommandPayloadIsValid` (הוא דורש `typeof payload === 'number'`
  * אחרי הנרמול) — התווית בשורת המצב התחדשה, והמסמך לא זז.
  *
- * הגבולות אינם קשיחים אלא `min`/`max` מ-`ui.zoom.getSnapshot()` (engine/zoom.ts),
- * וההגבלה נעשית ב-StatusBar לפי מה שהמנוע דיווח. הערך המוצג אינו נכתב כאן
+ * הגבולות אינם קשיחים אלא `min`/`max` מ-`ui.zoom.getSnapshot()` דרך הנרמול
+ * ב-engine/zoom.ts (כולל הרחבת התקרה להיקף Word — `ZOOM_PERCENT_MAX`),
+ * וההגבלה נעשית ב-StatusBar לפי הגבולות האפקטיביים. הערך המוצג אינו נכתב כאן
  * אלא מגיע מ-`observeZoom`: כך התווית משקפת את מה שהמסמך באמת בו, גם כשהזום
  * השתנה ממקור אחר וגם כשהפקודה נדחתה.
  */
@@ -1197,6 +1206,10 @@ onMounted(async () => {
   });
 
   if (editorStackRef.value) {
+    // לפני פתיחת המסמך הראשון: `observeZoom` יורה מיד עם ה-snapshot, וללא
+    // הפקד הזה הדיווח הראשון היה הולך לאיבוד.
+    zoomCenter = createZoomCenter(editorStackRef.value);
+
     save = initSaveCoordinator();
 
     // הבחירה נטענת לפני שנפתח מסמך: העריכה הראשונה עלולה להתחיל סבב autosave,
@@ -1233,6 +1246,8 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+  zoomCenter?.dispose();
+  zoomCenter = null;
   shortcuts?.dispose();
   directionShortcut?.dispose();
   // חיפוש-בזמן-הקלדה שממתין ירוץ אחרי הפירוק על handle של controller מפורק.

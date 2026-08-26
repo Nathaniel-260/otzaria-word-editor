@@ -10,10 +10,12 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
   FALLBACK_ZOOM,
+  ZOOM_PERCENT_MAX,
   clampZoom,
   normalizeZoomState,
   observeZoom,
   readZoom,
+  zoomBounds,
 } from '../../src/engine/zoom';
 
 describe('clampZoom', () => {
@@ -29,17 +31,48 @@ describe('clampZoom', () => {
   });
 });
 
+describe('zoomBounds', () => {
+  it('מרחיב את התקרה המדווחת אל היקף Word — ה-max של המנוע הוא גבול fit-width ולא מגבלת זום', () => {
+    // זה בדיוק מה שהמנוע מדווח בפועל (נמדד ב-bundle): 10–100.
+    expect(zoomBounds({ min: 10, max: 100 })).toEqual({ min: 10, max: ZOOM_PERCENT_MAX });
+  });
+
+  it('תקרה מדווחת נמוכה מ-500 מורחבת אליו', () => {
+    // התקרה שהמנוע מדווח היא גבול fit-width שלו ולא מגבלת זום — לכן מרחיבים.
+    expect(zoomBounds({ min: 25, max: 400 })).toEqual({ min: 25, max: ZOOM_PERCENT_MAX });
+  });
+
+  it('דיווח תקרה גבוהה מ-500 מנצח', () => {
+    expect(zoomBounds({ min: 10, max: 800 })).toEqual({ min: 10, max: 800 });
+  });
+
+  it('דיווח פגום נופל לגבולות ברירת המחדל', () => {
+    expect(zoomBounds(null)).toEqual({ min: FALLBACK_ZOOM.min, max: FALLBACK_ZOOM.max });
+    expect(zoomBounds({})).toEqual({ min: FALLBACK_ZOOM.min, max: FALLBACK_ZOOM.max });
+    expect(zoomBounds({ min: '10', max: 100 })).toEqual({ min: FALLBACK_ZOOM.min, max: FALLBACK_ZOOM.max });
+    expect(zoomBounds({ min: 400, max: 25 })).toEqual({ min: FALLBACK_ZOOM.min, max: FALLBACK_ZOOM.max });
+  });
+});
+
 describe('normalizeZoomState', () => {
-  it('לוקח את הגבולות מהמנוע', () => {
+  it('לוקח את הגבולות מהמנוע, עם תקרה מורחבת לפחות להיקף Word', () => {
+    // 400 < 500: התקרה המדווחת מורחבת אל היקף Word, המינימום נשמר מהמנוע.
     expect(normalizeZoomState({ value: 120, min: 25, max: 400 })).toEqual({
       value: 120,
       min: 25,
-      max: 400,
+      max: ZOOM_PERCENT_MAX,
+    });
+    // התקרה שהמנוע מדווח (גבול ה-fit-width שלו) אינה מגבלה אמיתית —
+    // setZoom אינו מצמצם; הסרגל חייב להציע עד 500.
+    expect(normalizeZoomState({ value: 100, min: 10, max: 100 })).toEqual({
+      value: 100,
+      min: 10,
+      max: ZOOM_PERCENT_MAX,
     });
   });
 
-  it('מגביל את הערך המדווח לגבולות המדווחים', () => {
-    expect(normalizeZoomState({ value: 500, min: 25, max: 400 }).value).toBe(400);
+  it('מגביל את הערך המדווח לגבולות האפקטיביים', () => {
+    expect(normalizeZoomState({ value: 700, min: 25, max: 400 }).value).toBe(ZOOM_PERCENT_MAX);
   });
 
   it('טווח הפוך נדחה — הוא היה מקפיא כל ערך על אותו מספר', () => {
@@ -94,7 +127,7 @@ describe('observeZoom', () => {
     observeZoom(ui, (state) => seen.push(state));
     listeners[0]({ value: 180, min: 50, max: 200 });
 
-    expect(seen).toEqual([{ value: 180, min: 50, max: 200 }]);
+    expect(seen).toEqual([{ value: 180, min: 50, max: ZOOM_PERCENT_MAX }]);
   });
 
   it('מחזיר disposer, ומעביר את זה של המנוע', () => {
@@ -112,7 +145,7 @@ describe('observeZoom', () => {
       seen.push(state),
     );
 
-    expect(seen).toEqual([{ value: 90, min: 50, max: 200 }]);
+    expect(seen).toEqual([{ value: 90, min: 50, max: ZOOM_PERCENT_MAX }]);
     expect(() => dispose()).not.toThrow();
   });
 
@@ -130,7 +163,9 @@ describe('observeZoom', () => {
       (state) => seen.push(state),
     );
 
-    expect(seen).toEqual([FALLBACK_ZOOM]);
+    // observe נפל — אך קריאת snapshot ישירה עדיין תקפה, והיא זו שמגיעה למאזין
+    // (עם הרחבת התקרה כרגיל), ולא FALLBACK החוזה.
+    expect(seen).toEqual([{ value: 100, min: 50, max: ZOOM_PERCENT_MAX }]);
     expect(() => dispose()).not.toThrow();
   });
 });
