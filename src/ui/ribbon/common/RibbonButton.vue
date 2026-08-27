@@ -8,6 +8,9 @@
     ]"
     :disabled="disabled"
     :title="computedTitle"
+    :data-tip-title="tip.title"
+    :data-tip-shortcut="tip.shortcut || undefined"
+    :data-tip-desc="tip.description || undefined"
     :aria-pressed="ariaPressed"
     @pointerdown.prevent
     @click="$emit('click', $event)"
@@ -31,12 +34,20 @@ import { isToggleButton } from '../aria';
 import { menuString } from '../i18n';
 import SvgIcon from '../../icons/SvgIcon.vue';
 import { shortcutLabel, type ShortcutId } from '../../shortcuts/registry';
+import { tipParts } from '../../tooltip/tooltip-content';
 
 const props = withDefaults(
   defineProps<{
     icon?: string;
     label?: string;
     tooltip?: string;
+    /**
+     * שורת ההסבר בטולטיפ — מה שהפקד *עושה*, מתחת לשמו ולצירוף.
+     *
+     * כשהיא חסרה היא נגזרת: `tooltip` שאינו זהה ל-`label` הוא ההסבר, וה-`label`
+     * הוא הכותרת. הכלל ולמה הוא כזה — ב-ui/tooltip/tooltip-content.ts.
+     */
+    description?: string;
     /**
      * מזהה מהרג'יסטרי של הקיצורים, לא מחרוזת חופשית. כך אי אפשר להבטיח
      * למשתמש „Ctrl+B” שאין לו מאזין: מזהה שאינו ברג'יסטרי נופל בבנייה.
@@ -78,4 +89,21 @@ const computedTitle = computed(() => {
   if (!props.shortcutId) return base;
   return `${base} (${shortcutLabel(props.shortcutId)})`;
 });
+
+/**
+ * שלושת שדות הטולטיפ המעוצב, כתכונות `data-tip-*` שהשכבה קוראת
+ * (ui/tooltip/TooltipLayer.vue).
+ *
+ * `title` נשאר לצדן ואינו מוחלף: הוא השם הנגיש של כפתור חסר תווית, והוא הנפילה
+ * לאחור אם השכבה אינה מורכבת. השכבה היא שמכבה אותו — היא מסירה אותו מהעוגן
+ * הפעיל בלבד, כדי שמערכת ההפעלה לא תצייר טולטיפ שני מעל הכרטיס.
+ */
+const tip = computed(() =>
+  tipParts({
+    label: menuString(props.label || ''),
+    tooltip: menuString(props.tooltip || ''),
+    description: menuString(props.description || ''),
+    shortcut: props.shortcutId ? shortcutLabel(props.shortcutId) : '',
+  }),
+);
 </script>

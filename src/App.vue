@@ -102,6 +102,13 @@
       :is-open="isShortcutsHelpOpen"
       @close="isShortcutsHelpOpen = false"
     />
+
+    <!--
+      הטולטיפ של כל התוכנה — מופע אחד, בסוף המעטפת. הוא מאזין במסירה על המסמך
+      ולא נקשר לפקד מסוים, ולכן אין לו props: כל פקד שיש לו `title` או
+      `data-tip-*` מקבל אותו. ההסבר המלא ב-ui/tooltip/TooltipLayer.vue.
+    -->
+    <TooltipLayer />
   </div>
 </template>
 
@@ -114,6 +121,7 @@ import FindReplaceDialog from './ui/panels/FindReplaceDialog.vue';
 import AboutDialog from './ui/panels/AboutDialog.vue';
 import LinkDialog from './ui/panels/LinkDialog.vue';
 import ShortcutsDialog from './ui/panels/ShortcutsDialog.vue';
+import TooltipLayer from './ui/tooltip/TooltipLayer.vue';
 
 import { createCommandAdapter, type CommandAdapter, type CommandOutcome } from './engine/command-adapter';
 import type { CommandId } from './engine/capabilities';
