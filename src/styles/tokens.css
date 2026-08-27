@@ -64,6 +64,7 @@
   --font-size-base: 18px;
   --line-height: 1.5;
   --font-size-ui: clamp(12px, calc(var(--font-size-base) * 0.78), 16px);
+  --font-size-tab: 13px;
   --font-size-ribbon-btn: 12px;
   --font-size-group-title: 11px;
 
@@ -75,7 +76,7 @@
 
   /* גבהים */
   --topbar-height: 48px;
-  --tabbar-height: 32px;
+  --tabbar-height: 24px;
   --ribbon-height: 96px;
   --statusbar-height: 24px;
 }
