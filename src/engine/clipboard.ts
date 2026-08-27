@@ -27,9 +27,16 @@
  *    כ-`NAMESPACE_UNAVAILABLE`, ולכן בדיקת היכולת (engine/doc-capabilities)
  *    מספיקה כדי להחליט אם הפקד פעיל — בדיוק כמו בהערות שוליים.
  * 2. **`navigator.clipboard` עשוי להיחסם.** התוסף רץ מ-`file://` בתוך
- *    WebView2, ושם הרשאת הלוח נדחית גם בתוך user-gesture. לכן יש כאן **לוח
+ *    WebView2, ושם קריאת הלוח נדחית גם בתוך user-gesture. לכן יש כאן **לוח
  *    פנימי**: העתקה שהמערכת חסמה עדיין נשמרת, וההדבקה בתוך התוסף תמצא אותה.
  *    ההודעה למשתמש אומרת בדיוק מה קרה — „הצלחה” במצב הזה היא טקסט שנעלם.
+ *
+ *    מה שנמדד ב-Chromium על `file://`: `isSecureContext` הוא `true`, ומה שחוסם
+ *    את `read()`/`readText()` הוא **ההרשאה בלבד** — `clipboard-read` במצב
+ *    `prompt` נדחה מיד, וברגע שהיא מוענקת שתי הקריאות עוברות. ההענקה אינה
+ *    בידינו: היא של המאכסן, ב-`onPermissionRequest` של ה-WebView. עד שהיא
+ *    תגיע, כפתור „הדבק” רואה לוח חסום — ו-Ctrl+V, שהמנוע מטפל בו בתוך המסמך
+ *    עם ה-`dataTransfer` של האירוע, אינו תלוי בהרשאה הזאת כלל.
  * 3. **הפאסדה בדפדפן א-סינכרונית**: `BrowserDocumentApi` עוטף כל מתודה
  *    ב-`MaybePromise`, ולכן כל קריאה כאן ב-`await` ובתוך `try`.
  *
@@ -112,6 +119,7 @@ export interface ClipboardDocumentApi {
     insert?: (input: {
       payload?: ClipboardPayload;
       plan?: ClipboardPlan;
+      target?: SelectionTarget;
     }) => MaybePromise<ClipboardInsertReceipt | undefined>;
   };
   delete?: (input: { target: SelectionTarget }) => MaybePromise<DocReceipt | undefined>;
@@ -157,7 +165,7 @@ export type ClipboardHostTarget = SuperDoc | ClipboardHost | null | undefined;
 /* הלוח הפנימי                                                        */
 /* ------------------------------------------------------------------ */
 
-let buffered: ClipboardPayload | null = null;
+let buffered: { payload: ClipboardPayload; mirrored: boolean } | null = null;
 
 /**
  * רשת הביטחון כשלוח המערכת אינו זמין.
@@ -166,15 +174,35 @@ let buffered: ClipboardPayload | null = null;
  * „גזור” היה מוחק טקסט שאי אפשר להחזיר בהדבקה. הוא חי כל עוד הדף חי, ואינו
  * מסונכרן עם לוח המערכת — בכוונה: לוח המערכת הוא המקור כשהוא זמין.
  *
+ * ## `mirrored`: לא כל תוכן ששמור כאן הוא תוכן שמותר להדביק
+ *
+ * הלוח הפנימי הוא **תמונת ראי** של מה שנשלח ללוח המערכת, ולכן יש לו שני מצבים
+ * שונים בתכלית:
+ *
+ * - `mirrored: false` — הכתיבה ללוח המערכת נחסמה, והעותק כאן הוא **העותק
+ *   היחיד**. בהדבקה שאין בה הרשאת קריאה הוא הידע הטוב ביותר שיש, וזה מה שמציל
+ *   „גזור” מלמחוק טקסט שאין לו החזרה.
+ * - `mirrored: true` — אותו תוכן יושב **גם** בלוח המערכת, ומאותו רגע לוח
+ *   המערכת הוא המקור. המשתמש עשוי להעתיק שם משהו חדש, או לבחור פריט אחר
+ *   מהיסטוריית Win+V, ואנחנו לא נדע. הדבקת הראי במצב הזה מתעלמת ממה שהוא בחר
+ *   ומחזירה תוכן ישן — וזו בדיוק התלונה שהאבחנה הזאת מסירה.
+ *
  * מיוצא כאובייקט (ולא כמשתנה) כדי שבדיקה תוכל לנקות אותו בין מקרים בלי שם
  * שמכריז „for tests”.
  */
 export const internalClipboard = {
   read(): ClipboardPayload | null {
-    return buffered;
+    return buffered?.payload ?? null;
   },
-  write(payload: ClipboardPayload): void {
-    buffered = payload;
+  /**
+   * התוכן, ורק כשהוא העותק היחיד. זה מה שההדבקה קוראת: ראי של לוח המערכת אינו
+   * תשובה לשאלה „מה יש בלוח **עכשיו**”.
+   */
+  readUnmirrored(): ClipboardPayload | null {
+    return buffered && !buffered.mirrored ? buffered.payload : null;
+  },
+  write(payload: ClipboardPayload, { mirrored = false }: { mirrored?: boolean } = {}): void {
+    buffered = { payload, mirrored };
   },
   clear(): void {
     buffered = null;
@@ -237,7 +265,10 @@ type SelectionRead = { ok: true; target: SelectionTarget } | { ok: false; reason
  * `selectionTarget` ולא `target`: הראשון שומר את קצות הבחירה בדיוק, והשני הוא
  * מודל הכתובות של הערות ומיועד לצרכן אחר.
  */
-function readSelection(surface: SelectionSurface | undefined): SelectionRead {
+function readSelection(
+  surface: SelectionSurface | undefined,
+  { allowCollapsed = false }: { allowCollapsed?: boolean } = {},
+): SelectionRead {
   const getSnapshot = surface?.getSnapshot;
   if (typeof getSnapshot !== 'function') return { ok: false, reason: 'host-capability-unavailable' };
 
@@ -248,13 +279,17 @@ function readSelection(surface: SelectionSurface | undefined): SelectionRead {
     return { ok: false, reason: 'not-ready' };
   }
 
+  // סמן בלי טווח הוא בחירה **חוקית** להדבקה ופסולה להעתקה, ולכן גם נוסח הכשל
+  // שונה: „יש למקם את הסמן במסמך” מול „יש לסמן טקסט תחילה”.
+  const missing = allowCollapsed ? 'selection-required' : 'range-selection-required';
+
   const target = slice?.selectionTarget ?? null;
   if (!target || typeof target !== 'object') {
     // `status` שאינו `ready` אומר שקריאת הבחירה עוד לא הסתיימה — וזה מצב אחר
     // מ„המשתמש לא סימן כלום”, גם אם שניהם מגיעים בתור `selectionTarget: null`.
-    return { ok: false, reason: slice?.status === 'ready' ? 'range-selection-required' : 'not-ready' };
+    return { ok: false, reason: slice?.status === 'ready' ? missing : 'not-ready' };
   }
-  if (slice?.empty === true) return { ok: false, reason: 'range-selection-required' };
+  if (!allowCollapsed && slice?.empty === true) return { ok: false, reason: 'range-selection-required' };
 
   return { ok: true, target };
 }
@@ -328,7 +363,11 @@ async function writeSystemClipboard(payload: ClipboardPayload): Promise<boolean>
 type Serialized = { ok: true; payload: ClipboardPayload } | { ok: false; outcome: CommandOutcome };
 
 /**
- * מסדרת את הבחירה דרך המנוע ושומרת בלוח הפנימי.
+ * מסדרת את הבחירה דרך המנוע ומחזירה את ה-payload.
+ *
+ * השמירה בלוח הפנימי אינה כאן אלא באתרי הקריאה, מפני שהיא צריכה לדעת דבר אחד
+ * שטרם ידוע בשלב הזה: האם אותו תוכן הגיע גם ללוח המערכת. ההסבר על ההבדל —
+ * `internalClipboard`.
  *
  * `target` אופציונלי: החוזה קובע ש-`serializeSelection` מסדר „the current or
  * supplied model selection”, ולכן כשאין מסלול לקרוא את הבחירה — „העתק” עדיין
@@ -365,7 +404,6 @@ async function serializeSelection(
     return { ok: false, outcome: failed(failedAction, 'range-selection-required') };
   }
 
-  internalClipboard.write(payload);
   return { ok: true, payload };
 }
 
@@ -400,18 +438,20 @@ export async function copySelection(host: ClipboardHostTarget): Promise<CommandO
   );
   if (!serialized.ok) return serialized.outcome;
 
-  if (!(await writeSystemClipboard(serialized.payload))) {
-    return systemBlocked('הטקסט הועתק', 'Ctrl+C');
-  }
+  const onSystemClipboard = await writeSystemClipboard(serialized.payload);
+  internalClipboard.write(serialized.payload, { mirrored: onSystemClipboard });
+
+  if (!onSystemClipboard) return systemBlocked('הטקסט הועתק', 'Ctrl+C');
   return { ok: true };
 }
 
 /**
  * „גזור” = העתק ואחר כך מחק.
  *
- * הסדר אינו שרירותי: המחיקה רצה **רק** אחרי שהתוכן נשמר בלוח הפנימי, כדי
- * שכשל בסדרוּר לא ימחוק טקסט שאין לו עותק. לוח מערכת שנחסם כן מאפשר להמשיך
- * למחיקה — התוכן קיים בתוך התוסף, וההודעה אומרת את זה במפורש.
+ * הסדר אינו שרירותי: המחיקה רצה **רק** אחרי שהתוכן נשמר — בלוח המערכת, ואם
+ * הוא נחסם אז בלוח הפנימי — כדי שכשל בסדרוּר לא ימחוק טקסט שאין לו עותק. לוח
+ * מערכת שנחסם כן מאפשר להמשיך למחיקה: התוכן קיים בתוך התוסף, מסומן שם כעותק
+ * היחיד, וההודעה אומרת את זה במפורש.
  */
 export async function cutSelection(host: ClipboardHostTarget): Promise<CommandOutcome> {
   const doc = docOf(host);
@@ -429,6 +469,7 @@ export async function cutSelection(host: ClipboardHostTarget): Promise<CommandOu
   if (!serialized.ok) return serialized.outcome;
 
   const onSystemClipboard = await writeSystemClipboard(serialized.payload);
+  internalClipboard.write(serialized.payload, { mirrored: onSystemClipboard });
 
   let receipt: DocReceipt | undefined;
   try {
@@ -596,9 +637,24 @@ function pasteFailureText(failure: ClipboardFailure | undefined): string {
  * להדביק נעצר לפני שנגענו במסמך, והמשתמש מקבל את הסיבה המדויקת
  * (`unsupportedReason`) ולא רק „הפעולה נכשלה”.
  *
- * `target` אינו נשלח: הוולידטור דורש בדיוק אחד מ-payload/plan/fragment ואינו
- * דורש יעד, והמנוע פותר את מקום ההדבקה מהבחירה החיה בעצמו — בדיוק כמו
- * ב-Ctrl+V. חישוב יעד כאן היה משחזר בקוד שלנו את מה שהוא כבר עושה.
+ * ## למה `target` **כן** נשלח
+ *
+ * כאן הייתה ההנחה שהפילה את הפעולה: „המנוע פותר את מקום ההדבקה מהבחירה החיה
+ * בעצמו — בדיוק כמו ב-Ctrl+V”. הוא אינו. נמדד מול המנוע האמיתי, עם בחירה חיה
+ * בתחילת המסמך:
+ *
+ * - `insert({ plan })` — הקבלה חזרה `success: true` עם `atChar` בסוף המסמך.
+ *   התוכן נכנס אחרי הפסקה האחרונה, והבחירה לא נלקחה בחשבון בכלל.
+ * - `insert({ plan, target })` — `atChar: 0`, כלומר בדיוק בסמן.
+ *
+ * זה מתיישב עם מה שהמנוע עושה בעצמו: `pasteClipboardPayload` שבפאסדה שלו קורא
+ * את הבחירה ו**נכשל** כשאין ממה לגזור target, במקום לתת ל-`insert` להחליט.
+ * `ClipboardTarget` בחוזה כולל `{ kind: 'documentEnd' }`, וזאת התנהגות ברירת
+ * המחדל — לא נפילה.
+ *
+ * לכן מקום ההדבקה נקרא **ראשון**, לפני הלוח: הוא המצב ברגע הלחיצה, בעוד קריאת
+ * הלוח היא `await` שבמהלכו הבחירה יכולה להשתנות. חסר סמן — הפעולה נכשלת עם
+ * „יש למקם את הסמן במסמך”, ולא מוסיפה בשקט בסוף המסמך.
  *
  * ההדבקה המקורית של המנוע אינה נוגעת בזה: המודול הזה אינו רושם מאזינים
  * ואינו חוטף אירועי `paste`.
@@ -610,8 +666,16 @@ export async function pasteFromClipboard(host: ClipboardHostTarget): Promise<Com
     return { ok: false, message: `${PASTE_FAILED}: ${UNAVAILABLE}`, reason: 'command-unsupported' };
   }
 
+  // `allowCollapsed`: סמן בלי טווח הוא המצב הרגיל של הדבקה. טווח מסומן גם הוא
+  // חוקי — המנוע מחליף אותו בתוכן שהודבק, כמו ב-Word.
+  const at = readSelection(selectionOf(host), { allowCollapsed: true });
+  if (!at.ok) return failed(PASTE_FAILED, at.reason);
+
   const read = await readSystemClipboard();
-  const payload = read.kind === 'payload' ? read.payload : read.kind === 'blocked' ? internalClipboard.read() : null;
+  // `readUnmirrored` ולא `read`: כשלוח המערכת קריא-אך-חסום, תוכן שכבר נשלח אליו
+  // אינו „מה שבלוח עכשיו”. ההסבר — `internalClipboard`.
+  const payload =
+    read.kind === 'payload' ? read.payload : read.kind === 'blocked' ? internalClipboard.readUnmirrored() : null;
 
   if (!payload) {
     if (read.kind === 'blocked') return readBlocked();
@@ -622,7 +686,7 @@ export async function pasteFromClipboard(host: ClipboardHostTarget): Promise<Com
     };
   }
 
-  let input: { payload?: ClipboardPayload; plan?: ClipboardPlan };
+  let input: { payload?: ClipboardPayload; plan?: ClipboardPlan; target: SelectionTarget };
   const parse = clipboard?.parse;
   if (typeof parse === 'function') {
     let parsed: ClipboardParseResult | undefined;
@@ -635,10 +699,10 @@ export async function pasteFromClipboard(host: ClipboardHostTarget): Promise<Com
       const failure = parsed?.success === false ? parsed.failure : undefined;
       return { ok: false, message: pasteFailureText(failure), reason: failure?.code ?? 'parse-failed' };
     }
-    input = { plan: parsed.plan };
+    input = { plan: parsed.plan, target: at.target };
   } else {
     // גרסה שאינה חושפת `parse`: `insert` מקבל payload גולמי ומפרק אותו בעצמו.
-    input = { payload };
+    input = { payload, target: at.target };
   }
 
   let receipt: ClipboardInsertReceipt | undefined;
