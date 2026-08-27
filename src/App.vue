@@ -117,7 +117,13 @@ import ShortcutsDialog from './ui/panels/ShortcutsDialog.vue';
 
 import { createCommandAdapter, type CommandAdapter, type CommandOutcome } from './engine/command-adapter';
 import type { CommandId } from './engine/capabilities';
-import { COMMAND_ADAPTER, COMMAND_REPORTER, FONT_OPTIONS, STYLE_GALLERY } from './composables/keys';
+import {
+  COMMAND_ADAPTER,
+  COMMAND_REPORTER,
+  FONT_OPTIONS,
+  READOUT_SELECTION,
+  STYLE_GALLERY,
+} from './composables/keys';
 import { ACTIVE_SUPERDOC } from './engine/document-api';
 import { readDocSelection } from './engine/doc-selection';
 import {
@@ -135,6 +141,11 @@ import {
   type StyleGalleryState,
 } from './engine/style-gallery';
 import { fallbackFontOptions, observeFontOptions, type FontOptions } from './engine/font-options';
+import {
+  UNSETTLED_SELECTION,
+  observeReadoutSelection,
+  type ReadoutSelection,
+} from './engine/readout-hold';
 import { zoomPayload } from './engine/payloads';
 import {
   createSearchAdapter,
@@ -229,6 +240,16 @@ provide(FONT_OPTIONS, fontOptions);
  */
 const styleGallery = shallowRef<StyleGalleryState>(fallbackStyleGallery());
 provide(STYLE_GALLERY, styleGallery);
+
+/**
+ * מצב הבחירה, בשביל החזקת החיווי ברצועה (engine/readout-hold.ts).
+ *
+ * מסופק מכאן ולא נקרא בקומפוננטה, מאותו טעם כמו שני המפתחות שמעליו:
+ * `ui.selection` הוא handle של ה-session, ורק מי שמנהל אותו יודע מתי להירשם
+ * ומתי לשחרר. הזרקה אחת לכל הרצועה — כל 38 הפקדים שואלים את אותה שאלה.
+ */
+const readoutSelection = shallowRef<ReadoutSelection>(UNSETTLED_SELECTION);
+provide(READOUT_SELECTION, readoutSelection);
 
 /**
  * המופע הפתוח, בשביל הפקדים שאין להם פקודה ב-registry של ה-controller —
@@ -429,6 +450,8 @@ async function openDocument(file?: UserFile): Promise<boolean> {
   activeSuperdoc.value = editor.superdoc;
   editor.onDispose(() => {
     if (activeSuperdoc.value === editor.superdoc) activeSuperdoc.value = null;
+    // בלי האיפוס הרצועה הייתה ממשיכה להחזיק את הקריאה של המסמך שנסגר.
+    readoutSelection.value = UNSETTLED_SELECTION;
   });
 
   // החיפוש שייך ל-session: ה-handle הוא של ה-controller של המופע, ומסמך חדש
@@ -476,6 +499,16 @@ async function openDocument(file?: UserFile): Promise<boolean> {
   // עמוד הסמן מגיע מהבחירה, ולכן הוא נקרא כשהיא זזה. בלי ההאזנה המספר היה
   // נכון רק ברגע שהמסמך נפתח.
   editor.onDispose(editor.ui.selection.observe(() => sessionMetrics.noteSelectionChanged()));
+
+  // אותה בחירה, שאלה אחרת: האם הקריאה התיישבה, והאם היא סמן או טווח. זה מה
+  // שמונע מהחיווי ברצועה להיכבות ולהידלק בכל תו שנקלד — ההנמקה המלאה,
+  // כולל המדידה, ב-engine/readout-hold.ts. מנוי נפרד ולא שדה נוסף במודד:
+  // המודד שייך לשורת המצב, וזה שייך לרצועה.
+  editor.onDispose(
+    observeReadoutSelection(editor.ui, (state) => {
+      readoutSelection.value = state;
+    })
+  );
 
   // גודל התצוגה: `observe` יורה מיד ואז על כל שינוי — כולל שינוי שלא בא
   // מאיתנו (התאמה לרוחב החלון), שאחרת היה משאיר את התווית על ערך שגוי.
