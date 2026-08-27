@@ -15,6 +15,7 @@ import {
   heldCommandState,
   observeReadoutSelection,
   toReadoutSelection,
+  type SelectionSliceLike,
 } from '../../src/engine/readout-hold';
 
 const CARET_SETTLED = { empty: true, settled: true };
@@ -115,16 +116,23 @@ describe('קריאת ה-slice של המנוע', () => {
 describe('ההאזנה', () => {
   it('מעבירה כל דיווח של המנוע בצורה הצרה', () => {
     const seen: unknown[] = [];
-    let emit: ((slice: unknown) => void) | null = null;
+    const captured: { emit: ((slice: SelectionSliceLike) => void) | null } = { emit: null };
     const off = vi.fn();
 
     const dispose = observeReadoutSelection(
-      { selection: { observe: (listener) => ((emit = listener), off) } },
+      {
+        selection: {
+          observe: (listener) => {
+            captured.emit = listener;
+            return off;
+          },
+        },
+      },
       (selection) => seen.push(selection),
     );
 
-    emit?.({ status: 'ready', empty: false });
-    emit?.({ status: 'stale', empty: true });
+    captured.emit?.({ status: 'ready', empty: false });
+    captured.emit?.({ status: 'stale', empty: true });
 
     expect(seen).toEqual([
       { empty: false, settled: true },
