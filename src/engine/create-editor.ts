@@ -14,6 +14,7 @@ import type { BorrowedSuperDocUI, SuperDocExceptionPayload } from 'superdoc';
 import 'superdoc/style.css';
 // אחרי גיליון המנוע, ובכוונה: הכללים שם מעברתים את שכבת הכותרות שהוא מצייר.
 import '../styles/engine-chrome.css';
+import { splashStage, SPLASH_STAGES } from '../host/splash';
 import { localizeEngineChrome } from './hf-chrome';
 import { installWordSelection } from './word-selection';
 import { engineWorkerUrls } from './workers';
@@ -85,6 +86,10 @@ export function exceptionToError(payload: SuperDocExceptionPayload): Error {
 }
 
 export function createEditor(options: CreateEditorOptions): Promise<EditorSession> {
+  // התחנה מדווחת כאן ולא ממי שקרא, ובכוונה: כאן המנוע כבר בזיכרון, וזה הרגע
+  // שבו „פותח את המסמך” נכון. אחרי הפתיחה הראשונה מסך הטעינה סגור וזה no-op.
+  splashStage(SPLASH_STAGES.documentOpening, 'פותח את המסמך…');
+
   const {
     container,
     source,

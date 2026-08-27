@@ -9,6 +9,7 @@ import './styles/print.css';
 import App from './App.vue';
 import { installBundledFonts } from './styles/fonts';
 import { onThemeChanged, resolveBoot } from './host/otzaria-client';
+import { splashFail, splashStage, SPLASH_STAGES } from './host/splash';
 import { applyTheme } from './host/theme';
 import { setMenuLocale } from './ui/ribbon/i18n';
 
@@ -37,6 +38,7 @@ async function main(): Promise<void> {
   // הרכבת אפליקציית Vue
   const app = createApp(App);
   app.mount('#app');
+  splashStage(SPLASH_STAGES.shellMounted, 'מכין את סביבת העריכה…');
 
   // תוצאת האתחול, על שורש ה-HTML: 'event' — האירוע נתפס ב-latch; 'recovered' —
   // האירוע אבד והמצב שוחזר ב-RPC; 'failed' — שניהם כשלו, והממשק עולה עם ערכת
@@ -65,4 +67,9 @@ async function main(): Promise<void> {
   }
 }
 
-void main();
+// כשל לפני שהממשק הורכב אינו מגיע לשום מקום שאפשר לראות אותו בו — הממשק
+// עצמו הוא מה שלא עלה. מסך הטעינה הוא המשטח היחיד שנשאר, ולכן הוא מדווח.
+void main().catch((error: unknown) => {
+  console.error('[otzaria-word] כשל בעליית התוסף:', error);
+  splashFail('התוסף לא הצליח לעלות');
+});

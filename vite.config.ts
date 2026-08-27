@@ -6,13 +6,90 @@ import vue from '@vitejs/plugin-vue';
  * ואוצריא טוענת תוסף ארוז בדיוק משם. ה-build יוצא IIFE בקובץ אחד, ולכן
  * תגית הסקריפט חייבת להיות קלאסית. במצב dev התגית נשארת module כדי
  * שה-HMR של Vite ימשיך לעבוד.
+ *
+ * ומעבר לכך: Vite מזריק את תגית הכניסה ל-`<head>`, וסקריפט קלאסי שם חוסם את
+ * פריסת ה-HTML — כלומר ה-`<body>`, ובתוכו מסך הטעינה, אינו נפרס עד ששני
+ * הבאנדלים (16MB יחד) נפרסו והורצו. זה בדיוק המסך הלבן שנמדד
+ * ב-`scripts/startup-probe.mjs`: צביעה ראשונה ב-1619ms מ-`file://`, כולה
+ * המתנה. שום דבר לא נכשל; פשוט לא היה מה לראות.
+ *
+ * לכן שתי התגיות מוסרות מה-HTML, ובמקומן נכנס טוען inline שמזריק אותן אחרי
+ * הצביעה הראשונה — ומדווח למסך הטעינה בין השלבים. הצביעה ירדה ל-50ms.
  */
-function classicScript(): Plugin {
+function deferredEntry(): Plugin {
+  const WORKERS_SRC = './assets/engine-workers.js';
+  const ENTRY = /[ \t]*<script\s+src="(\.\/assets\/app\.js)"><\/script>\n?/;
+
   return {
-    name: 'otzaria-classic-script',
+    name: 'otzaria-deferred-entry',
     apply: 'build',
+    // אחרי inlineEngineWorkers: התגית שלו כבר בדף, וכאן היא מוסרת יחד עם
+    // תגית הכניסה ומוחלפת בטוען.
+    enforce: 'post',
+
     transformIndexHtml(html) {
-      return html.replace(/\s+type="module"/g, '').replace(/\s+crossorigin/g, '');
+      const classic = html.replace(/\s+type="module"/g, '').replace(/\s+crossorigin/g, '');
+
+      const match = classic.match(ENTRY);
+      if (!match) {
+        // בלי התגית אין מה לדחות, ותוסף בלי app.js הוא מסך טעינה לנצח.
+        throw new Error(
+          'לא נמצאה תגית הכניסה assets/app.js ב-index.html — ' +
+            'ייתכן ש-entryFileNames או צורת ההזרקה של Vite השתנו.',
+        );
+      }
+
+      const withoutTags = classic
+        .replace(ENTRY, '')
+        .replace(new RegExp(`[ \\t]*<script src="${WORKERS_SRC.replace(/[./]/g, '\\$&')}"></script>\\n?`), '');
+
+      const loader = `    <script>
+      /* טוען הכניסה.
+
+         שני פריימים ואז הזרקה: הראשון מתזמן ציור, השני רץ אחרי שהוא הושלם —
+         כלומר מסך הטעינה כבר על המסך כשהבאנדלים מתחילים להיפרס.
+
+         ה-setTimeout אינו חגורה כפולה מיותרת: אוצריא עשויה להקים את ה-WebView
+         של התוסף כשהוא עדיין אינו נראה, וב-Chromium requestAnimationFrame
+         בדף מוסתר אינו נורה כלל. בלי השעון הזה תוסף שנפתח ברקע לא היה נטען
+         לעולם. מי שמגיע ראשון מנצח; השני נבלע.
+
+         „async = false” על אלמנט שמוזרק ב-JS הוא מה שמחזיק את סדר ההרצה:
+         engine-workers.js מציב את __SUPERDOC_WORKER_SOURCES__, ו-app.js צורך
+         אותו בהקמת המנוע. בלעדיו הדפדפן מריץ לפי סדר ההגעה — ואלה שני קבצים
+         בגדלים שונים מאוד. ההורדה עצמה נשארת מקבילה, כי שתי התגיות נכנסות
+         באותו tick. */
+      (function () {
+        var started = false;
+        function load() {
+          if (started) return;
+          started = true;
+          var splash = window.__otzariaSplash;
+          [
+            { src: '${WORKERS_SRC}', at: 22, text: 'טוען את מנוע המסמכים…' },
+            { src: '${match[1]}', at: 55, text: 'מרכיב את הממשק…' }
+          ].forEach(function (step) {
+            var script = document.createElement('script');
+            script.async = false;
+            script.src = step.src;
+            script.addEventListener('load', function () {
+              if (splash) splash.set(step.at, step.text);
+            });
+            script.addEventListener('error', function () {
+              if (splash) splash.fail('טעינת קוד התוסף נכשלה');
+            });
+            document.head.appendChild(script);
+          });
+        }
+        requestAnimationFrame(function () {
+          requestAnimationFrame(load);
+        });
+        setTimeout(load, 120);
+      })();
+    </script>
+`;
+
+      return withoutTags.replace('</body>', `${loader}  </body>`);
     },
   };
 }
@@ -34,6 +111,11 @@ const WORKER_ROLES: Array<{ match: string; role: 'document' | 'reviewIndex' | 'd
  * לקובץ ה-JS — ולכן ה-URL היחסי שהמנוע בונה בעצמו ל-worker אינו נפתר, גם
  * מ-origin תקין (נמדד: אריזה בלי הטמעה נכשלת ב-module-load-failed גם ב-http).
  * המדידות המלאות, כולל למה blob ולא data:, ב-docs/spike.md §שער A.
+ *
+ * הפלט הוא `JSON.parse('…')` ולא אובייקט ליטרלי, וזה אינו סגנון: אלה 5MB
+ * שהמנתח של JavaScript היה פורס כתחביר — ליטרל אחד ענק עם escaping — מול
+ * מנתח JSON ייעודי שמקבל מחרוזת אחת. נמדד ב-scripts/startup-probe.mjs:
+ * זמן ההרצה של הקובץ ירד בערך למחצית.
  */
 function inlineEngineWorkers(): Plugin {
   return {
@@ -63,18 +145,21 @@ function inlineEngineWorkers(): Plugin {
         );
       }
 
+      // מחרוזת JSON בתוך ליטרל JS: JSON.stringify פעמיים — הפנימי בונה את
+      // ה-JSON, החיצוני הופך אותו למחרוזת JS חוקית עם כל ה-escaping.
+      const payload = JSON.stringify(JSON.stringify(sources));
       this.emitFile({
         type: 'asset',
         fileName: 'assets/engine-workers.js',
-        source: `window.__SUPERDOC_WORKER_SOURCES__ = ${JSON.stringify(sources)};\n`,
+        source: `window.__SUPERDOC_WORKER_SOURCES__ = JSON.parse(${payload});\n`,
       });
     },
 
     transformIndexHtml(html) {
-      // חייב להיטען לפני app.js — נצרך בזמן הקמת המנוע. ההזרקה היא לפני
-      // הסקריפט הראשון שיש לו src, ולא לפני ה-`<script` הראשון: ה-latch של
-      // plugin.boot הוא סקריפט inline ב-head, וחייב להישאר ראשון — 5MB של
-      // worker שנטענים לפניו הם עיכוב שאין בו צורך.
+      // התגית מוזרקת כאן, ו-deferredEntry (שרץ אחריו) מחליף אותה ואת תגית
+      // הכניסה בטוען אחד. ההזרקה היא לפני הסקריפט הראשון שיש לו src, ולא לפני
+      // ה-`<script` הראשון: ה-latch של plugin.boot הוא סקריפט inline ב-head
+      // וחייב להישאר ראשון.
       return html.replace(
         /<script([^>]*\bsrc=)/,
         '<script src="./assets/engine-workers.js"></script>\n    <script$1',
@@ -85,7 +170,7 @@ function inlineEngineWorkers(): Plugin {
 
 export default defineConfig({
   base: './',
-  plugins: [vue(), classicScript(), inlineEngineWorkers()],
+  plugins: [vue(), inlineEngineWorkers(), deferredEntry()],
   worker: { format: 'iife' },
 
   // ברירת המחדל של Vite ב-build היא legalComments: 'none', והיא מוחקת את באנר

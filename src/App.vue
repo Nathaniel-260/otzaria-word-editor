@@ -177,6 +177,7 @@ import {
 } from './host/files';
 import { decideDocumentSwitch } from './sessions/open-flow';
 import { confirm, notifyError } from './host/otzaria-client';
+import { splashDone } from './host/splash';
 import {
   loadLastDocument,
   saveLastDocument,
@@ -1233,15 +1234,27 @@ onMounted(async () => {
       })
     );
 
-    // טעינת מסמך אחרון או פתיחת מסמך ריק
-    const last = await resolveLastDocument();
-    if (!last) {
-      await openDocument();
-    } else if (!(await openDocument(last))) {
-      void forgetLastDocument();
-      await openDocument();
-      setStatus('המסמך האחרון לא נפתח — נפתח מסמך חדש');
+    // טעינת מסמך אחרון או פתיחת מסמך ריק. תחנת „פותח את המסמך” מדווחת
+    // מ-createEditor ולא מכאן: כאן היא הייתה מוקדמת בשנייה ויותר — הפתיחה
+    // ממתינה קודם לחבילת המנוע, ומסך טעינה שאומר „פותח” בזמן שהוא מוריד
+    // 9MB מתאר את השלב הלא נכון.
+    try {
+      const last = await resolveLastDocument();
+      if (!last) {
+        await openDocument();
+      } else if (!(await openDocument(last))) {
+        void forgetLastDocument();
+        await openDocument();
+        setStatus('המסמך האחרון לא נפתח — נפתח מסמך חדש');
+      }
+    } finally {
+      // גם פתיחה שנכשלה מסירה את מסך הטעינה, ולא רק כדי „לא להיתקע”: הודעת
+      // הכשל יושבת בשורת המצב שמתחת, ומסך טעינה שנשאר פרוש מסתיר בדיוק את
+      // מה שצריך להיקרא.
+      splashDone();
     }
+  } else {
+    splashDone();
   }
 });
 
