@@ -6,12 +6,17 @@
  *
  * ## מה שנמדד
  *
- * - **היעד ל-wrap/remove הוא `TextAddress`** (`{kind:'text',blockId,range}`) —
+ * - **היעד ל-wrap הוא `TextAddress`** (`{kind:'text',blockId,range}`) —
  *   SelectionTarget נדחה ("requires a valid TextAddress target").
+ * - **היעד ל-remove הוא `HyperlinkTarget`** — כתובת של **צומת הקישור עצמו**
+ *   (`{kind:'inline', nodeType:'hyperlink', anchor:{start,end}}`), לא טווח
+ *   טקסט. `remove({ within: TextAddress })` זורק `Cannot read properties of
+ *   undefined (reading 'anchor')` — הכתובת הנכונה נלקחת מ-`list()`.
  * - **wrap דורש מפרט קישור:** `{ link: { destination: { href } } }` — href בלבד
  *   זרק "requires a link specification object".
- * - `list()` מחזיר `stories[].hyperlinks[]`; הסרה על טווח שאינו מכיל קישור
- *   מחזירה `TARGET_NOT_FOUND`.
+ * - `list()` מחזיר `{ items: [{ address, properties, text }] }` (מעטפת
+ *   discovery סטנדרטית) — לא `stories[].hyperlinks[]`. הסרה על כתובת שאינה
+ *   קישור מחזירה `TARGET_NOT_FOUND`.
  */
 import type { SuperDoc } from 'superdoc';
 import type { CommandOutcome } from './command-adapter';
@@ -23,6 +28,28 @@ export interface HyperlinkInfo {
   id?: string;
   href?: string;
   anchor?: string;
+}
+
+/** מיקום בתוך המסמך — `blockId` + היסט טקסט שטוח (נמדד: `InlineAnchor.start/end`). */
+interface HyperlinkPosition {
+  blockId?: string;
+  offset?: number;
+}
+
+/** כתובת צומת קישור, כפי שהיא חוזרת מ-`list()` ונשלחת חזרה ל-`remove`. */
+export interface HyperlinkTargetAddress {
+  kind: 'inline';
+  nodeType: 'hyperlink';
+  anchor: { start: HyperlinkPosition; end: HyperlinkPosition };
+  story?: unknown;
+}
+
+/** פריט גולמי בודד מתוך `items[]` של `hyperlinks.list()`. */
+interface RawHyperlinkItem {
+  id?: string;
+  address?: HyperlinkTargetAddress;
+  properties?: { href?: string; anchor?: string };
+  text?: string;
 }
 
 interface HyperlinksApiShape {
@@ -78,20 +105,58 @@ async function readTextAddress(
   }
 }
 
-/** דולה את הקישורים מכל ה-stories לרשימה אחת שטוחה. */
-function flattenLinks(raw: unknown): HyperlinkInfo[] {
+/** פריטי `items[]` הגולמיים של `hyperlinks.list()` (מעטפת discovery סטנדרטית). */
+function rawHyperlinkItems(raw: unknown): RawHyperlinkItem[] {
   if (!raw || typeof raw !== 'object') return [];
-  const stories = (raw as { stories?: unknown }).stories;
-  if (!Array.isArray(stories)) return [];
-  const out: HyperlinkInfo[] = [];
-  for (const story of stories) {
-    const links = (story as { hyperlinks?: unknown }).hyperlinks;
-    if (!Array.isArray(links)) continue;
-    for (const link of links) {
-      if (link && typeof link === 'object') out.push(link as HyperlinkInfo);
+  const items = (raw as { items?: unknown }).items;
+  return Array.isArray(items) ? (items as RawHyperlinkItem[]) : [];
+}
+
+/** דולה את הקישורים ל-`HyperlinkInfo[]` חיצוני שטוח. */
+function flattenLinks(raw: unknown): HyperlinkInfo[] {
+  return rawHyperlinkItems(raw).map((item) => ({
+    id: item.id,
+    href: item.properties?.href,
+    anchor: item.properties?.anchor,
+  }));
+}
+
+/**
+ * מאתרת את כתובת צומת הקישור שחופפת לטווח המסומן (`TextAddress`), כדי
+ * לשלוח אותה ל-`remove`. `null` = אין קישור בטווח.
+ */
+async function findHyperlinkTarget(
+  doc: HyperlinksApiShape,
+  address: { blockId: string; range: { start: number; end: number } },
+): Promise<HyperlinkTargetAddress | null> {
+  const list = doc.hyperlinks?.list;
+  if (typeof list !== 'function') return null;
+
+  let raw: unknown;
+  try {
+    raw = await list();
+  } catch {
+    return null;
+  }
+
+  for (const item of rawHyperlinkItems(raw)) {
+    const anchor = item.address?.anchor;
+    const start = anchor?.start?.offset;
+    const end = anchor?.end?.offset;
+    if (
+      typeof start !== 'number' ||
+      typeof end !== 'number' ||
+      anchor?.start?.blockId !== address.blockId ||
+      anchor?.end?.blockId !== address.blockId
+    ) {
+      continue;
+    }
+    // חפיפה (כולל מגע בקצה) בין טווח הקישור לטווח המסומן.
+    if (address.range.start <= end && address.range.end >= start) {
+      return item.address ?? null;
     }
   }
-  return out;
+  return null;
 }
 
 /** רשימת כל הקישורים במסמך. מחזירה `null` כשאין מנוע. */
@@ -120,9 +185,15 @@ export async function removeHyperlink(host: HyperlinksTarget): Promise<CommandOu
     return { ok: false, message: `${failedAction}: יש לסמן טקסט תחילה`, reason: 'selection-required' };
   }
 
+  const target = await findHyperlinkTarget(doc, address);
+  if (!target) {
+    // אין קישור בטווח = המצב המבוקש כבר מתקיים. לא כשל.
+    return { ok: true };
+  }
+
   let receipt: DocReceipt;
   try {
-    receipt = await remove({ within: address });
+    receipt = await remove({ target });
   } catch (error) {
     return { ok: false, message: thrownText(failedAction, error), reason: 'threw' };
   }
@@ -163,17 +234,13 @@ export async function editHyperlink(host: HyperlinksTarget, newHref: string): Pr
   }
 
   // אימות לפני מגע: אין קישור בטווח → עטיפה ישירה, בלי remove מיותר.
-  let hadLink = false;
-  try {
-    hadLink = flattenLinks(await doc.hyperlinks?.list?.()).length > 0;
-  } catch {
-    hadLink = false;
-  }
+  const existingTarget = await findHyperlinkTarget(doc, address);
+  const hadLink = existingTarget !== null;
 
   if (hadLink) {
     let removed: DocReceipt;
     try {
-      removed = await remove({ within: address });
+      removed = await remove({ target: existingTarget });
     } catch (error) {
       return { ok: false, message: thrownText(failedAction, error), reason: 'threw' };
     }
