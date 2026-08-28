@@ -94,7 +94,12 @@ interface PartEntry {
 
 export interface HeaderFooterDocumentApi {
   sections?: {
-    list?: () => MaybePromise<{ items?: readonly SectionItem[] } | undefined>;
+    // `SectionsListResult` הוא `DiscoveryOutput`: `items` הוא עמוד תחת
+    // `limit`/`offset`, ו-`total` הוא המספר האמיתי — ראו `readSections`.
+    list?: (query?: {
+      limit?: number;
+      offset?: number;
+    }) => MaybePromise<{ items?: readonly SectionItem[]; total?: number } | undefined>;
     setTitlePage?: (input: { target: unknown; enabled: boolean }) => MaybePromise<DocReceipt>;
     setOddEvenHeadersFooters?: (input: { enabled: boolean }) => MaybePromise<DocReceipt>;
   };
@@ -109,9 +114,13 @@ export interface HeaderFooterDocumentApi {
       }) => MaybePromise<DocReceipt>;
     };
     parts?: {
+      // `HeaderFootersPartsListResult` הוא `DiscoveryOutput` גם הוא — ראו
+      // `deleteOrphanParts`.
       list?: (query?: {
         kind?: HeaderFooterKind;
-      }) => MaybePromise<{ items?: readonly PartEntry[] } | undefined>;
+        limit?: number;
+        offset?: number;
+      }) => MaybePromise<{ items?: readonly PartEntry[]; total?: number } | undefined>;
       create?: (input: { kind: HeaderFooterKind }) => MaybePromise<PartsReceipt>;
       delete?: (input: {
         target: { kind: 'headerFooterPart'; refId: string };
@@ -196,9 +205,49 @@ function docOf(host: HeaderFooterTarget): HeaderFooterDocumentApi | null {
   return (host as HeaderFooterHost | null | undefined)?.activeEditor?.doc ?? null;
 }
 
+/** גודל העמוד בכל שאיבה, ובלם מפני מנוע שיחזיר `total` שאינו יורד. ראו footnotes.ts. */
+const PAGE_SIZE = 200;
+const PAGE_GUARD = 1000;
+
+/**
+ * כל הפריטים של פעולת discovery, בשאיבת עמודים עד `total`.
+ *
+ * `sections.list` ו-`headerFooters.parts.list` הם `DiscoveryOutput` (נמדד:
+ * `sections.list` מחזיר `page:{limit:250,...}` — ראו docs/engine-gaps.md),
+ * כלומר `items` הוא עמוד בלבד. קריאה יחידה הייתה מחילה פעולה על 250 המקטעים
+ * או החלקים הראשונים בלבד ומדווחת „בוצע” — אותו דפוס בדיוק כמו ב-footnotes.ts.
+ */
+async function collectPages<T>(
+  failedAction: string,
+  list: (query: { limit: number; offset: number }) => MaybePromise<
+    { items?: readonly T[]; total?: number } | undefined
+  >,
+): Promise<{ ok: true; items: T[] } | { ok: false; items: T[]; outcome: CommandOutcome }> {
+  const items: T[] = [];
+  let offset = 0;
+  let guard = 0;
+
+  for (;;) {
+    const listed = await attempt(failedAction, () => list({ limit: PAGE_SIZE, offset }));
+    if (!listed.ok) return { ok: false, items, outcome: listed.outcome };
+
+    const page = listed.value?.items ?? [];
+    items.push(...page);
+    if (page.length === 0) return { ok: true, items };
+
+    offset += page.length;
+
+    const total = listed.value?.total;
+    if (!Number.isFinite(total) || offset >= (total as number)) return { ok: true, items };
+    if (++guard > PAGE_GUARD) return { ok: true, items };
+  }
+}
+
 /**
  * מקטעי המסמך שיש להם כתובת. מקטע בלי כתובת אינו יעד חוקי לשום מוטציה, ולכן
  * הוא מסונן כאן ולא בכל אתר קריאה.
+ *
+ * שואבת עמודים עד `total` ולא נעצרת בעמוד הראשון — ראו `collectPages`.
  */
 async function readSections(
   doc: HeaderFooterDocumentApi,
@@ -207,12 +256,10 @@ async function readSections(
   const list = doc.sections?.list;
   if (typeof list !== 'function') return { ok: false, outcome: unsupported(failedAction) };
 
-  const result = await attempt(failedAction, () => list());
-  if (!result.ok) return result;
+  const collected = await collectPages<SectionItem>(failedAction, (query) => list(query));
+  if (!collected.ok) return { ok: false, outcome: collected.outcome };
 
-  const items = (result.value?.items ?? []).filter(
-    (item) => item.address !== undefined && item.address !== null,
-  );
+  const items = collected.items.filter((item) => item.address !== undefined && item.address !== null);
   if (items.length === 0) {
     return { ok: false, outcome: unavailable(failedAction, 'לא נמצא מקטע במסמך', 'target-unresolved') };
   }
@@ -419,6 +466,9 @@ export async function removeHeaderFooter(
  * חלק יתום אינו שובר את המסמך, אבל הוא כן נשאר ב-ZIP ומופיע שוב בכל „הוסף
  * כותרת” הבא כאילו לא נמחק. גרסה שאין בה `parts.list`/`parts.delete` אינה
  * כשל של ההסרה עצמה — ההפניות כבר נוקו, וזה מה שהמשתמש ביקש.
+ *
+ * שואבת עמודים עד `total` — ראו `collectPages`: מסמך עם הרבה חלקי כותרת
+ * יתומים (למשל אחרי כמה סבבי „הוסף”/„הסר”) לא היה מנוקה במלואו מקריאה יחידה.
  */
 async function deleteOrphanParts(
   doc: HeaderFooterDocumentApi,
@@ -429,10 +479,10 @@ async function deleteOrphanParts(
   const remove = doc.headerFooters?.parts?.delete;
   if (typeof list !== 'function' || typeof remove !== 'function') return { ok: true };
 
-  const listed = await attempt(failedAction, () => list({ kind }));
+  const listed = await collectPages<PartEntry>(failedAction, (query) => list({ kind, ...query }));
   if (!listed.ok) return listed.outcome;
 
-  for (const part of listed.value?.items ?? []) {
+  for (const part of listed.items) {
     if (typeof part.refId !== 'string' || part.refId === '') continue;
     if ((part.referencedBySections?.length ?? 0) > 0) continue;
 

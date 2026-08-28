@@ -44,6 +44,22 @@ interface FakeOptions {
   parts?: readonly { refId: string; referencedBySections?: unknown[] }[];
   /** הקבלה של `parts.create` תחזיר את המזהה הזה. `null` = בלי מזהה כלל. */
   refId?: string | null;
+  /**
+   * `total` ש-`sections.list`/`headerFooters.parts.list` מדווחים, בדיוק כמו
+   * `DiscoveryOutput` של המנוע. כשהוא מוגדר, הרשימה מדפדפת לפי `limit`/`offset`
+   * שנשלחים בפועל — ובלעדיו (ברירת המחדל של כל שאר הבדיקות) היא מחזירה הכול
+   * בעמוד הראשון, כמו שהמסמכים הקטנים שרוב הבדיקות משתמשות בהם מתנהגים.
+   */
+  sectionsTotal?: number;
+  partsTotal?: number;
+}
+
+/** עמוד מתוך רשימה, בדיוק כמו `DiscoveryOutput` של המנוע. ראו toc.test.ts. */
+function page<T>(all: readonly T[], input: unknown, total: number | undefined) {
+  const query = (input ?? {}) as { limit?: number; offset?: number };
+  const offset = query.offset ?? 0;
+  const end = query.limit === undefined ? undefined : offset + query.limit;
+  return { items: all.slice(offset, end), ...(total === undefined ? {} : { total }) };
 }
 
 function fakeEngine(options: FakeOptions = {}) {
@@ -72,7 +88,7 @@ function fakeEngine(options: FakeOptions = {}) {
 
   const doc = {
     sections: {
-      list: route('sections.list', () => ({ items })),
+      list: route('sections.list', (input) => page(items, input, options.sectionsTotal)),
       setTitlePage: route('sections.setTitlePage', () => receipt('sections.setTitlePage')),
       setOddEvenHeadersFooters: route('sections.setOddEvenHeadersFooters', () =>
         receipt('sections.setOddEvenHeadersFooters'),
@@ -88,7 +104,9 @@ function fakeEngine(options: FakeOptions = {}) {
         ),
       },
       parts: {
-        list: route('headerFooters.parts.list', () => ({ items: options.parts ?? [] })),
+        list: route('headerFooters.parts.list', (input) =>
+          page(options.parts ?? [], input, options.partsTotal),
+        ),
         create: route('headerFooters.parts.create', () => {
           const result = receipt('headerFooters.parts.create');
           if (!result.success) return result;
@@ -546,5 +564,40 @@ describe('readHeaderFooterState', () => {
       expect(engine.ops()).not.toContain('headerFooters.parts.create');
       expect(engine.ops()).not.toContain('headerFooters.refs.set');
     }
+  });
+});
+
+describe('דפדוף על מקטעים וחלקים', () => {
+  // באג 4: `sections.list` ו-`headerFooters.parts.list` הם `DiscoveryOutput`
+  // (נמדד `limit: 250` — docs/engine-gaps.md), כלומר `items` הוא עמוד בלבד.
+  // קריאה יחידה הייתה מחילה פעולה על 250 המקטעים/החלקים הראשונים ומדווחת
+  // „בוצע” על מסמך גדול מזה.
+
+  it('שואבת עמודי מקטעים עד `total`, ומחילה על כולם ולא רק על העמוד הראשון', async () => {
+    const engine = fakeEngine({ sections: 320, sectionsTotal: 320 });
+
+    expect(await setDifferentFirstPage(engine.host, true)).toEqual({ ok: true });
+
+    expect(engine.inputs('sections.list')).toEqual([
+      { limit: 200, offset: 0 },
+      { limit: 200, offset: 200 },
+    ]);
+    expect(engine.inputs('sections.setTitlePage')).toHaveLength(320);
+  });
+
+  it('שואבת עמודי חלקים יתומים עד `total`, ומוחקת את כולם', async () => {
+    const parts = Array.from({ length: 320 }, (_, index) => ({
+      refId: `rId${index}`,
+      referencedBySections: [],
+    }));
+    const engine = fakeEngine({ parts, partsTotal: 320 });
+
+    expect(await removeHeaderFooter(engine.host, 'header')).toEqual({ ok: true });
+
+    expect(engine.inputs('headerFooters.parts.list')).toEqual([
+      { kind: 'header', limit: 200, offset: 0 },
+      { kind: 'header', limit: 200, offset: 200 },
+    ]);
+    expect(engine.inputs('headerFooters.parts.delete')).toHaveLength(320);
   });
 });
