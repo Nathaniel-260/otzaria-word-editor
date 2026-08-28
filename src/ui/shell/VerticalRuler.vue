@@ -391,7 +391,9 @@ function onPointerDown(handle: Handle, event: PointerEvent): void {
   }
   element.focus();
   dragPointerId = event.pointerId;
-  dragValue.value = { id: handle.id, valueTwips: handle.valueTwips };
+  /** הערך שהידית יצאה ממנו. השחרור נכתב רק אם הוא זז. */
+  const startTwips = handle.valueTwips;
+  dragValue.value = { id: handle.id, valueTwips: startTwips };
 
   const move = (moveEvent: PointerEvent): void => {
     if (moveEvent.pointerId !== dragPointerId) return;
@@ -416,7 +418,12 @@ function onPointerDown(handle: Handle, event: PointerEvent): void {
     const drag = dragValue.value;
     stop();
     dragValue.value = null;
-    if (drag) void commit(drag.id, drag.valueTwips);
+    // לחיצה בלי תזוזה אינה עריכה, וכאן היא גרועה במיוחד: הערך שהידית מציגה
+    // הוא ה**אפקטיבי** שהמנוע צייר, ולא מה שכתוב במסמך. כתיבה שלו בשחרור
+    // דורסת את `w:top` — נמדד: קליק בודד על ידית עם רצפת כותרת פעילה שלח
+    // `setPageMargins({top: 0.6917})` על מסמך שכתוב בו 0.5", והסרגל נראה
+    // זהה אחרי זה, כך שהמשתמש אינו רואה שהמידה שלו הוחלפה.
+    if (drag && drag.valueTwips !== startTwips) void commit(drag.id, drag.valueTwips);
   };
 
   const cancel = (): void => {
@@ -444,7 +451,11 @@ function onKeyDown(handle: Handle, event: KeyboardEvent): void {
   if (posTwips === null) return;
 
   event.preventDefault();
-  void commit(handle.id, clampValue(handle.id, valueAtPosition(handle.id, Math.round(posTwips))));
+  const next = clampValue(handle.id, valueAtPosition(handle.id, Math.round(posTwips)));
+  // אותה הגנה כמו בשחרור הגרירה: מקש שנחסם על ידי החסם מחזיר את הערך הקיים,
+  // וכתיבתו בחזרה היא עריכה שלא נתבקשה. `Home` על ידית שכבר יושבת על הרצפה
+  // הוא בדיוק המקרה.
+  if (next !== handle.valueTwips) void commit(handle.id, next);
 }
 
 async function commit(id: HandleId, valueTwips: number): Promise<void> {

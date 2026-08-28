@@ -268,22 +268,69 @@ describe('רצפת הכותרת', () => {
     expect(Math.round(Number.parseFloat(area.style.top))).toBe(66);
   });
 
+  /**
+   * הרצפה נמדדת על **התזוזה** ולא על הכתיבה, ובכוונה.
+   *
+   * כשהרצפה פעילה הידית יושבת עליה בדיוק — `floorTopTwips` הוא
+   * `effectiveTopTwips`, וזה גם הערך שהידית מציגה — ולכן גרירה כלפי מעלה
+   * אינה יכולה לשנות אותו. כלומר הכתיבה היחידה שגרירה כזאת יכולה לייצר היא
+   * כתיבה של הערך הקיים בחזרה, וזו בדיוק הכתיבה שאין לעשות. מה שכן נראה
+   * למשתמש, ומה שנמדד כאן: הידית עומדת במקום בזמן שהסמן ממשיך מעליה.
+   */
   it('הידית נעצרת על הרצפה, ואינה יורדת מתחתיה', async () => {
     const base = reading({ top: FLOOR_TWIPS });
     const harness = await mountRuler({
       reading: { ...base, page: { ...base.page, topTwips: 720 } },
     });
     const handle = handleByLabel(harness.wrapper, 'שוליים עליונים')!;
+    const before = topOf(handle.element);
 
-    handle.element.dispatchEvent(pointer('pointerdown', 0, { button: 0 }));
+    handle.element.dispatchEvent(pointer('pointerdown', 106, { button: 0 }));
     await settle();
     window.dispatchEvent(pointer('pointermove', -500)); // הרבה מעל ראש העמוד
     await settle();
+
+    expect(topOf(handle.element), 'הידית לא זזה מהרצפה').toBeCloseTo(before, 3);
+
     window.dispatchEvent(pointer('pointerup', -500));
     await settle();
 
-    const input = harness.superdoc.inputs('sections.setPageMargins')[0] as { top: number };
-    expect(input.top).toBeCloseTo(FLOOR_TWIPS / 1440, 6);
+    // ומכיוון שהיא לא זזה, אין מה לכתוב — כתיבת הערך הקיים בחזרה הייתה
+    // דורסת את `w:top` שבמסמך (720) בערך שהמנוע צייר (996).
+    expect(harness.superdoc.inputs('sections.setPageMargins')).toEqual([]);
+  });
+
+  it('קליק על הידית בלי לגרור אינו דורס את מה שכתוב במסמך', async () => {
+    // הידית מציגה 996 (מה שהמנוע צייר) בזמן שבמסמך כתוב 720. השחרור היה
+    // כותב את המוצג, והסרגל נראה זהה אחרי זה — כלומר המידה של המשתמש
+    // הוחלפה בלי שהוא רואה.
+    const base = reading({ top: FLOOR_TWIPS });
+    const harness = await mountRuler({
+      reading: { ...base, page: { ...base.page, topTwips: 720 } },
+    });
+    const handle = handleByLabel(harness.wrapper, 'שוליים עליונים')!;
+
+    handle.element.dispatchEvent(pointer('pointerdown', 106, { button: 0 }));
+    await settle();
+    window.dispatchEvent(pointer('pointerup', 106));
+    await settle();
+
+    expect(harness.superdoc.inputs('sections.setPageMargins')).toEqual([]);
+  });
+
+  it('Home על ידית שכבר על הרצפה אינו דורס את המסמך', async () => {
+    // אותה דריסה של הקליק, במסלול המקלדת: `Home` מבקש 0, החסם מחזיר את
+    // הרצפה — שהיא כבר הערך המוצג — והכתיבה הייתה מחליפה את 720 שבמסמך.
+    const base = reading({ top: FLOOR_TWIPS });
+    const harness = await mountRuler({
+      reading: { ...base, page: { ...base.page, topTwips: 720 } },
+    });
+    const handle = handleByLabel(harness.wrapper, 'שוליים עליונים')!;
+
+    handle.element.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }));
+    await settle();
+
+    expect(harness.superdoc.inputs('sections.setPageMargins')).toEqual([]);
   });
 
   it('הידית מספרת למה היא נעצרת', async () => {

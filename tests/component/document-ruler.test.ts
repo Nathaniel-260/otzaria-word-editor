@@ -319,6 +319,21 @@ describe('גרירת שוליים', () => {
     expect(harness.superdoc.inputs('sections.setPageMargins')).toHaveLength(1);
   });
 
+  it('קליק על ידית בלי לגרור אינו כותב למסמך', async () => {
+    // כתיבה של הערך הקיים בחזרה אינה משנה מספר, אבל היא מריצה עימוד מחדש
+    // ומסמנת את המסמך כמלוכלך — ובמסמך רב-מקטעים משטחת את כולם לשוליים של
+    // המקטע הראשון.
+    const harness = await mountRuler();
+    const handle = handleByLabel(harness.wrapper, 'שוליים ימניים')!;
+
+    handle.element.dispatchEvent(pointer('pointerdown', 894, { button: 0 }));
+    await settle();
+    window.dispatchEvent(pointer('pointerup', 894));
+    await settle();
+
+    expect(harness.superdoc.inputs('sections.setPageMargins')).toEqual([]);
+  });
+
   it('ביטול הגרירה אינו כותב דבר', async () => {
     const harness = await mountRuler();
     const handle = handleByLabel(harness.wrapper, 'שוליים ימניים')!;

@@ -482,7 +482,9 @@ function onPointerDown(handle: Handle, event: PointerEvent): void {
   }
   element.focus();
   dragPointerId = event.pointerId;
-  dragValue.value = { id: handle.id, valueTwips: handle.valueTwips };
+  /** הערך שהידית יצאה ממנו. השחרור נכתב רק אם הוא זז. */
+  const startTwips = handle.valueTwips;
+  dragValue.value = { id: handle.id, valueTwips: startTwips };
 
   const move = (moveEvent: PointerEvent): void => {
     if (moveEvent.pointerId !== dragPointerId) return;
@@ -508,7 +510,12 @@ function onPointerDown(handle: Handle, event: PointerEvent): void {
     const drag = dragValue.value;
     stop();
     dragValue.value = null;
-    if (drag) void commit(drag.id, drag.valueTwips);
+    // לחיצה בלי תזוזה אינה עריכה. `pointerdown` מזריע את `dragValue` בערך
+    // הנוכחי כדי שהציור לא יקפוץ, ובלי ההשוואה הזאת השחרור היה כותב אותו
+    // בחזרה: עימוד מחדש של המסמך כולו, סימון „מלוכלך” שמפעיל שמירה
+    // אוטומטית, ובמסמך רב-מקטעים גם השטחה של כל המקטעים לשוליים של הראשון —
+    // הכול מקליק מקרי על ידית.
+    if (drag && drag.valueTwips !== startTwips) void commit(drag.id, drag.valueTwips);
   };
 
   /** Escape או ביטול של המערכת: הערך הישן חוזר, ולמסמך לא נכתב דבר. */
@@ -549,7 +556,11 @@ function onKeyDown(handle: Handle, event: KeyboardEvent): void {
   if (posTwips === null) return;
 
   event.preventDefault();
-  void commit(handle.id, clampValue(handle.id, valueAtPosition(handle.id, Math.round(posTwips))));
+  const next = clampValue(handle.id, valueAtPosition(handle.id, Math.round(posTwips)));
+  // אותה הגנה כמו בשחרור הגרירה: מקש שנחסם על ידי החסם מחזיר את הערך הקיים,
+  // וכתיבתו בחזרה היא עריכה שלא נתבקשה. `Home` על ידית שכבר יושבת על הרצפה
+  // הוא בדיוק המקרה.
+  if (next !== handle.valueTwips) void commit(handle.id, next);
 }
 
 /* ------------------------------------------------------------------ */
