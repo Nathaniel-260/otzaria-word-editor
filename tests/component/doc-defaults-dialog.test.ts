@@ -1,0 +1,100 @@
+/**
+ * דיאלוג „ברירות מחדל למסמך" — גופן וגודל ברירת המחדל של המסמך כולו.
+ *
+ * הבאג: `<input id="dd-size" type="number" v-model="fontSize">` — Vue 3
+ * ממיר את הערך שנקלט מ-`v-model` על `type="number"` **למספר**, גם בלי
+ * modifier מפורש (`.number`), ברגע שהמחרוזת נפרסת בהצלחה כמספר
+ * (`runtime-dom`: `castToNumber = number || vnode.props?.type === 'number'`).
+ * `fontSize` הוקלד `ref('')`, כלומר `string` בעיני TypeScript, אבל בזמן
+ * ריצה קיבל `number` ברגע שהוקלד תו ראשון תקין. `parseSize` קרא ל-
+ * `value.trim()` על מה שהגיע — וקרס עם `TypeError: f.trim is not a
+ * function` בתוך computed, מה שהעיף את כל הדיאלוג מהעץ (שום דבר לא
+ * נכתב ל-styles.xml). ראו את אותו כשל בדיוק, כבר מתועד ומתוקן, ב-
+ * FontAdvancedDialog.vue (`asText`).
+ *
+ * הבדיקה כאן מקלידה ערך אמיתי לשדה (לא מזריקה מספר ידנית) כדי לשחזר בדיוק
+ * את ההמרה שקורה בדפדפן.
+ */
+import { describe, expect, it } from 'vitest';
+import { DOMWrapper } from '@vue/test-utils';
+import DocDefaultsDialog from '../../src/ui/panels/DocDefaultsDialog.vue';
+import { autoUnmount, mountUi, settle } from './harness';
+
+autoUnmount();
+
+function teleported(selector: string): DOMWrapper<Element> {
+  const element = document.querySelector(selector);
+  if (!element) throw new Error(`לא נמצא ${selector} בגוף הדף`);
+  return new DOMWrapper(element);
+}
+
+function footerButton(label: string): DOMWrapper<Element> {
+  const buttons = [...document.querySelectorAll('.docdef-dialog .dd-footer .dd-btn')];
+  const found = buttons.find((button) => button.textContent?.trim() === label);
+  if (!found) throw new Error(`לא נמצא הכפתור „${label}" בדיאלוג`);
+  return new DOMWrapper(found);
+}
+
+describe('DocDefaultsDialog', () => {
+  it('הקלדת תו בודד בשדה הגודל אינה מפילה את הדיאלוג', async () => {
+    mountUi(DocDefaultsDialog, { props: { isOpen: true, busy: false, currentSizePt: null } });
+    await settle();
+
+    // הקלדה אמיתית לשדה — `type="number"`, בדיוק כמו בדפדפן — ולא הזרקת
+    // מספר ל-ref ידנית. זה מה ששחזר את ה-TypeError בפועל.
+    await teleported('#dd-size').setValue('2');
+    await settle();
+
+    // לפני התיקון: `f.trim is not a function` נזרק מתוך computed, והדיאלוג
+    // נעלם מה-DOM לגמרי.
+    expect(document.querySelector('.docdef-dialog')).not.toBeNull();
+    expect(document.querySelector('.dd-error')).toBeNull();
+  });
+
+  it('הערך שהוקלד נקרא נכון ונשלח כמספר ב-submit', async () => {
+    const harness = mountUi(DocDefaultsDialog, {
+      props: { isOpen: true, busy: false, currentSizePt: null },
+    });
+    await settle();
+
+    await teleported('#dd-size').setValue('24');
+    await settle();
+    await footerButton('אישור').trigger('click');
+    await settle();
+
+    const emissions = harness.wrapper.emitted('submit');
+    expect(emissions).toHaveLength(1);
+    expect(emissions?.[0]?.[0]).toEqual({ fontSizePt: 24 });
+  });
+
+  it('ערך לא-תקין (0) מציג שגיאה ומנטרל את „אישור", בלי לקרוס', async () => {
+    mountUi(DocDefaultsDialog, { props: { isOpen: true, busy: false, currentSizePt: null } });
+    await settle();
+
+    await teleported('#dd-size').setValue('0');
+    await settle();
+
+    expect(document.querySelector('.docdef-dialog')).not.toBeNull();
+    expect(teleported('.dd-error').exists()).toBe(true);
+    expect(footerButton('אישור').attributes('disabled')).toBeDefined();
+  });
+
+  it('ריקון השדה אחרי הקלדה חוזר ל"ללא שינוי" — אינו נשלח ב-patch', async () => {
+    const harness = mountUi(DocDefaultsDialog, {
+      props: { isOpen: true, busy: false, currentSizePt: null },
+    });
+    await settle();
+
+    await teleported('#dd-size').setValue('12');
+    await teleported('#dd-size').setValue('');
+    await settle();
+
+    expect(document.querySelector('.docdef-dialog')).not.toBeNull();
+    await teleported('#dd-family').setValue('Assistant');
+    await footerButton('אישור').trigger('click');
+    await settle();
+
+    const emissions = harness.wrapper.emitted('submit');
+    expect(emissions?.[0]?.[0]).toEqual({ fontFamily: 'Assistant' });
+  });
+});

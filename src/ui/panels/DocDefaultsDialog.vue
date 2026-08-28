@@ -143,9 +143,20 @@ watch(
   },
 );
 
-function parseSize(value: string): number | undefined | null {
-  if (value.trim() === '') return undefined;
-  const parsed = Number(value);
+/**
+ * v-model על `type="number"` ממיר אוטומטית למספר — ראו FontAdvancedDialog.vue,
+ * ששם אותו כשל בדיוק תועד ותוקן. `fontSize` הוא `string | number` בזמן ריצה
+ * (מוקלד אצלנו כ-`string` בלבד, ולכן `.trim()` על מספר קרס את הדיאלוג), והפרסור
+ * חייב לבדוק את הטיפוס בפועל לפני קריאה למתודות של מחרוזת.
+ */
+function asText(value: string | number): string {
+  return typeof value === 'string' ? value : String(value);
+}
+
+function parseSize(value: string | number): number | undefined | null {
+  const text = asText(value);
+  if (text.trim() === '') return undefined;
+  const parsed = Number(text);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
