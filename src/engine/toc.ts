@@ -183,9 +183,12 @@ export interface TocDocumentApi extends SelectionDocumentApi {
       limit?: number;
       offset?: number;
     }) => MaybePromise<{ blocks?: readonly BlockEntry[]; total?: number } | undefined>;
+    // `nodeType` הוא `'paragraph' | 'listItem'` ולא ליטרל יחיד: שורת תוכן
+    // עניינים ממוספר מסווגת `listItem` (ראו `ROW_NODE_TYPES`), וכתובת עם
+    // הסוג הלא נכון היא כתובת פסולה שהמחיקה עליה נכשלת.
     deleteRange?: (input: {
-      start: { kind: 'block'; nodeType: 'paragraph'; nodeId: string };
-      end: { kind: 'block'; nodeType: 'paragraph'; nodeId: string };
+      start: { kind: 'block'; nodeType: 'paragraph' | 'listItem'; nodeId: string };
+      end: { kind: 'block'; nodeType: 'paragraph' | 'listItem'; nodeId: string };
     }) => MaybePromise<DocReceipt>;
   };
 }
@@ -632,7 +635,10 @@ async function sweepTocRows(
     return unsupported(REMOVE_FAILED);
   }
 
-  const rows: string[] = [];
+  // כל שורה נושאת גם את ה-`nodeType` שלה: תוכן עניינים ממוספר עשוי לסווג
+  // שורה כ-`listItem` (ROW_NODE_TYPES), ו-`deleteRange` דורש את הסוג האמיתי
+  // של כל קצה — `isTocRow` כבר מוודאת שהוא אחד מהשניים.
+  const rows: { nodeId: string; nodeType: 'paragraph' | 'listItem' }[] = [];
   let offset = from;
   let guard = 0;
   let truncated = false;
@@ -650,7 +656,7 @@ async function sweepTocRows(
         stopped = true;
         break;
       }
-      rows.push(block.nodeId);
+      rows.push({ nodeId: block.nodeId, nodeType: block.nodeType as 'paragraph' | 'listItem' });
     }
     if (stopped) break;
 
@@ -670,10 +676,12 @@ async function sweepTocRows(
     return signature.expectedRows > 0 ? rowsRemain() : { ok: true };
   }
 
+  const first = rows[0];
+  const last = rows[rows.length - 1];
   const swept = await attempt(REMOVE_FAILED, () =>
     deleteRange({
-      start: { kind: 'block', nodeType: 'paragraph', nodeId: rows[0] },
-      end: { kind: 'block', nodeType: 'paragraph', nodeId: rows[rows.length - 1] },
+      start: { kind: 'block', nodeType: first.nodeType, nodeId: first.nodeId },
+      end: { kind: 'block', nodeType: last.nodeType, nodeId: last.nodeId },
     }),
   );
   if (!swept.ok) return swept.outcome;

@@ -387,6 +387,32 @@ describe('הסרת תוכן העניינים', () => {
     expect(engine.remaining()).toEqual(['body-1']);
   });
 
+  it('שורת קצה שהיא `listItem` נשלחת ל-`deleteRange` עם nodeType:listItem שלה, ולא paragraph מקובע', async () => {
+    // באג 3: תוכן עניינים ממוספר עשוי לסווג שורה כ-`listItem`. כתובת עם
+    // `nodeType:'paragraph'` מקובע על שורה כזאת פסולה, וה-`deleteRange` היה
+    // עלול להיכשל ולהשאיר שורות יתומות על המסך.
+    const engine = fakeEngine({
+      tocs: ['toc-1'],
+      total: 1,
+      entryCount: 3,
+      blocks: [
+        { ordinal: 0, nodeId: 'toc-1', nodeType: 'tableOfContents', styleId: 'TOC1' },
+        { ordinal: 1, nodeId: 'row-1', nodeType: 'listItem', styleId: 'TOC1' },
+        { ordinal: 2, nodeId: 'row-2', nodeType: 'listItem', styleId: 'TOC2' },
+        { ordinal: 3, nodeId: 'body-1', nodeType: 'paragraph', styleId: 'Normal' },
+      ],
+    });
+
+    expect(await removeTableOfContents(engine.host)).toEqual({ ok: true });
+
+    expect(engine.inputs('blocks.deleteRange')).toEqual([
+      {
+        start: { kind: 'block', nodeType: 'listItem', nodeId: 'row-1' },
+        end: { kind: 'block', nodeType: 'listItem', nodeId: 'row-2' },
+      },
+    ]);
+  });
+
   it('כותרת שאחרי הטבלה אינה נבלעת גם כשהיא בסגנון `TOC1`', async () => {
     const engine = fakeEngine({
       tocs: ['toc-1'],
