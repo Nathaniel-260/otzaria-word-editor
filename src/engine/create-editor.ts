@@ -15,6 +15,7 @@ import 'superdoc/style.css';
 // אחרי גיליון המנוע, ובכוונה: הכללים שם מעברתים את שכבת הכותרות שהוא מצייר.
 import '../styles/engine-chrome.css';
 import { splashStage, SPLASH_STAGES } from '../host/splash';
+import { installFormatPainter } from './format-painter';
 import { localizeEngineChrome } from './hf-chrome';
 import { installWordSelection } from './word-selection';
 import { engineWorkerUrls } from './workers';
@@ -190,6 +191,10 @@ export function createEditor(options: CreateEditorOptions): Promise<EditorSessio
         // למופע עצמו: המופע מוכר רק ב-onReady, ו-`session.onDispose` הוא גם מה
         // שמטפל במקרה שהפירוק כבר רץ.
         session.onDispose(installWordSelection(container, ready).dispose);
+        // מברשת עיצוב: המנוע מחיל רק כשמישהו קורא ל-notifyPointerUp/notifyKeyUp
+        // של ui.formatPainter, וזה בדיוק מה ש-SuperToolbar עושה — אבל הוא לא קם
+        // כש-ui: false. ראו format-painter.ts.
+        session.onDispose(installFormatPainter(container, ready).dispose);
         resolve(session);
       },
 
