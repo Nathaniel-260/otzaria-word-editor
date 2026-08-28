@@ -306,7 +306,7 @@ console.log('חיווי היישור — מה הוצג, לפי סדר:');
 for (const run of alignRuns.slice(0, 40)) {
   console.log(
     `  ${String(run.from).padStart(6)}–${String(run.until).padStart(6)}ms  ` +
-      `${(run.value || '«אף אחד»').padEnd(20)} bחירה=${run.sel.padEnd(14)} ${run.stage}`,
+      `${(run.value || '«אף אחד»').padEnd(20)} בחירה=${run.sel.padEnd(14)} ${run.stage}`,
   );
 }
 if (alignRuns.length > 40) console.log(`  … ועוד ${alignRuns.length - 40}`);
