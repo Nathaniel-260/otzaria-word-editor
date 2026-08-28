@@ -96,10 +96,11 @@ export interface FontAdvancedPatch {
   vanish?: boolean;
   /** גודל גופן מורכב בנקודות; חצאי נקודות מותרות (נמדד: 12.5 → szCs 25). */
   fontSizeCsPt?: number;
-  /** מודגש לטקסט מורכב — מה ש-Word מציג על עברית (ראו הממצא על `bold`). */
+  /** מודגש לטקסט מורכב — מה ש-Word מציג על עברית (ראו הממצא על `bold`). נשלח למנוע כ-`bCs`. */
   boldCs?: boolean;
+  /** נשלח למנוע כ-`iCs`. */
   italicCs?: boolean;
-  /** „השתמש בגופן מורכב". */
+  /** „השתמש בגופן מורכב". נשלח למנוע כ-`cs`. */
   complexScript?: boolean;
   /** כיוון הריצה מימין לשמאל. */
   rtl?: boolean;
@@ -225,13 +226,23 @@ export function buildInlinePatch(patch: FontAdvancedPatch): { inline: Record<str
     inline.fontSizeCs = patch.fontSizeCsPt;
   }
 
+  // שמות השדה בפאץ' של הדיאלוג אינם שמות המפתחות של המנוע: המנוע מכיר
+  // `bCs`/`iCs`/`cs`, לא `boldCs`/`italicCs`/`complexScript` (ראו הערת הפתיחה
+  // של המודול — הרשימה נמדדה). מיפוי חסר כאן הוא בדיוק מה שהחזיר
+  // `INVALID_INPUT: Unknown inline property` והפיל את כל ה-patch באותה קריאה.
+  const ENGINE_KEY: Partial<Record<'boldCs' | 'italicCs' | 'complexScript', string>> = {
+    boldCs: 'bCs',
+    italicCs: 'iCs',
+    complexScript: 'cs',
+  };
+
   for (const key of ['dstrike', 'outline', 'shadow', 'emboss', 'imprint', 'vanish', 'boldCs', 'italicCs', 'complexScript', 'rtl'] as const) {
     const value = patch[key];
     if (value !== undefined) {
       if (typeof value !== 'boolean') {
         return { error: { ok: false, message: 'מאפייני האפקטים מקבלים כן/לא בלבד', reason: 'invalid-flag' } };
       }
-      inline[key] = value;
+      inline[ENGINE_KEY[key as keyof typeof ENGINE_KEY] ?? key] = value;
     }
   }
 
