@@ -56,8 +56,10 @@ import {
   applyMarginPreset,
   applyOrientation,
   applyPageBorders,
+  applyPageMargins,
   applyPageNumbering,
   applyPaperSize,
+  readPageMargins,
   applyVerticalAlign,
   cmToInches,
   normalizeHeaderDistanceCm,
@@ -123,11 +125,20 @@ interface SectionXml {
 interface FakeOptions {
   /** מזהי המקטעים במסמך. */
   sectionIds?: string[];
+  /** כיוון המקטע כפי ש-`sections.list()` מדווח אותו. נמדד: `'rtl'` במסמך עברי. */
+  sectionDirection?: 'rtl' | 'ltr';
   /** מידות התחלה לכל מקטע, ב-twips. ברירת המחדל: Letter לאורך, כמו המסמך הריק. */
   startWidth?: number;
   startHeight?: number;
   /** קבלה חלופית — לבדיקת כשל, NO_OP, או הבטחה. */
   receipt?: () => unknown;
+  /**
+   * מה ש-`pageMetrics` מדווח, בפיקסלים — כלומר מה שהמנוע **צייר**. כותרת
+   * עליונה מרימה את `marginTopPx` מעל מה שכתוב במסמך; ראו readEffectiveMargins.
+   */
+  effectiveMarginsPx?: { top?: number; bottom?: number };
+  /** `pageMetrics` שזורק — גרסת מנוע שהחוזה שלה שונה. */
+  metricsThrows?: boolean;
   /** להסיר פעולה מהחוזה, כדי לדמות גרסה שאינה מכירה אותה. */
   omit?: Array<
     | 'list'
@@ -396,6 +407,15 @@ function fakeEngine(options: FakeOptions = {}) {
               footer: (current.hfMar.footer ?? 0) / TWIPS_PER_INCH,
             },
             pageNumbering: options.pageNumbering,
+            // נמדד על המנוע: השוליים חוזרים באינצ'ים, ולצדם `sectionDirection`.
+            margins: {
+              top: (current.pgMar.top ?? 0) / TWIPS_PER_INCH,
+              right: (current.pgMar.right ?? 0) / TWIPS_PER_INCH,
+              bottom: (current.pgMar.bottom ?? 0) / TWIPS_PER_INCH,
+              left: (current.pgMar.left ?? 0) / TWIPS_PER_INCH,
+              gutter: 0,
+            },
+            sectionDirection: options.sectionDirection ?? 'rtl',
           };
         }),
       });
@@ -640,7 +660,30 @@ function fakeEngine(options: FakeOptions = {}) {
     };
   }
 
-  const host: PageSetupHost = { activeEditor: { doc: { sections } } };
+  const pageMetrics =
+    options.effectiveMarginsPx || options.metricsThrows
+      ? {
+          getSnapshot: () => {
+            if (options.metricsThrows) throw new Error('boom');
+            const first = xml.get(ids[0]!)!;
+            return {
+              pages: [
+                {
+                  base: {
+                    widthPx: (first.pgSz.w ?? 0) / 15,
+                    heightPx: (first.pgSz.h ?? 0) / 15,
+                    marginTopPx: options.effectiveMarginsPx?.top ?? (first.pgMar.top ?? 0) / 15,
+                    marginBottomPx:
+                      options.effectiveMarginsPx?.bottom ?? (first.pgMar.bottom ?? 0) / 15,
+                  },
+                },
+              ],
+            };
+          },
+        }
+      : undefined;
+
+  const host: PageSetupHost = { activeEditor: { doc: { sections }, pageMetrics } };
   return { host, calls, xml };
 }
 
@@ -694,6 +737,238 @@ describe('applyMarginPreset', () => {
 
     expect(outcome.ok).toBe(false);
     expect(calls).toEqual([]);
+  });
+});
+
+describe('readPageMargins', () => {
+  it('מחזירה רוחב עמוד ושוליים ב-twips, וכיוון מהמקטע', async () => {
+    // A4 לאורך, 2.54 ס"מ מכל צד — המסמך שהתוסף פותח.
+    const { host } = fakeEngine({ startWidth: 11906, startHeight: 16838 });
+
+    expect(await readPageMargins(host)).toEqual({
+      pageWidthTwips: 11906,
+      pageHeightTwips: 16838,
+      leftTwips: 1440,
+      rightTwips: 1440,
+      topTwips: 1440,
+      bottomTwips: 1440,
+      effectiveTopTwips: 1440,
+      effectiveBottomTwips: 1440,
+      direction: 'rtl',
+    });
+  });
+
+  it('בלי `pageMetrics` הערכים האפקטיביים הם מה שכתוב במסמך', async () => {
+    // גרסת מנוע שאינה חושפת מדידות: הסרגל חייב להמשיך לעבוד כמו קודם.
+    const { host } = fakeEngine();
+    expect(await readPageMargins(host)).toMatchObject({
+      topTwips: 1440,
+      effectiveTopTwips: 1440,
+    });
+  });
+
+  it('כותרת עליונה מרימה את השוליים האפקטיביים, והמסמך נשאר כשהיה', async () => {
+    // נמדד: כותרת ריקה במרחק חצי אינץ' מרימה את ראש הטקסט ל-66.4px.
+    const { host } = fakeEngine({ effectiveMarginsPx: { top: 66.4 } });
+    await applyPageMargins(host, { topTwips: 720 });
+
+    const state = await readPageMargins(host);
+    expect(state?.topTwips).toBe(720); // מה שכתוב במסמך
+    expect(state?.effectiveTopTwips).toBe(996); // 66.4px * 15 = מה שצויר
+  });
+
+  it('מדידה נמוכה מהמסמך אינה מורידה — היא יכולה להיות רק תצלום ישן', async () => {
+    const { host } = fakeEngine({ effectiveMarginsPx: { top: 10, bottom: 10 } });
+    const state = await readPageMargins(host);
+    expect(state?.effectiveTopTwips).toBe(1440);
+    expect(state?.effectiveBottomTwips).toBe(1440);
+  });
+
+  it('`pageMetrics` שזורק אינו מפיל את הקריאה', async () => {
+    const { host } = fakeEngine({ metricsThrows: true });
+    expect(await readPageMargins(host)).toMatchObject({ effectiveTopTwips: 1440 });
+  });
+
+  it('מסמך לועזי מדווח `ltr`, ולא כיוון הממשק', async () => {
+    const { host } = fakeEngine({ sectionDirection: 'ltr' });
+    expect((await readPageMargins(host))?.direction).toBe('ltr');
+  });
+
+  it('שוליים שהשתנו נקראים חזרה — הסרגל והגלריה קוראים את אותו מספר', async () => {
+    const { host } = fakeEngine({ startWidth: 11906 });
+    await applyMarginPreset(host, 'narrow');
+
+    expect(await readPageMargins(host)).toMatchObject({ leftTwips: 720, rightTwips: 720 });
+  });
+
+  it('מסמך שעדיין נטען מוחזר כ-`null`, ולא כשגיאה', async () => {
+    for (const host of [null, undefined, {}, { activeEditor: null }, { activeEditor: { doc: null } }]) {
+      expect(await readPageMargins(host as never)).toBeNull();
+    }
+  });
+
+  it('`list` שזורקת אינה מפילה את הסרגל', async () => {
+    const { host } = fakeEngine({ throwOnList: true });
+    expect(await readPageMargins(host)).toBeNull();
+  });
+
+  it('מקטע בלי מידות אינו מייצר סרגל של חצי אמת', async () => {
+    // רוחב בלי שוליים היה מצייר סרגל שנראה נכון עם אזור טקסט מומצא.
+    const sections = {
+      list: () => Promise.resolve({ items: [{ pageSetup: { width: 8.5 } }] }),
+    };
+    expect(await readPageMargins({ activeEditor: { doc: { sections } } } as never)).toBeNull();
+  });
+});
+
+/**
+ * הצוק שהחסם הזה מגן עליו נמדד על ה-`dist` הארוז: שוליים שאינם משאירים גובה
+ * טקסט חיובי מפילים את הפריסה לאפס עמודים, וכל `setPageMargins` שאחריו
+ * מחזיר `success: true` בלי שהמסמך חוזר. כלומר בלי החסם אין דרך חזרה בתוך
+ * ההפעלה. ראו docs/engine-gaps.md.
+ */
+describe('applyPaperSize — מקום לטקסט', () => {
+  it('דף קטן יותר שהשוליים הקיימים לא נכנסים בו נדחה', async () => {
+    // A4 גבוה מ-Letter בכמעט אינץ': שוליים שהיו חוקיים ב-A4 חוצים את הצוק.
+    const { host, calls, xml } = fakeEngine({ startWidth: 11906, startHeight: 16838 });
+    xml.get('s0')!.pgMar.top = 16838 - 1440 - 720;
+
+    const outcome = await applyPaperSize(host, 'letter');
+
+    expect(outcome).toMatchObject({
+      ok: false,
+      message: expect.stringContaining('גדולים מדי לגובה של Letter'),
+    });
+    expect(calls).toEqual([]);
+  });
+
+  it('מסמך רגיל עובר גודל דף כרגיל', async () => {
+    const { host } = fakeEngine({ startWidth: 11906, startHeight: 16838 });
+    expect(await applyPaperSize(host, 'letter')).toEqual({ ok: true });
+  });
+});
+
+describe('applyPageMargins — מקום לטקסט', () => {
+  /** Letter לאורך: 12240 × 15840 twips. */
+  it('שוליים שחונקים את גובה העמוד נדחים, והמנוע אינו נקרא', async () => {
+    const { host, calls } = fakeEngine();
+
+    const outcome = await applyPageMargins(host, { topTwips: 15840 - 1440 - 719 });
+
+    expect(outcome).toMatchObject({
+      ok: false,
+      message: expect.stringContaining('לא יישאר מקום לטקסט לגובה העמוד'),
+    });
+    expect(calls).toEqual([]);
+  });
+
+  it('שוליים שחונקים את רוחב העמוד נדחים גם הם', async () => {
+    const { host, calls } = fakeEngine();
+
+    const outcome = await applyPageMargins(host, { leftTwips: 12240 - 1440 - 719 });
+
+    expect(outcome).toMatchObject({
+      ok: false,
+      message: expect.stringContaining('לא יישאר מקום לטקסט לרוחב העמוד'),
+    });
+    expect(calls).toEqual([]);
+  });
+
+  it('בדיוק על החסם — עובר', async () => {
+    const { host } = fakeEngine();
+
+    expect(await applyPageMargins(host, { topTwips: 15840 - 1440 - 720 })).toEqual({ ok: true });
+  });
+
+  it('הצד שלא נשלח נלקח מהמסמך — הצוק הוא בסכום', async () => {
+    const { host } = fakeEngine();
+    // 7000 לבד חוקי; 7000 + 7000 כבר לא, וזה מה שקורה בגרירה שנייה.
+    expect(await applyPageMargins(host, { topTwips: 7000 })).toEqual({ ok: true });
+
+    const outcome = await applyPageMargins(host, { bottomTwips: 9000 });
+    expect(outcome.ok).toBe(false);
+  });
+
+  it('מסמך שכבר חנוק אינו ננעל — שינוי שמשפר מותר', async () => {
+    // קובץ Word יכול להגיע כך. סירוב גורף היה מונע דווקא את התיקון.
+    const { host, xml } = fakeEngine();
+    xml.get('s0')!.pgMar.top = 15500;
+
+    const outcome = await applyPageMargins(host, { topTwips: 15000 });
+
+    expect(outcome.ok).toBe(true);
+    expect(xml.get('s0')!.pgMar.top).toBe(15000);
+  });
+
+  it('אבל החמרה על מסמך חנוק נדחית', async () => {
+    const { host, xml } = fakeEngine();
+    xml.get('s0')!.pgMar.top = 15000;
+
+    expect((await applyPageMargins(host, { topTwips: 15100 })).ok).toBe(false);
+  });
+
+  it('כשאין גודל עמוד אין על מה להתלונן', async () => {
+    // מקטע בלי `pageSetup` — אין דרך לדעת אם יש מקום, והסירוב היה שרירותי.
+    const { host } = fakeEngine({ startWidth: 0, startHeight: 0 });
+
+    expect((await applyPageMargins(host, { topTwips: 14000 })).ok).toBe(true);
+  });
+});
+
+describe('applyPageMargins', () => {
+  it("שולחת אינצ'ים, ורק את שני הצדדים שהסרגל גורר", async () => {
+    // נמדד על המנוע: `setPageMargins({left, right})` משאיר את top/bottom כפי
+    // שהם. שליחת ארבעתם הייתה משכתבת שוליים שהמשתמש לא נגע בהם.
+    const { host, calls, xml } = fakeEngine();
+
+    expect(await applyPageMargins(host, { leftTwips: 2880, rightTwips: 720 })).toEqual({ ok: true });
+
+    expect(calls[0]!.input).toEqual({
+      target: { kind: 'section', sectionId: 's0' },
+      left: 2,
+      right: 0.5,
+    });
+    expect(xml.get('s0')!.pgMar).toEqual({ top: 1440, right: 720, bottom: 1440, left: 2880 });
+  });
+
+  it('ערך שאינו שלם אי-שלילי נעצר לפני המנוע', async () => {
+    const { host, calls } = fakeEngine();
+
+    const outcome = await applyPageMargins(host, { leftTwips: -100, rightTwips: 720 });
+
+    expect(outcome.ok).toBe(false);
+    expect(calls).toEqual([]);
+  });
+
+  it('הסרגל האנכי שולח רק מעלה או מטה — הצדדים האופקיים אינם נוגעים', async () => {
+    const { host, calls, xml } = fakeEngine();
+
+    expect(await applyPageMargins(host, { topTwips: 2880 })).toEqual({ ok: true });
+
+    expect(calls[0]!.input).toEqual({ target: { kind: 'section', sectionId: 's0' }, top: 2 });
+    expect(xml.get('s0')!.pgMar).toEqual({ top: 2880, right: 1440, bottom: 1440, left: 1440 });
+  });
+
+  it('קריאה בלי אף צד נעצרת אצלנו — המנוע היה דוחה אותה', async () => {
+    const { host, calls } = fakeEngine();
+
+    expect((await applyPageMargins(host, {})).ok).toBe(false);
+    expect(calls).toEqual([]);
+  });
+
+  it('חלה על כל המקטעים, כמו הגלריה „שוליים”', async () => {
+    const { host, xml } = fakeEngine({ sectionIds: ['s0', 's1'] });
+
+    await applyPageMargins(host, { leftTwips: 720, rightTwips: 720 });
+
+    expect(xml.get('s0')!.pgMar.left).toBe(720);
+    expect(xml.get('s1')!.pgMar.left).toBe(720);
+  });
+
+  it('גרסה בלי `setPageMargins` מדווחת ואינה מנחשת', async () => {
+    const { host } = fakeEngine({ omit: ['setPageMargins'] });
+    const outcome = await applyPageMargins(host, { leftTwips: 720, rightTwips: 720 });
+    expect(outcome.ok).toBe(false);
   });
 });
 

@@ -35,6 +35,7 @@ import {
   createCommandDouble,
   createSuperdocDouble,
   settle,
+  type CommandDouble,
   type SuperdocDouble,
 } from './harness';
 import type { SaveCoordinatorDeps, SaveSnapshot } from '../../src/sessions/save-coordinator';
@@ -54,6 +55,10 @@ const stub = vi.hoisted(() => ({
   persistedAutosave: [] as boolean[],
   /** מה שההעדפה השמורה מחזירה בעלייה. */
   storedAutosave: true,
+  /** מצב הסרגל שנשמר בהפעלה הקודמת. */
+  storedRuler: false,
+  /** מה שנכתב לאחסון בשביל הסרגל, לפי הסדר. */
+  persistedRuler: [] as boolean[],
   searchOpens: 0,
   /** ה-deps שהמעטפת נתנה לקואורדינטור — דרך לדחוף snapshot כמו המנוע. */
   saveDeps: null as SaveCoordinatorDeps | null,
@@ -170,6 +175,10 @@ vi.mock('../../src/host/settings', () => ({
   saveAutosaveEnabled: async (enabled: boolean) => {
     stub.persistedAutosave.push(enabled);
   },
+  loadRulerVisible: async () => stub.storedRuler,
+  saveRulerVisible: async (visible: boolean) => {
+    stub.persistedRuler.push(visible);
+  },
 }));
 
 // הייבוא **אחרי** ה-mocks במכוון (הם מורמים בכל מקרה, וזה הסדר שקורא נכון).
@@ -194,6 +203,8 @@ beforeEach(() => {
   stub.resetCalls = 0;
   stub.searchOpens = 0;
   stub.storedAutosave = true;
+  stub.storedRuler = false;
+  stub.persistedRuler.length = 0;
   stub.saveDeps = null;
   stub.adapter = createCommandDouble();
   stub.superdoc = createSuperdocDouble();
@@ -387,5 +398,63 @@ describe('חיפוש', () => {
     await settle();
 
     expect(stub.searchOpens).toBe(1);
+  });
+});
+
+/**
+ * ההעדפה של הסרגל, ולמה היא צריכה בדיקה משלה.
+ *
+ * מצב הסרגל שייך למנוע (`config.rulers`), ומופע מנוע חדש נולד כבוי — כלומר
+ * בכל פתיחת מסמך המעטפת רואה `false` בדיוק ברגע שבו היא אמורה להחיל `true`
+ * שנשמר בהפעלה הקודמת. הבאג שהיה כאן: הסנכרון ההתחלתי כתב את מה שראה אל תוך
+ * ההעדפה, וכך **מחק** אותה לפני שהספיקה לחול — ואז לא היה מה להחיל.
+ *
+ * הבדיקות מקבעות את שני הכיוונים, מפני שתיקון של אחד מהם לבדו נראה נכון:
+ * שההעדפה חלה, ושסנכרון לבדו אינו כותב אותה.
+ */
+describe('ההעדפה של סרגל המידות', () => {
+  it('סרגל שנשמר דלוק מתבקש מהמנוע בפתיחה הבאה', async () => {
+    stub.storedRuler = true;
+    await mountShell();
+
+    const adapter = stub.adapter as CommandDouble;
+    expect(
+      adapter.calls.map((call) => call.id),
+      'המעטפת ביקשה מהמנוע להדליק את הסרגל',
+    ).toContain('ruler');
+  });
+
+  it('הסנכרון עם מנוע שנולד כבוי אינו מוחק את ההעדפה', async () => {
+    stub.storedRuler = true;
+    await mountShell();
+
+    // זה הלב: `getState('ruler').active` הוא `false` בפתיחה, ואסור שהוא
+    // ייכתב לאחסון — אחרת ההפעלה הבאה כבר לא תדע שהמשתמש רצה סרגל.
+    expect(stub.persistedRuler, 'ההעדפה לא נדרסה בסנכרון').not.toContain(false);
+  });
+
+  it('הסרגל מופיע כשהמנוע מאשר שהדגל התחלף', async () => {
+    stub.storedRuler = true;
+    const wrapper = await mountShell();
+
+    // המנוע עונה על `run('ruler')` דרך אותו מסלול שהכפתור ברצועה עובר בו.
+    (stub.adapter as CommandDouble).setState('ruler', { active: true });
+    await settle();
+
+    const ruler = wrapper.find('.doc-ruler').element as HTMLElement;
+    expect(ruler.style.display, 'הרצועה מוצגת').not.toBe('none');
+  });
+
+  it('כיבוי יזום נשמר להפעלה הבאה', async () => {
+    stub.storedRuler = true;
+    await mountShell();
+    const adapter = stub.adapter as CommandDouble;
+
+    adapter.setState('ruler', { active: true });
+    await settle();
+    adapter.setState('ruler', { active: false });
+    await settle();
+
+    expect(stub.persistedRuler[stub.persistedRuler.length - 1], 'הכיבוי נשמר').toBe(false);
   });
 });

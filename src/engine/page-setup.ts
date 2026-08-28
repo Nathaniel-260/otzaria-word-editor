@@ -141,6 +141,7 @@
 import type { SuperDoc } from 'superdoc';
 import type { CommandOutcome } from './command-adapter';
 import { receiptFailureText, thrownText, type DocReceipt, type MaybePromise } from './document-api';
+import { marginsLeaveRoom } from './ruler-geometry';
 
 /** 1440 twips לאינץ'. נמדד ב-`w:pgMar w:top="1440"` של המסמך הריק. ראו הערת הפתיחה. */
 export const TWIPS_PER_INCH = 1440;
@@ -216,6 +217,10 @@ export const COLUMN_GAP_TWIPS = 720;
 interface SectionItem {
   address?: unknown;
   pageSetup?: { width?: number; height?: number; orientation?: string };
+  /** שולי הדף, באינצ'ים — אותה יחידה שבה `setPageMargins` מקבל אותם. */
+  margins?: { top?: number; right?: number; bottom?: number; left?: number };
+  /** `'rtl'` במסמך עברי. נכתב על ידי `<w:bidi>` ב-`sectPr`. */
+  sectionDirection?: string;
   lineNumbering?: {
     enabled?: boolean;
     countBy?: number;
@@ -295,9 +300,35 @@ export interface PageBordersInput {
   left: PageBorderSide;
 }
 
+/**
+ * מדידות הפריסה כפי שהמנוע מחזיק אותן — לא מה שביקשנו אלא **מה שצויר**.
+ *
+ * `base` הוא בפיקסלי CSS בזום 1 (A4 = 793.73 × 1122.53), ו-`marginTopPx` שלו
+ * הוא השוליים האפקטיביים: כשיש כותרת והשוליים שביקשנו קטנים מ-
+ * `headerDistance + גובה הכותרת`, המנוע מרים אותם, ומחזיר כאן את הערך המורם.
+ * זה בדיוק ההפרש שהסרגל היה מסתיר. נמדד — ראו readEffectiveMargins.
+ */
+export interface PageMetricsSource {
+  getSnapshot?: () => {
+    pages?: readonly {
+      base?: {
+        widthPx?: number;
+        heightPx?: number;
+        marginTopPx?: number;
+        marginRightPx?: number;
+        marginBottomPx?: number;
+        marginLeftPx?: number;
+      };
+    }[];
+  };
+}
+
 /** מה שנדרש מ-SuperDoc: רק הפאסדה של המסמך. ראו document-defaults.ts. */
 export interface PageSetupHost {
-  activeEditor?: { doc?: PageSetupDocumentApi | null } | null;
+  activeEditor?: {
+    doc?: PageSetupDocumentApi | null;
+    pageMetrics?: PageMetricsSource | null;
+  } | null;
 }
 
 /**
@@ -331,6 +362,8 @@ async function applyToSections(
   host: PageSetupTarget,
   failedAction: string,
   pick: (sections: Sections) => ((section: SectionItem, target: unknown) => MaybePromise<DocReceipt>) | null,
+  /** בדיקה לפני הכתיבה. מחרוזת = סירוב, עם הנימוק שיוצג למשתמש. */
+  guard?: (section: SectionItem) => string | null,
 ): Promise<CommandOutcome> {
   const doc = (host as PageSetupHost | null | undefined)?.activeEditor?.doc;
   if (!doc) return unavailable(failedAction, 'המסמך עדיין נטען', 'document-api-unavailable');
@@ -351,6 +384,12 @@ async function applyToSections(
   const targets = items.filter((item) => item.address !== undefined && item.address !== null);
   if (targets.length === 0) {
     return unavailable(failedAction, 'לא נמצא מקטע במסמך', 'target-unresolved');
+  }
+
+  // כל הבדיקות לפני כל הכתיבות: סירוב באמצע היה משאיר חצי מהמקטעים משונים.
+  for (const section of targets) {
+    const refusal = guard?.(section);
+    if (refusal) return unavailable(failedAction, refusal, 'invalid-input');
   }
 
   for (const section of targets) {
@@ -407,6 +446,255 @@ export function applyMarginPreset(
   });
 }
 
+/** גיאומטריית הדף שהסרגל מצייר. הכול ב-twips, ההמרה מאינצ'ים כאן. */
+export interface PageMarginsState {
+  pageWidthTwips: number;
+  /** גובה הדף — מה שהסרגל האנכי מצייר עליו. */
+  pageHeightTwips: number;
+  leftTwips: number;
+  rightTwips: number;
+  topTwips: number;
+  bottomTwips: number;
+  /**
+   * השוליים שהמנוע **צייר** בפועל למעלה ולמטה, שאינם בהכרח מה שכתוב במסמך:
+   * כותרת עליונה מרימה את שולי הטקסט ל-`headerDistance + גובה הכותרת`. אלה
+   * הערכים שהסרגל מצייר ומגביל לפיהם — ראו readEffectiveMargins.
+   *
+   * כשאין מדידה זמינה הם שווים ל-`topTwips`/`bottomTwips`, כלומר הסרגל
+   * מתנהג בדיוק כמו קודם.
+   */
+  effectiveTopTwips: number;
+  effectiveBottomTwips: number;
+  /** כיוון המקטע. קובע איזה צד של העמוד הוא „ההתחלה” בסרגל. */
+  direction: 'rtl' | 'ltr';
+}
+
+/** אינצ'ים מ-`sections.list()` → twips שלמים. ערך פסול מוחזר כ-`null`. */
+function inchesToTwips(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return null;
+  return Math.round(value * TWIPS_PER_INCH);
+}
+
+/** פיקסלי CSS בזום 1 → twips. 96 פיקסלים לאינץ' — נמדד, ראו page-ruler.ts. */
+const TWIPS_PER_PX = TWIPS_PER_INCH / 96;
+
+function pxToTwips(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return null;
+  return Math.round(value * TWIPS_PER_PX);
+}
+
+/**
+ * השוליים האנכיים שהמנוע צייר בפועל, או `null` כשאין מדידה.
+ *
+ * **למה זה קיים בכלל.** נמדד על ה-`dist` הארוז, A4 עם כותרת עליונה ריקה
+ * ו-`headerDistance` של חצי אינץ':
+ *
+ *     top שביקשנו   0.75"  0.6"   0.5"   0.25"  0"
+ *     ראש הטקסט     72px   66.4px 66.4px 66.4px 66.4px
+ *
+ * כלומר מתחת ל-66.4px (= 48 מרחק הכותרת + 18.4 גובהה) **הטקסט אינו זז**, וכל
+ * גרירה נוספת של הידית לא עשתה כלום. זה מה שמשתמש רואה כ„הסרגל לא מזיז את
+ * הטקסט מעל קו מסוים”. אותה נוסחה מופיעה גם במקור של מנוע הפריסה:
+ * `max(topMargin, headerDistance + maxHeaderContentHeight)`.
+ *
+ * `pageMetrics.getSnapshot()` מחזיר את הערך **אחרי** ההרמה (66.4px גם כשכתוב
+ * במסמך 0), ולכן הוא המקור הנכון לציור ולחסימה. הוא אינו בחוזה המוקלד של
+ * `superdoc` — כמו `data-page-index` — ולכן הקריאה מתגוננת, יש נפילה אחורה
+ * לערכי המסמך, ויש שער באריזה: tests/contract/engine-page-hooks.test.ts.
+ */
+function readEffectiveMargins(
+  host: PageSetupTarget,
+): { topTwips: number; bottomTwips: number } | null {
+  const snapshot = (host as PageSetupHost | null | undefined)?.activeEditor?.pageMetrics
+    ?.getSnapshot;
+  if (typeof snapshot !== 'function') return null;
+
+  let base: { marginTopPx?: number; marginBottomPx?: number } | undefined;
+  try {
+    base = snapshot()?.pages?.[0]?.base;
+  } catch {
+    return null;
+  }
+
+  const topTwips = pxToTwips(base?.marginTopPx);
+  const bottomTwips = pxToTwips(base?.marginBottomPx);
+  if (topTwips === null || bottomTwips === null) return null;
+  return { topTwips, bottomTwips };
+}
+
+/**
+ * רוחב הדף, השוליים והכיוון של המקטע הראשון — מה שהסרגל צריך כדי לצייר.
+ *
+ * המקטע הראשון ולא „המקטע שהסמן בו”, מאותה סיבה שכל המודול הזה פועל על כל
+ * המקטעים: מיפוי הסמן למקטע דורש את אינדקס הפסקה שלו, וה-selection API אינו
+ * חושף אותו (ראו „על מה זה מוחל” בהערת הפתיחה). במסמך רגיל יש מקטע אחד.
+ *
+ * `null` הוא מצב רגיל ולא כשל: כך זה נראה כשהמסמך עדיין נטען. הסרגל פשוט
+ * אינו מצייר — אין לו על מה להתלונן.
+ */
+export async function readPageMargins(host: PageSetupTarget): Promise<PageMarginsState | null> {
+  const list = (host as PageSetupHost | null | undefined)?.activeEditor?.doc?.sections?.list;
+  if (typeof list !== 'function') return null;
+
+  let first: SectionItem | undefined;
+  try {
+    first = (await list())?.items?.[0];
+  } catch {
+    return null;
+  }
+  if (!first) return null;
+
+  const pageWidthTwips = inchesToTwips(first.pageSetup?.width);
+  const pageHeightTwips = inchesToTwips(first.pageSetup?.height);
+  const leftTwips = inchesToTwips(first.margins?.left);
+  const rightTwips = inchesToTwips(first.margins?.right);
+  const topTwips = inchesToTwips(first.margins?.top);
+  const bottomTwips = inchesToTwips(first.margins?.bottom);
+  // הכול או כלום: סרגל שמצייר מידת דף אמיתית לצד שוליים משוערים הוא סרגל
+  // שמראה מספרים שאינם המסמך.
+  if (
+    pageWidthTwips === null ||
+    pageHeightTwips === null ||
+    leftTwips === null ||
+    rightTwips === null ||
+    topTwips === null ||
+    bottomTwips === null
+  ) {
+    return null;
+  }
+  if (pageWidthTwips <= 0 || pageHeightTwips <= 0) return null;
+
+  // המדידה גוברת על המסמך רק כשהיא **מרימה**: הרמה היא הרצפה של הכותרת, ואילו
+  // ערך נמוך יותר מהמסמך יכול להיות רק תצלום ישן שעוד לא התעדכן.
+  const effective = readEffectiveMargins(host);
+
+  return {
+    pageWidthTwips,
+    pageHeightTwips,
+    leftTwips,
+    rightTwips,
+    topTwips,
+    bottomTwips,
+    effectiveTopTwips: Math.max(topTwips, effective?.topTwips ?? 0),
+    effectiveBottomTwips: Math.max(bottomTwips, effective?.bottomTwips ?? 0),
+    direction: first.sectionDirection === 'rtl' ? 'rtl' : 'ltr',
+  };
+}
+
+/** מה שגרירה בסרגל משנה. מה שלא נשלח — לא נגעו בו. */
+export interface PageMarginsInput {
+  leftTwips?: number;
+  rightTwips?: number;
+  topTwips?: number;
+  bottomTwips?: number;
+}
+
+/**
+ * שוליים מגרירה בסרגל — האופקי (ימין/שמאל) או האנכי (מעלה/מטה).
+ *
+ * **רק הצדדים שנגררו נשלחים**, וזה נמדד ולא הונח: `setPageMargins({left, right})`
+ * החזיר `success: true` והשאיר את `w:top`/`w:bottom` כפי שהיו (הם נשארו 96px
+ * בתצלום המדדים של המנוע). כלומר הפעולה הזאת **אינה** מהמשפחה שמחליפה את
+ * האלמנט כולו, בשונה מ-`setIndentation` — ולכן אין צורך לשלוח מצב מלא, ואין
+ * סיכון למחוק צד שהמשתמש לא נגע בו.
+ *
+ * מוחל על כל המקטעים, כמו כל שאר המודול — ראו „על מה זה מוחל”. גרירה בסרגל
+ * ו„שוליים ← רגיל” ברצועה חייבות להתנהג אותו דבר; שתי התנהגויות לאותה פעולה
+ * הן באג בפני עצמו.
+ *
+ * **מה שנחסם כאן, ולמה דווקא כאן.** שוליים שאינם משאירים מקום לטקסט מפילים את
+ * הפריסה של המנוע לאפס עמודים, והיא אינה חוזרת: כל `setPageMargins` שאחריו
+ * מחזיר `success: true` והמסך נשאר ריק (נמדד — ראו MIN_TEXT_AREA_TWIPS
+ * ו-docs/engine-gaps.md). הסרגל כבר מגביל את הגרירה, אבל החסם יושב **בשכבת
+ * המנוע** מפני שהוא מגן על המסמך ולא על הפקד: כל מי שיכתוב שוליים בעתיד
+ * — דיאלוג, קיצור, מאקרו — עובר דרך כאן.
+ */
+export function applyPageMargins(
+  host: PageSetupTarget,
+  input: PageMarginsInput,
+): Promise<CommandOutcome> {
+  const failedAction = 'שינוי השוליים נכשל';
+  const sides = [
+    ['left', input.leftTwips],
+    ['right', input.rightTwips],
+    ['top', input.topTwips],
+    ['bottom', input.bottomTwips],
+  ] as const;
+
+  const payload: Record<string, number> = {};
+  for (const [side, twips] of sides) {
+    if (twips === undefined) continue;
+    if (!Number.isInteger(twips) || twips < 0) {
+      return Promise.resolve({
+        ok: false,
+        message: `${failedAction}: השוליים חייבים להיות מספרים שלמים לא-שליליים`,
+        reason: 'invalid-input',
+      });
+    }
+    payload[side] = twipsToInches(twips);
+  }
+
+  if (Object.keys(payload).length === 0) {
+    // באג בקוד שלנו: ידית שנגררה חייבת לשלוח צד. המנוע היה דוחה קריאה ריקה.
+    return Promise.resolve({
+      ok: false,
+      message: `${failedAction}: לא נמסר אף צד לשינוי`,
+      reason: 'invalid-input',
+    });
+  }
+
+  return applyToSections(
+    host,
+    failedAction,
+    (sections) => {
+      const setPageMargins = sections.setPageMargins;
+      if (!setPageMargins) return null;
+      return (_section, target) => setPageMargins({ target, ...payload });
+    },
+    (section) => leavesRoomForText(section, input),
+  );
+}
+
+/**
+ * הנימוק לסירוב, או `null` כשהשוליים בסדר.
+ *
+ * שני דברים שאינם מובנים מאליהם:
+ *
+ *   1. **הצד שלא נשלח נלקח מהמסמך.** גרירה שולחת צד אחד, והצוק נקבע בסכום.
+ *   2. **מסמך שכבר חורג אינו ננעל.** קובץ Word יכול להגיע עם שוליים חונקים,
+ *      וסירוב גורף היה מונע דווקא את התיקון. לכן שינוי שמשפר את המצב מותר
+ *      גם כשהוא עדיין מתחת לחסם.
+ */
+function leavesRoomForText(section: SectionItem, input: PageMarginsInput): string | null {
+  const current = {
+    top: inchesToTwips(section.margins?.top) ?? 0,
+    bottom: inchesToTwips(section.margins?.bottom) ?? 0,
+    left: inchesToTwips(section.margins?.left) ?? 0,
+    right: inchesToTwips(section.margins?.right) ?? 0,
+  };
+  const next = {
+    top: input.topTwips ?? current.top,
+    bottom: input.bottomTwips ?? current.bottom,
+    left: input.leftTwips ?? current.left,
+    right: input.rightTwips ?? current.right,
+  };
+  const height = inchesToTwips(section.pageSetup?.height);
+  const width = inchesToTwips(section.pageSetup?.width);
+
+  const axes = [
+    { page: height, was: current.top + current.bottom, now: next.top + next.bottom, text: 'לגובה' },
+    { page: width, was: current.left + current.right, now: next.left + next.right, text: 'לרוחב' },
+  ] as const;
+
+  for (const axis of axes) {
+    if (marginsLeaveRoom(axis.page, axis.now, 0) !== false) continue;
+    // עדיין חורג, אבל פחות מקודם — זה תיקון, ולא הידרדרות.
+    if (axis.now < axis.was) continue;
+    return `לא יישאר מקום לטקסט ${axis.text} העמוד`;
+  }
+  return null;
+}
+
 export function applyOrientation(
   host: PageSetupTarget,
   orientation: PageOrientation,
@@ -442,23 +730,46 @@ export function applyPaperSize(
     });
   }
 
-  return applyToSections(host, `שינוי גודל הדף ל-${size.label} נכשל`, (sections) => {
-    const setPageSetup = sections.setPageSetup;
-    if (!setPageSetup) return null;
-    return (section, target) => {
-      const landscape = isLandscape(section);
-      // המידות בטבלה הן לאורך; במקטע שהוא לרוחב מחליפים אותן, אחרת נשארת
-      // סתירה בין `w:orient` ובין המידות בפועל.
-      const width = landscape ? size.heightTwips : size.widthTwips;
-      const height = landscape ? size.widthTwips : size.heightTwips;
-      return setPageSetup({
-        target,
-        width: twipsToInches(width),
-        height: twipsToInches(height),
-        paperSize: size.code,
-      });
-    };
-  });
+  /** המידות בטבלה הן לאורך; מקטע שהוא לרוחב מקבל אותן הפוכות. */
+  const sizeOf = (section: SectionItem): { width: number; height: number } =>
+    isLandscape(section)
+      ? { width: size.heightTwips, height: size.widthTwips }
+      : { width: size.widthTwips, height: size.heightTwips };
+
+  return applyToSections(
+    host,
+    `שינוי גודל הדף ל-${size.label} נכשל`,
+    (sections) => {
+      const setPageSetup = sections.setPageSetup;
+      if (!setPageSetup) return null;
+      return (section, target) => {
+        // בלי החלפה כאן נשארת סתירה בין `w:orient` ובין המידות בפועל.
+        const { width, height } = sizeOf(section);
+        return setPageSetup({
+          target,
+          width: twipsToInches(width),
+          height: twipsToInches(height),
+          paperSize: size.code,
+        });
+      };
+    },
+    // דף קטן יותר עם אותם שוליים יכול לחצות את הצוק — A4 גבוה מ-Letter
+    // בכמעט אינץ'. אותו חסם בדיוק כמו בשוליים, ומאותה סיבה.
+    (section) => {
+      const { width, height } = sizeOf(section);
+      const top = inchesToTwips(section.margins?.top) ?? 0;
+      const bottom = inchesToTwips(section.margins?.bottom) ?? 0;
+      const left = inchesToTwips(section.margins?.left) ?? 0;
+      const right = inchesToTwips(section.margins?.right) ?? 0;
+      if (marginsLeaveRoom(height, top, bottom) === false) {
+        return `השוליים הנוכחיים גדולים מדי לגובה של ${size.label}`;
+      }
+      if (marginsLeaveRoom(width, left, right) === false) {
+        return `השוליים הנוכחיים גדולים מדי לרוחב של ${size.label}`;
+      }
+      return null;
+    },
+  );
 }
 
 export function applyColumns(
