@@ -610,13 +610,21 @@ async function openDocument(file?: UserFile): Promise<boolean> {
    * ולא ב-DocumentRuler.vue מפני שהיא גם **כותבת**: העדפת המשתמש נשמרת, וכל
    * מסמך שנפתח מקבל אותה בחזרה (מופע חדש נולד עם `config.rulers: false`).
    *
-   * נקודה אחת ויחידה שמשנה את המצב, ולא שלוש: מצב שנקבע בהשמה ישירה במקום
-   * אחד ובקריאה למודל במקום אחר הוא בדיוק איך שנוצר סרגל מוסתר שממשיך לקרוא
-   * את המסמך על כל תזוזת סמן.
+   * שתי פונקציות ולא אחת, וההפרדה ביניהן היא הנקודה: „מה המנוע מראה” ו„מה
+   * המשתמש ביקש” הם שני דברים שנפרדים בדיוק ברגע פתיחת המסמך, שבו המנוע
+   * מראה `false` והמשתמש ביקש `true`. מיזוג שלהם לפונקציה אחת מוחק את
+   * ההעדפה. את הציר השני — סרגל מוסתר שאינו קורא את המסמך — מחזיק
+   * `setEnabled`, והוא יושב בשתיהן דרך `syncRulerVisible`.
    */
-  const applyRulerVisible = (active: boolean): void => {
+
+  /** שיקוף מצב המנוע, בלי לגעת בהעדפה. */
+  const syncRulerVisible = (active: boolean): void => {
     isRulerVisible.value = active;
     sessionRuler.setEnabled(active);
+  };
+
+  /** ההחלפה הייתה בחירה של המשתמש, ולכן היא זו שנשמרת להפעלה הבאה. */
+  const rememberRulerVisible = (active: boolean): void => {
     if (rulerPreference === active) return;
     rulerPreference = active;
     void saveRulerVisible(active);
@@ -624,14 +632,19 @@ async function openDocument(file?: UserFile): Promise<boolean> {
 
   editor.onDispose(
     adapter.observe('ruler', (state) => {
-      if (isRulerVisible.value !== state.active) applyRulerVisible(state.active);
+      if (isRulerVisible.value === state.active) return;
+      syncRulerVisible(state.active);
+      rememberRulerVisible(state.active);
     })
   );
-  applyRulerVisible(adapter.getState('ruler').active);
-  // ההעדפה חלה כאן, אחרי שה-observe רשום: `run` מחליף את הדגל במנוע, וההודעה
-  // חוזרת דרך אותו מסלול שהכפתור ברצועה עובר בו. `rulerPreference` נקרא לפני
-  // ההחלה, מפני שהיא עצמה כותבת אותו.
+
+  // ההעדפה נקראת **לפני** הסנכרון, ולא אחריו: הסנכרון מביא את מצב המנוע הטרי
+  // (`rulers: false`), ומרגע שהוא רץ אין יותר דרך לדעת מה המשתמש ביקש בהפעלה
+  // הקודמת.
   const wanted = rulerPreference;
+  syncRulerVisible(adapter.getState('ruler').active);
+  // ההחלה אחרי שה-observe רשום: `run` מחליף את הדגל במנוע, וההודעה חוזרת דרך
+  // אותו מסלול שהכפתור ברצועה עובר בו.
   if (wanted && !isRulerVisible.value) void adapter.run('ruler');
 
   // מסמך שפתוח לקריאה בלבד — הידיות בסרגל אינן נגררות בו.
