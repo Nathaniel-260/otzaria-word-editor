@@ -698,10 +698,37 @@ await phase('שלב א — קבוצת „פיסקה"', async (app, ctx) => {
   });
 
   /*
-   * שתי הבדיקות הבאות — תוספת: הביקורת הסטטית מצאה שהיעד שהדיאלוג כותב
-   * אליו מקבע `nodeType:'paragraph'` במקום לגזור אותו מהבלוק בפועל. השער
-   * עד כה בדק רק פסקה רגילה.
+   * שלוש הבדיקות הבאות — תוספת: הביקורת הסטטית מצאה שהיעד שהדיאלוג כותב
+   * אליו מקבע `nodeType:'paragraph'` (במקום לגזור אותו מהבלוק בפועל), וש-
+   * הכניסות נקראות רק מ-`indent.left`/`indent.right` (במקום גם מ-
+   * `indent.start`/`indent.end`). השער עד כה לא בדק אף אחד מהם — כל
+   * הבדיקות רצות על פסקה רגילה, ואף לא פותחות מחדש דיאלוג שכבר נסגר.
    */
+
+  await step('תפריט פסקה — קריאה חוזרת אחרי סגירה ופתיחה (הכניסות לא מתאפסות)', async () => {
+    // באג 2: `setIndentation({left,right})` נכתב בפסקה עברית (bidi) לוגית —
+    // `w:start`/`w:end` ולא בהכרח `w:left`/`w:right` (נמדד ב-docs/engine-gaps.md,
+    // ואותו דבר בדיוק מה שגרם לרגקס בבדיקה הקודמת לקבל את שתי הצורות). קריאה
+    // שמתעלמת מ-`start`/`end` הייתה מציגה לדיאלוג הזה 0.00/0.00 — כלומר
+    // „מוחקת למראית עין" את הכניסות שהמשתמש קבע ברגע שסוגרים ופותחים מחדש.
+    await caretAt(2);
+    await app.click('תפריט פסקה');
+    await app.sleep(1600);
+    const dlg = await app.dialog();
+    if (!dlg || !/פסקה/.test(dlg.label || '')) {
+      report.fail('תפריט פסקה — קריאה חוזרת', `לא נפתח: ${JSON.stringify(dlg)}`);
+      await closeDialogs();
+      return;
+    }
+    const left = dlg.controls.find((x) => x.id === 'pd-ind-left')?.value;
+    const right = dlg.controls.find((x) => x.id === 'pd-ind-right')?.value;
+    console.log('קריאה חוזרת: pd-ind-left=', left, '| pd-ind-right=', right, '(צפוי מהאישור הקודם: 1.00 / 0.50)');
+    left === '1.00' && right === '0.50'
+      ? report.pass('תפריט פסקה — קריאה חוזרת', `הכניסות שנקבעו קודם עדיין מוצגות: left=${left} right=${right}`)
+      : report.fail('תפריט פסקה — קריאה חוזרת',
+        `הדיאלוג הציג left=${left} right=${right} במקום 1.00/0.50 — הכניסות „התאפסו" בקריאה החוזרת`);
+    await closeDialogs();
+  });
 
   await step('תפריט פסקה — על כותרת (nodeType:heading, לא paragraph מקובע)', async () => {
     // באג 1: היעד שנשלח למנוע חייב לשאת את ה-nodeType האמיתי של הבלוק.

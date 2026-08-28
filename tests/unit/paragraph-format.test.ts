@@ -362,6 +362,35 @@ describe('readParagraphFormat', () => {
     expect(notFound.ok && notFound.target.nodeType).toBe('paragraph');
   });
 
+  it('הכניסות נקראות מ-indent.start/indent.end כשהן קיימות — לא רק left/right', async () => {
+    // באג 2: setIndentation({left,right}) שלנו נכתב לוגית ל-w:start/w:end
+    // (נמדד ב-docs/engine-gaps.md). קריאה שמתעלמת מהם חוזרת אפסים אחרי
+    // שהמשתמש קבע כניסה, סגר את הדיאלוג ופתח אותו מחדש.
+    const { host } = fakeDoc({
+      get: documentWith({ indent: { start: 36, end: 18, left: 999, right: 999 } }),
+    });
+
+    const result = await readParagraphFormat(host);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.snapshot.indentation.leftTwips).toBe(720);
+      expect(result.snapshot.indentation.rightTwips).toBe(360);
+    }
+  });
+
+  it('בלי start/end — עדיין נופל חזרה על left/right', async () => {
+    const { host } = fakeDoc({ get: documentWith({ indent: { left: 36, right: 18 } }) });
+
+    const result = await readParagraphFormat(host);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.snapshot.indentation.leftTwips).toBe(720);
+      expect(result.snapshot.indentation.rightTwips).toBe(360);
+    }
+  });
+
   it('מסמך בלי הפסקה מחזיר ברירות מחדל ולא זריקה', async () => {
     const { host } = fakeDoc({ get: { body: [] } });
 
@@ -520,6 +549,25 @@ describe('readParagraphIndents', () => {
     const reading = await readParagraphIndents(host);
 
     expect(reading?.target).toMatchObject({ nodeType: 'listItem', nodeId: 'p3' });
+  });
+
+  it('הכניסות נקראות מ-indent.start/indent.end כשהן קיימות', async () => {
+    const { host } = fakeDoc({
+      get: {
+        body: [
+          {
+            kind: 'paragraph',
+            paragraphIds: { paraId: 'p3' },
+            paragraph: { props: { indent: { start: 36, end: 18, left: 999, right: 999 } } },
+          },
+        ],
+      },
+    });
+
+    const reading = await readParagraphIndents(host);
+
+    expect(reading?.indents.leftTwips).toBe(720);
+    expect(reading?.indents.rightTwips).toBe(360);
   });
 
   it('אין סמן במסמך — `null`, ובלי הודעת כשל', async () => {

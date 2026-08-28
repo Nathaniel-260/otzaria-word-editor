@@ -255,10 +255,13 @@ export function emptyParagraphFormat(): ParagraphFormatSnapshot {
  * וגרסה שתחזיר את השני לא תשבור את הקריאה.
  */
 interface RawParagraphProps {
-  /** השם שנמדד במנוע 2.8.0. */
-  indent?: { left?: number; right?: number; firstLine?: number; hanging?: number };
+  /**
+   * השם שנמדד במנוע 2.8.0. `start`/`end` הם הצד הלוגי (`SDParagraphProps`
+   * ב-sd-props.d.ts) — ראו ההערה על `indentsFromProps` למטה למה שניהם נקראים.
+   */
+  indent?: { left?: number; right?: number; start?: number; end?: number; firstLine?: number; hanging?: number };
   /** השם שהונח קודם. נשמר כרשת ביטחון — ראו הערת הפתיחה של הטיפוס. */
-  indentation?: { left?: number; right?: number; firstLine?: number; hanging?: number };
+  indentation?: { left?: number; right?: number; start?: number; end?: number; firstLine?: number; hanging?: number };
   spacing?: { before?: number; after?: number; line?: number; lineRule?: string };
   keepWithNext?: boolean;
   keepLines?: boolean;
@@ -320,12 +323,21 @@ function pointsToTwips(value: unknown): number {
   return Math.round(points * TWIPS_PER_PT);
 }
 
-/** הכניסות בלבד, מתוך תכונות פסקה שכבר נקראו. */
+/**
+ * הכניסות בלבד, מתוך תכונות פסקה שכבר נקראו.
+ *
+ * `start`/`end` נקראים **לפני** `left`/`right`, ולא כתחליף גיבוי גרידא:
+ * `docs/engine-gaps.md` מדד ש-`setIndentation({left,right})` שלנו נכתב
+ * כ-`w:start`/`w:end` הלוגיים (הצד ההתחלה/סוף, לא פיזי ימין/שמאל), ו-
+ * `SDParagraphProps` (sd-props.d.ts) חושף את `indent.start`/`indent.end` בדיוק
+ * בשביל זה. בלי הקדימה הזאת — משתמש שקובע כניסה בדיאלוג, סוגר ופותח מחדש,
+ * היה רואה אפסים: הערך יושב תחת `start`/`end` ולא תחת `left`/`right`.
+ */
 export function indentsFromProps(props: RawParagraphProps | undefined): ParagraphIndents {
   const indent = props?.indent ?? props?.indentation ?? {};
   return {
-    leftTwips: Math.max(0, pointsToTwips(indent.left)),
-    rightTwips: Math.max(0, pointsToTwips(indent.right)),
+    leftTwips: Math.max(0, pointsToTwips(indent.start ?? indent.left)),
+    rightTwips: Math.max(0, pointsToTwips(indent.end ?? indent.right)),
     firstLineTwips: Math.max(0, pointsToTwips(indent.firstLine)),
     hangingTwips: Math.max(0, pointsToTwips(indent.hanging)),
     bidi: props?.bidi === true,
@@ -397,8 +409,9 @@ export async function readParagraphFormat(
     target: resolved.target,
     snapshot: {
       indentation: {
-        leftTwips: ptToTwips(ind.left),
-        rightTwips: ptToTwips(ind.right),
+        // `start`/`end` לפני `left`/`right` — ראו ההערה על `indentsFromProps`.
+        leftTwips: ptToTwips(ind.start ?? ind.left),
+        rightTwips: ptToTwips(ind.end ?? ind.right),
         firstLineTwips: ptToTwips(ind.firstLine),
         hangingTwips: ptToTwips(ind.hanging),
       },
