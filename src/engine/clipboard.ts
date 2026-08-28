@@ -304,6 +304,24 @@ function readSelection(
   return { ok: true, target };
 }
 
+/**
+ * אותו טווח, מכווץ לאחד מקצותיו — כלומר סמן בלי בחירה.
+ *
+ * `story` ו-`coordinateSpace` נשמרים: פעולה בכותרת עליונה או בהערת שוליים
+ * אינה בגוף המסמך, ובחירה בלי הזהות הזאת הייתה מצביעה על בלוק אחר לגמרי.
+ */
+function collapsedTo(target: SelectionTarget, edge: 'start' | 'end'): SelectionTarget {
+  const point = target[edge];
+
+  return {
+    kind: 'selection',
+    start: point,
+    end: point,
+    ...(target.story ? { story: target.story } : {}),
+    ...(target.coordinateSpace ? { coordinateSpace: target.coordinateSpace } : {}),
+  };
+}
+
 /** הפריט מה-payload לפי MIME, כשהוא מחרוזת. `null` = אין כזה. */
 function textItem(payload: ClipboardPayload | undefined, type: string): string | null {
   const items = payload?.items;
@@ -496,8 +514,51 @@ export async function cutSelection(host: ClipboardHostTarget): Promise<CommandOu
     };
   }
 
+  // הסמן חוזר למקום שממנו נגזר. ההנמקה המלאה ב-`caretAfterCut`.
+  await moveCaret(selectionOf(host), caretAfterCut(selection.target), {
+    what: 'למקום הגזירה',
+    retries: 0,
+  });
+
   if (!onSystemClipboard) return systemBlocked('הטקסט נגזר', 'Ctrl+X');
   return { ok: true };
+}
+
+/**
+ * הסמן שאחרי „גזור”: תחילת הטווח שנמחק.
+ *
+ * ## התלונה שזה נולד ממנה
+ *
+ * „גוזר, וזה גוזר — אבל הסמן יוצא מהטקסט.” אחרי `doc.delete` המנוע נשאר
+ * **בלי בחירה בכלל**. נמדד מול המנוע האמיתי (Chrome על ה-dist הארוז): גזירת
+ * מילה מסומנת מחזירה `getSnapshot()` = `{status:'ready', empty:true,
+ * selectionTarget:null}`, אין סמן מצויר במסמך, וההקלדה הבאה **אינה נכנסת לשום
+ * מקום** — הטקסט נשאר כפי שהיה אחרי המחיקה.
+ *
+ * המיקוד עצמו אינו הבעיה: `document.activeElement` נשאר ה-textarea המוסתר של
+ * המנוע לאורך כל המסלול, מפני שהפקד מונע את גזילת המיקוד (`@pointerdown.prevent`
+ * ב-RibbonButton, ו-tests/unit/clipboard: „הפקד עצמו מונע מהלחיצה לגזול את
+ * המיקוד”). מה שחסר הוא בחירה להקליד לתוכה.
+ *
+ * ## למה **תחילת** הטווח, ולמה היא שורדת את המחיקה
+ *
+ * זה גם מה ש-Word עושה: הסמן נשאר במקום שממנו הטקסט נעלם. נקודת ההתחלה נשארת
+ * ניתנת לאיתור גם כשהמחיקה חוצה פסקאות — המנוע מותיר את בלוק ההתחלה ומכריז על
+ * בלוק **הסיום** כ-`invalidatedRefs`. שלוש הצורות נמדדו, וכולן החזירו
+ * `apply → {ok:true}` עם סמן מצויר והקלדה שנכנסת במקום הנכון:
+ *
+ * - טווח בתוך פסקה אחת;
+ * - טווח חוצה פסקאות בכיסוי חלקי (הפסקאות מתמזגות לבלוק ההתחלה);
+ * - טווח חוצה פסקאות שמכסה את שתיהן במלואן (בלוק ההתחלה שורד, ריק).
+ *
+ * ## למה בלי ניסיון חוזר
+ *
+ * להבדיל מההדבקה (`moveCaretAfterPaste`), היעד כאן אינו בלוק שזה עתה נוצר אלא
+ * בלוק שכבר היה במסמך, ולכן אין ממה להמתין: בשלוש הצורות שנמדדו ההחלה
+ * **מיד** אחרי שהמחיקה חזרה — בלי השהיה — עברה בניסיון הראשון.
+ */
+function caretAfterCut(target: SelectionTarget): SelectionTarget {
+  return collapsedTo(target, 'start');
 }
 
 /* ------------------------------------------------------------------ */
@@ -663,18 +724,9 @@ function caretAfterPaste(receipt: ClipboardInsertReceipt | undefined): Selection
   if (!Array.isArray(spans) || spans.length === 0) return null;
 
   const span = spans[spans.length - 1]?.selectionTarget;
-  const end = span?.end;
-  if (!span || !end) return null;
+  if (!span?.end) return null;
 
-  return {
-    kind: 'selection',
-    start: end,
-    end,
-    // ה-story נשמר: הדבקה בכותרת עליונה או בהערת שוליים אינה בגוף המסמך,
-    // ובחירה בלי הזהות הזאת הייתה מצביעה על בלוק אחר לגמרי.
-    ...(span.story ? { story: span.story } : {}),
-    ...(span.coordinateSpace ? { coordinateSpace: span.coordinateSpace } : {}),
-  };
+  return collapsedTo(span, 'end');
 }
 
 /** כמה ניסיונות חוזרים, ובאיזה מרווח, כשהבלוק החדש טרם אותר. ההנמקה למטה. */
@@ -711,23 +763,38 @@ async function moveCaretAfterPaste(
   const caret = caretAfterPaste(receipt);
   if (!caret) return;
 
+  await moveCaret(surface, caret, { what: 'לסוף ההדבקה', retries: CARET_RETRIES });
+}
+
+/**
+ * מחילה סמן על העורך החי, ומדווחת ללוג בלבד.
+ *
+ * `retries` הוא ההבדל בין שני הקוראים, ולא גחמה: אחרי הדבקה היעד עשוי להיות
+ * בלוק שזה עתה נוצר וטרם ניתן לאיתור (ההנמקה למעלה), ואחרי גזירה היעד הוא
+ * בלוק **שכבר היה שם** — ולכן ניסיון אחד (ההנמקה ב-`caretAfterCut`).
+ */
+async function moveCaret(
+  surface: SelectionSurface | undefined,
+  caret: SelectionTarget,
+  { what, retries }: { what: string; retries: number },
+): Promise<void> {
   const apply = surface?.apply;
   if (typeof apply !== 'function') return;
 
-  for (let attempt = 0; attempt <= CARET_RETRIES; attempt += 1) {
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
     if (attempt > 0) await wait(CARET_RETRY_MS);
 
     let result: { ok?: boolean; reason?: string } | undefined;
     try {
       result = await apply(caret);
     } catch (error) {
-      console.warn('[otzaria-word] הזזת הסמן לסוף ההדבקה נכשלה', error);
+      console.warn(`[otzaria-word] הזזת הסמן ${what} נכשלה`, error);
       return;
     }
 
     if (result?.ok !== false) return;
-    if (attempt === CARET_RETRIES) {
-      console.warn('[otzaria-word] הזזת הסמן לסוף ההדבקה נדחתה', result.reason);
+    if (attempt === retries) {
+      console.warn(`[otzaria-word] הזזת הסמן ${what} נדחתה`, result.reason);
     }
   }
 }

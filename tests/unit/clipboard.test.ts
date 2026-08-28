@@ -69,6 +69,16 @@ const CARET_AFTER_PASTE = {
   end: { kind: 'text', blockId: 'p9', offset: 9 },
 } as const;
 
+/**
+ * הסמן שאחרי „גזור”: תחילת הטווח שנגזר, מכווצת לנקודה. זה מה ש-`apply` אמור
+ * לקבל — וזה גם מה ש-Word עושה, הסמן נשאר במקום שממנו הטקסט נעלם.
+ */
+const CARET_AFTER_CUT = {
+  kind: 'selection',
+  start: { kind: 'text', blockId: 'p1', offset: 0 },
+  end: { kind: 'text', blockId: 'p1', offset: 0 },
+} as const;
+
 /** האם זה באמת `SelectionTarget`, ולא סתם אובייקט שהועבר הלאה. */
 function isSelectionTarget(value: unknown): boolean {
   const target = value as { kind?: string; start?: { kind?: string }; end?: { kind?: string } } | null;
@@ -682,6 +692,83 @@ describe('cutSelection', () => {
       expect(outcome.reason).toBe('threw');
       expect(outcome.message).toBe('הגזירה נכשלה: boom');
     }
+  });
+
+  it('הסמן חוזר לתחילת מה שנגזר', async () => {
+    // אחרי `doc.delete` המנוע נשאר בלי בחירה בכלל — נמדד מול המנוע האמיתי —
+    // וההקלדה הבאה אינה נכנסת לשום מקום. ההנמקה ב-`caretAfterCut`.
+    const { host } = fakeDoc();
+    const apply = vi.fn(() => ({ ok: true }));
+    host.ui = { selection: { getSnapshot: () => READY_SELECTION, apply } };
+    setSystemClipboard(workingClipboard().api);
+
+    const outcome = await cutSelection(host);
+
+    expect(outcome.ok).toBe(true);
+    expect(apply).toHaveBeenCalledTimes(1);
+    expect(apply).toHaveBeenCalledWith(CARET_AFTER_CUT);
+  });
+
+  it('גם כשלוח המערכת נחסם — הטקסט נגזר, ולכן הסמן חוזר', async () => {
+    const { host } = fakeDoc();
+    const apply = vi.fn(() => ({ ok: true }));
+    host.ui = { selection: { getSnapshot: () => READY_SELECTION, apply } };
+    setSystemClipboard(deniedClipboard());
+
+    const outcome = await cutSelection(host);
+
+    expect(outcome.ok).toBe(false);
+    expect(apply).toHaveBeenCalledWith(CARET_AFTER_CUT);
+  });
+
+  it('מחיקה שנכשלה אינה מזיזה את הסמן — אין מה לגזור, ואין לאן לחזור', async () => {
+    const { host } = fakeDoc({
+      delete: () => ({ success: false, failure: { code: 'DOCUMENT_READONLY' } }),
+    });
+    const apply = vi.fn(() => ({ ok: true }));
+    host.ui = { selection: { getSnapshot: () => READY_SELECTION, apply } };
+    setSystemClipboard(workingClipboard().api);
+
+    await cutSelection(host);
+
+    expect(apply).not.toHaveBeenCalled();
+  });
+
+  it('`apply` שנכשל סגור אינו הופך גזירה שהצליחה לכישלון, ואינו חוזר על עצמו', async () => {
+    // להבדיל מההדבקה: היעד כאן הוא בלוק שכבר היה במסמך, ולכן אין ממה להמתין.
+    const { host } = fakeDoc();
+    const apply = vi.fn(() => ({ ok: false, reason: 'target-unresolved' }));
+    host.ui = { selection: { getSnapshot: () => READY_SELECTION, apply } };
+    setSystemClipboard(workingClipboard().api);
+
+    const outcome = await cutSelection(host);
+
+    expect(outcome.ok).toBe(true);
+    expect(apply).toHaveBeenCalledTimes(1);
+  });
+
+  it('`apply` שזורק אינו מפיל את הגזירה', async () => {
+    const { host } = fakeDoc();
+    const apply = vi.fn(() => {
+      throw new Error('boom');
+    });
+    host.ui = { selection: { getSnapshot: () => READY_SELECTION, apply } };
+    setSystemClipboard(workingClipboard().api);
+
+    const outcome = await cutSelection(host);
+
+    expect(outcome.ok).toBe(true);
+  });
+
+  it('משטח בחירה בלי `apply` — הגזירה עדיין מצליחה', async () => {
+    const { host, calls } = fakeDoc();
+    host.ui = { selection: selectionSurface(READY_SELECTION) };
+    setSystemClipboard(workingClipboard().api);
+
+    const outcome = await cutSelection(host);
+
+    expect(outcome.ok).toBe(true);
+    expect(calls.map((call) => call.op)).toEqual(['clipboard.serializeSelection', 'delete']);
   });
 });
 
