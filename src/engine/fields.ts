@@ -52,8 +52,39 @@
  * מוצהרת בקטלוג הפעולות ככזאת שמחזירה כרגע `CAPABILITY_UNAVAILABLE`. אין
  * כאן מה לממש.
  *
- * `fields.remove` קיים, אבל ב-Word אין לו פקד ברצועה: מוחקים שדה כמו שמוחקים
- * טקסט. פונקציה בלי פקד היא קוד מת, ולכן היא אינה כאן.
+ * `fields.remove` אין לו פקד ברצועה — ב-Word מוחקים שדה כמו שמוחקים טקסט —
+ * אבל הוא **כן** נצרך כאן, פנימית בלבד: ראו „מניעת קינון” למטה.
+ *
+ * ## מניעת קינון של שדה בתוך שדה, ולמה הבדיקה היא „הכנס ובדוק” ולא „בדוק מראש”
+ *
+ * `fields.insert` מקבל `at: TextTarget` בלי לבדוק אם הוא נופל **בתוך** שדה
+ * קיים, ומכניס בשקט — שלא כמו `citations.insert`, שמסרב במצב הזה עם
+ * `CAPABILITY_UNAVAILABLE` („text-range-in-field”, מתועד ב-`docs/engine-gaps.md`).
+ * שלוש הכנסות רצופות באותה נקודה — בדיוק המסלול ש-hint התפריט „מספר עמוד”
+ * מנחה עליו לצירוף „עמוד X מתוך Y” — קיננו שדה בתוך **תוצאת** שדה אחר: נמדד
+ * ב-Chrome אמיתי, `PAGE` שהיה אמור לפתור ל-`"1"` פתר ל-`"28/08/202611"`.
+ *
+ * בדיקה **מראש** ("הסמן יושב על שדה?") הייתה הפתרון הנקי, אבל אין לה על מה
+ * להישען: `fields.list` אינו מקבל סינון לפי בלוק או טווח (`FieldListInput`
+ * הוא `type`/`limit`/`offset` בלבד — נבדק מול `fields.types.d.ts`), וכתובת
+ * שדה (`FieldAddress`) היא `blockId`/`occurrenceIndex`, לא היסט טקסט — אין
+ * דרך לדעת אילו תווים בבלוק שייכים לאיזה שדה. הדגל `nested` שה-`FieldDomain`
+ * חושף **גם הוא לא עוזר**: נמדד ישירות (Chrome, אותו תרחיש קינון) ששני
+ * השדות המקוננים חוזרים עם `nested: false` — הדגל תופס קינון של קוד שדה
+ * בתוך קוד שדה (למשל `{ IF { PAGE } = 1 ... }`), לא את הסוג הזה של קינון,
+ * שבו הכתובת החדשה נשתלת בתוך **הריצה של התוצאה המחושבת**.
+ *
+ * לכן הבדיקה כאן היא **אחרי** ההכנסה: תצלום של השדות הקיימים בבלוק
+ * (`instruction`+`resolvedText`, לפי `fieldId` יציב) לפני הקריאה ל-`insert`,
+ * ואותו תצלום שוב אחריה. שדה קיים שה-`resolvedText` או ה-`instruction` שלו
+ * השתנו כתוצאה מההכנסה — הוכחה שהיא נשתלה בתוכו, ולא לידו. במצב הזה השדה
+ * החדש **מוסר** (`fields.remove`, ולכן הוא כן נצרך) והפעולה מדווחת כסירוב
+ * מנומק בעברית, לא כהצלחה שקטה. משתמש שהסמן שלו כבר בתוך שדה מקבל הודעה
+ * שאומרת להזיז אותו — בדיוק מה ש-`citations.insert` נותן חינם מהמנוע.
+ *
+ * הבדיקה מדלגת (ולא בולמת) כשאין `fieldId` יציב על אף שדה בבלוק — גרסת מנוע
+ * ישנה בלי handle יציב אין דרך אמינה להשוות בינה לבין עצמה אחרי מוטציה, ועדיף
+ * לוותר על ההגנה מאשר לחסום הכנסה תקינה על בסיס ניחוש.
  */
 import type { SuperDoc } from 'superdoc';
 import type { CommandOutcome } from './command-adapter';
@@ -77,11 +108,17 @@ interface FieldReceipt extends DocReceipt {
   field?: unknown;
 }
 
-/** `FieldDomain` בחלק שנצרך כאן. `address` הוא מה ש-`rebuild` מקבל כ-`target`. */
+/**
+ * `FieldDomain` בחלק שנצרך כאן. `address` הוא מה ש-`rebuild`/`remove` מקבלים
+ * כ-`target`. `resolvedText` ו-`nested` נוספו לצורך גילוי הקינון — ראו הערת
+ * הפתיחה.
+ */
 interface FieldEntry {
   address?: unknown;
   instruction?: string;
   fieldType?: string;
+  resolvedText?: string;
+  nested?: boolean;
 }
 
 export interface FieldsDocumentApi extends SelectionDocumentApi {
@@ -97,8 +134,12 @@ export interface FieldsDocumentApi extends SelectionDocumentApi {
       mode: 'raw';
     }) => MaybePromise<FieldReceipt>;
     rebuild?: (input: { target: unknown }) => MaybePromise<DocReceipt>;
+    /** נצרך רק פנימית, לביטול שדה שהתגלה כמקונן. ראו הערת הפתיחה. */
+    remove?: (input: { target: unknown; mode: 'raw' }) => MaybePromise<DocReceipt>;
   };
 }
+
+type FieldsList = NonNullable<NonNullable<FieldsDocumentApi['fields']>['list']>;
 
 /** מה שנדרש מ-SuperDoc: רק הפאסדה של המסמך. ראו page-setup.ts. */
 export interface FieldsHost {
@@ -127,6 +168,13 @@ const REBUILD_FAILED = 'עדכון השדות נכשל';
  */
 const NO_TARGET_DETAIL = 'יש ללחוץ בגוף המסמך, על שורת טקסט שיש בה תו אחד לפחות, ואז להוסיף את השדה';
 const READ_FAILED = 'קריאת שדות המסמך נכשלה';
+/** ראו „מניעת קינון” בהערת הפתיחה: הבדיקה היא „הכנס ובדוק”, לא „בדוק מראש”. */
+const NESTED_FIELD_DETAIL =
+  'הסמן היה בתוך שדה קיים, וההכנסה הייתה נבלעת בתוכו. ההכנסה בוטלה — יש להזיז את הסמן אל מחוץ לשדה הקיים ולנסות שוב';
+
+/** גודל העמוד בכל שאיבה, ובלם מפני מנוע שיחזיר `total` שאינו יורד. */
+const PAGE_SIZE = 200;
+const PAGE_GUARD = 1000;
 
 function unavailable(failedAction: string, detail: string, reason: string): CommandOutcome {
   return { ok: false, message: `${failedAction}: ${detail}`, reason };
@@ -170,6 +218,111 @@ function docOf(host: FieldsTarget): FieldsDocumentApi | null {
   return (host as FieldsHost | null | undefined)?.activeEditor?.doc ?? null;
 }
 
+/**
+ * כל השדות שיש להם כתובת, בשאיבת עמודים עד `total`. `total` ולא
+ * `items.length`: `fields.list` הוא `DiscoveryOutput`, ו„עדכן שדות” שרץ על
+ * העמוד הראשון בלבד היה משאיר שדות לא מעודכנים במסמך גדול — ובלי שום סימן,
+ * כי הפעולה מדווחת הצלחה.
+ */
+async function collectAllFields(
+  failedAction: string,
+  list: FieldsList,
+): Promise<{ ok: true; items: FieldEntry[] } | { ok: false; outcome: CommandOutcome }> {
+  const items: FieldEntry[] = [];
+  let offset = 0;
+  let guard = 0;
+
+  for (;;) {
+    const listed = await attempt(failedAction, () => list({ limit: PAGE_SIZE, offset }));
+    if (!listed.ok) return { ok: false, outcome: listed.outcome };
+
+    const page = listed.value?.items ?? [];
+    items.push(...page);
+    if (page.length === 0) return { ok: true, items };
+
+    offset += page.length;
+    const total = listed.value?.total;
+    if (!Number.isFinite(total) || offset >= (total as number)) return { ok: true, items };
+    if (++guard > PAGE_GUARD) return { ok: true, items };
+  }
+}
+
+/**
+ * מפתח יציב לשדה, מ-`fieldId` (עם `storyId` להבחין בין stories). `null` כשאין
+ * `fieldId` — גרסת מנוע בלי handle יציב, ואין דרך אמינה להשוות כתובת כזאת בין
+ * שתי קריאות `list` נפרדות (`occurrenceIndex` זז עם כל מוטציה בבלוק).
+ */
+function fieldIdentity(address: unknown): string | null {
+  const addr = address as { fieldId?: unknown; storyId?: unknown } | null | undefined;
+  if (!addr || typeof addr !== 'object' || typeof addr.fieldId !== 'string' || addr.fieldId === '') {
+    return null;
+  }
+  return typeof addr.storyId === 'string' && addr.storyId !== ''
+    ? `${addr.storyId} ${addr.fieldId}`
+    : addr.fieldId;
+}
+
+function blockIdOf(address: unknown): string | null {
+  const blockId = (address as { blockId?: unknown } | null | undefined)?.blockId;
+  return typeof blockId === 'string' ? blockId : null;
+}
+
+/** תצלום השדות **הקיימים** בבלוק נתון, לפי `fieldId`. `null` = כשל קריאה, לא נבלם ההכנסה בגללו. */
+async function snapshotFieldsIn(
+  list: FieldsList,
+  blockId: string,
+): Promise<Map<string, { instruction?: string; resolvedText?: string }> | null> {
+  const collected = await collectAllFields(READ_FAILED, list);
+  if (!collected.ok) return null;
+
+  const snapshot = new Map<string, { instruction?: string; resolvedText?: string }>();
+  for (const entry of collected.items) {
+    if (blockIdOf(entry.address) !== blockId) continue;
+    const key = fieldIdentity(entry.address);
+    if (key === null) continue;
+    snapshot.set(key, { instruction: entry.instruction, resolvedText: entry.resolvedText });
+  }
+  return snapshot;
+}
+
+/**
+ * בודקת אם ההכנסה שזה עתה בוצעה קיננה בתוך שדה קיים, ומבטלת אותה אם כן.
+ *
+ * ההשוואה היא מול `before`, תצלום שנלקח **לפני** הקריאה ל-`insert`. שדה
+ * קיים ש-`instruction` או `resolvedText` שלו השתנו — מי שהוא לא, בהגדרה, לא
+ * אמור היה להשתנות מהכנסת שדה **אחר** — הוא ההוכחה לקינון. ראו הערת הפתיחה.
+ */
+async function undoIfNested(
+  doc: FieldsDocumentApi,
+  list: FieldsList,
+  blockId: string,
+  before: Map<string, { instruction?: string; resolvedText?: string }>,
+  newField: unknown,
+  failedAction: string,
+): Promise<CommandOutcome | null> {
+  const after = await snapshotFieldsIn(list, blockId);
+  if (after === null) return null;
+
+  let corrupted = false;
+  for (const [key, was] of before) {
+    const now = after.get(key);
+    if (!now || now.instruction !== was.instruction || now.resolvedText !== was.resolvedText) {
+      corrupted = true;
+      break;
+    }
+  }
+  if (!corrupted) return null;
+
+  const remove = doc.fields?.remove;
+  if (typeof remove === 'function' && newField !== undefined && newField !== null) {
+    // כשל הביטול אינו הופך את הסירוב לשקט: השדה שקינן נכתב בכל מקרה, וההודעה
+    // חייבת לומר זאת — גם אם הניקוי עצמו לא הצליח.
+    await attempt(failedAction, () => remove({ target: newField, mode: 'raw' }));
+  }
+
+  return unavailable(failedAction, NESTED_FIELD_DETAIL, 'field-in-field');
+}
+
 /* ------------------------------------------------------------------ */
 /* הכנסת שדה                                                           */
 /* ------------------------------------------------------------------ */
@@ -198,6 +351,15 @@ async function insertField(host: FieldsTarget, kind: FieldKind): Promise<Command
     return unavailable(failedAction, NO_TARGET_DETAIL, 'no-selection');
   }
 
+  // תצלום השדות שכבר בבלוק, **לפני** ההכנסה — הבסיס להשוואה שמגלה קינון.
+  // ראו „מניעת קינון” בהערת הפתיחה. `blockId === null` לא אמור לקרות כאן
+  // (`selection.target` דורש קטע עם `blockId`), אבל הבדיקה מדלגת ולא זורקת.
+  const list = doc.fields?.list;
+  const before =
+    typeof list === 'function' && selection.blockId !== null
+      ? await snapshotFieldsIn(list, selection.blockId)
+      : null;
+
   const inserted = await attempt(failedAction, () =>
     insert({ at: selection.target, instruction: FIELD_INSTRUCTIONS[kind], mode: 'raw' }),
   );
@@ -206,9 +368,16 @@ async function insertField(host: FieldsTarget, kind: FieldKind): Promise<Command
   const failure = failureOf(failedAction, inserted.value);
   if (failure) return failure;
 
+  const newField = inserted.value?.field;
+
+  if (before && before.size > 0 && list && selection.blockId !== null) {
+    const nested = await undoIfNested(doc, list, selection.blockId, before, newField, failedAction);
+    if (nested) return nested;
+  }
+
   // השדה נכנס עם תוצאה ריקה, וה-rebuild הוא שמחשב אותה. בלעדיו המשתמש רואה
   // מקום ריק ולא „3”, ואין לו שום רמז שצריך ללחוץ על „עדכן שדות”.
-  return rebuildInsertedField(doc, inserted.value?.field, failedAction);
+  return rebuildInsertedField(doc, newField, failedAction);
 }
 
 /**
@@ -279,12 +448,38 @@ export async function readFieldsState(host: FieldsTarget): Promise<FieldsState> 
   return { count: Array.isArray(items) ? items.length : 0 };
 }
 
+/** מה שמוחזר כשלא כל השדות התעדכנו. ראו `rebuildAllFields`. */
+function partialRebuildOutcome(succeeded: number, failed: number): CommandOutcome {
+  const succeededText =
+    succeeded === 0 ? 'אף שדה לא עודכן' : succeeded === 1 ? 'שדה אחד עודכן' : `${succeeded} שדות עודכנו`;
+  const failedText = failed === 1 ? 'שדה אחד נכשל ולא עודכן' : `${failed} שדות נכשלו ולא עודכנו`;
+  return {
+    ok: false,
+    message: `עדכון השדות לא הושלם: ${succeededText}, ו${failedText}`,
+    reason: 'partial-rebuild',
+  };
+}
+
 /**
  * „עדכן שדות” — מחשבת מחדש כל שדה במסמך, כמו F9 על מסמך שכולו מסומן.
  *
- * העצירה בכשל הראשון מכוונת: `rebuild` נכשל על תנאי מסמך (מסמך נעול, שדה
- * שאינו נתמך), וכשל כזה יחזור על עצמו בכל שדה — רצף של אותה הודעה עשרים פעם
- * אינו מוסיף מידע.
+ * **לא** עוצרת בכשל הראשון, ו**מרעננת** את הרשימה אחרי כל כשל — שני שינויים
+ * ששרשרת אחת אליה. שדה מקונן (ראו „מניעת קינון” בהערת הפתיחה, ומסמכים שהגיעו
+ * כבר מקוננים מ-Word או מגרסה קודמת) גורם ל-`rebuild` על השדה שקינן בתוכו
+ * **לשחזר/להסיר** את המבנה השגוי — ומי שנמדד: אחרי `rebuild` כזה מספר השדות
+ * במסמך יורד (5→3), כלומר כתובות ששאבנו **לפני** אותה מוטציה עלולות
+ * להצביע על מה שכבר אינו קיים.
+ *
+ * הגרסה הקודמת שאבה את כל הכתובות **פעם אחת** ומיטטה אחת-אחת, ועצרה בכשל
+ * הראשון (`TARGET_NOT_FOUND` על כתובת שהתיישנה) — כלומר כל שדה **אחרי** זה
+ * במסמך נשאר לא-מעודכן, בלי שום סימן חוץ מהודעת הכשל היחידה. שדה בודד שנכשל
+ * אינו סיבה לא לעדכן את שאר המסמך.
+ *
+ * לכן כאן: כל שדה מנוסה **פעם אחת** (`attempted`, לפי `fieldIdentity` —
+ * וכשאין `fieldId` יציב, לפי הכתובת עצמה), הכשל שלו נספר ולא עוצר את הלולאה,
+ * ואחרי **כל** כשל נשאבת רשימה טרייה לפני שממשיכים — כך ששאר השדות מטופלים
+ * על סמך מבנה עדכני, לא על סמך תצלום שאולי כבר לא נכון. בסוף מדווח כמה
+ * הצליחו וכמה נכשלו; `ok:true` רק כשכולם הצליחו.
  *
  * מסמך בלי שדות מחזיר הצלחה שקטה: המשתמש ביקש שכל השדות יהיו מעודכנים, וכולם
  * מעודכנים. אין כאן כשל שיש לדווח עליו.
@@ -297,40 +492,50 @@ export async function rebuildAllFields(host: FieldsTarget): Promise<CommandOutco
   const rebuild = doc.fields?.rebuild;
   if (typeof list !== 'function' || typeof rebuild !== 'function') return unsupported(REBUILD_FAILED);
 
-  // `list()` מחזיר **עמוד** ולא את כל המסמך: `items` נשלט ב-`limit`/`offset`,
-  // ו-`total` הוא המספר האמיתי. „עדכן שדות” שרץ על העמוד הראשון בלבד היה
-  // משאיר שדות לא מעודכנים במסמך גדול — ובלי שום סימן, כי הפעולה מדווחת
-  // הצלחה. לכן נשאבים עמודים עד שנספרו `total` שדות.
-  //
-  // `PAGE_SIZE` מפורש ולא ברירת המחדל של המנוע: בלעדיו אין דרך לדעת בכמה
-  // להתקדם. `guard` הוא בלם מפני מנוע שיחזיר `total` שאינו יורד לעולם —
-  // לולאה אינסופית בלחיצת כפתור היא תקלה גרועה יותר משדה שלא עודכן.
-  const PAGE_SIZE = 200;
-  let offset = 0;
+  const attempted = new Set<string>();
+  let succeeded = 0;
+  let failed = 0;
+  let pending: FieldEntry[] = [];
+  let needsFreshList = true;
   let guard = 0;
 
   for (;;) {
-    const listed = await attempt(REBUILD_FAILED, () => list({ limit: PAGE_SIZE, offset }));
-    if (!listed.ok) return listed.outcome;
+    if (needsFreshList) {
+      const collected = await collectAllFields(REBUILD_FAILED, list);
+      if (!collected.ok) {
+        // כשל הקריאה עצמה: אם עוד לא הצלחנו/נכשלנו באף שדה זו הודעת הכשל
+        // היחידה שיש; אחרת יש כבר תוצאה חלקית לדווח עליה, ועדיף עליה.
+        if (succeeded === 0 && failed === 0) return collected.outcome;
+        break;
+      }
 
-    const items = listed.value?.items ?? [];
-    if (items.length === 0) return { ok: true };
-
-    for (const entry of items) {
-      // שדה בלי כתובת אינו יעד חוקי ל-`rebuild`, ושליחתו הייתה חריגת
-      // `INVALID_INPUT` על שדה שאיש לא ביקש במיוחד.
-      if (entry.address === undefined || entry.address === null) continue;
-
-      const rebuilt = await attempt(REBUILD_FAILED, () => rebuild({ target: entry.address }));
-      if (!rebuilt.ok) return rebuilt.outcome;
-      const failure = failureOf(REBUILD_FAILED, rebuilt.value);
-      if (failure) return failure;
+      pending = collected.items.filter((entry) => {
+        // שדה בלי כתובת אינו יעד חוקי ל-`rebuild`, ושליחתו הייתה חריגת
+        // `INVALID_INPUT` על שדה שאיש לא ביקש במיוחד.
+        if (entry.address === undefined || entry.address === null) return false;
+        return !attempted.has(fieldIdentity(entry.address) ?? JSON.stringify(entry.address));
+      });
+      needsFreshList = false;
     }
 
-    offset += items.length;
+    const entry = pending.shift();
+    if (!entry) break; // רשימה טרייה בלי אף שדה חדש — הכול נוסה, סיימנו.
 
-    const total = listed.value?.total;
-    if (!Number.isFinite(total) || offset >= (total as number)) return { ok: true };
-    if (++guard > 1000) return { ok: true };
+    attempted.add(fieldIdentity(entry.address) ?? JSON.stringify(entry.address));
+
+    const rebuilt = await attempt(REBUILD_FAILED, () => rebuild({ target: entry.address }));
+    const failure = rebuilt.ok ? failureOf(REBUILD_FAILED, rebuilt.value) : rebuilt.outcome;
+    if (failure) {
+      failed++;
+      // כתובת שנכשלה עשויה לסמן שהמבנה השתנה (בדיוק המצב שתועד למעלה) —
+      // שאר הכתובות שכבר נשאבו עלולות להיות מיושנות גם הן.
+      needsFreshList = true;
+    } else {
+      succeeded++;
+    }
+
+    if (++guard > PAGE_GUARD) break;
   }
+
+  return failed === 0 ? { ok: true } : partialRebuildOutcome(succeeded, failed);
 }

@@ -29,13 +29,31 @@ interface Call {
   input?: unknown;
 }
 
+interface RawField {
+  address?: unknown;
+  instruction?: string;
+  resolvedText?: string;
+}
+
 interface FakeOptions {
   /** מה `fields.list` מחזיר כ-`items` — עמוד, לא בהכרח כל המסמך. */
-  fields?: readonly { address?: unknown; instruction?: string }[];
+  fields?: readonly RawField[];
+  /**
+   * כמו `fields`, אבל **מתחלף** בין קריאה מלאה אחת (עמוד/עמודים, `offset:0`
+   * עד סיום) לשנייה — כדי לבדוק ש`rebuildAllFields` שואב רשימה טרייה אחרי
+   * כשל, ולא מסתמך על התצלום הראשון. הקריאה המלאה ה-N-ית (`offset:0`)
+   * מקדמת לאיבר ה-N ברשימה; אחרי הסוף היא נשארת על האחרון. גובר על `fields`.
+   */
+  fieldsSequence?: readonly (readonly RawField[])[];
   /** `total` של `DiscoveryOutput`. `undefined` = גרסה שאינה חושפת אותו. */
   total?: number;
-  /** קבלה שנכשלת, לפי שם הפעולה. */
+  /** קבלה שנכשלת, לפי שם הפעולה — לכל קריאה לאותה פעולה. */
   failures?: Record<string, { code: string; message?: string }>;
+  /**
+   * `fields.rebuild` נכשל (`TARGET_NOT_FOUND`) כשה-`fieldId` של ה-`target`
+   * ברשימה הזאת — לבדיקת „ממשיך לשאר ומדווח נכון” בלי להפיל את כל הפעולות.
+   */
+  rebuildFailFieldIds?: readonly string[];
   /** פעולות שזורקות. */
   throws?: readonly string[];
   /** מסלולים שאינם קיימים בפאסדה — גרסת מנוע שאין לה את היכולת. */
@@ -51,6 +69,7 @@ function fakeEngine(options: FakeOptions = {}) {
   const missing = new Set(options.missing ?? []);
   const throwing = new Set(options.throws ?? []);
   const failures = options.failures ?? {};
+  const rebuildFailFieldIds = new Set(options.rebuildFailFieldIds ?? []);
 
   function route<T>(op: string, impl: (input: unknown) => T): ((input: unknown) => T) | undefined {
     if (missing.has(op)) return undefined;
@@ -70,6 +89,10 @@ function fakeEngine(options: FakeOptions = {}) {
     segments: blockId ? [{ blockId, range: { start: 3, end: 3 } }] : [],
   };
 
+  // אינדקס ה„דור” הנוכחי של `fieldsSequence`: מתקדם בכל קריאה עם `offset:0`,
+  // ונשאר על האחרון אחרי הסוף. `fields` הרגיל הוא דור יחיד קבוע.
+  let generation = -1;
+
   const doc = {
     selection: {
       current: route('selection.current', () => ({ empty: true, target: selectionTarget })),
@@ -79,9 +102,17 @@ function fakeEngine(options: FakeOptions = {}) {
       // `DiscoveryOutput`, ו„עדכן שדות” שואב ממנו עמוד אחר עמוד. כפיל שמתעלם
       // מהעמוד היה מאשר בירוק גם מימוש שרץ על העמוד הראשון בלבד.
       list: route('fields.list', (input) => {
-        const all = options.fields ?? [];
         const query = (input ?? {}) as { limit?: number; offset?: number };
         const offset = query.offset ?? 0;
+
+        let all: readonly RawField[];
+        if (options.fieldsSequence) {
+          if (offset === 0) generation = Math.min(generation + 1, options.fieldsSequence.length - 1);
+          all = options.fieldsSequence[Math.max(generation, 0)] ?? [];
+        } else {
+          all = options.fields ?? [];
+        }
+
         const end = query.limit === undefined ? undefined : offset + query.limit;
         return {
           items: all.slice(offset, end),
@@ -97,7 +128,14 @@ function fakeEngine(options: FakeOptions = {}) {
             : options.insertedField;
         return field === null ? result : { ...result, field };
       }),
-      rebuild: route('fields.rebuild', () => receipt('fields.rebuild')),
+      rebuild: route('fields.rebuild', (input) => {
+        const target = (input as { target?: { fieldId?: string } } | undefined)?.target;
+        if (target && typeof target.fieldId === 'string' && rebuildFailFieldIds.has(target.fieldId)) {
+          return { success: false, failure: { code: 'TARGET_NOT_FOUND' } };
+        }
+        return receipt('fields.rebuild');
+      }),
+      remove: route('fields.remove', () => receipt('fields.remove')),
     },
   };
 
@@ -230,6 +268,88 @@ describe('הכנסת שדה', () => {
   });
 });
 
+describe('מניעת קינון — הכנסה על סמן שכבר בתוך שדה', () => {
+  /**
+   * זה בדיוק תרחיש הבאג שנמדד: `PAGE` שהיה אמור לפתור ל-`"1"` פתר
+   * ל-`"28/08/202611"` אחרי שהוכנס עליו שדה נוסף באותה נקודה. הכפיל מדמה
+   * זאת ב-`fieldsSequence`: התצלום „לפני” מראה שדה יחיד תקין, והתצלום
+   * „אחרי” (אחרי ה-`insert`) מראה את אותו `fieldId` עם `resolvedText` שונה —
+   * ההוכחה לקינון.
+   */
+  it('שדה קיים שה-`resolvedText` שלו השתנה בעקבות ההכנסה: ההכנסה מבוטלת ומדווחת כסירוב', async () => {
+    const existing = { fieldId: 'f1', blockId: 'block-1', occurrenceIndex: 0, nestingDepth: 0 };
+    const inserted = { fieldId: 'f2', blockId: 'block-1', occurrenceIndex: 1, nestingDepth: 0 };
+    const engine = fakeEngine({
+      fieldsSequence: [
+        [{ address: existing, instruction: 'PAGE', resolvedText: '1' }],
+        [
+          // אחרי ההכנסה: השדה הקיים נשתל בתוכו והתוצאה שלו התלכלכה.
+          { address: existing, instruction: 'PAGE', resolvedText: '11' },
+          { address: inserted, instruction: 'NUMPAGES', resolvedText: '' },
+        ],
+      ],
+      insertedField: inserted,
+    });
+
+    expect(await insertPageCount(engine.host)).toEqual({
+      ok: false,
+      message:
+        'הוספת מספר העמודים נכשלה: הסמן היה בתוך שדה קיים, וההכנסה הייתה נבלעת בתוכו. ' +
+        'ההכנסה בוטלה — יש להזיז את הסמן אל מחוץ לשדה הקיים ולנסות שוב',
+      reason: 'field-in-field',
+    });
+
+    // השדה שקינן מוסר, וה-rebuild של „מספר העמודים” החדש לא נקרא — הוא בוטל.
+    expect(engine.inputs('fields.remove')).toEqual([{ target: inserted, mode: 'raw' }]);
+    expect(engine.ops()).not.toContain('fields.rebuild');
+  });
+
+  it('שדה קיים באותו בלוק שלא נגעו בו: לא מדווח קינון (ושינוי ב**בלוק אחר** מתעלם ממנו)', async () => {
+    const sibling = { fieldId: 'f1', blockId: 'block-1', occurrenceIndex: 0, nestingDepth: 0 };
+    const inserted = { fieldId: 'f2', blockId: 'block-1', occurrenceIndex: 1, nestingDepth: 0 };
+    const elsewhere = { fieldId: 'fX', blockId: 'block-9', occurrenceIndex: 0, nestingDepth: 0 };
+    const engine = fakeEngine({
+      fieldsSequence: [
+        [
+          { address: sibling, instruction: 'DATE \\@ "dd/MM/yyyy"', resolvedText: '28/08/2026' },
+          { address: elsewhere, instruction: 'PAGE', resolvedText: '3' },
+        ],
+        [
+          // ה-sibling נשאר בדיוק כפי שהיה — ההכנסה לא נגעה בו. `elsewhere`
+          // דווקא כן השתנה, אבל הוא בבלוק אחר, ולכן אינו אמור להיספר.
+          { address: sibling, instruction: 'DATE \\@ "dd/MM/yyyy"', resolvedText: '28/08/2026' },
+          { address: inserted, instruction: 'NUMPAGES', resolvedText: '' },
+          { address: elsewhere, instruction: 'PAGE', resolvedText: '4' },
+        ],
+      ],
+      insertedField: inserted,
+    });
+
+    expect(await insertPageCount(engine.host)).toEqual({ ok: true });
+    expect(engine.ops()).not.toContain('fields.remove');
+  });
+
+  it('אין שדות קודמים בבלוק: אין קריאה שנייה ל-`fields.list` (מסלול מהיר)', async () => {
+    const engine = fakeEngine({ fields: [] });
+
+    expect(await insertDate(engine.host)).toEqual({ ok: true });
+    // תצלום „לפני” יצא (רשימה ריקה), אבל בלי שדות קיימים אין מה להשוות אליו
+    // אחרי ההכנסה — קריאה שנייה הייתה בזבוז על הפקד הכי נפוץ.
+    expect(engine.inputs('fields.list')).toHaveLength(1);
+  });
+
+  it('שדה קיים בלי `fieldId` יציב: ההגנה מדלגת ואינה חוסמת הכנסה תקינה', async () => {
+    // גרסת מנוע בלי handle יציב — אין דרך אמינה להשוות, ועדיף לוותר על ההגנה
+    // מאשר לחסום הכנסה על בסיס ניחוש. ראו הערת הפתיחה של fields.ts.
+    const engine = fakeEngine({
+      fields: [{ address: { blockId: 'block-1', occurrenceIndex: 0 }, instruction: 'DATE', resolvedText: '28/08/2026' }],
+    });
+
+    expect(await insertPageNumber(engine.host)).toEqual({ ok: true });
+    expect(engine.ops()).not.toContain('fields.remove');
+  });
+});
+
 describe('rebuildAllFields', () => {
   it('מחשבת מחדש כל שדה שיש לו כתובת, ומדלגת על שדה בלעדיה', async () => {
     const engine = fakeEngine({
@@ -263,18 +383,55 @@ describe('rebuildAllFields', () => {
     expect(await rebuildAllFields(engine.host)).toEqual({ ok: true });
   });
 
-  it('כשל עוצר בשדה הראשון ואינו חוזר על אותה הודעה', async () => {
+  it('כשל **אינו** עוצר את השאר: כל שדה ננסה, והתוצאה מדווחת כמה הצליחו וכמה נכשלו', async () => {
+    // שני השדות נכשלים כאן (הכפיל מכשיל כל קריאה ל-`fields.rebuild`), אבל
+    // שניהם **נוסו** — לא רק הראשון. זה ההפך המדויק מהבאג שנמדד: „עדכן שדות”
+    // שעצר על הכשל הראשון והשאיר את כל מה שאחריו לא מעודכן, בלי שום סימן.
     const engine = fakeEngine({
-      fields: [{ address: { kind: 'field', blockId: 'b1' } }, { address: { kind: 'field', blockId: 'b2' } }],
+      fields: [
+        { address: { fieldId: 'a', blockId: 'b1', occurrenceIndex: 0, nestingDepth: 0 } },
+        { address: { fieldId: 'b', blockId: 'b2', occurrenceIndex: 0, nestingDepth: 0 } },
+      ],
       failures: { 'fields.rebuild': { code: 'PRECONDITION_FAILED' } },
     });
 
     expect(await rebuildAllFields(engine.host)).toEqual({
       ok: false,
-      message: 'עדכון השדות נכשל: המסמך אינו במצב שמאפשר את הפעולה',
-      reason: 'PRECONDITION_FAILED',
+      message: 'עדכון השדות לא הושלם: אף שדה לא עודכן, ו2 שדות נכשלו ולא עודכנו',
+      reason: 'partial-rebuild',
     });
-    expect(engine.inputs('fields.rebuild')).toHaveLength(1);
+    expect(engine.inputs('fields.rebuild')).toHaveLength(2);
+  });
+
+  /**
+   * זה בדיוק מה שנמדד בדפדפן: `rebuild` על שדה שקינן משקם/מסיר את המבנה
+   * השגוי, וכתובת של שדה **אחר** שנשאבה **לפני** אותה מוטציה עלולה להתיישן.
+   * הכפיל מדמה זאת: `fields.rebuild` נכשל עבור `fieldId: 'b'` (כאילו הכתובת
+   * שלו התיישנה), וברענון שאחרי הכשל השדה השלישי (`c`) מופיע לראשונה —
+   * ובכל זאת מתעדכן, כי הלולאה לא עצרה ולא הסתמכה על התצלום הישן.
+   */
+  it('אחרי כשל: הרשימה מתרעננת, ושדה שמתגלה רק ברענון עדיין מתעדכן', async () => {
+    const a = { fieldId: 'a', blockId: 'b1', occurrenceIndex: 0, nestingDepth: 0 };
+    const b = { fieldId: 'b', blockId: 'b1', occurrenceIndex: 1, nestingDepth: 0 };
+    const c = { fieldId: 'c', blockId: 'b2', occurrenceIndex: 0, nestingDepth: 0 };
+    const engine = fakeEngine({
+      fieldsSequence: [
+        [{ address: a }, { address: b }],
+        // אחרי הכשל על `b`: `a` כבר נוסה (מדולג), `b` עדיין שם (ייכשל שוב —
+        // לא נוסה בשנית), ו-`c` מתגלה לראשונה.
+        [{ address: a }, { address: b }, { address: c }],
+      ],
+      rebuildFailFieldIds: ['b'],
+    });
+
+    expect(await rebuildAllFields(engine.host)).toEqual({
+      ok: false,
+      message: 'עדכון השדות לא הושלם: 2 שדות עודכנו, ושדה אחד נכשל ולא עודכן',
+      reason: 'partial-rebuild',
+    });
+    expect(engine.inputs('fields.rebuild')).toEqual([{ target: a }, { target: b }, { target: c }]);
+    // רשימה טרייה נשאבה רק אחרי הכשל על `b`, לא אחרי כל שדה.
+    expect(engine.inputs('fields.list')).toHaveLength(2);
   });
 
   it('`fields.rebuild` חסר בפאסדה: „אינו זמין בגרסה זו”', async () => {
