@@ -49,11 +49,13 @@ import {
   COMMAND_ADAPTER,
   COMMAND_REPORTER,
   FONT_OPTIONS,
+  READOUT_SELECTION,
   STYLE_GALLERY,
 } from '../../src/composables/keys';
 import { ACTIVE_SUPERDOC } from '../../src/engine/document-api';
 import { fallbackFontOptions, type FontOptions } from '../../src/engine/font-options';
 import { fallbackStyleGallery, type StyleGalleryState } from '../../src/engine/style-gallery';
+import type { ReadoutSelection } from '../../src/engine/readout-hold';
 import { checkPayload, commandDescriptor } from '../support/superdoc-engine';
 
 /* ------------------------------------------------------------------ */
@@ -1183,8 +1185,16 @@ export interface HarnessOptions {
   superdoc?: SuperdocDouble | null;
   fontOptions?: FontOptions;
   styleGallery?: StyleGalleryState;
+  /**
+   * מצב הבחירה שהחזקת החיווי נשענת עליו. ברירת המחדל היא סמן שהתיישב —
+   * המצב שרצועה במסמך פתוח נמצאת בו רוב הזמן. ראו engine/readout-hold.ts.
+   */
+  readoutSelection?: ReadoutSelection;
   props?: Record<string, unknown>;
 }
+
+/** סמן במסמך, קריאה שהתיישבה. */
+export const SETTLED_CARET: ReadoutSelection = { empty: true, settled: true };
 
 export interface Harness {
   wrapper: VueWrapper;
@@ -1196,6 +1206,10 @@ export interface Harness {
   failures(): ReportedOutcome[];
   /** מחליפה את המסמך הפעיל, כמו פתיחת מסמך חדש במעטפת. */
   setSuperdoc(next: SuperdocDouble | null): Promise<void>;
+  /** מחליפה את האדפטר, כמו החלפת session — מאפסת את זיכרון החיווי. */
+  setAdapter(next: CommandDouble | null): Promise<void>;
+  /** מזיזה את הבחירה: סמן/טווח, התיישבה או לא. */
+  setReadoutSelection(next: ReadoutSelection): Promise<void>;
 }
 
 /**
@@ -1224,6 +1238,10 @@ export function mountUi(component: Component, options: HarnessOptions = {}): Har
     options.styleGallery ?? fallbackStyleGallery(),
   );
   provide[ACTIVE_SUPERDOC as unknown as symbol] = superdocRef;
+  const readoutSelectionRef = shallowRef<ReadoutSelection>(
+    options.readoutSelection ?? SETTLED_CARET,
+  );
+  provide[READOUT_SELECTION as unknown as symbol] = readoutSelectionRef;
 
   const wrapper = mount(component, {
     props: options.props,
@@ -1240,6 +1258,14 @@ export function mountUi(component: Component, options: HarnessOptions = {}): Har
     failures: () => reports.filter((report) => !report.outcome.ok),
     async setSuperdoc(next) {
       superdocRef.value = next ? next.host : null;
+      await settle();
+    },
+    async setAdapter(next) {
+      adapterRef.value = next;
+      await settle();
+    },
+    async setReadoutSelection(next) {
+      readoutSelectionRef.value = next;
       await settle();
     },
   };

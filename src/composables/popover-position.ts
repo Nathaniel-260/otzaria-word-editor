@@ -70,6 +70,17 @@ export interface PlacementOptions {
   rtl?: boolean;
   gap?: number;
   margin?: number;
+  /**
+   * היישור האופקי ביחס לכפתור.
+   *
+   * `'start'` — קצה ההתחלה של הכפתור, וזה מה שתפריט או פלטה שנפתחים ממנו
+   * עושים: הם רחבים ממנו, והקצה המשותף הוא מה שקושר ביניהם.
+   *
+   * `'center'` — מרכז מול מרכז, וזה מה שטולטיפ צריך: הוא לרוב *צר* מהמרווח
+   * שהוא מכסה ואינו נפתח מהכפתור אלא מסביר אותו, ולכן יישור לקצה היה מסיט
+   * אותו הצדה מהאייקון שאליו הוא מתייחס.
+   */
+  align?: 'start' | 'center';
 }
 
 function clamp(value: number, low: number, high: number): number {
@@ -106,7 +117,15 @@ export function popoverPlacement(
 
   // ההצמדה היא לקצה ההתחלה של הכפתור: בעברית הימני, ובלטינית השמאלי. פופאובר
   // רחב מהכפתור ליד קצה החלון היה יוצא ממנו, ולכן ההצמדה נכנעת לחלון.
-  const wantedLeft = options.rtl ? anchor.right - size.width : anchor.left;
+  //
+  // ביישור למרכז הכיווניות אינה משנה — מרכז הוא מרכז — ולכן `rtl` אינו נבדק
+  // שם, וההיכנעות לחלון היא אותה היכנעות.
+  const wantedLeft =
+    options.align === 'center'
+      ? (anchor.left + anchor.right) / 2 - size.width / 2
+      : options.rtl
+        ? anchor.right - size.width
+        : anchor.left;
   const left = clamp(wantedLeft, margin, Math.max(margin, viewport.width - margin - size.width));
 
   return { top, left, maxHeight, side };

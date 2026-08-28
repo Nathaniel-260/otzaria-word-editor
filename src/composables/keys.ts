@@ -9,6 +9,7 @@ import type { InjectionKey, Ref } from 'vue';
 import type { CommandAdapter, CommandOutcome } from '../engine/command-adapter';
 import type { FontOptions } from '../engine/font-options';
 import type { StyleGalleryState } from '../engine/style-gallery';
+import type { ReadoutSelection } from '../engine/readout-hold';
 
 /** האדפטר של ה-session הפעיל. `null` עד שיש מסמך פתוח. */
 export const COMMAND_ADAPTER: InjectionKey<Ref<CommandAdapter | null>> = Symbol('commandAdapter');
@@ -41,3 +42,14 @@ export const FONT_OPTIONS: InjectionKey<Ref<FontOptions>> = Symbol('fontOptions'
  * מתי להירשם ומתי לשחרר. הקומפוננטה רואה מצב קריא בלבד.
  */
 export const STYLE_GALLERY: InjectionKey<Ref<StyleGalleryState>> = Symbol('styleGallery');
+
+/**
+ * מצב הבחירה כפי שהחזקת החיווי צריכה אותו (`ui.selection` דרך
+ * engine/readout-hold.ts).
+ *
+ * מפתח נפרד ולא הרחבה של `COMMAND_ADAPTER`, מאותו טעם צר כמו שני המפתחות
+ * שמעליו: האדפטר הוא „הרץ פקודה, ותן לי את מצבה”, והבחירה היא עובדה על
+ * המסמך שכל הפקדים חולקים. הזרקה אחת ולא מנוי לכל פקד — 38 מנויים ל-
+ * `ui.selection` על אותו slice היו 38 עותקים של אותה תשובה.
+ */
+export const READOUT_SELECTION: InjectionKey<Ref<ReadoutSelection>> = Symbol('readoutSelection');

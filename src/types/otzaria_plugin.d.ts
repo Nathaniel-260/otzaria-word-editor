@@ -97,11 +97,15 @@ export interface ColorScheme {
 }
 
 export interface Typography {
+  /** גופן הקריאה — לטקסט הספר/המסמך בלבד. אסור להחיל על הממשק. */
   fontFamily: string;
   fontSize: number;
   lineHeight: number;
   commentatorsFontFamily: string;
   commentatorsFontSize: number;
+  /** גופן הממשק — כפתורים, תפריטים, שדות. נשאר חד בגדלים קטנים.
+   *  קיים מ-0.9.97; במארח ישן חסר — שמרו fallback ב-CSS. */
+  uiFontFamily?: string;
 }
 
 export interface ThemePayload {
@@ -430,6 +434,37 @@ export interface GetLinksResult {
   links: BookLink[];
   /** `true` כשהתשובה נחתכה בתקרת 2,000 הרשומות. */
   truncated: boolean;
+}
+
+/**
+ * קישור יחיד בחמשת המפתחות של פורמט `links.json`, כפי שמוחזר מ-
+ * `library.getRawLinks`.
+ *
+ * ⚠️ בניגוד לשאר ה-SDK, `line_index_1`/`line_index_2` הם **1-based** — זו
+ * מוסכמת הפורמט. גם שגיאת הכתיב ב-`Conection Type` היא חלק ממנו.
+ *
+ * `start`/`end` מופיעים רק בספרים שהקישורים שלהם נקראים מקובץ ולא מהמסד.
+ */
+export interface RawBookLink {
+  heRef_2: string;
+  line_index_1: number;
+  path_2: string;
+  line_index_2: number;
+  'Conection Type': string;
+  start?: number;
+  end?: number;
+}
+
+export interface GetRawLinksResult {
+  links: RawBookLink[];
+  /** `true` כשהתשובה נחתכה בתקרת 10,000 הרשומות. */
+  truncated: boolean;
+  /**
+   * הטווח שנסרק בפועל (0-based, כולל). `endLine` הוא נקודת המשך תקפה רק
+   * כש-`truncated` הוא `false`.
+   */
+  startLine: number;
+  endLine: number;
 }
 
 export interface LinkTargetSummary {
@@ -952,7 +987,7 @@ export interface ContextMenuColor {
   /** Safe CSS color: #RRGGBB or #RRGGBBAA. */
   color: string;
   label: string;
-  /** Optional FluentUI icon rendered instead of the color swatch. */
+  /** Optional icon rendered instead of the color swatch. See ICONS.md. */
   icon?: string;
   selected?: boolean;
 }
@@ -968,6 +1003,7 @@ export interface ContextMenuItem {
   /** `label` is accepted as a legacy alias. */
   title?: string;
   label?: string;
+  /** Icon name (see ICONS.md). */
   icon?: string;
   /** One or more reader contexts. Children inherit this when omitted; an
    * explicit child value must be a subset of its parent's contexts. */
@@ -1035,7 +1071,7 @@ export interface ToolbarItem {
   type?: 'button' | 'menu' | 'split';
   /** Tooltip on the visible button and label in the overflow menu. */
   title: string;
-  /** FluentUI icon name. Required on top-level items, optional on children. */
+  /** Icon name (see ICONS.md). Required on top-level items, optional on children. */
   icon?: string;
   /** One or more reader contexts. Children inherit this when omitted; an
    * explicit child value must be a subset of its parent's contexts. */
@@ -1333,6 +1369,15 @@ export interface DatabaseBatchQueryResult {
   results: DatabaseQueryResult[];
 }
 
+export interface InstalledPlugin {
+  pluginId: string;
+  name: string;
+  version: string;
+  enabled: boolean;
+  showInTools: boolean;
+  toolTabIconName: string;
+}
+
 /** Where a `shortcut.create` deep-link shortcut is placed. `startMenu` is Windows-only. */
 export type ShortcutLocation = 'desktop' | 'startMenu';
 
@@ -1473,6 +1518,7 @@ export type OtzariaMethod =
   | 'library.getBookAltToc'
   | 'library.getCommentators'
   | 'library.getLinks'
+  | 'library.getRawLinks'
   | 'library.getLinkTargetsSummary'
   | 'library.getLinkContent'
   | 'library.getTree'
@@ -1575,9 +1621,8 @@ export type OtzariaMethod =
   | 'plugin.openOther'
   /** @internal חנות התוספים בלבד — לא מתועד ב-API_REFERENCE ואינו חוזה יציב. */
   | 'plugin.requestInstall'
-  /** @internal חנות התוספים בלבד — לא מתועד ב-API_REFERENCE ואינו חוזה יציב. */
-  | 'plugin.listInstalled'
   | 'plugin.backgroundDone'
+  | 'plugin.listInstalled'
   | 'reader.addContextMenuItem'
   | 'reader.removeContextMenuItem'
   | 'reader.updateContextMenuItem'
@@ -1613,6 +1658,12 @@ export interface OtzariaGlobal {
     method: 'reader.openSearchTab',
     payload: OpenSearchTabArgs
   ): Promise<OtzariaResponse<boolean>>;
+
+  /** מחזיר רשימה של כל התוספים המותקנים. */
+  call(
+    method: 'plugin.listInstalled',
+    payload?: Record<string, unknown>
+  ): Promise<OtzariaResponse<InstalledPlugin[]>>;
 
   /**
    * Call a Host API method.

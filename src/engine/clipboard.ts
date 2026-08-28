@@ -27,9 +27,16 @@
  *    כ-`NAMESPACE_UNAVAILABLE`, ולכן בדיקת היכולת (engine/doc-capabilities)
  *    מספיקה כדי להחליט אם הפקד פעיל — בדיוק כמו בהערות שוליים.
  * 2. **`navigator.clipboard` עשוי להיחסם.** התוסף רץ מ-`file://` בתוך
- *    WebView2, ושם הרשאת הלוח נדחית גם בתוך user-gesture. לכן יש כאן **לוח
+ *    WebView2, ושם קריאת הלוח נדחית גם בתוך user-gesture. לכן יש כאן **לוח
  *    פנימי**: העתקה שהמערכת חסמה עדיין נשמרת, וההדבקה בתוך התוסף תמצא אותה.
  *    ההודעה למשתמש אומרת בדיוק מה קרה — „הצלחה” במצב הזה היא טקסט שנעלם.
+ *
+ *    מה שנמדד ב-Chromium על `file://`: `isSecureContext` הוא `true`, ומה שחוסם
+ *    את `read()`/`readText()` הוא **ההרשאה בלבד** — `clipboard-read` במצב
+ *    `prompt` נדחה מיד, וברגע שהיא מוענקת שתי הקריאות עוברות. ההענקה אינה
+ *    בידינו: היא של המאכסן, ב-`onPermissionRequest` של ה-WebView. עד שהיא
+ *    תגיע, כפתור „הדבק” רואה לוח חסום — ו-Ctrl+V, שהמנוע מטפל בו בתוך המסמך
+ *    עם ה-`dataTransfer` של האירוע, אינו תלוי בהרשאה הזאת כלל.
  * 3. **הפאסדה בדפדפן א-סינכרונית**: `BrowserDocumentApi` עוטף כל מתודה
  *    ב-`MaybePromise`, ולכן כל קריאה כאן ב-`await` ובתוך `try`.
  *
@@ -94,11 +101,21 @@ export type ClipboardParseResult =
   | { success: true; plan: ClipboardPlan }
   | { success: false; failure?: ClipboardFailure };
 
+/**
+ * טווח טקסט שהמוטציה **יצרה**, כפי שהוא בנתיב ה-`effects` של הקבלה.
+ * `selectionTarget` הוא בדיוק הצורה שפעולות הבחירה מקבלות — החוזה מתאר אותו
+ * כ„selection target covering the created span, for selection-consuming APIs”.
+ */
+export interface ClipboardInsertedText {
+  selectionTarget?: SelectionTarget;
+}
+
 /** הקבלה של `insert`, בתוספת מה שהיא מספרת על מה שהודבק בפועל. */
 export interface ClipboardInsertReceipt extends DocReceipt {
   failure?: ClipboardFailure;
   plan?: { sourceKind?: string; plainFallback?: boolean };
   diagnostics?: readonly unknown[];
+  effects?: { insertedText?: readonly ClipboardInsertedText[] };
 }
 
 /** מה שנצרך מ-`activeEditor.doc`. כל שדה אופציונלי: גרסה אחרת עשויה לא לחשוף אותו. */
@@ -112,6 +129,7 @@ export interface ClipboardDocumentApi {
     insert?: (input: {
       payload?: ClipboardPayload;
       plan?: ClipboardPlan;
+      target?: SelectionTarget;
     }) => MaybePromise<ClipboardInsertReceipt | undefined>;
   };
   delete?: (input: { target: SelectionTarget }) => MaybePromise<DocReceipt | undefined>;
@@ -157,7 +175,7 @@ export type ClipboardHostTarget = SuperDoc | ClipboardHost | null | undefined;
 /* הלוח הפנימי                                                        */
 /* ------------------------------------------------------------------ */
 
-let buffered: ClipboardPayload | null = null;
+let buffered: { payload: ClipboardPayload; mirrored: boolean } | null = null;
 
 /**
  * רשת הביטחון כשלוח המערכת אינו זמין.
@@ -166,15 +184,35 @@ let buffered: ClipboardPayload | null = null;
  * „גזור” היה מוחק טקסט שאי אפשר להחזיר בהדבקה. הוא חי כל עוד הדף חי, ואינו
  * מסונכרן עם לוח המערכת — בכוונה: לוח המערכת הוא המקור כשהוא זמין.
  *
+ * ## `mirrored`: לא כל תוכן ששמור כאן הוא תוכן שמותר להדביק
+ *
+ * הלוח הפנימי הוא **תמונת ראי** של מה שנשלח ללוח המערכת, ולכן יש לו שני מצבים
+ * שונים בתכלית:
+ *
+ * - `mirrored: false` — הכתיבה ללוח המערכת נחסמה, והעותק כאן הוא **העותק
+ *   היחיד**. בהדבקה שאין בה הרשאת קריאה הוא הידע הטוב ביותר שיש, וזה מה שמציל
+ *   „גזור” מלמחוק טקסט שאין לו החזרה.
+ * - `mirrored: true` — אותו תוכן יושב **גם** בלוח המערכת, ומאותו רגע לוח
+ *   המערכת הוא המקור. המשתמש עשוי להעתיק שם משהו חדש, או לבחור פריט אחר
+ *   מהיסטוריית Win+V, ואנחנו לא נדע. הדבקת הראי במצב הזה מתעלמת ממה שהוא בחר
+ *   ומחזירה תוכן ישן — וזו בדיוק התלונה שהאבחנה הזאת מסירה.
+ *
  * מיוצא כאובייקט (ולא כמשתנה) כדי שבדיקה תוכל לנקות אותו בין מקרים בלי שם
  * שמכריז „for tests”.
  */
 export const internalClipboard = {
   read(): ClipboardPayload | null {
-    return buffered;
+    return buffered?.payload ?? null;
   },
-  write(payload: ClipboardPayload): void {
-    buffered = payload;
+  /**
+   * התוכן, ורק כשהוא העותק היחיד. זה מה שההדבקה קוראת: ראי של לוח המערכת אינו
+   * תשובה לשאלה „מה יש בלוח **עכשיו**”.
+   */
+  readUnmirrored(): ClipboardPayload | null {
+    return buffered && !buffered.mirrored ? buffered.payload : null;
+  },
+  write(payload: ClipboardPayload, { mirrored = false }: { mirrored?: boolean } = {}): void {
+    buffered = { payload, mirrored };
   },
   clear(): void {
     buffered = null;
@@ -237,7 +275,10 @@ type SelectionRead = { ok: true; target: SelectionTarget } | { ok: false; reason
  * `selectionTarget` ולא `target`: הראשון שומר את קצות הבחירה בדיוק, והשני הוא
  * מודל הכתובות של הערות ומיועד לצרכן אחר.
  */
-function readSelection(surface: SelectionSurface | undefined): SelectionRead {
+function readSelection(
+  surface: SelectionSurface | undefined,
+  { allowCollapsed = false }: { allowCollapsed?: boolean } = {},
+): SelectionRead {
   const getSnapshot = surface?.getSnapshot;
   if (typeof getSnapshot !== 'function') return { ok: false, reason: 'host-capability-unavailable' };
 
@@ -248,15 +289,37 @@ function readSelection(surface: SelectionSurface | undefined): SelectionRead {
     return { ok: false, reason: 'not-ready' };
   }
 
+  // סמן בלי טווח הוא בחירה **חוקית** להדבקה ופסולה להעתקה, ולכן גם נוסח הכשל
+  // שונה: „יש למקם את הסמן במסמך” מול „יש לסמן טקסט תחילה”.
+  const missing = allowCollapsed ? 'selection-required' : 'range-selection-required';
+
   const target = slice?.selectionTarget ?? null;
   if (!target || typeof target !== 'object') {
     // `status` שאינו `ready` אומר שקריאת הבחירה עוד לא הסתיימה — וזה מצב אחר
     // מ„המשתמש לא סימן כלום”, גם אם שניהם מגיעים בתור `selectionTarget: null`.
-    return { ok: false, reason: slice?.status === 'ready' ? 'range-selection-required' : 'not-ready' };
+    return { ok: false, reason: slice?.status === 'ready' ? missing : 'not-ready' };
   }
-  if (slice?.empty === true) return { ok: false, reason: 'range-selection-required' };
+  if (!allowCollapsed && slice?.empty === true) return { ok: false, reason: 'range-selection-required' };
 
   return { ok: true, target };
+}
+
+/**
+ * אותו טווח, מכווץ לאחד מקצותיו — כלומר סמן בלי בחירה.
+ *
+ * `story` ו-`coordinateSpace` נשמרים: פעולה בכותרת עליונה או בהערת שוליים
+ * אינה בגוף המסמך, ובחירה בלי הזהות הזאת הייתה מצביעה על בלוק אחר לגמרי.
+ */
+function collapsedTo(target: SelectionTarget, edge: 'start' | 'end'): SelectionTarget {
+  const point = target[edge];
+
+  return {
+    kind: 'selection',
+    start: point,
+    end: point,
+    ...(target.story ? { story: target.story } : {}),
+    ...(target.coordinateSpace ? { coordinateSpace: target.coordinateSpace } : {}),
+  };
 }
 
 /** הפריט מה-payload לפי MIME, כשהוא מחרוזת. `null` = אין כזה. */
@@ -328,7 +391,11 @@ async function writeSystemClipboard(payload: ClipboardPayload): Promise<boolean>
 type Serialized = { ok: true; payload: ClipboardPayload } | { ok: false; outcome: CommandOutcome };
 
 /**
- * מסדרת את הבחירה דרך המנוע ושומרת בלוח הפנימי.
+ * מסדרת את הבחירה דרך המנוע ומחזירה את ה-payload.
+ *
+ * השמירה בלוח הפנימי אינה כאן אלא באתרי הקריאה, מפני שהיא צריכה לדעת דבר אחד
+ * שטרם ידוע בשלב הזה: האם אותו תוכן הגיע גם ללוח המערכת. ההסבר על ההבדל —
+ * `internalClipboard`.
  *
  * `target` אופציונלי: החוזה קובע ש-`serializeSelection` מסדר „the current or
  * supplied model selection”, ולכן כשאין מסלול לקרוא את הבחירה — „העתק” עדיין
@@ -365,7 +432,6 @@ async function serializeSelection(
     return { ok: false, outcome: failed(failedAction, 'range-selection-required') };
   }
 
-  internalClipboard.write(payload);
   return { ok: true, payload };
 }
 
@@ -400,18 +466,20 @@ export async function copySelection(host: ClipboardHostTarget): Promise<CommandO
   );
   if (!serialized.ok) return serialized.outcome;
 
-  if (!(await writeSystemClipboard(serialized.payload))) {
-    return systemBlocked('הטקסט הועתק', 'Ctrl+C');
-  }
+  const onSystemClipboard = await writeSystemClipboard(serialized.payload);
+  internalClipboard.write(serialized.payload, { mirrored: onSystemClipboard });
+
+  if (!onSystemClipboard) return systemBlocked('הטקסט הועתק', 'Ctrl+C');
   return { ok: true };
 }
 
 /**
  * „גזור” = העתק ואחר כך מחק.
  *
- * הסדר אינו שרירותי: המחיקה רצה **רק** אחרי שהתוכן נשמר בלוח הפנימי, כדי
- * שכשל בסדרוּר לא ימחוק טקסט שאין לו עותק. לוח מערכת שנחסם כן מאפשר להמשיך
- * למחיקה — התוכן קיים בתוך התוסף, וההודעה אומרת את זה במפורש.
+ * הסדר אינו שרירותי: המחיקה רצה **רק** אחרי שהתוכן נשמר — בלוח המערכת, ואם
+ * הוא נחסם אז בלוח הפנימי — כדי שכשל בסדרוּר לא ימחוק טקסט שאין לו עותק. לוח
+ * מערכת שנחסם כן מאפשר להמשיך למחיקה: התוכן קיים בתוך התוסף, מסומן שם כעותק
+ * היחיד, וההודעה אומרת את זה במפורש.
  */
 export async function cutSelection(host: ClipboardHostTarget): Promise<CommandOutcome> {
   const doc = docOf(host);
@@ -429,6 +497,7 @@ export async function cutSelection(host: ClipboardHostTarget): Promise<CommandOu
   if (!serialized.ok) return serialized.outcome;
 
   const onSystemClipboard = await writeSystemClipboard(serialized.payload);
+  internalClipboard.write(serialized.payload, { mirrored: onSystemClipboard });
 
   let receipt: DocReceipt | undefined;
   try {
@@ -445,8 +514,51 @@ export async function cutSelection(host: ClipboardHostTarget): Promise<CommandOu
     };
   }
 
+  // הסמן חוזר למקום שממנו נגזר. ההנמקה המלאה ב-`caretAfterCut`.
+  await moveCaret(selectionOf(host), caretAfterCut(selection.target), {
+    what: 'למקום הגזירה',
+    retries: 0,
+  });
+
   if (!onSystemClipboard) return systemBlocked('הטקסט נגזר', 'Ctrl+X');
   return { ok: true };
+}
+
+/**
+ * הסמן שאחרי „גזור”: תחילת הטווח שנמחק.
+ *
+ * ## התלונה שזה נולד ממנה
+ *
+ * „גוזר, וזה גוזר — אבל הסמן יוצא מהטקסט.” אחרי `doc.delete` המנוע נשאר
+ * **בלי בחירה בכלל**. נמדד מול המנוע האמיתי (Chrome על ה-dist הארוז): גזירת
+ * מילה מסומנת מחזירה `getSnapshot()` = `{status:'ready', empty:true,
+ * selectionTarget:null}`, אין סמן מצויר במסמך, וההקלדה הבאה **אינה נכנסת לשום
+ * מקום** — הטקסט נשאר כפי שהיה אחרי המחיקה.
+ *
+ * המיקוד עצמו אינו הבעיה: `document.activeElement` נשאר ה-textarea המוסתר של
+ * המנוע לאורך כל המסלול, מפני שהפקד מונע את גזילת המיקוד (`@pointerdown.prevent`
+ * ב-RibbonButton, ו-tests/unit/clipboard: „הפקד עצמו מונע מהלחיצה לגזול את
+ * המיקוד”). מה שחסר הוא בחירה להקליד לתוכה.
+ *
+ * ## למה **תחילת** הטווח, ולמה היא שורדת את המחיקה
+ *
+ * זה גם מה ש-Word עושה: הסמן נשאר במקום שממנו הטקסט נעלם. נקודת ההתחלה נשארת
+ * ניתנת לאיתור גם כשהמחיקה חוצה פסקאות — המנוע מותיר את בלוק ההתחלה ומכריז על
+ * בלוק **הסיום** כ-`invalidatedRefs`. שלוש הצורות נמדדו, וכולן החזירו
+ * `apply → {ok:true}` עם סמן מצויר והקלדה שנכנסת במקום הנכון:
+ *
+ * - טווח בתוך פסקה אחת;
+ * - טווח חוצה פסקאות בכיסוי חלקי (הפסקאות מתמזגות לבלוק ההתחלה);
+ * - טווח חוצה פסקאות שמכסה את שתיהן במלואן (בלוק ההתחלה שורד, ריק).
+ *
+ * ## למה בלי ניסיון חוזר
+ *
+ * להבדיל מההדבקה (`moveCaretAfterPaste`), היעד כאן אינו בלוק שזה עתה נוצר אלא
+ * בלוק שכבר היה במסמך, ולכן אין ממה להמתין: בשלוש הצורות שנמדדו ההחלה
+ * **מיד** אחרי שהמחיקה חזרה — בלי השהיה — עברה בניסיון הראשון.
+ */
+function caretAfterCut(target: SelectionTarget): SelectionTarget {
+  return collapsedTo(target, 'start');
 }
 
 /* ------------------------------------------------------------------ */
@@ -576,6 +688,117 @@ function readBlocked(): CommandOutcome {
   };
 }
 
+/**
+ * הסמן שאחרי ההדבקה: קצה הטקסט שנוצר, מכווץ לנקודה.
+ *
+ * ## התלונה שזה נולד ממנה
+ *
+ * „מדביק משה, ואז כהן — ויוצא כהןמשה.” המנוע **אינו** מזיז את הבחירה החיה
+ * אחרי `clipboard.insert`. נמדד מול המנוע האמיתי (Chrome על ה-dist הארוז):
+ * לפני ההדבקה הסמן ב-`41964671:0`, אחריה — `41964671:0` שוב, בזמן שהקבלה כבר
+ * מדווחת על טווח שנוצר בין 0 ל-3. ההדבקה הבאה קוראת את אותו סמן, ולכן נכנסת
+ * **לפני** קודמתה.
+ *
+ * Ctrl+V אינו סובל מזה: שם המנוע מטפל באירוע `paste` בעצמו ומזיז את הסמן
+ * כחלק מאותה עסקה. מסלול הכפתור עובר ב-Document API, ושם הזזת הבחירה היא
+ * באחריות מי שקרא — בדיוק כמו שליחת ה-`target` להדבקה.
+ *
+ * ## למה מהקבלה, ולא בחישוב
+ *
+ * אין כאן ספירת תווים משלנו: הדבקה של טקסט רב-שורות או של HTML נפרסת לכמה
+ * פסקאות, ואורך מה שהודבק אינו האורך שנכנס לפסקה שבה הסמן היה. הקבלה מדווחת
+ * על מה שנוצר בפועל, ו-`selectionTarget` שבתוכה הוא כבר הצורה שפעולות הבחירה
+ * מקבלות.
+ *
+ * נמדד: גם ב-„אחת\nשתיים\nשלוש” וגם ב-`<p>אלף</p><p>בית</p>` חוזר **פריט
+ * אחד** ב-`insertedText`, והוא הטווח האחרון שנוצר („שלוש”, „בית”) — כלומר
+ * בדיוק המקום שבו הסמן צריך לשבת. `insertedBlocks` היה ריק בכל המקרים, ולכן
+ * הוא אינו נקרא כאן. הקצה נלקח מהאיבר האחרון ולא מהראשון: החוזה מבטיח סדר
+ * מסמך, וגרסה שתדווח על כמה טווחים תיקרא נכון.
+ *
+ * `null` = הקבלה אינה מדווחת על טווח שנוצר. אז אין מה להזיז, וההדבקה עצמה
+ * עדיין הצליחה.
+ */
+function caretAfterPaste(receipt: ClipboardInsertReceipt | undefined): SelectionTarget | null {
+  const spans = receipt?.effects?.insertedText;
+  if (!Array.isArray(spans) || spans.length === 0) return null;
+
+  const span = spans[spans.length - 1]?.selectionTarget;
+  if (!span?.end) return null;
+
+  return collapsedTo(span, 'end');
+}
+
+/** כמה ניסיונות חוזרים, ובאיזה מרווח, כשהבלוק החדש טרם אותר. ההנמקה למטה. */
+const CARET_RETRIES = 3;
+const CARET_RETRY_MS = 80;
+
+const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * מזיזה את הסמן לסוף מה שהודבק.
+ *
+ * best-effort בכוונה: התוכן כבר במסמך, וכשל בהזזת הסמן אינו הופך הדבקה
+ * שהצליחה לכישלון — הוא נרשם ללוג, כמו הדבקה שנפלה לטקסט בלבד. `apply` הוא
+ * adapter אופציונלי (ההסבר ב-`selectWholeDocument`), ולכן היעדרו הוא מסלול
+ * חוקי ולא שגיאה.
+ *
+ * ## למה ניסיון חוזר
+ *
+ * הדבקה שיוצרת פסקה חדשה מחזירה בקבלה בלוק שברגע החזרה של `insert` עדיין
+ * אינו ניתן לאיתור: `apply` נכשל סגור עם `target-unresolved`. נמדד מול המנוע
+ * האמיתי, אותה הדבקה רב-שורתית בארבע השהיות — 0ms נדחה (וניסיון חוזר
+ * 250ms אחריו עבר), ו-50ms / 300ms / 1000ms עברו בראשון.
+ *
+ * לכן הניסיון הראשון מיידי: הדבקה שנשארת בתוך הפסקה — הרוב המוחלט — מסתדרת
+ * בו, והשהיה קבועה לפני `apply` הייתה מחייבת **כל** הדבקה לשלם את מחיר המקרה
+ * הנדיר. אירוע „הבלוק נקלט” אינו בחוזה, ולכן ההמתנה היא ניסיונות קצרים.
+ *
+ * `apply` שזורק אינו חוזר על עצמו: חריגה אינה „עדיין לא מוכן” אלא מסלול שבור.
+ */
+async function moveCaretAfterPaste(
+  surface: SelectionSurface | undefined,
+  receipt: ClipboardInsertReceipt | undefined,
+): Promise<void> {
+  const caret = caretAfterPaste(receipt);
+  if (!caret) return;
+
+  await moveCaret(surface, caret, { what: 'לסוף ההדבקה', retries: CARET_RETRIES });
+}
+
+/**
+ * מחילה סמן על העורך החי, ומדווחת ללוג בלבד.
+ *
+ * `retries` הוא ההבדל בין שני הקוראים, ולא גחמה: אחרי הדבקה היעד עשוי להיות
+ * בלוק שזה עתה נוצר וטרם ניתן לאיתור (ההנמקה למעלה), ואחרי גזירה היעד הוא
+ * בלוק **שכבר היה שם** — ולכן ניסיון אחד (ההנמקה ב-`caretAfterCut`).
+ */
+async function moveCaret(
+  surface: SelectionSurface | undefined,
+  caret: SelectionTarget,
+  { what, retries }: { what: string; retries: number },
+): Promise<void> {
+  const apply = surface?.apply;
+  if (typeof apply !== 'function') return;
+
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    if (attempt > 0) await wait(CARET_RETRY_MS);
+
+    let result: { ok?: boolean; reason?: string } | undefined;
+    try {
+      result = await apply(caret);
+    } catch (error) {
+      console.warn(`[otzaria-word] הזזת הסמן ${what} נכשלה`, error);
+      return;
+    }
+
+    if (result?.ok !== false) return;
+    if (attempt === retries) {
+      console.warn(`[otzaria-word] הזזת הסמן ${what} נדחתה`, result.reason);
+    }
+  }
+}
+
 /** ההסבר בעברית לכשל של `parse` או `insert`. */
 function pasteFailureText(failure: ClipboardFailure | undefined): string {
   const unsupported = failure?.details?.unsupportedReason;
@@ -596,9 +819,24 @@ function pasteFailureText(failure: ClipboardFailure | undefined): string {
  * להדביק נעצר לפני שנגענו במסמך, והמשתמש מקבל את הסיבה המדויקת
  * (`unsupportedReason`) ולא רק „הפעולה נכשלה”.
  *
- * `target` אינו נשלח: הוולידטור דורש בדיוק אחד מ-payload/plan/fragment ואינו
- * דורש יעד, והמנוע פותר את מקום ההדבקה מהבחירה החיה בעצמו — בדיוק כמו
- * ב-Ctrl+V. חישוב יעד כאן היה משחזר בקוד שלנו את מה שהוא כבר עושה.
+ * ## למה `target` **כן** נשלח
+ *
+ * כאן הייתה ההנחה שהפילה את הפעולה: „המנוע פותר את מקום ההדבקה מהבחירה החיה
+ * בעצמו — בדיוק כמו ב-Ctrl+V”. הוא אינו. נמדד מול המנוע האמיתי, עם בחירה חיה
+ * בתחילת המסמך:
+ *
+ * - `insert({ plan })` — הקבלה חזרה `success: true` עם `atChar` בסוף המסמך.
+ *   התוכן נכנס אחרי הפסקה האחרונה, והבחירה לא נלקחה בחשבון בכלל.
+ * - `insert({ plan, target })` — `atChar: 0`, כלומר בדיוק בסמן.
+ *
+ * זה מתיישב עם מה שהמנוע עושה בעצמו: `pasteClipboardPayload` שבפאסדה שלו קורא
+ * את הבחירה ו**נכשל** כשאין ממה לגזור target, במקום לתת ל-`insert` להחליט.
+ * `ClipboardTarget` בחוזה כולל `{ kind: 'documentEnd' }`, וזאת התנהגות ברירת
+ * המחדל — לא נפילה.
+ *
+ * לכן מקום ההדבקה נקרא **ראשון**, לפני הלוח: הוא המצב ברגע הלחיצה, בעוד קריאת
+ * הלוח היא `await` שבמהלכו הבחירה יכולה להשתנות. חסר סמן — הפעולה נכשלת עם
+ * „יש למקם את הסמן במסמך”, ולא מוסיפה בשקט בסוף המסמך.
  *
  * ההדבקה המקורית של המנוע אינה נוגעת בזה: המודול הזה אינו רושם מאזינים
  * ואינו חוטף אירועי `paste`.
@@ -610,8 +848,16 @@ export async function pasteFromClipboard(host: ClipboardHostTarget): Promise<Com
     return { ok: false, message: `${PASTE_FAILED}: ${UNAVAILABLE}`, reason: 'command-unsupported' };
   }
 
+  // `allowCollapsed`: סמן בלי טווח הוא המצב הרגיל של הדבקה. טווח מסומן גם הוא
+  // חוקי — המנוע מחליף אותו בתוכן שהודבק, כמו ב-Word.
+  const at = readSelection(selectionOf(host), { allowCollapsed: true });
+  if (!at.ok) return failed(PASTE_FAILED, at.reason);
+
   const read = await readSystemClipboard();
-  const payload = read.kind === 'payload' ? read.payload : read.kind === 'blocked' ? internalClipboard.read() : null;
+  // `readUnmirrored` ולא `read`: כשלוח המערכת קריא-אך-חסום, תוכן שכבר נשלח אליו
+  // אינו „מה שבלוח עכשיו”. ההסבר — `internalClipboard`.
+  const payload =
+    read.kind === 'payload' ? read.payload : read.kind === 'blocked' ? internalClipboard.readUnmirrored() : null;
 
   if (!payload) {
     if (read.kind === 'blocked') return readBlocked();
@@ -622,7 +868,7 @@ export async function pasteFromClipboard(host: ClipboardHostTarget): Promise<Com
     };
   }
 
-  let input: { payload?: ClipboardPayload; plan?: ClipboardPlan };
+  let input: { payload?: ClipboardPayload; plan?: ClipboardPlan; target: SelectionTarget };
   const parse = clipboard?.parse;
   if (typeof parse === 'function') {
     let parsed: ClipboardParseResult | undefined;
@@ -635,10 +881,10 @@ export async function pasteFromClipboard(host: ClipboardHostTarget): Promise<Com
       const failure = parsed?.success === false ? parsed.failure : undefined;
       return { ok: false, message: pasteFailureText(failure), reason: failure?.code ?? 'parse-failed' };
     }
-    input = { plan: parsed.plan };
+    input = { plan: parsed.plan, target: at.target };
   } else {
     // גרסה שאינה חושפת `parse`: `insert` מקבל payload גולמי ומפרק אותו בעצמו.
-    input = { payload };
+    input = { payload, target: at.target };
   }
 
   let receipt: ClipboardInsertReceipt | undefined;
@@ -651,6 +897,10 @@ export async function pasteFromClipboard(host: ClipboardHostTarget): Promise<Com
   if (receipt?.success === false) {
     return { ok: false, message: pasteFailureText(receipt.failure), reason: receipt.failure?.code };
   }
+
+  // הסמן עובר לסוף מה שהודבק — אחרת ההדבקה הבאה נכנסת לפני זו. ההנמקה
+  // המלאה ב-`caretAfterPaste`.
+  await moveCaretAfterPaste(selectionOf(host), receipt);
 
   // הדבקה שנפלה לטקסט בלבד היא **הצלחה** עם אובדן עיצוב. אין לה ערוץ נפרד
   // אל המשתמש (המדווח מציג כשלים), ולכן היא נרשמת ללוג ולא נצבעת כשגיאה.

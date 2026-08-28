@@ -44,6 +44,41 @@ const RANGE = {
   end: { kind: 'text', blockId: 'p1', offset: 5 },
 } as const;
 
+/** סמן: אותה צורה בלי טווח. זה המצב הרגיל של הדבקה, והוא פסול להעתקה. */
+const CARET = {
+  kind: 'selection',
+  start: { kind: 'text', blockId: 'p2', offset: 3 },
+  end: { kind: 'text', blockId: 'p2', offset: 3 },
+} as const;
+
+/**
+ * הטווח שהמנוע מדווח עליו בקבלה כ„מה שנוצר” (`effects.insertedText`). בלוק
+ * אחר מזה שהסמן היה בו, כדי שהזזת הסמן לא תוכל להצליח במקרה. הקבלה האמיתית
+ * נושאת שם גם `kind` ו-`text`; מה שנצרך כאן הוא ה-`selectionTarget` בלבד.
+ */
+const INSERTED = {
+  kind: 'selection',
+  start: { kind: 'text', blockId: 'p9', offset: 4 },
+  end: { kind: 'text', blockId: 'p9', offset: 9 },
+} as const;
+
+/** אותו קצה, מכווץ לנקודה — זה מה ש-`apply` אמור לקבל אחרי הדבקה. */
+const CARET_AFTER_PASTE = {
+  kind: 'selection',
+  start: { kind: 'text', blockId: 'p9', offset: 9 },
+  end: { kind: 'text', blockId: 'p9', offset: 9 },
+} as const;
+
+/**
+ * הסמן שאחרי „גזור”: תחילת הטווח שנגזר, מכווצת לנקודה. זה מה ש-`apply` אמור
+ * לקבל — וזה גם מה ש-Word עושה, הסמן נשאר במקום שממנו הטקסט נעלם.
+ */
+const CARET_AFTER_CUT = {
+  kind: 'selection',
+  start: { kind: 'text', blockId: 'p1', offset: 0 },
+  end: { kind: 'text', blockId: 'p1', offset: 0 },
+} as const;
+
 /** האם זה באמת `SelectionTarget`, ולא סתם אובייקט שהועבר הלאה. */
 function isSelectionTarget(value: unknown): boolean {
   const target = value as { kind?: string; start?: { kind?: string }; end?: { kind?: string } } | null;
@@ -154,8 +189,15 @@ function fakeDoc(overrides: Partial<ClipboardDocumentApi> = {}) {
         }
         if (input.payload !== undefined) assertPayload(input.payload, 'clipboard.insert');
         if (input.plan !== undefined) assertPlan(input.plan, 'clipboard.insert');
+        // `target` אופציונלי בחוזה — אבל כשהוא נשלח הוא נבדק, ו-target פסול
+        // נדחה ב-INVALID_INPUT במקום להידחף בסוף המסמך.
+        if (input.target !== undefined && !isSelectionTarget(input.target)) {
+          throw new Error('clipboard.insert target must be a ClipboardTarget');
+        }
         calls.push({ op: 'clipboard.insert', input });
-        return { success: true };
+        // המנוע מדווח על הטווח שנוצר, ולא רק על „הצליח” — זה מה שמאפשר
+        // להזיז את הסמן לסופו בלי לספור תווים.
+        return { success: true, effects: { insertedText: [{ selectionTarget: INSERTED as never }] } };
       },
     },
     delete: (input) => {
@@ -651,6 +693,83 @@ describe('cutSelection', () => {
       expect(outcome.message).toBe('הגזירה נכשלה: boom');
     }
   });
+
+  it('הסמן חוזר לתחילת מה שנגזר', async () => {
+    // אחרי `doc.delete` המנוע נשאר בלי בחירה בכלל — נמדד מול המנוע האמיתי —
+    // וההקלדה הבאה אינה נכנסת לשום מקום. ההנמקה ב-`caretAfterCut`.
+    const { host } = fakeDoc();
+    const apply = vi.fn(() => ({ ok: true }));
+    host.ui = { selection: { getSnapshot: () => READY_SELECTION, apply } };
+    setSystemClipboard(workingClipboard().api);
+
+    const outcome = await cutSelection(host);
+
+    expect(outcome.ok).toBe(true);
+    expect(apply).toHaveBeenCalledTimes(1);
+    expect(apply).toHaveBeenCalledWith(CARET_AFTER_CUT);
+  });
+
+  it('גם כשלוח המערכת נחסם — הטקסט נגזר, ולכן הסמן חוזר', async () => {
+    const { host } = fakeDoc();
+    const apply = vi.fn(() => ({ ok: true }));
+    host.ui = { selection: { getSnapshot: () => READY_SELECTION, apply } };
+    setSystemClipboard(deniedClipboard());
+
+    const outcome = await cutSelection(host);
+
+    expect(outcome.ok).toBe(false);
+    expect(apply).toHaveBeenCalledWith(CARET_AFTER_CUT);
+  });
+
+  it('מחיקה שנכשלה אינה מזיזה את הסמן — אין מה לגזור, ואין לאן לחזור', async () => {
+    const { host } = fakeDoc({
+      delete: () => ({ success: false, failure: { code: 'DOCUMENT_READONLY' } }),
+    });
+    const apply = vi.fn(() => ({ ok: true }));
+    host.ui = { selection: { getSnapshot: () => READY_SELECTION, apply } };
+    setSystemClipboard(workingClipboard().api);
+
+    await cutSelection(host);
+
+    expect(apply).not.toHaveBeenCalled();
+  });
+
+  it('`apply` שנכשל סגור אינו הופך גזירה שהצליחה לכישלון, ואינו חוזר על עצמו', async () => {
+    // להבדיל מההדבקה: היעד כאן הוא בלוק שכבר היה במסמך, ולכן אין ממה להמתין.
+    const { host } = fakeDoc();
+    const apply = vi.fn(() => ({ ok: false, reason: 'target-unresolved' }));
+    host.ui = { selection: { getSnapshot: () => READY_SELECTION, apply } };
+    setSystemClipboard(workingClipboard().api);
+
+    const outcome = await cutSelection(host);
+
+    expect(outcome.ok).toBe(true);
+    expect(apply).toHaveBeenCalledTimes(1);
+  });
+
+  it('`apply` שזורק אינו מפיל את הגזירה', async () => {
+    const { host } = fakeDoc();
+    const apply = vi.fn(() => {
+      throw new Error('boom');
+    });
+    host.ui = { selection: { getSnapshot: () => READY_SELECTION, apply } };
+    setSystemClipboard(workingClipboard().api);
+
+    const outcome = await cutSelection(host);
+
+    expect(outcome.ok).toBe(true);
+  });
+
+  it('משטח בחירה בלי `apply` — הגזירה עדיין מצליחה', async () => {
+    const { host, calls } = fakeDoc();
+    host.ui = { selection: selectionSurface(READY_SELECTION) };
+    setSystemClipboard(workingClipboard().api);
+
+    const outcome = await cutSelection(host);
+
+    expect(outcome.ok).toBe(true);
+    expect(calls.map((call) => call.op)).toEqual(['clipboard.serializeSelection', 'delete']);
+  });
 });
 
 describe('pasteFromClipboard', () => {
@@ -671,7 +790,91 @@ describe('pasteFromClipboard', () => {
         { type: 'text/plain', kind: 'string', data: 'טקסט' },
       ],
     });
-    expect(calls[1]!.input).toEqual({ plan: enginePlan() });
+    // ה-target הוא הבחירה החיה, ולא נשמט: `insert` בלי יעד מדביק בסוף המסמך.
+    expect(calls[1]!.input).toEqual({ plan: enginePlan(), target: RANGE });
+  });
+
+  it('סמן בלי טווח הוא מקום הדבקה חוקי, ומגיע ל-`insert` כמו שהוא', async () => {
+    // המצב הרגיל של הדבקה: המשתמש לחץ במסמך ולא סימן כלום. `empty: true` עם
+    // `selectionTarget` הוא סמן — ולא „אין בחירה”.
+    const { host, calls } = fakeDoc();
+    host.ui = {
+      selection: selectionSurface({ status: 'ready', empty: true, selectionTarget: CARET as never }),
+    };
+    setSystemClipboard(readableClipboard({ 'text/plain': 'טקסט' }));
+
+    const outcome = await pasteFromClipboard(host);
+
+    expect(outcome.ok).toBe(true);
+    const insertCall = calls.find((call) => call.op === 'clipboard.insert');
+    expect((insertCall!.input as { target?: unknown }).target).toEqual(CARET);
+  });
+
+  it('אין סמן במסמך — נכשלת, ואינה מדביקה בסוף המסמך', async () => {
+    // הכשל שהתיקון נולד ממנו: `insert` בלי `target` מחזיר `success: true`
+    // ומכניס את התוכן אחרי הפסקה האחרונה. „נכשל בגלוי” הוא ההתנהגות הנכונה —
+    // הדבקה שקטה במקום אחר היא הפתעה שאין ממנה חזרה חוץ מ„בטל”.
+    const { host, calls } = fakeDoc();
+    host.ui = { selection: selectionSurface({ status: 'ready', empty: true, selectionTarget: null }) };
+    const clipboard = readableClipboard({ 'text/plain': 'טקסט' });
+    setSystemClipboard(clipboard);
+
+    const outcome = await pasteFromClipboard(host);
+
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) {
+      expect(outcome.reason).toBe('selection-required');
+      expect(outcome.message).toBe('ההדבקה נכשלה: יש למקם את הסמן במסמך');
+    }
+    expect(calls).toEqual([]);
+    // הבחירה נקראת לפני הלוח, ולכן הרשאת הלוח לא נדרשת בכלל במצב הזה.
+    expect(clipboard.read).not.toHaveBeenCalled();
+  });
+
+  it('בחירה שטרם נקראה — „המסמך עדיין נטען”, ולא „לא מיקמת סמן”', async () => {
+    const { host, calls } = fakeDoc();
+    host.ui = { selection: selectionSurface({ status: 'pending', selectionTarget: null }) };
+    setSystemClipboard(readableClipboard({ 'text/plain': 'טקסט' }));
+
+    const outcome = await pasteFromClipboard(host);
+
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) {
+      expect(outcome.reason).toBe('not-ready');
+      expect(outcome.message).toContain('המסמך עדיין נטען');
+    }
+    expect(calls).toEqual([]);
+  });
+
+  it('אין משטח בחירה — נכשלת, ולא נותנת למנוע לבחור את המקום', async () => {
+    const { host, calls } = fakeDoc();
+    host.ui = undefined;
+    setSystemClipboard(readableClipboard({ 'text/plain': 'טקסט' }));
+
+    const outcome = await pasteFromClipboard(host);
+
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) expect(outcome.reason).toBe('host-capability-unavailable');
+    expect(calls).toEqual([]);
+  });
+
+  it('תוכן שכבר הגיע ללוח המערכת אינו מודבק מהלוח הפנימי כשהקריאה נחסמה', async () => {
+    // ההעתקה הצליחה, כלומר לוח המערכת מחזיק את התוכן — ומאותו רגע הוא המקור.
+    // המשתמש עשוי להעתיק שם משהו אחר, או לבחור פריט אחר מהיסטוריית Win+V,
+    // ואנחנו לא נדע. הדבקת הראי הפנימי כאן הייתה מחזירה תוכן ישן בלי לספר.
+    const { host, calls } = fakeDoc();
+    setSystemClipboard(workingClipboard().api);
+    expect((await copySelection(host)).ok).toBe(true);
+
+    setSystemClipboard(deniedClipboard());
+    const outcome = await pasteFromClipboard(host);
+
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) {
+      expect(outcome.reason).toBe('system-clipboard-blocked');
+      expect(outcome.message).toContain('Ctrl+V');
+    }
+    expect(calls.some((call) => call.op === 'clipboard.insert')).toBe(false);
   });
 
   it('תמונה מהלוח נקראת כ-bytes, כפי שהוולידטור דורש', async () => {
@@ -843,6 +1046,7 @@ describe('pasteFromClipboard', () => {
     expect(calls.map((call) => call.op)).toEqual(['clipboard.insert']);
     expect(calls[0]!.input).toEqual({
       payload: { source: 'browser', items: [{ type: 'text/plain', kind: 'string', data: 'א' }] },
+      target: RANGE,
     });
   });
 
@@ -866,6 +1070,79 @@ describe('pasteFromClipboard', () => {
     const clipboard = host.activeEditor!.doc!.clipboard!;
     clipboard.parse = () => Promise.resolve({ success: true, plan: enginePlan() });
     clipboard.insert = () => Promise.resolve({ success: true });
+    setSystemClipboard(readableClipboard({ 'text/plain': 'א' }));
+
+    expect((await pasteFromClipboard(host)).ok).toBe(true);
+  });
+
+  it('הסמן עובר לסוף מה שהודבק', async () => {
+    // הבאג שזה נולד ממנו: המנוע אינו מזיז את הבחירה החיה אחרי `insert`,
+    // וההדבקה הבאה קוראת את אותו סמן — „משה” ואז „כהן” יצא „כהןמשה”.
+    const { host } = fakeDoc();
+    const apply = vi.fn(() => ({ ok: true }));
+    host.ui = { selection: { getSnapshot: () => READY_SELECTION, apply } };
+    setSystemClipboard(readableClipboard({ 'text/plain': 'משה' }));
+
+    expect((await pasteFromClipboard(host)).ok).toBe(true);
+    // מכווץ לקצה, ולא הטווח שנוצר: אחרי הדבקה יש סמן, לא טקסט מסומן.
+    expect(apply).toHaveBeenCalledWith(CARET_AFTER_PASTE);
+  });
+
+  it('קבלה בלי `effects` — הסמן נשאר במקומו במקום לזוז לניחוש', async () => {
+    const { host } = fakeDoc();
+    host.activeEditor!.doc!.clipboard!.insert = () => ({ success: true });
+    const apply = vi.fn(() => ({ ok: true }));
+    host.ui = { selection: { getSnapshot: () => READY_SELECTION, apply } };
+    setSystemClipboard(readableClipboard({ 'text/plain': 'א' }));
+
+    expect((await pasteFromClipboard(host)).ok).toBe(true);
+    expect(apply).not.toHaveBeenCalled();
+  });
+
+  it('`apply` שנדחה כי הבלוק החדש טרם אותר — ניסיון חוזר, ואותו יעד', async () => {
+    // הדבקה שיוצרת פסקה חדשה: הבלוק שבקבלה אינו ניתן לאיתור ברגע שההכנסה
+    // חזרה, והמנוע מחזיר `target-unresolved`. נמדד — ההנמקה ב-clipboard.ts.
+    const { host } = fakeDoc();
+    const apply = vi
+      .fn<(target: unknown) => { ok: boolean; reason?: string }>()
+      .mockReturnValueOnce({ ok: false, reason: 'target-unresolved' })
+      .mockReturnValue({ ok: true });
+    host.ui = { selection: { getSnapshot: () => READY_SELECTION, apply } };
+    setSystemClipboard(readableClipboard({ 'text/plain': 'א' }));
+
+    expect((await pasteFromClipboard(host)).ok).toBe(true);
+    expect(apply).toHaveBeenCalledTimes(2);
+    expect(apply).toHaveBeenLastCalledWith(CARET_AFTER_PASTE);
+  });
+
+  it('`apply` שנכשל סגור אינו הופך הדבקה שהצליחה לכישלון, ואינו מנסה לנצח', async () => {
+    // התוכן כבר במסמך. „ההדבקה נכשלה” בגלל סמן שלא זז הוא שקר למשתמש.
+    const { host } = fakeDoc();
+    const apply = vi.fn(() => ({ ok: false, reason: 'document-readonly' }));
+    host.ui = { selection: { getSnapshot: () => READY_SELECTION, apply } };
+    setSystemClipboard(readableClipboard({ 'text/plain': 'א' }));
+
+    expect((await pasteFromClipboard(host)).ok).toBe(true);
+    // ניסיון אחד ועוד שלושה חוזרים. חסם, ולא לולאה שממתינה לנס.
+    expect(apply).toHaveBeenCalledTimes(4);
+  });
+
+  it('`apply` שזורק אינו מפיל את ההדבקה, ואינו חוזר על עצמו', async () => {
+    // חריגה אינה „הבלוק עדיין לא נקלט” אלא מסלול שבור — אין מה לנסות שוב.
+    const { host } = fakeDoc();
+    const apply = vi.fn(() => {
+      throw new Error('boom');
+    });
+    host.ui = { selection: { getSnapshot: () => READY_SELECTION, apply } };
+    setSystemClipboard(readableClipboard({ 'text/plain': 'א' }));
+
+    expect((await pasteFromClipboard(host)).ok).toBe(true);
+    expect(apply).toHaveBeenCalledTimes(1);
+  });
+
+  it('משטח בחירה בלי `apply` — ההדבקה עדיין מצליחה', async () => {
+    // גרסת מנוע שאינה חושפת את ה-helper: אין הזזת סמן, ואין כשל.
+    const { host } = fakeDoc();
     setSystemClipboard(readableClipboard({ 'text/plain': 'א' }));
 
     expect((await pasteFromClipboard(host)).ok).toBe(true);

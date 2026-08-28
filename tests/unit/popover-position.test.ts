@@ -101,4 +101,41 @@ describe('popoverPlacement', () => {
 
     expect(placement.left).toBe(POPOVER_MARGIN_PX);
   });
+
+  /**
+   * היישור למרכז נוסף בעבור הטולטיפ (ui/tooltip/TooltipLayer.vue): כרטיס ההסבר
+   * אינו „נפתח מ”הכפתור אלא מסביר אותו, ולעתים צר ממנו — יישור לקצה היה מסיט
+   * אותו מהאייקון.
+   */
+  describe('align: center', () => {
+    const TIP = { width: 240, height: 60 };
+
+    it('מרכז הפופאובר נופל על מרכז הכפתור, בשני הכיוונים', () => {
+      const anchor = anchorAt(80, 500);
+      const middle = (anchor.left + anchor.right) / 2;
+
+      for (const rtl of [true, false]) {
+        const placement = popoverPlacement(anchor, TIP, DESKTOP, { align: 'center', rtl });
+        expect(placement.left + TIP.width / 2).toBe(middle);
+      }
+    });
+
+    it('כפתור בקצה — המרכוז נכנע לחלון, כמו ההצמדה לקצה', () => {
+      const nearEnd = popoverPlacement(anchorAt(80, 995), TIP, DESKTOP, { align: 'center' });
+      expect(nearEnd.left).toBe(DESKTOP.width - POPOVER_MARGIN_PX - TIP.width);
+
+      const nearStart = popoverPlacement(anchorAt(80, 40), TIP, DESKTOP, { align: 'center' });
+      expect(nearStart.left).toBe(POPOVER_MARGIN_PX);
+    });
+
+    it('ההיפוך האנכי אינו תלוי ביישור האופקי', () => {
+      const placement = popoverPlacement(anchorAt(760, 500), TIP, DESKTOP, {
+        align: 'center',
+        gap: 8,
+      });
+
+      expect(placement.side).toBe('above');
+      expect(placement.top).toBe(760 - 8 - TIP.height);
+    });
+  });
 });

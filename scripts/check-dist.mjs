@@ -45,12 +45,45 @@ for (const match of html.matchAll(/\b(src|href)=("|')([^"']+)\2/g)) {
   if (!existsSync(local)) errors.push(`נכס חסר ב-dist: ${url}`);
 }
 
-// ה-workers חייבים להיטען לפני app.js — engineWorkerUrls() נצרך בהקמת המנוע.
-const workersAt = html.indexOf('engine-workers.js');
-const appAt = html.indexOf('app.js');
-if (workersAt === -1) errors.push('assets/engine-workers.js אינו נטען מ-index.html');
-else if (appAt !== -1 && workersAt > appAt) {
-  errors.push('engine-workers.js נטען אחרי app.js — המנוע יקום בלי ה-workers');
+/**
+ * שרשרת הטעינה. שני הבאנדלים אינם `<script src>` ב-HTML יותר, אלא מוזרקים
+ * מטוען inline אחרי הצביעה הראשונה (`deferredEntry` ב-vite.config.ts): סקריפט
+ * חוסם ב-`<head>` עוצר את פריסת ה-HTML, כלומר את ה-`<body>` ובתוכו את מסך
+ * הטעינה עצמו — נמדד, 1619ms של מסך לבן מ-file://.
+ *
+ * מכאן שבדיקת הנכסים שמעל אינה מכסה אותם: הם מחרוזות בתוך JS ולא תכונות src.
+ * מי שישבור חוליה יקבל תוסף שעולה, מצייר מסך טעינה — ונתקע עליו בלי שגיאה.
+ * לכן כל חוליה נבדקת בשמה, וגם הסדר: engine-workers.js מציב את
+ * `__SUPERDOC_WORKER_SOURCES__`, ו-engineWorkerUrls() נצרך בהקמת המנוע.
+ */
+const workersAt = html.indexOf('./assets/engine-workers.js');
+const appAt = html.indexOf('./assets/app.js');
+if (workersAt === -1) {
+  errors.push('dist/index.html אינו מזריק את ./assets/engine-workers.js — המנוע יקום בלי workers');
+}
+if (appAt === -1) {
+  errors.push('dist/index.html אינו מזריק את ./assets/app.js — התוסף לא ייטען כלל');
+}
+if (workersAt !== -1 && appAt !== -1 && workersAt > appAt) {
+  errors.push('engine-workers.js מוזרק אחרי app.js — המנוע יקום בלי ה-workers');
+}
+
+const headEnd = html.indexOf('</head>');
+if (/<script[^>]*\bsrc=/.test(headEnd === -1 ? html : html.slice(0, headEnd))) {
+  errors.push('יש <script src> ב-<head> של dist/index.html — הוא חוסם את ציור מסך הטעינה');
+}
+
+/**
+ * מסך הטעינה. הוא כל מה שהמשתמש רואה בשנייה-שתיים הראשונות, והוא inline
+ * ב-HTML בדיוק כדי שלא יהיה תלוי בבאנדל שהוא מכסה עליו. אם הוא ייעלם, כל
+ * הקריאות ב-`src/host/splash.ts` יהפכו ל-no-op **בשקט** — הממשק יעלה כרגיל,
+ * והפתיחה תחזור להיות מסך לבן בלי ששום דבר ייכשל.
+ */
+if (!html.includes('__otzariaSplash')) {
+  errors.push('ה-API של מסך הטעינה אינו ב-dist/index.html — הפתיחה תחזור להיות מסך לבן');
+}
+if (!html.includes('id="otzaria-splash"')) {
+  errors.push('חסרה תגית מסך הטעינה ב-dist/index.html');
 }
 
 /**
@@ -200,14 +233,19 @@ const ESM_SIGNATURES = [
 const workersFile = join(DIST, 'assets/engine-workers.js');
 if (existsSync(workersFile)) {
   const wrapper = readFileSync(workersFile, 'utf8');
-  const json = wrapper.match(/^window\.__SUPERDOC_WORKER_SOURCES__ = ([\s\S]*);\s*$/);
+  // הצורה היא `JSON.parse("…")` ולא אובייקט ליטרלי, ובכוונה: אלה 5MB שהמנתח
+  // של JavaScript היה פורס כתחביר. השכבה החיצונית היא מחרוזת JS, ולכן הפירוק
+  // כאן הוא בשני שלבים — JSON.parse על הליטרל, ואז על מה שהוא החזיר.
+  const json = wrapper.match(
+    /^window\.__SUPERDOC_WORKER_SOURCES__ = JSON\.parse\(([\s\S]*)\);\s*$/,
+  );
 
   if (!json) {
     errors.push('assets/engine-workers.js אינו בצורה המצופה — לא ניתן לבדוק את קוד ה-workers');
   } else {
     let sources;
     try {
-      sources = JSON.parse(json[1]);
+      sources = JSON.parse(JSON.parse(json[1]));
     } catch (error) {
       errors.push(`קוד ה-workers אינו JSON תקין: ${error.message}`);
     }

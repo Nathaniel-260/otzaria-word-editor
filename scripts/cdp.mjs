@@ -105,14 +105,23 @@ export async function openPage(fileUrl, { port = Number(process.env.CDP_PORT ?? 
   try {
     let targets = null;
     for (let i = 0; i < 60 && !targets; i++) {
-      try {
-        const response = await fetch(`http://127.0.0.1:${port}/json/list`);
-        const list = await response.json();
-        const pages = list.filter((t) => t.type === 'page' && t.url.startsWith('file://'));
-        if (pages.length) targets = pages;
-      } catch {
-        await sleep(250);
+      // שני המארחים ולא רק `127.0.0.1`: ב-Windows Chrome קושר את יציאת ה-CDP
+      // ל-`::1` בלבד, ופנייה ל-IPv4 נכשלת בסירוב חיבור — הבדיקה נראתה כאילו
+      // הדפדפן לא עלה בכלל.
+      for (const host of ['127.0.0.1', '[::1]']) {
+        try {
+          const response = await fetch(`http://${host}:${port}/json/list`);
+          const list = await response.json();
+          const pages = list.filter((t) => t.type === 'page' && t.url.startsWith('file://'));
+          if (pages.length) {
+            targets = pages;
+            break;
+          }
+        } catch {
+          /* המארח הבא, ואם שניהם נכשלו — סבב נוסף אחרי המתנה */
+        }
       }
+      if (!targets) await sleep(250);
     }
     if (!targets) throw new Error('CDP לא נפתח');
 

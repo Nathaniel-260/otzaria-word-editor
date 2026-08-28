@@ -102,6 +102,13 @@
       :is-open="isShortcutsHelpOpen"
       @close="isShortcutsHelpOpen = false"
     />
+
+    <!--
+      הטולטיפ של כל התוכנה — מופע אחד, בסוף המעטפת. הוא מאזין במסירה על המסמך
+      ולא נקשר לפקד מסוים, ולכן אין לו props: כל פקד שיש לו `title` או
+      `data-tip-*` מקבל אותו. ההסבר המלא ב-ui/tooltip/TooltipLayer.vue.
+    -->
+    <TooltipLayer />
   </div>
 </template>
 
@@ -114,10 +121,17 @@ import FindReplaceDialog from './ui/panels/FindReplaceDialog.vue';
 import AboutDialog from './ui/panels/AboutDialog.vue';
 import LinkDialog from './ui/panels/LinkDialog.vue';
 import ShortcutsDialog from './ui/panels/ShortcutsDialog.vue';
+import TooltipLayer from './ui/tooltip/TooltipLayer.vue';
 
 import { createCommandAdapter, type CommandAdapter, type CommandOutcome } from './engine/command-adapter';
 import type { CommandId } from './engine/capabilities';
-import { COMMAND_ADAPTER, COMMAND_REPORTER, FONT_OPTIONS, STYLE_GALLERY } from './composables/keys';
+import {
+  COMMAND_ADAPTER,
+  COMMAND_REPORTER,
+  FONT_OPTIONS,
+  READOUT_SELECTION,
+  STYLE_GALLERY,
+} from './composables/keys';
 import { ACTIVE_SUPERDOC } from './engine/document-api';
 import { readDocSelection } from './engine/doc-selection';
 import {
@@ -135,6 +149,11 @@ import {
   type StyleGalleryState,
 } from './engine/style-gallery';
 import { fallbackFontOptions, observeFontOptions, type FontOptions } from './engine/font-options';
+import {
+  UNSETTLED_SELECTION,
+  observeReadoutSelection,
+  type ReadoutSelection,
+} from './engine/readout-hold';
 import { zoomPayload } from './engine/payloads';
 import {
   createSearchAdapter,
@@ -177,6 +196,7 @@ import {
 } from './host/files';
 import { decideDocumentSwitch } from './sessions/open-flow';
 import { confirm, notifyError } from './host/otzaria-client';
+import { splashDone } from './host/splash';
 import {
   loadLastDocument,
   saveLastDocument,
@@ -228,6 +248,16 @@ provide(FONT_OPTIONS, fontOptions);
  */
 const styleGallery = shallowRef<StyleGalleryState>(fallbackStyleGallery());
 provide(STYLE_GALLERY, styleGallery);
+
+/**
+ * מצב הבחירה, בשביל החזקת החיווי ברצועה (engine/readout-hold.ts).
+ *
+ * מסופק מכאן ולא נקרא בקומפוננטה, מאותו טעם כמו שני המפתחות שמעליו:
+ * `ui.selection` הוא handle של ה-session, ורק מי שמנהל אותו יודע מתי להירשם
+ * ומתי לשחרר. הזרקה אחת לכל הרצועה — כל 38 הפקדים שואלים את אותה שאלה.
+ */
+const readoutSelection = shallowRef<ReadoutSelection>(UNSETTLED_SELECTION);
+provide(READOUT_SELECTION, readoutSelection);
 
 /**
  * המופע הפתוח, בשביל הפקדים שאין להם פקודה ב-registry של ה-controller —
@@ -428,6 +458,8 @@ async function openDocument(file?: UserFile): Promise<boolean> {
   activeSuperdoc.value = editor.superdoc;
   editor.onDispose(() => {
     if (activeSuperdoc.value === editor.superdoc) activeSuperdoc.value = null;
+    // בלי האיפוס הרצועה הייתה ממשיכה להחזיק את הקריאה של המסמך שנסגר.
+    readoutSelection.value = UNSETTLED_SELECTION;
   });
 
   // החיפוש שייך ל-session: ה-handle הוא של ה-controller של המופע, ומסמך חדש
@@ -475,6 +507,16 @@ async function openDocument(file?: UserFile): Promise<boolean> {
   // עמוד הסמן מגיע מהבחירה, ולכן הוא נקרא כשהיא זזה. בלי ההאזנה המספר היה
   // נכון רק ברגע שהמסמך נפתח.
   editor.onDispose(editor.ui.selection.observe(() => sessionMetrics.noteSelectionChanged()));
+
+  // אותה בחירה, שאלה אחרת: האם הקריאה התיישבה, והאם היא סמן או טווח. זה מה
+  // שמונע מהחיווי ברצועה להיכבות ולהידלק בכל תו שנקלד — ההנמקה המלאה,
+  // כולל המדידה, ב-engine/readout-hold.ts. מנוי נפרד ולא שדה נוסף במודד:
+  // המודד שייך לשורת המצב, וזה שייך לרצועה.
+  editor.onDispose(
+    observeReadoutSelection(editor.ui, (state) => {
+      readoutSelection.value = state;
+    })
+  );
 
   // גודל התצוגה: `observe` יורה מיד ואז על כל שינוי — כולל שינוי שלא בא
   // מאיתנו (התאמה לרוחב החלון), שאחרת היה משאיר את התווית על ערך שגוי.
@@ -1233,15 +1275,27 @@ onMounted(async () => {
       })
     );
 
-    // טעינת מסמך אחרון או פתיחת מסמך ריק
-    const last = await resolveLastDocument();
-    if (!last) {
-      await openDocument();
-    } else if (!(await openDocument(last))) {
-      void forgetLastDocument();
-      await openDocument();
-      setStatus('המסמך האחרון לא נפתח — נפתח מסמך חדש');
+    // טעינת מסמך אחרון או פתיחת מסמך ריק. תחנת „פותח את המסמך” מדווחת
+    // מ-createEditor ולא מכאן: כאן היא הייתה מוקדמת בשנייה ויותר — הפתיחה
+    // ממתינה קודם לחבילת המנוע, ומסך טעינה שאומר „פותח” בזמן שהוא מוריד
+    // 9MB מתאר את השלב הלא נכון.
+    try {
+      const last = await resolveLastDocument();
+      if (!last) {
+        await openDocument();
+      } else if (!(await openDocument(last))) {
+        void forgetLastDocument();
+        await openDocument();
+        setStatus('המסמך האחרון לא נפתח — נפתח מסמך חדש');
+      }
+    } finally {
+      // גם פתיחה שנכשלה מסירה את מסך הטעינה, ולא רק כדי „לא להיתקע”: הודעת
+      // הכשל יושבת בשורת המצב שמתחת, ומסך טעינה שנשאר פרוש מסתיר בדיוק את
+      // מה שצריך להיקרא.
+      splashDone();
     }
+  } else {
+    splashDone();
   }
 });
 
