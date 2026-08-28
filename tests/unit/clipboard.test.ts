@@ -459,6 +459,34 @@ describe('copySelection', () => {
     expect(calls[0]!.input).toEqual({ includeHtml: true });
   });
 
+  it('תצלום stale שמתייצב — „העתק” ממתין, ולא נכשל על בחירה שקיימת', async () => {
+    // המרוץ שהתגלה: Shift+חץ יוצר טווח אמיתי במסמך, אבל `getSnapshot()` ממשיך
+    // לדווח `empty: true` יחד עם `status` שאינו `ready` במשך עד כ-820ms. שני
+    // התצלומים הראשונים כאן חוזרים stale (כמו שנמדד), והשלישי — אחרי שהבחירה
+    // כבר התייצבה. בלי הבדיקה בכל הענפים, „העתק” היה נכשל מיד עם „יש לסמן
+    // טקסט תחילה” על בחירה שקיימת.
+    const { host, calls } = fakeDoc();
+    let reads = 0;
+    host.ui = {
+      selection: {
+        getSnapshot: () => {
+          reads += 1;
+          return reads <= 2
+            ? { status: 'stale', empty: true, selectionTarget: RANGE as never }
+            : { status: 'ready', empty: false, selectionTarget: RANGE as never };
+        },
+      },
+    };
+    setSystemClipboard(workingClipboard().api);
+
+    const outcome = await copySelection(host);
+
+    expect(outcome.ok).toBe(true);
+    expect(reads).toBeGreaterThan(2);
+    // אחרי שהתייצב יש target אמיתי — ולא הקריאה בלי target (שנכשלת במנוע האמיתי).
+    expect(calls[0]!.input).toEqual({ target: RANGE, includeHtml: true });
+  });
+
   it('אין משטח בחירה — מסדרת את הבחירה החיה בלי target', async () => {
     // החוזה קובע ש-serializeSelection מסדר "the current or supplied model
     // selection", ולכן „העתק” אינו נופל רק מפני שלא הצלחנו לקרוא את הבחירה.
@@ -631,6 +659,33 @@ describe('cutSelection', () => {
     expect(outcome.ok).toBe(false);
     if (!outcome.ok) expect(outcome.message).toBe('הגזירה נכשלה: יש לסמן טקסט תחילה');
     expect(calls).toEqual([]);
+  });
+
+  it('תצלום stale שמתייצב — „גזור” ממתין, ולא נכשל על בחירה שקיימת', async () => {
+    // אותו מרוץ כמו ב„העתק”, אבל „גזור” אינו יכול ליפול על „המנוע יסדר את
+    // הבחירה החיה בעצמו”: `doc.delete` דורש target מפורש. לכן כאן הפתרון הוא
+    // המתנה להתייצבות, ולא מקור חלופי. שני התצלומים הראשונים חוזרים כ-stale
+    // (בדיוק כמו שנמדד ב-Shift+חץ), והשלישי — אחרי שהבחירה כבר התייצבה.
+    const { host, calls } = fakeDoc();
+    let reads = 0;
+    host.ui = {
+      selection: {
+        getSnapshot: () => {
+          reads += 1;
+          return reads <= 2
+            ? { status: 'stale', empty: true, selectionTarget: RANGE as never }
+            : { status: 'ready', empty: false, selectionTarget: RANGE as never };
+        },
+      },
+    };
+    setSystemClipboard(workingClipboard().api);
+
+    const outcome = await cutSelection(host);
+
+    expect(outcome.ok).toBe(true);
+    expect(reads).toBeGreaterThan(2);
+    const deleteCall = calls.find((call) => call.op === 'delete');
+    expect(deleteCall?.input).toEqual({ target: RANGE });
   });
 
   it('`getSnapshot` שזורק אינו מפיל את הכפתור', async () => {

@@ -299,9 +299,54 @@ function readSelection(
     // מ„המשתמש לא סימן כלום”, גם אם שניהם מגיעים בתור `selectionTarget: null`.
     return { ok: false, reason: slice?.status === 'ready' ? missing : 'not-ready' };
   }
-  if (!allowCollapsed && slice?.empty === true) return { ok: false, reason: 'range-selection-required' };
+  if (!allowCollapsed && slice?.empty === true) {
+    // אותה הבחנה כמו בענף שלמעלה, ולא רק עליו: `empty` יכול לדווח `true`
+    // מפני שהתצלום פיגר אחרי בחירה חיה שכבר קיימת במסמך, ולא רק מפני
+    // שה-`selectionTarget` עצמו עוד לא הגיע. נמדד (ראו הערת הראש של הקובץ):
+    // Shift+חץ מציג `empty:true` יחד עם `status` שאינו `ready` במשך עד
+    // כ-820ms אחרי שיש כבר טווח אמיתי במסמך. בלי הבדיקה הזאת „העתק”/„גזור”
+    // שנלחצים בחלון הזה מקבלים „יש לסמן טקסט תחילה” על בחירה שקיימת.
+    return { ok: false, reason: slice?.status === 'ready' ? 'range-selection-required' : 'not-ready' };
+  }
 
   return { ok: true, target };
+}
+
+/** כמה פעמים, ובאיזה מרווח, מותר להמתין שהבחירה תתייצב. ר' `readSelectionSettled`. */
+const SELECTION_SETTLE_RETRIES = 10;
+const SELECTION_SETTLE_INTERVAL_MS = 100;
+
+/**
+ * כמו `readSelection`, אבל ל„העתק” ול„גזור”: `status` שאינו `ready` הוא „עוד
+ * לא ידוע”, לא „אין בחירה”, וזה עניין של זמן בלבד — לכן ממתינים לו במקום
+ * להיכשל עליו.
+ *
+ * ## למה לא המסלול בלי `target`
+ *
+ * `serializeSelection` מקבל `target` אופציונלי, וההנחה המקורית כאן הייתה
+ * שבלעדיו המנוע מסדר את הבחירה החיה בעצמו — ולכן „העתק” ויתר על ההמתנה
+ * וקרא בלי target כשלא היה טווח נקרא. נמדד מול המנוע האמיתי (ה-dist הארוז)
+ * שזה **אינו** המצב: הקריאה נכשלת עם `"…requires an explicit target until
+ * current-selection serialization is wired"`. כלומר גם „העתק” זקוק לטווח
+ * שנפתר, בדיוק כמו „גזור” שצריך אותו למחיקה (`doc.delete` מקבל `target` או
+ * `ref` בלבד) — ולכן שניהם ממתינים כאן באותה לולאה.
+ *
+ * זו לולאת בדיקה חוזרת ולא המתנה קבועה: היא בודקת מיד, ומחכה רק כשהתשובה
+ * „עוד לא ידוע” — מכונה מהירה יוצאת מהלולאה בסיבוב הראשון, איטית ממשיכה, ואף
+ * אחת לא משלמת מחיר קבוע שאינו שלה. הגבול העליון (כ-1000ms) הוא רשת ביטחון
+ * ולא המנגנון עצמו: נמדד ש-820ms הוא הזמן הארוך ביותר שבו הבחירה עדיין לא
+ * התיישבה.
+ */
+async function readSelectionSettled(surface: SelectionSurface | undefined): Promise<SelectionRead> {
+  for (let attempt = 0; attempt <= SELECTION_SETTLE_RETRIES; attempt += 1) {
+    if (attempt > 0) await wait(SELECTION_SETTLE_INTERVAL_MS);
+
+    const result = readSelection(surface);
+    if (result.ok || result.reason !== 'not-ready') return result;
+    if (attempt === SELECTION_SETTLE_RETRIES) return result;
+  }
+  // בלתי מגיע: הלולאה תמיד חוזרת מבפנים בסיבוב האחרון.
+  return readSelection(surface);
 }
 
 /**
@@ -398,8 +443,13 @@ type Serialized = { ok: true; payload: ClipboardPayload } | { ok: false; outcome
  * `internalClipboard`.
  *
  * `target` אופציונלי: החוזה קובע ש-`serializeSelection` מסדר „the current or
- * supplied model selection”, ולכן כשאין מסלול לקרוא את הבחירה — „העתק” עדיין
- * עובד על החי. „גזור” אינו יכול, כי הוא צריך את אותו target למחיקה.
+ * supplied model selection”, אבל נמדד מול המנוע האמיתי (ה-dist הארוז) שבלי
+ * target הקריאה **נכשלת** — „…requires an explicit target until
+ * current-selection serialization is wired”. כלומר זה אינו מסלול חלופי תקין
+ * להעתקה רגילה (קוראי `copySelection`/`cutSelection` ממתינים לטווח שנפתר,
+ * ר' `readSelectionSettled`), אלא מה שנשאר לקרוא בו כשאין בכלל דרך לקרוא את
+ * הבחירה (`ui.selection` עצמו חסר) — שם אין ברירה חוץ מלנסות בלי target ולתת
+ * למנוע להחליט.
  */
 async function serializeSelection(
   host: ClipboardHostTarget,
@@ -451,10 +501,17 @@ function systemBlocked(what: string, gesture: string): CommandOutcome {
  * מפילה את רינדור הרצועה כולה.
  */
 export async function copySelection(host: ClipboardHostTarget): Promise<CommandOutcome> {
-  const selection = readSelection(selectionOf(host));
+  // `readSelectionSettled` ולא `readSelection`: נמדד מול המנוע האמיתי (ה-dist
+  // הארוז) ש-`serializeSelection` בלי `target` **נכשל** — "requires an
+  // explicit target until current-selection serialization is wired" — ולא
+  // מסדר את הבחירה החיה כפי שההערה למטה הניחה. לכן `status` שאינו `ready`
+  // ממתין להתייצבות כאן, בדיוק כמו ב„גזור"; המסלול בלי target נשאר למטה רק
+  // למקרה שאין בכלל משטח לקרוא ממנו (`host-capability-unavailable`).
+  const selection = await readSelectionSettled(selectionOf(host));
   // בחירה ריקה נעצרת כאן ולא במנוע, כדי שההודעה תהיה „יש לסמן טקסט תחילה”
-  // ולא כשל סדרוּר. חוסר **מסלול** לקרוא את הבחירה אינו עוצר: המנוע יסדר את
-  // הבחירה החיה בעצמו.
+  // ולא כשל סדרוּר. חוסר **מסלול** לקרוא את הבחירה (למשל אין `ui.selection`
+  // בכלל) אינו עוצר: הקריאה למטה עדיין יוצאת בלי target, וזה המסלול שנשאר
+  // תלוי במנוע — לא הבחירה הרגילה.
   if (!selection.ok && selection.reason === 'range-selection-required') {
     return failed(COPY_FAILED, selection.reason);
   }
@@ -489,8 +546,10 @@ export async function cutSelection(host: ClipboardHostTarget): Promise<CommandOu
   }
 
   // ל„גזור” הבחירה היא חובה, ולא נוחות: `doc.delete` מקבל `target` או `ref`,
-  // ובלי אחד מהם אין מה למחוק.
-  const selection = readSelection(selectionOf(host));
+  // ובלי אחד מהם אין מה למחוק. `readSelectionSettled` ולא `readSelection`:
+  // בניגוד ל„העתק”, אין כאן מסלול חלופי בלי target, ולכן `status` שעוד לא
+  // הסתיים ממתין להתייצבות במקום להיכשל על „not-ready”.
+  const selection = await readSelectionSettled(selectionOf(host));
   if (!selection.ok) return failed(CUT_FAILED, selection.reason);
 
   const serialized = await serializeSelection(host, CUT_FAILED, selection.target);
