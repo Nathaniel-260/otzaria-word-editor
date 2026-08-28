@@ -101,11 +101,21 @@ export type ClipboardParseResult =
   | { success: true; plan: ClipboardPlan }
   | { success: false; failure?: ClipboardFailure };
 
+/**
+ * טווח טקסט שהמוטציה **יצרה**, כפי שהוא בנתיב ה-`effects` של הקבלה.
+ * `selectionTarget` הוא בדיוק הצורה שפעולות הבחירה מקבלות — החוזה מתאר אותו
+ * כ„selection target covering the created span, for selection-consuming APIs”.
+ */
+export interface ClipboardInsertedText {
+  selectionTarget?: SelectionTarget;
+}
+
 /** הקבלה של `insert`, בתוספת מה שהיא מספרת על מה שהודבק בפועל. */
 export interface ClipboardInsertReceipt extends DocReceipt {
   failure?: ClipboardFailure;
   plan?: { sourceKind?: string; plainFallback?: boolean };
   diagnostics?: readonly unknown[];
+  effects?: { insertedText?: readonly ClipboardInsertedText[] };
 }
 
 /** מה שנצרך מ-`activeEditor.doc`. כל שדה אופציונלי: גרסה אחרת עשויה לא לחשוף אותו. */
@@ -617,6 +627,111 @@ function readBlocked(): CommandOutcome {
   };
 }
 
+/**
+ * הסמן שאחרי ההדבקה: קצה הטקסט שנוצר, מכווץ לנקודה.
+ *
+ * ## התלונה שזה נולד ממנה
+ *
+ * „מדביק משה, ואז כהן — ויוצא כהןמשה.” המנוע **אינו** מזיז את הבחירה החיה
+ * אחרי `clipboard.insert`. נמדד מול המנוע האמיתי (Chrome על ה-dist הארוז):
+ * לפני ההדבקה הסמן ב-`41964671:0`, אחריה — `41964671:0` שוב, בזמן שהקבלה כבר
+ * מדווחת על טווח שנוצר בין 0 ל-3. ההדבקה הבאה קוראת את אותו סמן, ולכן נכנסת
+ * **לפני** קודמתה.
+ *
+ * Ctrl+V אינו סובל מזה: שם המנוע מטפל באירוע `paste` בעצמו ומזיז את הסמן
+ * כחלק מאותה עסקה. מסלול הכפתור עובר ב-Document API, ושם הזזת הבחירה היא
+ * באחריות מי שקרא — בדיוק כמו שליחת ה-`target` להדבקה.
+ *
+ * ## למה מהקבלה, ולא בחישוב
+ *
+ * אין כאן ספירת תווים משלנו: הדבקה של טקסט רב-שורות או של HTML נפרסת לכמה
+ * פסקאות, ואורך מה שהודבק אינו האורך שנכנס לפסקה שבה הסמן היה. הקבלה מדווחת
+ * על מה שנוצר בפועל, ו-`selectionTarget` שבתוכה הוא כבר הצורה שפעולות הבחירה
+ * מקבלות.
+ *
+ * נמדד: גם ב-„אחת\nשתיים\nשלוש” וגם ב-`<p>אלף</p><p>בית</p>` חוזר **פריט
+ * אחד** ב-`insertedText`, והוא הטווח האחרון שנוצר („שלוש”, „בית”) — כלומר
+ * בדיוק המקום שבו הסמן צריך לשבת. `insertedBlocks` היה ריק בכל המקרים, ולכן
+ * הוא אינו נקרא כאן. הקצה נלקח מהאיבר האחרון ולא מהראשון: החוזה מבטיח סדר
+ * מסמך, וגרסה שתדווח על כמה טווחים תיקרא נכון.
+ *
+ * `null` = הקבלה אינה מדווחת על טווח שנוצר. אז אין מה להזיז, וההדבקה עצמה
+ * עדיין הצליחה.
+ */
+function caretAfterPaste(receipt: ClipboardInsertReceipt | undefined): SelectionTarget | null {
+  const spans = receipt?.effects?.insertedText;
+  if (!Array.isArray(spans) || spans.length === 0) return null;
+
+  const span = spans[spans.length - 1]?.selectionTarget;
+  const end = span?.end;
+  if (!span || !end) return null;
+
+  return {
+    kind: 'selection',
+    start: end,
+    end,
+    // ה-story נשמר: הדבקה בכותרת עליונה או בהערת שוליים אינה בגוף המסמך,
+    // ובחירה בלי הזהות הזאת הייתה מצביעה על בלוק אחר לגמרי.
+    ...(span.story ? { story: span.story } : {}),
+    ...(span.coordinateSpace ? { coordinateSpace: span.coordinateSpace } : {}),
+  };
+}
+
+/** כמה ניסיונות חוזרים, ובאיזה מרווח, כשהבלוק החדש טרם אותר. ההנמקה למטה. */
+const CARET_RETRIES = 3;
+const CARET_RETRY_MS = 80;
+
+const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * מזיזה את הסמן לסוף מה שהודבק.
+ *
+ * best-effort בכוונה: התוכן כבר במסמך, וכשל בהזזת הסמן אינו הופך הדבקה
+ * שהצליחה לכישלון — הוא נרשם ללוג, כמו הדבקה שנפלה לטקסט בלבד. `apply` הוא
+ * adapter אופציונלי (ההסבר ב-`selectWholeDocument`), ולכן היעדרו הוא מסלול
+ * חוקי ולא שגיאה.
+ *
+ * ## למה ניסיון חוזר
+ *
+ * הדבקה שיוצרת פסקה חדשה מחזירה בקבלה בלוק שברגע החזרה של `insert` עדיין
+ * אינו ניתן לאיתור: `apply` נכשל סגור עם `target-unresolved`. נמדד מול המנוע
+ * האמיתי, אותה הדבקה רב-שורתית בארבע השהיות — 0ms נדחה (וניסיון חוזר
+ * 250ms אחריו עבר), ו-50ms / 300ms / 1000ms עברו בראשון.
+ *
+ * לכן הניסיון הראשון מיידי: הדבקה שנשארת בתוך הפסקה — הרוב המוחלט — מסתדרת
+ * בו, והשהיה קבועה לפני `apply` הייתה מחייבת **כל** הדבקה לשלם את מחיר המקרה
+ * הנדיר. אירוע „הבלוק נקלט” אינו בחוזה, ולכן ההמתנה היא ניסיונות קצרים.
+ *
+ * `apply` שזורק אינו חוזר על עצמו: חריגה אינה „עדיין לא מוכן” אלא מסלול שבור.
+ */
+async function moveCaretAfterPaste(
+  surface: SelectionSurface | undefined,
+  receipt: ClipboardInsertReceipt | undefined,
+): Promise<void> {
+  const caret = caretAfterPaste(receipt);
+  if (!caret) return;
+
+  const apply = surface?.apply;
+  if (typeof apply !== 'function') return;
+
+  for (let attempt = 0; attempt <= CARET_RETRIES; attempt += 1) {
+    if (attempt > 0) await wait(CARET_RETRY_MS);
+
+    let result: { ok?: boolean; reason?: string } | undefined;
+    try {
+      result = await apply(caret);
+    } catch (error) {
+      console.warn('[otzaria-word] הזזת הסמן לסוף ההדבקה נכשלה', error);
+      return;
+    }
+
+    if (result?.ok !== false) return;
+    if (attempt === CARET_RETRIES) {
+      console.warn('[otzaria-word] הזזת הסמן לסוף ההדבקה נדחתה', result.reason);
+    }
+  }
+}
+
 /** ההסבר בעברית לכשל של `parse` או `insert`. */
 function pasteFailureText(failure: ClipboardFailure | undefined): string {
   const unsupported = failure?.details?.unsupportedReason;
@@ -715,6 +830,10 @@ export async function pasteFromClipboard(host: ClipboardHostTarget): Promise<Com
   if (receipt?.success === false) {
     return { ok: false, message: pasteFailureText(receipt.failure), reason: receipt.failure?.code };
   }
+
+  // הסמן עובר לסוף מה שהודבק — אחרת ההדבקה הבאה נכנסת לפני זו. ההנמקה
+  // המלאה ב-`caretAfterPaste`.
+  await moveCaretAfterPaste(selectionOf(host), receipt);
 
   // הדבקה שנפלה לטקסט בלבד היא **הצלחה** עם אובדן עיצוב. אין לה ערוץ נפרד
   // אל המשתמש (המדווח מציג כשלים), ולכן היא נרשמת ללוג ולא נצבעת כשגיאה.
