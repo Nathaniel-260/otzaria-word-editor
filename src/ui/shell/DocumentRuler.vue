@@ -646,32 +646,36 @@ function round2(value: number): number {
   border-radius: 1px;
 }
 
-/* שנתה. הקו נמשך כלפי מטה מהמרכז, וגובהו הוא הדירוג שלה. */
+/* שנתה. כל השנתות נגמרות על אותו קו, וגובהן כלפי מעלה הוא הדירוג שלהן.
+
+   בסיס משותף ולא `top` לכל דירוג: המספר תלוי מעל השנתה הראשית (`bottom: 100%`),
+   ולכן ראש השנתה הראשית הוא גם רצפת המספרים. כשלכל דירוג היה `top` משלו
+   הרצפה הזאת ישבה על 4px, המספר בן 9 הפיקסלים נדחף ל-‎-5px, ו-`overflow:
+   hidden` של הרצועה חתך ממנו חמישה — נמדד ב-Chrome: 44% מהספרה נראו. */
 .doc-ruler__tick {
   position: absolute;
+  bottom: 8px;
   width: 1px;
   background: var(--color-on-surface-variant);
   opacity: 0.55;
 }
 
 .doc-ruler__tick--major {
-  top: 4px;
   height: 5px;
   opacity: 0.75;
 }
 
 .doc-ruler__tick--mid {
-  top: 8px;
-  height: 5px;
+  height: 4px;
 }
 
 .doc-ruler__tick--minor {
-  top: 10px;
-  height: 3px;
+  height: 2px;
   opacity: 0.4;
 }
 
-/* המספר יושב מעל השנתה הראשית, ממורכז עליה. */
+/* המספר יושב מעל השנתה הראשית, ממורכז עליה — ובתוך הרצועה: ראש השנתה על
+   9px, והמספר ממלא בדיוק את התשעה שמעליו. */
 .doc-ruler__number {
   position: absolute;
   bottom: 100%;
@@ -727,10 +731,11 @@ function round2(value: number): number {
 }
 
 /* סמני הכניסה: משולשים, כמו ב-Word. `clip-path` ולא גבולות — הצורה נשארת
-   חדה בכל DPI, והצבע מגיע מטוקן אחד ולא מארבעה גבולות. */
+   חדה בכל DPI, והצבע מגיע מטוקן אחד ולא מארבעה גבולות. יושבים מתחת לשנתות,
+   שנגמרות על 14px, ולא חופפים להן. */
 .doc-ruler__handle--indent-start,
 .doc-ruler__handle--indent-end {
-  bottom: 1px;
+  bottom: 0;
   height: 8px;
 }
 

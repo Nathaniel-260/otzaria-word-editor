@@ -546,9 +546,20 @@ function handleTitle(handle: Handle): string {
   opacity: 0.4;
 }
 
+/* המספר בצד הפנוי של העמודה, מעבר לשנתה — ולא מעליה.
+
+   השנתות נצמדות ל-`inset-inline-end` ורוחבן 6px, ולכן `inset-inline-start: 1px`
+   הצמיד את המספר אל **תוך** תיבת השנתה: הקצה שלו נעל על 7px בעמודה של 22px,
+   והוא גדל משם החוצה. נמדד ב-Chrome עם הגופן הארוז — „3” נכנס, „10” יצא
+   ל-‎-2.5px ואיבד חלק מהספרה המובילה, בזמן ש-14 פיקסלים מהעמודה עמדו ריקים.
+   ב-A4 בסנטימטרים התוויות מגיעות ל-27, כלומר זה כל תווית דו-ספרתית.
+
+   `inset-inline-end: 100%` מעביר אותו אל מעבר לקצה השני של השנתה, לתוך המקום
+   הפנוי, והמרווח הוא `margin-inline-end`. */
 .doc-vruler__number {
   position: absolute;
-  inset-inline-start: 1px;
+  inset-inline-end: 100%;
+  margin-inline-end: 2px;
   top: 50%;
   transform: translateY(-50%);
   font-family: var(--font-main);
