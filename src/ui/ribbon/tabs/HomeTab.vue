@@ -439,6 +439,7 @@ import { computed, inject, ref, shallowRef, watch, type Ref } from 'vue';
 import type { SuperDoc } from 'superdoc';
 import RibbonGroup from '../common/RibbonGroup.vue';
 import RibbonButton from '../common/RibbonButton.vue';
+import RibbonMenuButton from '../common/RibbonMenuButton.vue';
 import RibbonSelect, { type SelectOption } from '../common/RibbonSelect.vue';
 import ColorPickerPopover from '../common/ColorPickerPopover.vue';
 import StyleGallery from '../common/StyleGallery.vue';
