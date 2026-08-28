@@ -67,12 +67,26 @@
  * ומוחזרת לו ביציאה, וכדי שהשם הנגיש לא ייעלם בינתיים הוא נשמר ב-`aria-label`
  * (רק אם לא היה שם כזה קודם). ההסרה היא רק במסלול העכבר: במיקוד מקלדת הדפדפן
  * אינו מצייר טולטיפ מולד כלל, ואין מה לכבות.
+ *
+ * ### ומה שההסרה שברה: פקד שכל תוכנו הוא `title`
+ *
+ * העוגן מזוהה ב-`TIP_ANCHOR_SELECTOR`, ובפקד שאין לו `data-tip-title` **התכונה
+ * שהוסרה היא בדיוק מה שהפך אותו לעוגן**. נמדד ב-Chrome על ה-dist הארוז, על
+ * `.word-app-badge` שבפס העליון: ריחוף פותח את הכרטיס ומסיר את ה-`title`,
+ * ותזוזה של פיקסל אחד סוגרת אותו — `anchorAt` מחזיר `null` בשני המסלולים,
+ * `scheduleHide` רץ, ה-`title` חוזר, וכעבור 400ms הכול חוזר חלילה. כלומר
+ * הבהוב, ודווקא על כל מה שסעיף 2 שלמעלה הבטיח לכסות בלי חיווט.
+ *
+ * לכן ההסרה אינה מוחקת את התוכן אלא **מעבירה** אותו ל-`data-tip-title` לאורך
+ * ההשהיה. האלמנט נשאר עוגן, `readTip` מחזיר את אותו תוכן בדיוק — הוא קורא את
+ * שתי התכונות באותה נפילה — ומערכת ההפעלה כבר אינה מציירת דבר.
  */
 import { nextTick, onUnmounted, ref, shallowRef, type CSSProperties } from 'vue';
 import { popoverPlacement } from '../../composables/popover-position';
 import {
   TIP_ANCHOR_SELECTOR,
   TIP_EXCLUDED_SELECTOR,
+  TIP_TITLE_ATTR,
   readTip,
   type TipContent,
 } from './tooltip-content';
@@ -133,7 +147,13 @@ let showTimer = 0;
 let hideTimer = 0;
 
 /** מה שהוסר מהעוגן כדי לכבות את הטולטיפ המולד. ראו ההסבר בראש הקובץ. */
-let suppression: { element: HTMLElement; title: string; borrowedLabel: boolean } | null = null;
+let suppression: {
+  element: HTMLElement;
+  title: string;
+  borrowedLabel: boolean;
+  /** ה-`data-tip-title` הוא שלנו ולא של הפקד, ולכן יורד ביציאה. */
+  borrowedTip: boolean;
+} | null = null;
 
 function clearTimers(): void {
   window.clearTimeout(showTimer);
@@ -148,18 +168,23 @@ function suppressNative(element: HTMLElement): void {
 
   const borrowedLabel = !element.hasAttribute('aria-label');
   if (borrowedLabel) element.setAttribute('aria-label', title);
+  // התוכן עובר ולא נמחק: בלי זה פקד שכל תוכנו `title` מפסיק להיות עוגן ברגע
+  // שהכרטיס נפתח, והתזוזה הבאה סוגרת אותו. ההסבר המלא בראש הקובץ.
+  const borrowedTip = !element.hasAttribute(TIP_TITLE_ATTR);
+  if (borrowedTip) element.setAttribute(TIP_TITLE_ATTR, title);
   element.removeAttribute('title');
-  suppression = { element, title, borrowedLabel };
+  suppression = { element, title, borrowedLabel, borrowedTip };
 }
 
 function restoreNative(): void {
   if (!suppression) return;
-  const { element, title, borrowedLabel } = suppression;
+  const { element, title, borrowedLabel, borrowedTip } = suppression;
   suppression = null;
   // אלמנט שיצא מה-DOM בזמן שהכרטיס היה פתוח (לשונית שהתחלפה) — אין מה להחזיר.
   if (!element.isConnected) return;
   element.setAttribute('title', title);
   if (borrowedLabel) element.removeAttribute('aria-label');
+  if (borrowedTip) element.removeAttribute(TIP_TITLE_ATTR);
 }
 
 function describe(element: HTMLElement, tip: TipContent): void {

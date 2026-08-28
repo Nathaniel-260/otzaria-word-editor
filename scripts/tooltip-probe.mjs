@@ -238,7 +238,47 @@ try {
     console.log('… אין כפתור מנוטרל במסמך שנטען — הדילוג אינו כשל');
   }
 
-  /* 5. Escape מסלק את הכרטיס. */
+  /* 5. פקד שכל תוכנו `title` — הכיסוי-ללא-חיווט, ותזוזה שנייה עליו.
+
+     כאן נמדדה התקלה: הכיבוי של הטולטיפ המולד הסיר את `title`, ובפקד שאין לו
+     `data-tip-title` משלו זו בדיוק התכונה שהפכה אותו לעוגן. תזוזה של פיקסל
+     אחד החזירה `null` מ-`anchorAt`, הכרטיס נסגר, ה-`title` חזר, וכעבור 400ms
+     הכול חזר חלילה. שתי התזוזות כאן ולא אחת: הראשונה פותחת, והשנייה היא מה
+     שנשבר. */
+  const bare = await page.cdp.evaluate(`(() => {
+    const found = Array.from(
+      document.querySelectorAll('[title]:not([title=""]):not([data-tip-title])'),
+    ).find((element) => !element.closest('.editor-stack') && element.getBoundingClientRect().width > 4);
+    if (!found) return null;
+    const box = found.getBoundingClientRect();
+    return {
+      title: found.getAttribute('title'),
+      x: Math.round(box.left + box.width / 2),
+      y: Math.round(box.top + box.height / 2),
+    };
+  })()`);
+  if (bare) {
+    console.log(`   פקד ללא חיווט: ${bare.title}`);
+    await hover(page.cdp, bare.x, bare.y);
+    const opened = await page.cdp.evaluate(TIP_STATE);
+    check(opened?.title === bare.title, `פקד עם title בלבד מקבל כרטיס: ${opened?.title}`);
+
+    await page.cdp.send('Input.dispatchMouseEvent', {
+      type: 'mouseMoved',
+      x: bare.x + 1,
+      y: bare.y + 1,
+      buttons: 0,
+    });
+    await sleep(400);
+    check(
+      Boolean(await page.cdp.evaluate(TIP_STATE)),
+      'הכרטיס שורד תזוזה נוספת על אותו פקד — בלי זה הוא מהבהב',
+    );
+  } else {
+    console.log('… לא נמצא פקד עם title בלבד — הדילוג אינו כשל');
+  }
+
+  /* 6. Escape מסלק את הכרטיס. */
   const escape = await page.cdp.evaluate(centerOf('button[data-tip-title="נטוי"]'));
   if (escape) {
     await hover(page.cdp, escape.x, escape.y);
@@ -248,7 +288,7 @@ try {
     check((await page.cdp.evaluate(TIP_STATE)) === null, 'Escape סוגר את הכרטיס');
   }
 
-  /* 6. אזור המסמך אינו מקבל טולטיפ של המעטפת. */
+  /* 7. אזור המסמך אינו מקבל טולטיפ של המעטפת. */
   await page.cdp.send('Input.dispatchMouseEvent', {
     type: 'mouseMoved',
     x: VIEWPORT.width / 2,
