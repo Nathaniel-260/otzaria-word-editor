@@ -108,6 +108,12 @@
  * מסמך במצב `viewing` יעבור ב-toggle ל-`suggesting`, כלומר גם ייצא מצפייה
  * בלבד. זה מכוון: המשתמש ביקש להתחיל לעקוב אחר שינויים.
  *
+ * **„הגבל עריכה" (למטה) כותב לאותו `document-mode` בדיוק** — היא זו שמעבירה
+ * אותו ל-`'viewing'` כדי לחסום קלט בפועל (ראו engine/protection.ts). מסמך
+ * שהיה ב-`suggesting` ואז הוגן ייראה כאן `isSuggesting: false` (המסמך ב-
+ * `viewing`, לא ב-`suggesting`) — וזה נכון: אי אפשר גם לחסום קלט וגם להשאיר
+ * מעקב פעיל. הביטול משחזר את `'suggesting'`, לא רק את `enforced`.
+ *
  * **שני פקדים מנוטרלים במפורש, ולא כפתור מת:**
  *   - „בדיקת איות” היא שלב שלם בתכנית (§13.2): ספק איות תורני, המרת המילון
  *     למודול נתונים, ו-offsets ב-UTF-16 שמכבדים ניקוד וטעמים. הקיצור `F7`
@@ -124,10 +130,10 @@ import { useCommand } from '../../../composables/useCommand';
 import {
   disableProtection,
   enableReadOnlyProtection,
-  readProtectionState,
+  syncProtectionRuntime,
 } from '../../../engine/protection';
 import { ACTIVE_SUPERDOC } from '../../../engine/document-api';
-import { COMMAND_REPORTER, type CommandReporter } from '../../../composables/keys';
+import { COMMAND_ADAPTER, COMMAND_REPORTER, type CommandReporter } from '../../../composables/keys';
 
 const acceptCmd = useCommand('acceptChange');
 const rejectCmd = useCommand('rejectChange');
@@ -143,13 +149,19 @@ const isSuggesting = computed(() => modeCmd.value.value === 'suggesting');
 
 /**
  * „הגבל עריכה" — מתג הפעלה/ביטול של קריאה-בלבד, דרך `protection.*`
- * (engine/protection.ts). מסלול הביטול נמדד **לפני** ההפעלה ועובד
- * בלי סיסמה; אחרי ההפעלה 4 יכולות נופלות ל-false — ולכן ה-tooltip
- * אומר במדויק מה יקרה, ואישור דו-לחיצה לפני הנעילה.
+ * (engine/protection.ts). כתיבת ה-XML (`setEditingRestriction`/
+ * `clearEditingRestriction`) אינה מספיקה לחסימה בפועל: המנוע שוער קלט
+ * ופקודות לפי `document-mode === 'viewing'` בלבד, ולכן `engine/protection.ts`
+ * מעביר גם אותו, יחד עם ה-XML — ראו הערת הראש שם. מסלול הביטול נמדד **לפני**
+ * ההפעלה ועובד בלי סיסמה; אחרי ההפעלה 4 יכולות נופלות ל-false — ולכן
+ * ה-tooltip אומר במדויק מה יקרה, ואישור דו-לחיצה לפני הנעילה.
+ *
+ * `modeBeforeProtection` שומר את מצב המסמך (`'editing'`/`'suggesting'`) כפי
+ * שהיה **לפני** שההפעלה כפתה `'viewing'`, כדי שהביטול ישחזר אותו במדויק:
+ * מסמך שהיה במעקב שינויים לא אמור לצאת ממנו רק בגלל שהוגן ואז שוחרר.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const superdoc = inject(ACTIVE_SUPERDOC, shallowRef(null));
+const commands = inject(COMMAND_ADAPTER, ref(null));
 const fallbackReporter: CommandReporter = (outcome, id) => {
   if (!outcome.ok) console.warn(`[otzaria-word] ${id}: ${outcome.message}`);
 };
@@ -159,14 +171,19 @@ const report = inject(COMMAND_REPORTER, fallbackReporter);
 const protectionEnforced = ref(false);
 const protectionInFlight = ref(false);
 const protectionConfirm = ref(false);
+const modeBeforeProtection = ref<string | null>(null);
 let protectionGeneration = 0;
 
 watch(
   superdoc,
   async (host) => {
     const mine = ++protectionGeneration;
-    const state = await readProtectionState(host);
-    if (mine === protectionGeneration && state) protectionEnforced.value = state.enforced;
+    // מסמך חדש: אין זיכרון של מצב קודם, ואם הוא נטען כשהוא כבר מוגן —
+    // syncProtectionRuntime הוא זה שכופה 'viewing' בפועל ולא רק מציג מנעול.
+    const state = await syncProtectionRuntime(host, commands.value);
+    if (mine !== protectionGeneration || !state) return;
+    protectionEnforced.value = state.enforced;
+    modeBeforeProtection.value = null;
   },
   { immediate: true },
 );
@@ -174,9 +191,19 @@ watch(
 const protectionTooltip = computed(() => {
   if (protectionInFlight.value) return 'הפעולה מתבצעת…';
   if (protectionConfirm.value) return 'לחץ שוב לאישור: המסמך יינעל לקריאה בלבד (ניתן לביטול מכאן)';
-  if (protectionEnforced.value) return 'ביטול ההגבלה — המסמך יחזור לעריכה מלאה';
+  if (protectionEnforced.value) {
+    return modeBeforeProtection.value === 'suggesting'
+      ? 'ביטול ההגבלה — המסמך יחזור למצב מעקב אחר שינויים'
+      : 'ביטול ההגבלה — המסמך יחזור לעריכה מלאה';
+  }
   return 'הצג את המסמך במצב „קריאה בלבד". ניתן לבטל מכאן בכל עת.';
 });
+
+async function syncProtectionEnforced(): Promise<void> {
+  const mine = ++protectionGeneration;
+  const state = await syncProtectionRuntime(superdoc.value, commands.value);
+  if (mine === protectionGeneration && state) protectionEnforced.value = state.enforced;
+}
 
 async function onToggleProtection(): Promise<void> {
   if (protectionInFlight.value) return;
@@ -190,15 +217,21 @@ async function onToggleProtection(): Promise<void> {
 
   protectionInFlight.value = true;
   try {
-    const outcome = protectionEnforced.value
-      ? await disableProtection(superdoc.value)
-      : await enableReadOnlyProtection(superdoc.value);
-    report(outcome, 'protection-toggle');
-
-    if (outcome.ok) {
-      const mine = ++protectionGeneration;
-      const state = await readProtectionState(superdoc.value);
-      if (mine === protectionGeneration && state) protectionEnforced.value = state.enforced;
+    if (protectionEnforced.value) {
+      const restoreMode = modeBeforeProtection.value ?? 'editing';
+      const outcome = await disableProtection(superdoc.value, commands.value, restoreMode);
+      report(outcome, 'protection-toggle');
+      if (outcome.ok) {
+        modeBeforeProtection.value = null;
+        await syncProtectionEnforced();
+      }
+    } else {
+      const outcome = await enableReadOnlyProtection(superdoc.value, commands.value);
+      report(outcome, 'protection-toggle');
+      if (outcome.ok) {
+        modeBeforeProtection.value = outcome.previousMode;
+        await syncProtectionEnforced();
+      }
     }
   } finally {
     protectionInFlight.value = false;
