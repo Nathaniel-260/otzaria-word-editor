@@ -332,7 +332,7 @@ const LINES = ['alpha rho', 'beta', 'gamma', 'delta', 'epsilon rho', 'zeta'];
 /* ================================================================== */
 
 await phase('שלב א — קבוצת „פיסקה"', async (app, ctx) => {
-  const { js, caretAt, selectPara, clickEl, fill, docx, clean, closeDialogs, step, seed, TEXT_BOX } = ctx;
+  const { js, caretAt, selectPara, clickEl, fill, docx, clickStyle, clean, closeDialogs, step, seed, TEXT_BOX } = ctx;
 
   /* -------- בלי סמן -------- */
   await step('התנהגות בלי סמן', async () => {
@@ -694,6 +694,77 @@ await phase('שלב א — קבוצת „פיסקה"', async (app, ctx) => {
     if (failed.length === 0 && c.ok) report.pass('תפריט פסקה — אישור', `כל תשעת השדות נכתבו: ${ind} ${sp} + <w:keepNext/><w:keepLines/>`);
     else if (failed.length === Object.keys(checks).length) report.fail('תפריט פסקה — אישור', `שום דבר לא נכתב (פתוח=${stillOpen}, שגיאה=${err}). pPr=${short(pPr, 300)} | ${c.detail}`);
     else report.partial('תפריט פסקה — אישור', `לא נכתבו: ${failed.join(' / ')} | ind=${ind} sp=${sp} | ${c.detail}`);
+    await closeDialogs();
+  });
+
+  /*
+   * שתי הבדיקות הבאות — תוספת: הביקורת הסטטית מצאה שהיעד שהדיאלוג כותב
+   * אליו מקבע `nodeType:'paragraph'` במקום לגזור אותו מהבלוק בפועל. השער
+   * עד כה בדק רק פסקה רגילה.
+   */
+
+  await step('תפריט פסקה — על כותרת (nodeType:heading, לא paragraph מקובע)', async () => {
+    // באג 1: היעד שנשלח למנוע חייב לשאת את ה-nodeType האמיתי של הבלוק.
+    // כתובת עם nodeType:'paragraph' מקובע על כותרת היא כתובת פסולה, וכל
+    // כתיבה חזרה (setIndentation/setSpacing/setKeepOptions) הייתה נכשלת.
+    await caretAt(3);
+    const styled = await clickStyle('כותרת 1');
+    if (!styled.found) { report.skip('תפריט פסקה — על כותרת', 'כרטיס „כותרת 1" לא נמצא בגלריה'); return; }
+    await app.sleep(600);
+    const pStyleBefore = (pPrOf(await docx('heading-style'), 'delta') || '').match(/w:pStyle w:val="([^"]+)"/)?.[1] ?? null;
+    if (!pStyleBefore || !/heading/i.test(pStyleBefore)) {
+      report.skip('תפריט פסקה — על כותרת', `הסגנון לא הוחל: pStyle=${pStyleBefore}`);
+      return;
+    }
+    await caretAt(3);
+    await app.click('תפריט פסקה'); await app.sleep(1600);
+    if (!(await app.dialog())) { report.fail('תפריט פסקה — על כותרת', 'הדיאלוג לא נפתח על כותרת'); return; }
+    await fill('#pd-ind-left', 0, '1.5');
+    await app.sleep(250);
+    const ok = await clickEl('.para-dialog .pd-btn-primary', 0, 2200);
+    const err = await js(`(() => { const e = document.querySelector('.pd-error'); return e ? e.textContent.trim() : null; })()`);
+    const stillOpen = !!(await app.dialog());
+    const files = await docx('heading-ind');
+    const pPr = pPrOf(files, 'delta') || '';
+    const c = await clean();
+    const ind = pPr.match(/<w:ind[^>]*>/)?.[0] ?? null;
+    console.log('כותרת + הזחה: pStyle=', pStyleBefore, '| ok=', JSON.stringify(ok), '| עדיין פתוח?', stillOpen, '| שגיאה=', err, '| ind=', ind, '|', c.detail);
+    ind && /w:(?:left|start)="850"/.test(ind) && c.ok
+      ? report.pass('תפריט פסקה — על כותרת', `<w:ind> נכתב על פסקת כותרת (pStyle=${pStyleBefore}): ${ind}`)
+      : report.fail('תפריט פסקה — על כותרת',
+        `לא נכתב/נכשל על כותרת: ind=${ind} | פתוח=${stillOpen} | שגיאה=${err} | ${c.detail}`);
+    await closeDialogs();
+  });
+
+  await step('תפריט פסקה — על פריט רשימה (nodeType:listItem, לא paragraph מקובע)', async () => {
+    await caretAt(4);
+    let pPrBefore = pPrOf(await docx('listitem-check'), 'epsilon rho') || '';
+    if (!/<w:numPr>/.test(pPrBefore)) {
+      await app.click('תבליטים');
+      await app.sleep(1200);
+      pPrBefore = pPrOf(await docx('listitem-setup'), 'epsilon rho') || '';
+    }
+    if (!/<w:numPr>/.test(pPrBefore)) {
+      report.skip('תפריט פסקה — על פריט רשימה', `לא הצלחתי להפוך את הפסקה לפריט רשימה: ${short(pPrBefore)}`);
+      return;
+    }
+    await caretAt(4);
+    await app.click('תפריט פסקה'); await app.sleep(1600);
+    if (!(await app.dialog())) { report.fail('תפריט פסקה — על פריט רשימה', 'הדיאלוג לא נפתח על פריט רשימה'); return; }
+    await fill('#pd-ind-right', 0, '0.5');
+    await app.sleep(250);
+    const ok = await clickEl('.para-dialog .pd-btn-primary', 0, 2200);
+    const err = await js(`(() => { const e = document.querySelector('.pd-error'); return e ? e.textContent.trim() : null; })()`);
+    const stillOpen = !!(await app.dialog());
+    const files = await docx('listitem-ind');
+    const pPr = pPrOf(files, 'epsilon rho') || '';
+    const c = await clean();
+    const ind = pPr.match(/<w:ind[^>]*>/)?.[0] ?? null;
+    console.log('פריט רשימה + הזחה: ok=', JSON.stringify(ok), '| עדיין פתוח?', stillOpen, '| שגיאה=', err, '| ind=', ind, '|', c.detail);
+    ind && /w:(?:right|end)="283"/.test(ind) && /<w:numPr>/.test(pPr) && c.ok
+      ? report.pass('תפריט פסקה — על פריט רשימה', `<w:ind> נכתב על פריט רשימה בלי לאבד את המספור: ${ind}`)
+      : report.fail('תפריט פסקה — על פריט רשימה',
+        `לא נכתב/נכשל על פריט רשימה: ind=${ind} | numPr נשאר=${/<w:numPr>/.test(pPr)} | פתוח=${stillOpen} | שגיאה=${err} | ${c.detail}`);
     await closeDialogs();
   });
 

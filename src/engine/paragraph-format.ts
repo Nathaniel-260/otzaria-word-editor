@@ -134,6 +134,9 @@ export interface ParagraphFormatDocumentApi extends SelectionDocumentApi {
     };
   };
   get?: () => MaybePromise<unknown>;
+  blocks?: {
+    list?: () => MaybePromise<{ blocks?: readonly { nodeId?: string; nodeType?: string }[] } | undefined>;
+  };
 }
 
 /** מה שנדרש מ-SuperDoc: רק הפאסדה של המסמך. */
@@ -143,17 +146,48 @@ export interface ParagraphFormatHost {
 
 export type ParagraphFormatTarget = SuperDoc | ParagraphFormatHost | null | undefined;
 
+/** שלושת סוגי הבלוק שדיאלוג ההפסקה יכול לחול עליהם — `ParagraphBlockType` בחוזה. */
+export type ParagraphBlockType = 'paragraph' | 'heading' | 'listItem';
+
 export interface ParagraphTarget {
   kind: 'block';
-  nodeType: 'paragraph';
+  nodeType: ParagraphBlockType;
   nodeId: string;
   story?: unknown;
 }
 
 /**
- * הפסקה שהבחירה **מתחילה** בה — אותו פתרון יעד שנמדד ב-page-break.ts:
- * `blockId` מהבחירה, `nodeType:'paragraph'` תמיד (פתרון היעד במנוע נעשה לפי
- * `nodeId` ו-`story` בלבד), ו-`story` נשלח רק כשיש.
+ * סוג הבלוק בפועל של המזהה — פסקה, כותרת או פריט רשימה — לפי `blocks.list`.
+ *
+ * החוזה (`ParagraphTarget` ב-paragraphs.types.d.ts) דורש את הסוג האמיתי,
+ * ולא ליטרל מקובע: כתובת עם `nodeType:'paragraph'` על בלוק שהוא בפועל
+ * `heading` או `listItem` היא כתובת פסולה, וכתיבה חזרה אליה נכשלת. הפתרון
+ * כאן הוא אותו דפוס בדיוק כמו `resolveListItem` ב-lists.ts.
+ *
+ * ברירת המחדל `'paragraph'` — גם כשאין `blocks.list`, וגם כשהמזהה לא נמצא
+ * בעמוד שנקרא — היא התאמה לאחור: פסקה היא הסוג הנפוץ, וגרסת מנוע ישנה
+ * שאינה חושפת את הפעולה לא הייתה מפסיקה לעבוד על המקרה הרגיל.
+ */
+async function resolveBlockType(
+  doc: ParagraphFormatDocumentApi,
+  blockId: string,
+): Promise<ParagraphBlockType> {
+  const list = doc.blocks?.list;
+  if (typeof list !== 'function') return 'paragraph';
+  try {
+    const listed = await list();
+    const type = (listed?.blocks ?? []).find((b) => b.nodeId === blockId)?.nodeType;
+    return type === 'heading' || type === 'listItem' ? type : 'paragraph';
+  } catch {
+    return 'paragraph';
+  }
+}
+
+/**
+ * הפסקה/כותרת/פריט הרשימה שהבחירה **מתחילה** בה — אותו פתרון יעד שנמדד
+ * ב-page-break.ts, עם תיקון אחד: `nodeType` נגזר מ-`blocks.list` ולא מקובע
+ * ל-`'paragraph'` — ראו `resolveBlockType`. `blockId` מהבחירה, ו-`story`
+ * נשלח רק כשיש.
  */
 async function resolveTarget(
   host: ParagraphFormatTarget,
@@ -162,10 +196,12 @@ async function resolveTarget(
   if (!selection.blockId) {
     return { error: { ok: false, message: 'יש למקם את הסמן במסמך', reason: 'selection-required' } };
   }
+  const doc = docOf(host);
+  const nodeType = doc ? await resolveBlockType(doc, selection.blockId) : 'paragraph';
   return {
     target: {
       kind: 'block',
-      nodeType: 'paragraph',
+      nodeType,
       nodeId: selection.blockId,
       ...(selection.story ? { story: selection.story } : {}),
     },
@@ -403,23 +439,26 @@ export async function readParagraphIndents(
   host: ParagraphFormatTarget,
 ): Promise<ParagraphIndentReading | null> {
   const doc = docOf(host);
-  const get = doc?.get;
-  if (typeof get !== 'function') return null;
+  if (!doc || typeof doc.get !== 'function') return null;
 
   const selection = await readDocSelection(host);
   if (!selection.blockId) return null;
 
   let document: unknown;
   try {
-    document = await get();
+    document = await doc.get();
   } catch {
     return null;
   }
 
+  // אותה גזירה כמו ב-`resolveTarget`: הסרגל מצייר סמני כניסה גם על כותרת
+  // ופריט רשימה, וכתיבה חזרה דרכם דורשת את ה-`nodeType` האמיתי שלהם.
+  const nodeType = await resolveBlockType(doc, selection.blockId);
+
   return {
     target: {
       kind: 'block',
-      nodeType: 'paragraph',
+      nodeType,
       nodeId: selection.blockId,
       ...(selection.story ? { story: selection.story } : {}),
     },

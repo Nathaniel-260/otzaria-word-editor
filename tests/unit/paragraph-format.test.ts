@@ -43,7 +43,13 @@ type OpName =
  * כפיל של `format.paragraph.*`. `ops` הם המימושים (null להשמטה), ו-`calls`
  * אוסף את הקלט לכל אחת — ההקלטה בעטיפה בלבד.
  */
-function fakeDoc(options: { ops?: Partial<Record<OpName, ((input: unknown) => unknown) | null>>; get?: unknown; selection?: unknown } = {}) {
+function fakeDoc(options: {
+  ops?: Partial<Record<OpName, ((input: unknown) => unknown) | null>>;
+  get?: unknown;
+  selection?: unknown;
+  /** מה ש-`blocks.list` מדווח — כדי לגזור את `nodeType` האמיתי של הבלוק שהסמן בו. */
+  blocks?: readonly { nodeId: string; nodeType: string }[];
+} = {}) {
   const calls = new Map<OpName, unknown[]>();
   const paragraph: Record<string, unknown> = {};
   for (const name of ['setIndentation', 'clearIndentation', 'setSpacing', 'clearSpacing', 'setKeepOptions', 'setTabStop', 'clearTabStop', 'clearAllTabStops'] as const) {
@@ -61,6 +67,7 @@ function fakeDoc(options: { ops?: Partial<Record<OpName, ((input: unknown) => un
     selection: { current: vi.fn(async () => options.selection ?? CARET) },
     format: { paragraph },
     ...(options.get === undefined ? {} : { get: async () => options.get }),
+    ...(options.blocks === undefined ? {} : { blocks: { list: async () => ({ blocks: options.blocks }) } }),
   } as never;
 
   return { doc, calls, host: { activeEditor: { doc } } };
@@ -319,6 +326,42 @@ describe('readParagraphFormat', () => {
     }
   });
 
+  it('הבחירה יושבת בכותרת — היעד לכתיבה חזרה נושא nodeType:heading ולא paragraph מקובע', async () => {
+    // באג 1: כתיבה חזרה עם nodeType:'paragraph' מקובע על כותרת היא כתובת
+    // פסולה ונכשלת. nodeType כאן נגזר מ-blocks.list, בדיוק כמו resolveListItem.
+    const { host } = fakeDoc({
+      get: documentWith({ indentation: { left: 36 } }),
+      blocks: [{ nodeId: 'p3', nodeType: 'heading' }],
+    });
+
+    const result = await readParagraphFormat(host);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.target).toMatchObject({ nodeType: 'heading', nodeId: 'p3' });
+  });
+
+  it('הבחירה יושבת בפריט רשימה — היעד נושא nodeType:listItem', async () => {
+    const { host } = fakeDoc({
+      get: documentWith({ indentation: { left: 36 } }),
+      blocks: [{ nodeId: 'p3', nodeType: 'listItem' }],
+    });
+
+    const result = await readParagraphFormat(host);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.target).toMatchObject({ nodeType: 'listItem', nodeId: 'p3' });
+  });
+
+  it('בלי blocks.list, או כשהבלוק לא מדווח שם — nodeType נשאר paragraph', async () => {
+    const withoutBlocks = await readParagraphFormat(fakeDoc({ get: documentWith({}) }).host);
+    expect(withoutBlocks.ok && withoutBlocks.ok && withoutBlocks.target.nodeType).toBe('paragraph');
+
+    const notFound = await readParagraphFormat(
+      fakeDoc({ get: documentWith({}), blocks: [{ nodeId: 'other', nodeType: 'heading' }] }).host,
+    );
+    expect(notFound.ok && notFound.target.nodeType).toBe('paragraph');
+  });
+
   it('מסמך בלי הפסקה מחזיר ברירות מחדל ולא זריקה', async () => {
     const { host } = fakeDoc({ get: { body: [] } });
 
@@ -462,6 +505,21 @@ describe('readParagraphIndents', () => {
     });
 
     expect((await readParagraphIndents(host))?.indents.leftTwips).toBe(0);
+  });
+
+  it('היעד לכתיבה נושא את ה-nodeType האמיתי — כותרת ולא paragraph מקובע', async () => {
+    // באג 1: הסרגל כותב כניסות גם על כותרת/פריט רשימה, וכתיבה חזרה עם
+    // nodeType:'paragraph' מקובע על כתובת כזאת פסולה ונכשלת.
+    const { host } = fakeDoc({
+      get: {
+        body: [{ kind: 'paragraph', paragraphIds: { paraId: 'p3' }, paragraph: { props: {} } }],
+      },
+      blocks: [{ nodeId: 'p3', nodeType: 'listItem' }],
+    });
+
+    const reading = await readParagraphIndents(host);
+
+    expect(reading?.target).toMatchObject({ nodeType: 'listItem', nodeId: 'p3' });
   });
 
   it('אין סמן במסמך — `null`, ובלי הודעת כשל', async () => {
