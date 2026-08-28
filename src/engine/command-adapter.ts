@@ -63,6 +63,8 @@ export const FAILURE_TEXT: Record<string, string> = {
   INVALID_TARGET: 'לא ניתן לבצע את הפעולה במקום הזה במסמך',
   TARGET_NOT_FOUND: 'היעד של הפעולה לא נמצא במסמך',
   LOCK_VIOLATION: 'החלק הזה במסמך מוגן מפני שינוי',
+  // הנוסח נשאר כתיעוד ולשימוש engine/document-api.ts, אבל `run()` למטה
+  // מיירט NO_OP לפני שהוא מגיע לטבלה הזאת — הוא אינו כשל שהמשתמש רואה.
   NO_OP: 'לא היה מה לשנות',
 };
 
@@ -125,6 +127,13 @@ export function createCommandAdapter(ui: BorrowedSuperDocUI): CommandAdapter {
 
       if (isReceipt(result) && result.success === false) {
         const { code, message } = result.failure;
+        // NO_OP = הערכים המבוקשים כבר מוגדרים. זו אינה כשל מבחינת המשתמש —
+        // הוא ביקש "הזחה 0" ו"RTL" והם כבר כך. הצגת שגיאה כאן היא בדיוק מה
+        // שגרם לדיווח "הפעולה הכי טבעית במסמך עברי מציגה שגיאה" (בדיקת 9 בסקר
+        // הפקדים). כל שאר מודולי ה-Document API הישיר (page-setup.ts,
+        // header-footer.ts, footnotes.ts ועוד) כבר מכריעים כך; מסלול הפקודות
+        // המנותב חייב להסכים איתם, אחרת אותו כשל מתנהג אחרת בשני המסלולים.
+        if (code === 'NO_OP') return { ok: true };
         // אין תרגום? מציגים את ההסבר של המנוע ואת הקוד. ההסבר באנגלית, אבל הוא
         // אומר משהו — ובלעדיו נשארת רק הודעה גנרית שאי אפשר לעשות איתה כלום.
         const fallback = message ? `הפעולה נכשלה: ${message} (${code})` : `הפעולה נכשלה (${code})`;

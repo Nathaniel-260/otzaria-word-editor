@@ -99,6 +99,20 @@ describe('createCommandAdapter', () => {
     expect(outcome.ok === false && outcome.message).toContain('future-reason');
   });
 
+  it('receipt עם NO_OP נחשב הצלחה שקטה, לא כשל', async () => {
+    // באג #9 בסקר הפקדים: "הקטן הזחה" על הזחה אפס ו"RTL" על פסקה שכבר RTL
+    // עוברים כאן בדיוק (ui.commands.executeAsync), והמנוע מחזיר NO_OP כשהערך
+    // המבוקש כבר קיים. ב-Word זו אינה שגיאה, וכך גם מודולי ה-Document API
+    // הישיר (page-setup.ts ואחרים) כבר מכריעים.
+    const { ui } = fakeUi({
+      'indent-decrease': {
+        result: { success: false, failure: { code: 'NO_OP', message: 'no change' } } as never,
+      },
+    });
+
+    await expect(createCommandAdapter(ui).run('indent-decrease')).resolves.toEqual({ ok: true });
+  });
+
   it('receipt כושל מתורגם לפי קוד הכשל', async () => {
     const { ui } = fakeUi({
       link: {

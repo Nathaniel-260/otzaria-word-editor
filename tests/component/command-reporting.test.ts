@@ -161,6 +161,23 @@ describe('כשל של Document API', () => {
     ]);
   });
 
+  it('NO_OP — „שוליים ← רגיל” על מסמך שכבר רגיל — אינו מגיע למדווח כשגיאה', async () => {
+    // באג #9 בסקר הפקדים: NO_OP הוא מה שהמנוע מחזיר כשהערכים המבוקשים כבר
+    // מוגדרים, וזו הצלחה מבחינת המשתמש (ראו הערת הפתיחה של page-setup.ts).
+    // הבדיקה כאן על המסלול הישיר של ה-Document API — page-setup.ts כבר סינן
+    // את זה קודם; מה שנמדד הוא שהמסקנה עדיין נכונה ולא נשברה בדרך למדווח.
+    const superdoc = createSuperdocDouble({
+      failures: { 'sections.setPageMargins': { code: 'NO_OP' } },
+    });
+    const harness = mountUi(LayoutTab, { superdoc });
+    await settle();
+
+    await chooseFromMenu(harness, 'הגדרת שולי הדף (רגיל, צר, רחב)', 'רגיל');
+
+    expect(harness.failures()).toEqual([]);
+    expect(harness.reports).toEqual([{ commandId: 'page-margins', outcome: { ok: true } }]);
+  });
+
   it('בחירה מוצלחת מדווחת הצלחה ומגיעה למסלול הנכון', async () => {
     const superdoc = createSuperdocDouble();
     const harness = mountUi(LayoutTab, { superdoc });
