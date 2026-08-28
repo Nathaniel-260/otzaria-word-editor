@@ -106,6 +106,25 @@ const INSTRUMENT = `
     list.getEntries().forEach(function (entry) { mark('paint:' + entry.name); });
   }).observe({ type: 'paint', buffered: true });
 
+  /* רצף הטקסטים שמסך הטעינה באמת הציג.
+
+     זה מה שתופס תחנה שמדווחת אך נבלעת: מסך הטעינה מתעלם מיעד נמוך מהנוכחי,
+     ולכן תחנה שממוספרת נמוך אך מדווחת מאוחר פשוט אינה מגיעה למסך — ושום
+     בדיקה סטטית על סדר המספרים אינה רואה את זה. נמדד: „מרכיב את הממשק…”
+     דווח מ-onload של app.js, אחרי ש-main.ts כבר קידם ל-68, ולא הוצג מעולם. */
+  marks.stages = [];
+  (function watchStage() {
+    var stage = document.getElementById('otzaria-splash-stage');
+    if (!stage) { requestAnimationFrame(watchStage); return; }
+    function note() {
+      var text = (stage.textContent || '').trim();
+      var last = marks.stages[marks.stages.length - 1];
+      if (!last || last[1] !== text) marks.stages.push([Math.round(performance.now()), text]);
+    }
+    note();
+    new MutationObserver(note).observe(stage, { childList: true, characterData: true, subtree: true });
+  })();
+
   // סקריפט שמוזרק ב-JS יורה load אחרי שהוא **הורץ**, לא רק ירד — וזה מה
   // שמעניין כאן. ה-observer תופס אותו בזמן ההוספה ל-DOM.
   new MutationObserver(function (records) {
@@ -199,6 +218,11 @@ for (const [label, value] of [
 }
 console.log(`  ${'תוצאת אתחול'.padEnd(30)} ${marks.boot ?? '—'}`);
 console.log('  מצב בסיום:', JSON.stringify(marks.diagnostic));
+
+const stages = Array.isArray(marks.stages) ? marks.stages : [];
+console.log('');
+console.log('מה שמסך הטעינה הציג בפועל:');
+for (const [when, text] of stages) console.log(`  ${String(when - base).padStart(6)}ms  ${text}`);
 if (marks.console && marks.console.length) {
   console.log(''); console.log('מה שהדף אמר:');
   for (const line of marks.console.slice(0, 25)) console.log(`  ${line}`);
@@ -212,6 +236,25 @@ if (paint === undefined) {
 }
 if (appRan === undefined) {
   errors.push('assets/app.js לא הורץ — התוסף לא נטען');
+}
+
+/**
+ * כל תחנה שהטוען מצהיר עליה חייבת להופיע על המסך.
+ *
+ * מסך הטעינה בולע יעד נמוך מהנוכחי — גם את הטקסט — ולכן תחנה שממוספרת נמוך
+ * אך מדווחת מאוחר נעלמת **בשקט**. הבדיקה הסטטית ב-tests/unit/splash.test.ts
+ * מודדת את סדר המספרים בלבד ואינה יכולה לראות את זה; רק הרצה אמיתית יכולה.
+ *
+ * הטקסטים נקראים מה-HTML הארוז ולא נכתבים כאן, כדי שתחנה חדשה תיכנס לשער
+ * מעצמה ולא תדרוש עדכון בשני מקומות.
+ */
+const shown = new Set(stages.map(([, text]) => text));
+const declared = Array.from(readFileSync(INDEX, 'utf8').matchAll(/\btext:\s*'([^']+)'/g), (m) => m[1]);
+if (declared.length === 0) {
+  errors.push('לא נמצאו תחנות בטוען שב-dist/index.html — ייתכן שצורתו השתנתה');
+}
+for (const text of declared) {
+  if (!shown.has(text)) errors.push(`התחנה „${text}” דווחה אך לא הוצגה — נבלעה על ידי תחנה גבוהה יותר`);
 }
 
 // הסף שקובע: הצביעה קודמת לסיום ההרצה של הבאנדל.

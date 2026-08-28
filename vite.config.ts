@@ -65,15 +65,29 @@ function deferredEntry(): Plugin {
           if (started) return;
           started = true;
           var splash = window.__otzariaSplash;
+          function say(stage) {
+            if (splash && stage) splash.set(stage.at, stage.text);
+          }
+          /* התחנה מדווחת על השלב ש**מתחיל**, לא על זה שנגמר.
+
+             דיווח ב-onload של app.js פשוט נעלם: הבאנדל הוא IIFE, ו-main.ts
+             מרכיב את Vue במיקרו-טסק בתוך אותה הרצה — כלומר התחנה 68 קודמת
+             ל-onload, ומסך הטעינה בולע כל דיווח נמוך ממנה. נמדד ברצף שהוצג
+             בפועל: מתחיל · טוען את מנוע המסמכים… · מכין את סביבת העריכה… ·
+             פותח את המסמך… · מוכן — התחנה שבאמצע לא הופיעה כלל.
+
+             בצורה הזאת כל תחנה מדווחת ברגע שהיא אכן נכונה: כאן הבאנדל של
+             המנוע מתחיל לרדת, ובסיום שלו app.js מתחיל להיפרס. */
+          say({ at: 22, text: 'טוען את מנוע המסמכים…' });
           [
-            { src: '${WORKERS_SRC}', at: 22, text: 'טוען את מנוע המסמכים…' },
-            { src: '${match[1]}', at: 55, text: 'מרכיב את הממשק…' }
+            { src: '${WORKERS_SRC}', next: { at: 55, text: 'מרכיב את הממשק…' } },
+            { src: '${match[1]}', next: null }
           ].forEach(function (step) {
             var script = document.createElement('script');
             script.async = false;
             script.src = step.src;
             script.addEventListener('load', function () {
-              if (splash) splash.set(step.at, step.text);
+              say(step.next);
             });
             script.addEventListener('error', function () {
               if (splash) splash.fail('טעינת קוד התוסף נכשלה');
