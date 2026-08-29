@@ -421,6 +421,30 @@ function now(): number {
  *   - **כפתור ראשי בלבד.** לחיצה כפולה בכפתור ימני פותחת תפריט הקשר, ובחירה
  *     שמשתנה תחת תפריט פתוח היא בדיוק מה שהמשתמש לא ביקש.
  */
+/**
+ * הסימון שמפריד בין לחיצה של אדם לבין לחיצה שהתוסף עצמו שיגר.
+ *
+ * תפריט ההקשר מזיז את הסמן בלחיצה שמאלית מסונתזת (composables/use-context-menu.ts,
+ * שער ש9), מפני שהמנוע מתעלם מכפתור ימני. בלי ההפרדה הזאת שתי לחיצות ימניות
+ * באותה נקודה היו נספרות כאן כלחיצה כפולה — כלומר בחירת מילה שאיש לא ביקש.
+ *
+ * **`isTrusted` אינו מתאים לתפקיד**, וזה נמדד: בדיקות משגרות אירועים מסונתזים
+ * בדיוק כמו שהמשתמש היה לוחץ, וסינון לפיו היה הופך את כל
+ * `tests/unit/word-selection.test.ts` לירוק על קוד מת. הסימון כאן אומר „אני
+ * שיגרתי את זה”, ולא „זה לא מגיע ממכשיר”.
+ */
+const SYNTHETIC_POINTER = '__otzariaSyntheticPointer';
+
+/** מסמנת אירוע כשלנו לפני שיגורו. מחזירה אותו, כדי שאפשר יהיה לשרשר. */
+export function markSyntheticPointer<E extends Event>(event: E): E {
+  Object.defineProperty(event, SYNTHETIC_POINTER, { value: true });
+  return event;
+}
+
+function isSyntheticPointer(event: Event): boolean {
+  return (event as unknown as Record<string, unknown>)[SYNTHETIC_POINTER] === true;
+}
+
 export function installWordSelection(
   container: HTMLElement,
   host: WordSelectionTarget,
@@ -439,6 +463,8 @@ export function installWordSelection(
     Math.abs(x - toX) <= CLICK_SEQUENCE_SLOP_PX && Math.abs(y - toY) <= CLICK_SEQUENCE_SLOP_PX;
 
   const onMouseDown = (event: MouseEvent): void => {
+    if (isSyntheticPointer(event)) return;
+
     interaction += 1;
     if (event.button !== 0) {
       clicks = 0;
@@ -457,6 +483,7 @@ export function installWordSelection(
   };
 
   const onClick = (event: MouseEvent): void => {
+    if (isSyntheticPointer(event)) return;
     if (event.button !== 0) return;
     if (!near(event.clientX, event.clientY, downX, downY)) return;
 
