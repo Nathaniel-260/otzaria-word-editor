@@ -218,6 +218,15 @@ describe('normalizeLinkHref', () => {
     expect(normalizeLinkHref('mailto:info@otzaria.org')).toBe('mailto:info@otzaria.org');
   });
 
+  it('otzaria:// מותר — קישור פנימי לספרייה', () => {
+    expect(normalizeLinkHref('otzaria://open/book/12?index=57')).toBe(
+      'otzaria://open/book/12?index=57',
+    );
+    expect(normalizeLinkHref('  otzaria://open/pdf/8?page=3  ')).toBe(
+      'otzaria://open/pdf/8?page=3',
+    );
+  });
+
   it('javascript: נדחה — זו בעיית אבטחה ולא כתובת חסרת טעם', () => {
     // הקישור נשמר במסמך, והמסמך נפתח אצל מישהו אחר. `javascript:` שם הוא
     // הרצת קוד בהקשר שלו.
@@ -252,7 +261,7 @@ describe('normalizeLinkHref', () => {
 
   it('רשימת ההיתר היא רשימת היתר, ולא רשימת שלילה', () => {
     // אם מישהו יוסיף סכימה, הבדיקה הזאת היא זו שתדרוש ממנו להסביר למה.
-    expect([...LINK_SCHEMES]).toEqual(['http:', 'https:', 'mailto:']);
+    expect([...LINK_SCHEMES]).toEqual(['http:', 'https:', 'mailto:', 'otzaria:']);
   });
 });
 
