@@ -9,6 +9,7 @@ import './styles/print.css';
 import App from './App.vue';
 import { installBundledFonts } from './styles/fonts';
 import { onThemeChanged, resolveBoot } from './host/otzaria-client';
+import { setHostAppVersion } from './host/host-capabilities';
 import { splashFail, splashStage, SPLASH_STAGES } from './host/splash';
 import { applyTheme } from './host/theme';
 import { setMenuLocale } from './ui/ribbon/i18n';
@@ -55,6 +56,9 @@ async function main(): Promise<void> {
     // docs/plugin-sdk). נקבעת גם במסלול „recovered", כי `app.getInfo`
     // מחזיר את אותו מידע. כשל אתחול משאיר עברית — שפת ברירת המחדל.
     setMenuLocale(info.app.language);
+    // גרסת אוצריא קובעת אילו קריאות Host קיימות — ר' host/host-capabilities.ts.
+    // נקבעת גם במסלול „recovered", מאותה סיבה ומאותו מקור כמו השפה.
+    setHostAppVersion(info.app.version);
     onThemeChanged(applyTheme);
     root.dataset.boot = info.source === 'recovered' ? 'recovered' : 'event';
 

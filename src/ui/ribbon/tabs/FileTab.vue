@@ -52,6 +52,14 @@
         @click="$emit('export-doc')"
       />
       <RibbonButton
+        icon="exportPdf"
+        label="ייצוא ל-PDF"
+        variant="large"
+        :tooltip="pdfExportTooltip"
+        :disabled="!hasDocument || !hasPdfExport"
+        @click="$emit('export-pdf')"
+      />
+      <RibbonButton
         icon="print"
         label="הדפסה"
         variant="large"
@@ -151,6 +159,14 @@ const props = withDefaults(
     isSaving?: boolean;
     /** האם פתיחת מסמך רצה כרגע. */
     isOpening?: boolean;
+    /**
+     * האם ה-Host מכיר את `ui.exportPdf`.
+     *
+     * הפקד מנוטרל כשאין — התוסף רץ גם מחוץ לאוצריא (`host/dev-stub.ts`), וגם
+     * בתוך גרסה ישנה יותר ממנה: `ui.exportPdf` נוסף ב-0.9.97. כפתור שנלחץ
+     * ומחזיר „הפעולה אינה מוכרת” גרוע מכפתור מנוטרל שהטולטיפ שלו מסביר.
+     */
+    hasPdfExport?: boolean;
   }>(),
   {
     // ברירת המחדל היא „אין מסמך ואין פעולה שרצה”, כלומר המצב לפני שהמעטפת
@@ -159,6 +175,7 @@ const props = withDefaults(
     hasDocument: false,
     isSaving: false,
     isOpening: false,
+    hasPdfExport: false,
   },
 );
 
@@ -169,6 +186,7 @@ defineEmits<{
   (e: 'save-as-doc'): void;
   (e: 'export-doc'): void;
   (e: 'print-doc'): void;
+  (e: 'export-pdf'): void;
   (e: 'about'): void;
   (e: 'shortcuts-help'): void;
   (e: 'exit-app'): void;
@@ -199,6 +217,17 @@ function saveTooltip(enabledText: string): string {
 function documentTooltip(enabledText: string): string {
   return props.hasDocument ? enabledText : NO_DOCUMENT;
 }
+
+/**
+ * שני טעמים שונים לנטרול, ולכן שני נוסחים: „אין מסמך” הוא זמני ומוכר,
+ * ו„אין תמיכה ב-Host” הוא קבוע ואינו באשמת המשתמש — הוא צריך לדעת שאין טעם
+ * ללחוץ שוב, ולמה.
+ */
+const pdfExportTooltip = computed(() => {
+  if (!props.hasDocument) return NO_DOCUMENT;
+  if (!props.hasPdfExport) return 'ייצוא ל-PDF דורש גרסה עדכנית יותר של אוצריא';
+  return 'שמירת המסמך כקובץ PDF';
+});
 
 /**
  * „יציאה” אינו דורש מסמך פתוח — יציאה ממסך שאין בו מסמך היא בקשה תקפה — אבל

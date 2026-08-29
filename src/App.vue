@@ -30,6 +30,7 @@
     <!-- רצועת הכלים (Ribbon) -->
     <Ribbon
       :has-document="hasDocument"
+      :has-pdf-export="supportsPdfExport"
       :is-saving="saveSnapshot.isSaving"
       :is-opening="isOpening"
       @new-doc="onNewDocument"
@@ -38,6 +39,7 @@
       @save-as-doc="onSave(true)"
       @export-doc="onExportDocx"
       @print-doc="onPrint"
+      @export-pdf="onExportPdf"
       @about="isAboutOpen = true"
       @shortcuts-help="isShortcutsHelpOpen = true"
       @exit-app="onExit"
@@ -227,7 +229,7 @@ import {
 } from './engine/document-defaults';
 import type { SuperDoc } from 'superdoc';
 import { exportDocx, docxFileName } from './engine/export';
-import { printDocument } from './engine/print';
+import { exportPdfDocument, pdfSuggestedName, printDocument } from './engine/print';
 import { downloadBlob } from './host/download';
 import {
   beginBinaryWrite,
@@ -239,7 +241,8 @@ import {
   type UserFile,
 } from './host/files';
 import { decideDocumentSwitch } from './sessions/open-flow';
-import { confirm, notifyError } from './host/otzaria-client';
+import { call, confirm, notifyError } from './host/otzaria-client';
+import { supportsPdfExport } from './host/host-capabilities';
 import { splashDone } from './host/splash';
 import {
   loadLastDocument,
@@ -918,6 +921,39 @@ async function onPrint(): Promise<void> {
     return;
   }
   if (isStatusError.value) setStatus('');
+}
+
+/**
+ * ייצוא ל-PDF דרך `ui.exportPdf` של אוצריא (מ-0.9.97).
+ *
+ * ההכנה זהה להדפסה, ולא במקרה: אוצריא מייצרת את ה-PDF מדף התוסף עצמו, ולכן
+ * הגלון של `styles/print.css` ומידות ה-`@page` הם שקובעים מה ייכנס לקובץ.
+ * ההסבר המלא ב-engine/print.ts.
+ *
+ * ביטול בדיאלוג „שמור בשם” אינו שגיאה ואינו נכתב אדום: המשתמש נשאל ואמר לא,
+ * וזו תשובה. אותו כלל כמו „אין התאמות” בהחלפה.
+ */
+async function onExportPdf(): Promise<void> {
+  if (!swap?.current) {
+    setStatus('אין מסמך פתוח לייצוא', true);
+    return;
+  }
+
+  const outcome = await exportPdfDocument(
+    activeSuperdoc.value,
+    (input) => call('ui.exportPdf', input),
+    { fileName: pdfSuggestedName(title.value), title: 'ייצוא ל-PDF' },
+  );
+
+  if (!outcome.ok) {
+    setStatus(outcome.message, true);
+    return;
+  }
+  if (!outcome.saved) {
+    setStatus('הייצוא בוטל');
+    return;
+  }
+  setStatus(outcome.warning ? `${outcome.name} נשמר — ${outcome.warning}` : `${outcome.name} נשמר`);
 }
 
 function onUndo(): void {

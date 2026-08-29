@@ -61,6 +61,7 @@
       <FileTab
         v-if="activeTabId === 'file'"
         :has-document="hasDocument"
+        :has-pdf-export="hasPdfExport"
         :is-saving="isSaving"
         :is-opening="isOpening"
         @new-doc="$emit('new-doc')"
@@ -69,6 +70,7 @@
         @save-as-doc="$emit('save-as-doc')"
         @export-doc="$emit('export-doc')"
         @print-doc="$emit('print-doc')"
+        @export-pdf="$emit('export-pdf')"
         @about="$emit('about')"
         @shortcuts-help="$emit('shortcuts-help')"
         @exit-app="$emit('exit-app')"
@@ -151,10 +153,12 @@ const translatedTabs = computed(() => TABS.map((tab) => ({ ...tab, label: menuSt
 withDefaults(
   defineProps<{
     hasDocument?: boolean;
+    /** האם ה-Host תומך ב-`ui.exportPdf` (אוצריא 0.9.97 ומעלה). */
+    hasPdfExport?: boolean;
     isSaving?: boolean;
     isOpening?: boolean;
   }>(),
-  { hasDocument: false, isSaving: false, isOpening: false },
+  { hasDocument: false, hasPdfExport: false, isSaving: false, isOpening: false },
 );
 
 const activeTabId = ref('home');
@@ -167,6 +171,7 @@ defineEmits<{
   (e: 'save-as-doc'): void;
   (e: 'export-doc'): void;
   (e: 'print-doc'): void;
+  (e: 'export-pdf'): void;
   (e: 'about'): void;
   (e: 'shortcuts-help'): void;
   (e: 'exit-app'): void;

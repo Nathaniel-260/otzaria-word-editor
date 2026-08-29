@@ -23,9 +23,14 @@
     /** מה שהוצג למשתמש דרך המאחז — showError / showMessage / showConfirm. */
     messages: [],
     confirmAnswer: true,
+    /** מה שנשלח ל-`ui.exportPdf`, ומה שהמאחז יענה עליו. */
+    exportPdfCalls: [],
+    exportPdfReply: null,
     reset: function () {
       H.calls.length = 0;
       H.messages.length = 0;
+      H.exportPdfCalls.length = 0;
+      H.exportPdfReply = null;
     },
   });
 
@@ -74,6 +79,15 @@
         case 'ui.showConfirm':
           H.messages.push({ method: method, text: payload && (payload.content || payload.title) });
           return ok({ confirmed: H.confirmAnswer });
+        // ייצוא ל-PDF: הדמה רושם את מה שנשלח ומחזיר תשובה שהשער קובע
+        // (`H.exportPdfReply`), כדי שאפשר יהיה למדוד גם „נשמר”, גם „בוטל”
+        // וגם כשל — בלי דיאלוג מערכת.
+        case 'ui.exportPdf':
+          H.exportPdfCalls.push(payload || {});
+          if (H.exportPdfReply && H.exportPdfReply.__throw) {
+            return fail(H.exportPdfReply.message || 'נכשל', H.exportPdfReply.code);
+          }
+          return ok(H.exportPdfReply || { saved: true, name: 'מסמך.pdf' });
         default:
           return fail('אין תמיכה בדמה: ' + method);
       }

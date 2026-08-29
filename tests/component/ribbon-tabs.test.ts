@@ -56,7 +56,10 @@ const TABS: ReadonlyArray<{
   component: Component;
   props?: Record<string, unknown>;
 }> = [
-  { name: 'קובץ', component: FileTab, props: { hasDocument: true } },
+  // `hasPdfExport` הוא זמינות ה-Host ולא היעדר API: `ui.exportPdf` קיים,
+  // והפקד מנוטרל רק כשאוצריא ישנה מ-0.9.97. הכפיל מדמה Host עדכני, אחרת
+  // הבדיקה הזאת הייתה מדווחת „אין API” על משהו שיש לו.
+  { name: 'קובץ', component: FileTab, props: { hasDocument: true, hasPdfExport: true } },
   { name: 'בית', component: HomeTab },
   { name: 'הוספה', component: InsertTab },
   { name: 'פריסה', component: LayoutTab },
@@ -226,6 +229,7 @@ describe('לשונית „קובץ” נשענת על מצב המעטפת', () =
     'שמור',
     'שמור בשם...',
     'ייצוא ל-Word',
+    'ייצוא ל-PDF',
     'הדפסה',
     'יציאה',
     'אודות',
@@ -244,7 +248,7 @@ describe('לשונית „קובץ” נשענת על מצב המעטפת', () =
     return byLabel;
   }
 
-  it('תשעה פקדים, וכל התוויות נמצאו — אחרת הבדיקות למטה מודדות אוויר', async () => {
+  it('עשרה פקדים, וכל התוויות נמצאו — אחרת הבדיקות למטה מודדות אוויר', async () => {
     const byLabel = await states({ hasDocument: true });
 
     expect(Object.keys(byLabel)).toHaveLength(LABELS.length);

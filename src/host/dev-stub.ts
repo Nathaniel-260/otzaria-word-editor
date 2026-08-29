@@ -185,6 +185,19 @@ async function handle(method: string, payload: Record<string, unknown> = {}): Pr
       console.info('[stub]', payload.message);
       return true;
 
+    /**
+     * `ui.exportPdf` — מחוץ לאוצריא אין דיאלוג „שמור בשם” של מערכת ההפעלה
+     * ואין מנוע שמייצר PDF. הכפיל מדפיס את מה שהיה נשלח ומדווח ביטול: זהו
+     * המצב שאינו יוצר קובץ ואינו מתחזה להצלחה, ובכל זאת מריץ את כל מסלול
+     * ההכנה (`@page` והגלון) שאותו כן אפשר לבדוק בדפדפן.
+     *
+     * ה-`version` של הכפיל הוא 0.9.97, ולכן הפקד **כן** פעיל בפיתוח — אחרת
+     * מסלול ההכנה לא היה נבדק כלל מחוץ לאוצריא.
+     */
+    case 'ui.exportPdf':
+      console.info('[stub] ui.exportPdf', payload);
+      return { saved: false, name: null };
+
     default:
       console.info('[stub] call לא ממומש:', method, payload);
       return null;

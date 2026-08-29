@@ -129,8 +129,9 @@ describe('פקדי לשונית „קובץ”', () => {
    */
   const UNCONDITIONAL = ['אודות', 'קיצורים'];
 
-  it('נמצאו תשעה פקדים', () => {
-    expect(controls(FILE_TAB)).toHaveLength(9);
+  it('נמצאו עשרה פקדים', () => {
+    // עשרה מאז ש„ייצוא ל-PDF" נוסף (ui.exportPdf, אוצריא 0.9.97).
+    expect(controls(FILE_TAB)).toHaveLength(10);
   });
 
   it('לכל פקד יש חיווט של disabled — חוץ מ„אודות” ומ„קיצורים”', () => {
@@ -146,7 +147,7 @@ describe('פקדי לשונית „קובץ”', () => {
     for (const control of controls(FILE_TAB)) {
       expect(control, labelOf(control)).not.toContain(':disabled="true"');
     }
-    for (const state of ['hasDocument', 'isSaving', 'isOpening']) {
+    for (const state of ['hasDocument', 'hasPdfExport', 'isSaving', 'isOpening']) {
       expect(FILE_TAB, state).toContain(state);
     }
   });

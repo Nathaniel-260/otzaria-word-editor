@@ -238,3 +238,114 @@ export async function printDocument(
 
   return size ? { ok: true, size } : { ok: true, size: null, warning: NO_PAPER_WARNING };
 }
+
+/* ------------------------------------------------------------------ */
+/* ייצוא ל-PDF                                                         */
+/* ------------------------------------------------------------------ */
+
+/**
+ * שם קובץ מוצע לדיאלוג „שמור בשם”.
+ *
+ * אוצריא מסירה מפרידי נתיב בעצמה, ובכל זאת מנקים כאן את אותה קבוצת תווים
+ * שאסורה בשמות קבצים ב-Windows — בדיוק כמו `docxFileName` — כדי ששם המסמך
+ * לא יגיע לדיאלוג חצוי. הסיומת אינה נוספת: אוצריא מוסיפה `.pdf` בעצמה
+ * ומחזירה את השם המלא.
+ */
+export function pdfSuggestedName(title: string): string {
+  return title.replace(/[\\/:*?"<>|]/g, '').trim() || 'מסמך';
+}
+
+/** מה ש-`ui.exportPdf` מחזיר. */
+export interface ExportPdfReply {
+  saved?: boolean;
+  name?: string | null;
+}
+
+export interface ExportPdfOptions {
+  /** ברירת המחדל: המסמך של הדפדפן. מוחלף בבדיקות. */
+  root?: Document;
+  /** שם מוצע בדיאלוג. */
+  fileName?: string;
+  /** כותרת הדיאלוג. */
+  title?: string;
+}
+
+export type ExportPdfOutcome =
+  | {
+      ok: true;
+      saved: true;
+      /** שם הקובץ שנשמר. הנתיב המלא אינו מוחזר מאוצריא — במכוון. */
+      name: string;
+      size: PrintPageSize | null;
+      warning?: string;
+    }
+  | { ok: true; saved: false }
+  | { ok: false; message: string; reason: string };
+
+/**
+ * מייצאת את המסמך ל-PDF דרך `ui.exportPdf` של אוצריא.
+ *
+ * ## למה זה עובר דרך אותה הכנה כמו ההדפסה
+ *
+ * אוצריא מייצרת את ה-PDF **מדף התוסף עצמו**, ולכן מה שקובע את הפלט הוא בדיוק
+ * מה שקובע אותו בהדפסה: הגלון ב-`styles/print.css` שמסתיר את המעטפת, ו-`@page`
+ * עם מידות הדף של המסמך. בלי ההכנה הזאת ה-PDF היה מכיל את הרצועה ואת שורת
+ * המצב, ועמוד A4 היה נשבר לשני גיליונות — אותן שלוש הבעיות שתועדו בראש הקובץ.
+ *
+ * ## ההזרקה, ולמה היא כאן
+ *
+ * `exportPdf` מוזרק ואינו נקרא מכאן: שכבת ה-engine אינה נוגעת ב-Host (אף
+ * מודול ב-`src/engine/` אינו מייבא מ-`src/host/`), בדיוק כפי ש-`printDocument`
+ * מקבל את `print`. מי שמחבר את השניים הוא App.vue.
+ *
+ * ## פעולת המשתמש
+ *
+ * אוצריא דורשת הפעלת-משתמש חולפת ובודקת אותה ישירות ב-WebView; קריאה מטיימר
+ * או אחרי שרשרת `await` ארוכה נדחית ב-`forbidden`. הקריאה כאן ממתינה בדיוק
+ * לדבר אחד — `sections.list()` לקריאת מידות הדף — שהוא הלוך-ושוב אחד למנוע
+ * ומסתיים במילישניות, הרבה בתוך חלון ההפעלה. הוויתור עליו לא היה חוסך זמן
+ * אמיתי והיה מייצר PDF בגודל נייר שגוי, וזו תקלה גרועה יותר.
+ *
+ * `forbidden` בכל זאת מטופל בשמו: אם אוצריא תדחה, המשתמש יקבל הסבר שאומר מה
+ * לעשות ולא „הייצוא נכשל”.
+ */
+export async function exportPdfDocument(
+  host: PrintTarget,
+  exportPdf: (input: { fileName?: string; title?: string }) => Promise<ExportPdfReply>,
+  options: ExportPdfOptions = {},
+): Promise<ExportPdfOutcome> {
+  const root = options.root ?? document;
+
+  const size = await readPrintPageSize(host);
+  applyPrintPageSize(size, root);
+
+  let reply: ExportPdfReply;
+  try {
+    reply = await exportPdf({
+      ...(options.fileName ? { fileName: options.fileName } : {}),
+      ...(options.title ? { title: options.title } : {}),
+    });
+  } catch (error) {
+    const code = (error as { code?: unknown } | null)?.code;
+    if (code === 'forbidden') {
+      return {
+        ok: false,
+        message: 'הייצוא ל-PDF דורש לחיצה ישירה על הכפתור — נסו שוב',
+        reason: 'forbidden',
+      };
+    }
+    return {
+      ok: false,
+      message: `הייצוא ל-PDF נכשל: ${error instanceof Error ? error.message : String(error)}`,
+      reason: 'threw',
+    };
+  }
+
+  // ביטול אינו כישלון: המשתמש סגר את דיאלוג „שמור בשם”, וזו תשובה.
+  if (!reply?.saved) return { ok: true, saved: false };
+
+  const name = typeof reply.name === 'string' && reply.name ? reply.name : 'הקובץ';
+  return size
+    ? { ok: true, saved: true, name, size }
+    : { ok: true, saved: true, name, size: null, warning: NO_PAPER_WARNING };
+}

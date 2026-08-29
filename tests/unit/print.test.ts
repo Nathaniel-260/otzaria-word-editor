@@ -23,6 +23,8 @@ import {
   pageSizeText,
   printDocument,
   readPrintPageSize,
+  exportPdfDocument,
+  pdfSuggestedName,
   type PrintDocumentApi,
 } from '../../src/engine/print';
 
@@ -270,5 +272,115 @@ describe('הכפתור מחובר למסלול הזה', () => {
         file,
       ).toBe(false);
     }
+  });
+});
+
+describe('exportPdfDocument', () => {
+  /** מסמך נקי לכל בדיקה — `applyPrintPageSize` כותב לתוכו. */
+  function fakeRoot(): Document {
+    return document.implementation.createHTMLDocument('t');
+  }
+
+  it('מכינה את `@page` לפני הקריאה — אחרת ה-PDF יוצא בגודל נייר שגוי', async () => {
+    const root = fakeRoot();
+    const seen: string[] = [];
+    const outcome = await exportPdfDocument(
+      fakeHost(),
+      async () => {
+        // נקרא בזמן הקריאה עצמה, ולכן מוכיח שההכנה קדמה לה ולא באה אחריה.
+        seen.push(root.getElementById(PRINT_PAGE_STYLE_ID)?.textContent ?? '');
+        return { saved: true, name: 'x.pdf' };
+      },
+      { root },
+    );
+
+    expect(outcome).toMatchObject({ ok: true, saved: true, name: 'x.pdf' });
+    expect(seen[0]).toBe(pageRule({ widthIn: 8.269, heightIn: 11.694 }));
+  });
+
+  it('מעבירה שם מוצע וכותרת, ומשמיטה אותם כשאינם', async () => {
+    const withBoth: unknown[] = [];
+    await exportPdfDocument(fakeHost(), async (input) => {
+      withBoth.push(input);
+      return { saved: true, name: 'a.pdf' };
+    }, { root: fakeRoot(), fileName: 'ספר', title: 'ייצוא' });
+    expect(withBoth[0]).toEqual({ fileName: 'ספר', title: 'ייצוא' });
+
+    const bare: unknown[] = [];
+    await exportPdfDocument(fakeHost(), async (input) => {
+      bare.push(input);
+      return { saved: true, name: 'a.pdf' };
+    }, { root: fakeRoot() });
+    expect(bare[0]).toEqual({});
+  });
+
+  it('ביטול אינו כישלון — ואינו נושא שם', async () => {
+    const outcome = await exportPdfDocument(
+      fakeHost(),
+      async () => ({ saved: false, name: null }),
+      { root: fakeRoot() },
+    );
+    expect(outcome).toEqual({ ok: true, saved: false });
+  });
+
+  it('`forbidden` מקבל הסבר שאומר מה לעשות, ולא „הייצוא נכשל”', async () => {
+    const outcome = await exportPdfDocument(
+      fakeHost(),
+      async () => {
+        throw Object.assign(new Error('user activation required'), { code: 'forbidden' });
+      },
+      { root: fakeRoot() },
+    );
+    expect(outcome).toEqual({
+      ok: false,
+      message: 'הייצוא ל-PDF דורש לחיצה ישירה על הכפתור — נסו שוב',
+      reason: 'forbidden',
+    });
+  });
+
+  it('כשל אחר נושא את ההודעה של ה-Host', async () => {
+    const outcome = await exportPdfDocument(
+      fakeHost(),
+      async () => {
+        throw new Error('הדיסק מלא');
+      },
+      { root: fakeRoot() },
+    );
+    expect(outcome).toMatchObject({ ok: false, reason: 'threw' });
+    expect((outcome as { message: string }).message).toContain('הדיסק מלא');
+  });
+
+  it('גודל דף שלא נקרא אינו עוצר את הייצוא — אבל נאמר עליו', async () => {
+    const outcome = await exportPdfDocument(
+      fakeHost({ omitList: true }),
+      async () => ({ saved: true, name: 'b.pdf' }),
+      { root: fakeRoot() },
+    );
+    expect(outcome).toMatchObject({ ok: true, saved: true, name: 'b.pdf', size: null });
+    expect((outcome as { warning?: string }).warning).toBeTruthy();
+  });
+
+  it('תשובה בלי שם עדיין נחשבת שמורה, עם נוסח שאינו „undefined”', async () => {
+    const outcome = await exportPdfDocument(
+      fakeHost(),
+      async () => ({ saved: true }),
+      { root: fakeRoot() },
+    );
+    expect(outcome).toMatchObject({ ok: true, saved: true, name: 'הקובץ' });
+  });
+});
+
+describe('pdfSuggestedName', () => {
+  it('מסירה תווים אסורים בשם קובץ', () => {
+    expect(pdfSuggestedName('ספר/פרק:א*')).toBe('ספרפרקא');
+  });
+
+  it('שם ריק נופל לברירת מחדל', () => {
+    expect(pdfSuggestedName('   ')).toBe('מסמך');
+    expect(pdfSuggestedName('///')).toBe('מסמך');
+  });
+
+  it('אינה מוסיפה סיומת — אוצריא מוסיפה אותה ומחזירה את השם המלא', () => {
+    expect(pdfSuggestedName('ספר')).toBe('ספר');
   });
 });

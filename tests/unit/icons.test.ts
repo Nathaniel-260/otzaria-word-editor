@@ -692,6 +692,7 @@ describe('אתרי הקריאה לאייקונים', () => {
       ['save', 'שמור'],
       ['saveAs', 'שמור בשם...'],
       ['export', 'ייצוא ל-Word'],
+      ['exportPdf', 'ייצוא ל-PDF'],
     ] as const) {
       expect(fileTab, label).toContain(`icon="${icon}"\n        label="${label}"`);
     }
