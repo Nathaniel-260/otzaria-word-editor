@@ -29,6 +29,8 @@
 
     <!-- רצועת הכלים (Ribbon) -->
     <Ribbon
+      v-model:active-tab="ribbonTab"
+      v-model:collapsed="ribbonCollapsed"
       :has-document="hasDocument"
       :has-pdf-export="supportsPdfExport"
       :is-saving="saveSnapshot.isSaving"
@@ -146,7 +148,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, provide, onMounted, onUnmounted, computed, shallowRef } from 'vue';
+import { ref, provide, onMounted, onUnmounted, computed, shallowRef, watch } from 'vue';
 import TitleBar from './ui/shell/TitleBar.vue';
 import Ribbon from './ui/ribbon/Ribbon.vue';
 import StatusBar from './ui/shell/StatusBar.vue';
@@ -201,7 +203,7 @@ import {
 } from './engine/search';
 import { createEditorSwap, type EditorSwap } from './sessions/editor-swap';
 import { createSaveCoordinator, type SaveCoordinator, type SaveSnapshot } from './sessions/save-coordinator';
-import { createEditor } from './engine/create-editor';
+import { createEditor, type EditorSession } from './engine/create-editor';
 import {
   anchorPageIndex,
   createDocMetrics,
@@ -228,7 +230,7 @@ import {
   applyHebrewPaperSize,
 } from './engine/document-defaults';
 import type { SuperDoc } from 'superdoc';
-import { exportDocx, docxFileName } from './engine/export';
+import { DOCX_MIME, exportDocx, docxFileName } from './engine/export';
 import { exportPdfDocument, pdfSuggestedName, printDocument } from './engine/print';
 import { downloadBlob } from './host/download';
 import {
@@ -246,13 +248,30 @@ import { supportsPdfExport } from './host/host-capabilities';
 import { splashDone } from './host/splash';
 import {
   loadLastDocument,
-  saveLastDocument,
   forgetLastDocument,
   loadAutosaveEnabled,
   saveAutosaveEnabled,
   loadRulerVisible,
   saveRulerVisible,
+  loadSessionRecord,
+  saveSessionRecord,
 } from './host/settings';
+import {
+  DRAFT_PATH,
+  decideDraftRecovery,
+  documentViewFor,
+  normalizeSession,
+  sessionFromLastDocument,
+  type SessionState,
+} from './sessions/session-state';
+import { createSessionKeeper, type SessionKeeper } from './sessions/session-keeper';
+import { applyCaretAnchor, readCaretAnchor, type CaretAnchor } from './engine/caret-anchor';
+import {
+  deleteWorkspaceEntry,
+  readWorkspaceBytes,
+  writeWorkspaceBytes,
+} from './host/workspace';
+import { onPluginHidden } from './host/lifecycle';
 import { revealZone, type RevealZone } from './composables/focus-mode';
 import { selectWholeDocument } from './engine/clipboard';
 import {
@@ -333,6 +352,21 @@ const statusText = ref('');
 const isStatusError = ref(false);
 const isFocusMode = ref(false);
 const revealed = ref<RevealZone>(null);
+
+/**
+ * הלשונית ברצועה ומצב הכיווץ. הוחזקו עד עכשיו בתוך `Ribbon.vue` עצמו, ועלו
+ * לכאן מסיבה אחת: הם שורדים הפעלות, ומי שזוכר יושב כאן. ההנמקה המלאה בראש
+ * ההגדרה ב-Ribbon.vue.
+ */
+const ribbonTab = ref('home');
+const ribbonCollapsed = ref(false);
+
+// `watch` ולא מטפל על הרצועה: הרצועה מחליפה לשונית משלושה מקומות — קליק,
+// חצים, ולחיצה כפולה שמכווצת — ומטפל היה צריך להיקרא בכל אחד מהם. השינוי
+// עצמו הוא מה שמעניין, ולכן מאזינים לו ולא למי שגרם לו.
+watch([ribbonTab, ribbonCollapsed], ([tab, collapsed]) => {
+  keeper?.updateView({ ribbonTab: tab, ribbonCollapsed: collapsed });
+});
 
 const isFindOpen = ref(false);
 const findMode = ref<'find' | 'replace'>('find');
@@ -415,6 +449,14 @@ let ruler: RulerModel | null = null;
 /** מרכוז העמוד בזום. יחיד למאגס — אינו מוחלף בין מסמכים. */
 let zoomCenter: ZoomCenter | null = null;
 
+/**
+ * זוכר ההפעלה. יחיד למעטפת ואינו מוחלף בין מסמכים — הוא מה שמחזיק את הרשומה
+ * שעוברת מהפעלה להפעלה. ההנמקה המלאה ב-sessions/session-keeper.ts.
+ */
+let keeper: SessionKeeper | null = null;
+/** מבטל את ההאזנה למעבר לרקע. */
+let hiddenListener: (() => void) | null = null;
+
 const saveStateMessage = computed(() => {
   const state = saveSnapshot.value.state;
   if (state === 'exporting') return 'מייצא…';
@@ -469,6 +511,54 @@ function initSaveCoordinator(): SaveCoordinator {
     onStateChange: (snapshot) => {
       saveSnapshot.value = snapshot;
     },
+    /**
+     * כאן, ולא באתר הקריאה ל-`saveNow`.
+     *
+     * שלושה מסלולים מגיעים לשמירה — „שמור” של המשתמש, „לשמור לפני שפותחים
+     * אחר”, ושמירה אוטומטית — ורק הראשון עובר במעטפת. תלייה על `onSave`
+     * בלבד השאירה את טיוטת השחזור חיה אחרי כל שמירה אוטומטית, ומכיוון
+     * שהיא מפסיקה להתעדכן ברגע שהמסמך נקי, היא הייתה נפתחת בהפעלה הבאה
+     * **מעל עבודה חדשה ממנה** — ואז נכתבת לקובץ. כאן זה מסלול אחד לכולם.
+     */
+    onSaved: (info) => {
+      // „שמור בשם” מחליף את הקובץ שמאחורי המסמך; „שמור” רגיל אינו. רק
+      // הראשון הוא זהות חדשה, ורק אז נכון לשכוח את מקום הסמן.
+      if (keeper && keeper.state.document?.token !== info.token) {
+        keeper.setDocument({ token: info.token, name: info.name, writable: true });
+      }
+      // הגודל הוא של מה שנכתב עכשיו, ולכן הוא הבסיס להשוואה הבאה מול
+      // הדיסק — בלעדיו „הקובץ השתנה מבחוץ” היה נשאל אחרי כל שמירה רגילה.
+      void keeper?.noteSaved(info.size);
+    },
+  });
+}
+
+/**
+ * זוכר ההפעלה. כל התלויות שלו הן פונקציות של המעטפת ולא ייבוא ישיר, מאותו
+ * טעם כמו בקואורדינטור השמירה: הקוד שמחליט מתי לכתוב את העבודה של המשתמש
+ * צריך להיות נבדק בלי מנוע ובלי גשר.
+ */
+function initSessionKeeper(): SessionKeeper {
+  return createSessionKeeper({
+    persist: (state) => saveSessionRecord(state),
+    exportDocument: () => {
+      const active = swap?.current;
+      if (!active) throw new Error('אין מסמך פתוח');
+      return exportDocx(active.superdoc);
+    },
+    // ההמרה מ-`Blob` כאן ולא ב-host/workspace.ts: כאן יושב מי שמחזיק את
+    // המנוע, ושם יושב מי שמדבר עם הגשר.
+    writeDraft: async (content) =>
+      writeWorkspaceBytes(DRAFT_PATH, new Uint8Array(await content.arrayBuffer())),
+    removeDraft: () => deleteWorkspaceEntry(DRAFT_PATH),
+    draftPath: DRAFT_PATH,
+    readCaret: (previous) => {
+      const active = swap?.current;
+      if (!active) return Promise.resolve(null);
+      return readCaretAnchor(active.ui, active.superdoc, previous);
+    },
+    isDirty: () => save?.snapshot.isDirty === true,
+    isSaving: () => save?.snapshot.isSaving === true,
   });
 }
 
@@ -510,13 +600,33 @@ async function applyNewDocumentPaperSize(superdoc: SuperDoc): Promise<void> {
   setStatus(`המסמך נפתח, אך גודל הדף לא הוגדר ל-A4: ${report.failure}`, true);
 }
 
-async function openDocument(file?: UserFile): Promise<boolean> {
+/** מה שאינו נגזר מהקובץ עצמו — המסלולים של „חזרה למה שהיה”. */
+interface OpenOptions {
+  /**
+   * בייטים לפתוח **במקום** ה-URL של הקובץ: טיוטת השחזור. המסמך שנפתח כך
+   * מסומן מיד כלא-שמור, כי זה בדיוק מה שהוא — עבודה שאינה בדיסק.
+   */
+  draft?: Blob;
+  /** גודל התצוגה והסמן שיוחזרו אחרי הפתיחה. ראו restoreDocumentView. */
+  restore?: { zoom: number | null; caret: CaretAnchor | null };
+  /**
+   * האם לרשום את מה שנפתח כמסמך של ההפעלה. ברירת המחדל: כן.
+   *
+   * `false` למסלול אחד — מסמך ריק שנפתח מפני שהמסמך האמיתי **לא הצליח**
+   * להיפתח. רישום שלו היה מוחק מהרשומה את המסמך האחרון, ואיתו את הדרך
+   * לנסות שוב בהפעלה הבאה: כשל בפתיחה עשוי להיות זמני, והטיוטה שמחזיקה את
+   * העבודה מזוהה מול אותו token בדיוק.
+   */
+  remember?: boolean;
+}
+
+async function openDocument(file?: UserFile, options: OpenOptions = {}): Promise<boolean> {
   if (!swap) return false;
   isOpening.value = true;
   const startedAt = performance.now();
   setStatus(file ? `פותח את ${file.name}…` : 'פותח מסמך ריק…');
 
-  const outcome = await swap.open(file?.url);
+  const outcome = await swap.open(options.draft ?? file?.url);
   isOpening.value = swap.isOpening;
 
   if (outcome.status === 'superseded') return false;
@@ -660,11 +770,13 @@ async function openDocument(file?: UserFile): Promise<boolean> {
 
   // עמוד הסמן מגיע מהבחירה, ולכן הוא נקרא כשהיא זזה. בלי ההאזנה המספר היה
   // נכון רק ברגע שהמסמך נפתח. אותה האזנה מזינה גם את הסרגל — סמני הכניסה הם
-  // של הפסקה שהסמן בה.
+  // של הפסקה שהסמן בה — וגם את זוכר-ההפעלה: „איפה הסמן” הוא מה שהוא שומר,
+  // והשאלה הזאת משתנה בדיוק כאן. הקריאה שלו מושהית — ראו session-keeper.ts.
   editor.onDispose(
     editor.ui.selection.observe(() => {
       sessionMetrics.noteSelectionChanged();
       sessionRuler.noteSelectionChanged();
+      keeper?.noteChange();
     })
   );
 
@@ -687,6 +799,10 @@ async function openDocument(file?: UserFile): Promise<boolean> {
       // בא מאיתנו, ולכן העמוד אינו נשאר ממורכז לפי אחוז ישן. ראו
       // engine/zoom-center.ts.
       zoomCenter?.setZoom(state.value);
+      // ואותו דיווח מזין גם את הזיכרון בין הפעלות. כאן ולא במטפל של הסרגל,
+      // מאותו טעם בדיוק: גם שינוי שלא בא מאיתנו הוא גודל התצוגה שהמשתמש
+      // רואה, והוא זה שצריך לחזור.
+      keeper?.updateView({ zoom: state.value });
     })
   );
 
@@ -728,20 +844,30 @@ async function openDocument(file?: UserFile): Promise<boolean> {
 
   save?.reset(file && file.access === 'readwrite' ? { token: file.token, name: file.name } : null);
 
-  if (file) {
-    void saveLastDocument({
-      token: file.token,
-      name: file.name,
-      writable: file.access === 'readwrite',
-    });
-  } else {
-    void forgetLastDocument();
+  if (options.remember !== false) {
+    keeper?.setDocument(
+      file ? { token: file.token, name: file.name, writable: file.access === 'readwrite' } : null,
+      { sourceSize: file?.size ?? null, keepDraft: options.draft !== undefined },
+    );
+  }
+
+  if (!file && !options.draft) {
     // גודל הדף לפני הכיווניות: `sections.setPageSetup` כותב את אותו `sectPr`
     // ש-`setSectionDirection` כותב אליו, וכך הכיווניות היא זו שנכתבת אחרונה.
     // גם הסדר של ההודעות נגזר מזה — כשל כיווניות הוא החמור, והוא זה שיישאר
     // בשורת המצב אם שניהם נכשלו.
+    //
+    // מסמך ששוחזר מטיוטה מדלג על שניהם בכוונה: ההגדרות האלה כבר בתוכו — הוא
+    // היה מסמך פתוח שיוצא — והחלה חוזרת שלהן היא כתיבה למסמך של המשתמש
+    // ברגע שהוא רק ביקש לחזור אליו.
     await applyNewDocumentPaperSize(editor.superdoc);
     await applyNewDocumentDirection(editor.superdoc);
+  }
+
+  if (options.draft) {
+    // מה שנפתח אינו מה שבדיסק. בלי הסימון הזה „שמור” היה חושב שאין מה לשמור,
+    // והפס העליון היה מציג „נשמר” על עבודה שאינה שמורה בשום מקום.
+    save?.markDirty();
   }
 
   // האזנה למצב Undo/Redo
@@ -760,7 +886,41 @@ async function openDocument(file?: UserFile): Promise<boolean> {
   // להם היה מקבל סמן ואז פריסה שזזה תחתיו.
   focusOpenedDocument(editor.superdoc);
 
+  // ואחריו המקום שהמשתמש היה בו. **אחרי** המיקוד ולא לפניו: `focus` עם
+  // `restoreSelection` מציב סמן משלו, ומי שרץ אחרון הוא זה שקובע איפה הוא
+  // יושב.
+  await restoreDocumentView(editor, options.restore);
+
   return true;
+}
+
+/**
+ * מחזירה למסמך שנפתח את גודל התצוגה ואת מקום הסמן שהיו בו בהפעלה הקודמת.
+ *
+ * הזום עובר דרך פקודת `zoom` של האדפטר ולא דרך `ui.zoom.set`, מאותו טעם
+ * שמנוסח ב-engine/zoom.ts: יש מסלול כתיבה **אחד** לגודל התצוגה, וכל מי שמשנה
+ * אותו — הסרגל, לחצני ±, וגם השחזור — עובר בו.
+ *
+ * כשל בשחזור אינו מגיע לשורת המצב: המשתמש ביקש לפתוח מסמך, לא לקפוץ למקום,
+ * והודעת שגיאה על „לא מצאתי את השורה שהיית בה” היא רעש. הוא כן מגיע ללוג של
+ * אוצריא, כי שם מודדים.
+ */
+async function restoreDocumentView(
+  editor: EditorSession,
+  restore: OpenOptions['restore'],
+): Promise<void> {
+  if (!restore) return;
+
+  if (restore.zoom !== null) {
+    const outcome = await commandAdapter.value?.run('zoom', zoomPayload(restore.zoom));
+    if (outcome && !outcome.ok) {
+      console.info(`[otzaria-word] גודל התצוגה השמור לא הוחזר: ${outcome.message}`);
+    }
+  }
+
+  if (restore.caret && !(await applyCaretAnchor(editor.ui, editor.superdoc, restore.caret))) {
+    console.info('[otzaria-word] מקום הסמן השמור לא נמצא במסמך שנפתח');
+  }
 }
 
 async function onSave(forceSaveAs = false): Promise<void> {
@@ -773,7 +933,8 @@ async function onSave(forceSaveAs = false): Promise<void> {
   }
   if (outcome.status === 'saved') {
     title.value = outcome.name.replace(/\.docx$/i, '') || title.value;
-    void saveLastDocument({ token: outcome.token, name: outcome.name, writable: true });
+    // זוכר-ההפעלה אינו מעודכן כאן אלא ב-`onSaved` של הקואורדינטור: שם עוברות
+    // גם השמירה האוטומטית וגם „לשמור לפני שפותחים אחר”, שאינן עוברות כאן.
     setStatus(`${title.value} נשמר`);
   }
 }
@@ -785,12 +946,20 @@ async function onPickAndOpen(): Promise<void> {
     if (!file) return;
 
     if (save && swap) {
+      // נקרא **לפני** ההחלטה: אחרי „לשמור קודם” המסמך כבר נקי, ואז אי אפשר
+      // להבחין בין „לא היה מה למחוק” לבין „המשתמש ביקש למחוק”.
+      const hadUnsaved = save.snapshot.isDirty;
       const decision = await decideDocumentSwitch({
         isDirty: () => save!.snapshot.isDirty,
         isSaving: () => save!.snapshot.isSaving,
         confirm,
         documentName: () => title.value,
       });
+
+      // „החלף” על מסמך שהיו בו שינויים פירושו שהמשתמש אישר את מחיקתם
+      // במפורש — שתי שאלות, ראו open-flow.ts. זה המסלול היחיד שבו הטיוטה
+      // נמחקת מלבד שמירה מוצלחת.
+      if (hadUnsaved && decision.action === 'switch') await keeper?.discardDraft();
 
       if (decision.action === 'cancel') {
         setStatus(
@@ -825,6 +994,8 @@ async function onNewDocument(): Promise<void> {
       confirm,
       documentName: () => title.value,
     });
+    // ראו onPickAndOpen: „החלף” כאן פירושו שהמחיקה אושרה במפורש.
+    if (decision.action === 'switch') await keeper?.discardDraft();
     if (decision.action === 'cancel') return;
     if (decision.action === 'save-first') {
       const outcome = await save.saveNow({ suggestedName: title.value });
@@ -982,6 +1153,7 @@ function onTitleUpdate(newTitle: string): void {
   if (newTitle.trim()) {
     title.value = newTitle.trim();
     save?.markDirty();
+    keeper?.noteChange();
   }
 }
 
@@ -999,6 +1171,7 @@ function toggleAutosave(): void {
 
 function toggleFocusMode(): void {
   isFocusMode.value = !isFocusMode.value;
+  keeper?.updateView({ focusMode: isFocusMode.value });
   // יציאה ממצב מיקוד מאפסת את החשיפה: אחרת המחלקה נשארת והפסים מקבלים
   // opacity מיותר ברגע שחוזרים למצב הרגיל.
   if (!isFocusMode.value) revealed.value = null;
@@ -1474,6 +1647,7 @@ onMounted(async () => {
     zoomCenter = createZoomCenter(editorStackRef.value);
 
     save = initSaveCoordinator();
+    keeper = initSessionKeeper();
 
     // הבחירה נטענת לפני שנפתח מסמך: העריכה הראשונה עלולה להתחיל סבב autosave,
     // ואם ההעדפה עוד לא הגיעה הוא היה רץ לפי ברירת המחדל ולא לפי מה שהמשתמש
@@ -1483,6 +1657,16 @@ onMounted(async () => {
 
     // גם ההעדפה של הסרגל, ומאותו טעם: היא חלה על המסמך שנפתח מיד אחרי כאן.
     rulerPreference = await loadRulerVisible();
+
+    // ורשומת ההפעלה, מאותו טעם בדיוק: הפתיחה עצמה כותבת עליה (`setDocument`),
+    // וקריאה אחריה הייתה קוראת את מה שהרגע דרסנו.
+    const session = await loadPreviousSession();
+    keeper.adopt(session);
+    applyShellPreferences(session);
+
+    // ההאזנה למעבר לרקע נרשמת כאן, אחרי שיש למי לדווח. שלושת המקורות
+    // וההנמקה — ב-host/lifecycle.ts.
+    hiddenListener = onPluginHidden(() => void keeper?.flush());
 
     swap = createEditorSwap(editorStackRef.value, (host, source) =>
       createEditor({
@@ -1495,6 +1679,8 @@ onMounted(async () => {
           // שוליים או כניסות יכולים להשתנות גם מפעולה ברצועה (גלריית
           // „שוליים”, דיאלוג הפסקה) ולא רק מהסרגל עצמו.
           ruler?.noteDocumentChanged();
+          // וגם זוכר-ההפעלה: זה הרגע שבו נולדת עבודה שאינה בדיסק.
+          keeper?.noteChange();
         },
         // ה-callback נרשם פעם אחת, כאן, ולכן הוא מפנה למודד הנוכחי ולא
         // ל-session מסוים — בדיוק כמו `save?.markDirty()` שמעליו.
@@ -1507,14 +1693,7 @@ onMounted(async () => {
     // ממתינה קודם לחבילת המנוע, ומסך טעינה שאומר „פותח” בזמן שהוא מוריד
     // 9MB מתאר את השלב הלא נכון.
     try {
-      const last = await resolveLastDocument();
-      if (!last) {
-        await openDocument();
-      } else if (!(await openDocument(last))) {
-        void forgetLastDocument();
-        await openDocument();
-        setStatus('המסמך האחרון לא נפתח — נפתח מסמך חדש');
-      }
+      await reopenPreviousSession(session);
     } finally {
       // גם פתיחה שנכשלה מסירה את מסך הטעינה, ולא רק כדי „לא להיתקע”: הודעת
       // הכשל יושבת בשורת המצב שמתחת, ומסך טעינה שנשאר פרוש מסתיר בדיוק את
@@ -1533,18 +1712,156 @@ onUnmounted(() => {
   directionShortcut?.dispose();
   // חיפוש-בזמן-הקלדה שממתין ירוץ אחרי הפירוק על handle של controller מפורק.
   searchAdapter?.dispose();
+  hiddenListener?.();
+  hiddenListener = null;
+  keeper?.dispose();
+  keeper = null;
 });
 
-async function resolveLastDocument(): Promise<UserFile | undefined> {
-  const last = await loadLastDocument();
-  if (!last) return undefined;
+/**
+ * הרשומה של ההפעלה הקודמת, כולל המסלול ממשתמש שמעדכן מגרסה שלא הייתה בה
+ * רשומה בכלל.
+ *
+ * `forgetLastDocument` אחרי ההמרה, ובכוונה: מרגע שהמפתח הישן נקרא, שני
+ * מקורות לאותה שאלה הם מקור אחד יותר מדי — והישן הוא זה שכבר אינו מתעדכן.
+ */
+async function loadPreviousSession(): Promise<SessionState | null> {
+  const stored = normalizeSession(await loadSessionRecord());
+  if (stored) return stored;
 
-  const file = await resolveFileUrl(last.token);
-  if (!file) {
-    void forgetLastDocument();
-    return undefined;
+  const migrated = sessionFromLastDocument(await loadLastDocument());
+  if (migrated) void forgetLastDocument();
+  return migrated;
+}
+
+/**
+ * מצב המעטפת — מיקוד, לשונית, כיווץ — מוחל מיד ולא ממתין למסמך.
+ *
+ * זו העדפה של מי שיושב מול המסך ולא תכונה של המסמך (ראו `documentViewFor`),
+ * ולכן היא נכונה גם אם המסמך האחרון לא ייפתח בכלל. החלה מוקדמת היא גם מה
+ * שמונע הבהוב: הרצועה נפרסת פעם אחת בלשונית הנכונה, ולא קופצת אליה אחרי
+ * שהמסמך נטען.
+ */
+function applyShellPreferences(session: SessionState | null): void {
+  if (!session) return;
+  isFocusMode.value = session.view.focusMode;
+  if (session.view.ribbonTab) ribbonTab.value = session.view.ribbonTab;
+  ribbonCollapsed.value = session.view.ribbonCollapsed;
+}
+
+/**
+ * פותחת מחדש את מה שהיה — קובץ, טיוטה, או מסמך חדש.
+ *
+ * ## ארבעת המסלולים
+ *
+ * 1. **אין רשומה** — מסמך ריק, כמו תמיד.
+ * 2. **יש קובץ, ואין טיוטה** — הקובץ נפתח מהדיסק, ועליו מוחזרים הזום והסמן.
+ * 3. **יש טיוטה** — היא זו שנפתחת, כי היא מה שהיה על המסך. הקובץ עדיין הוא
+ *    יעד השמירה, ולכן „שמור” יכתוב למקום הנכון.
+ * 4. **ה-token לא נפתר** — הקובץ הוזז, נמחק, או שההרשאה בוטלה. נפתח מסמך
+ *    חדש, והמשתמש מקבל הודעה במקום מסך ריק בלי הסבר. עבודה שלא נשמרה נפתחת
+ *    לתוכו: היא אינה תלויה בקובץ שאבד.
+ *
+ * הטיוטה נבדקת גם כשאין קובץ כלל: מסמך חדש שמעולם לא נשמר הוא בדיוק המקרה
+ * שבו אין שום דבר אחר לחזור אליו.
+ */
+async function reopenPreviousSession(session: SessionState | null): Promise<void> {
+  const remembered = session?.document ?? null;
+  const file = remembered ? await resolveRememberedFile(remembered) : null;
+
+  if (remembered && !file) {
+    // הקובץ אינו נגיש — הוזז, נמחק, או שההרשאה בוטלה. אבל עבודה שלא נשמרה
+    // אינה תלויה בו: אין לה יעד כתיבה בכל מקרה („שמור” יפתח „שמור בשם”),
+    // ולכן פתיחתה כמסמך חדש אינה יכולה לדרוס דבר — והיא הדרך היחידה שלא
+    // לאבד אותה. הטיוטה עוברת לבעלות המסמך שנפתח ממנה (ראו `setDocument`).
+    const orphan = session?.draft?.documentToken === remembered.token
+      ? await readDraftBytes(session.draft.path)
+      : null;
+
+    await openDocument(undefined, { draft: orphan ?? undefined });
+    setStatus(
+      orphan
+        ? `${remembered.name} לא נמצא — השינויים שלא נשמרו נפתחו כמסמך חדש`
+        : `${remembered.name} לא נמצא — נפתח מסמך חדש`,
+      !orphan,
+    );
+    return;
   }
-  return { ...file, name: file.name || last.name, access: last.writable ? 'readwrite' : 'read' };
+
+  const draft = await recoverDraft(session, file);
+  const restore = documentViewFor(session, file?.token ?? null);
+
+  if (await openDocument(file ?? undefined, { draft: draft ?? undefined, restore })) {
+    if (draft) setStatus('שוחזרו שינויים שלא נשמרו מההפעלה הקודמת');
+    return;
+  }
+
+  // הפתיחה נכשלה. מסמך חדש עדיף על מסך ריק — אבל הרשומה **אינה** מתעדכנת
+  // אליו: הכשל עשוי להיות זמני (worker שלא עלה, קובץ נעול), ואילו רישום
+  // המסמך הריק היה מוחק את המסמך האחרון מהרשומה ומנתק אותה מהטיוטה שמחזיקה
+  // את העבודה. בהפעלה הבאה מנסים שוב, בדיוק מאותה נקודה.
+  await openDocument(undefined, { remember: false });
+  setStatus('המסמך האחרון לא נפתח — נפתח מסמך חדש', true);
+}
+
+/** ה-URL העדכני של הקובץ שנזכר. `null` = אינו נגיש יותר. */
+async function resolveRememberedFile(remembered: {
+  token: string;
+  name: string;
+  writable: boolean;
+}): Promise<UserFile | null> {
+  const file = await resolveFileUrl(remembered.token);
+  if (!file) return null;
+  return {
+    ...file,
+    name: file.name || remembered.name,
+    access: remembered.writable ? 'readwrite' : 'read',
+  };
+}
+
+/**
+ * הבייטים של הטיוטה, אם יש מה לשחזר וזה בטוח.
+ *
+ * ההחלטה עצמה ב-sessions/session-state.ts ולא כאן, מאותו טעם כמו
+ * `decideDocumentSwitch`: היא קובעת אם עבודה של המשתמש נכתבת מעל קובץ, וקוד
+ * כזה חייב להיבדק. מה שנשאר כאן הוא השאלה למשתמש במסלול היחיד שאין בו תשובה
+ * נכונה אחת — הקובץ השתנה מבחוץ.
+ */
+async function recoverDraft(
+  session: SessionState | null,
+  file: UserFile | null,
+): Promise<Blob | null> {
+  const decision = decideDraftRecovery({
+    draft: session?.draft ?? null,
+    openingToken: file?.token ?? null,
+    diskSize: file?.size ?? null,
+  });
+
+  if (decision.action === 'discard') {
+    // טיוטה של מסמך אחר אינה נמחקת: היא עדיין העבודה של אותו מסמך, והוא
+    // עשוי להיפתח שוב. מה שאינה — רלוונטית עכשיו.
+    return null;
+  }
+
+  if (
+    decision.action === 'ask' &&
+    !(await confirm({
+      title: `${file?.name ?? 'המסמך'} השתנה מחוץ לעורך`,
+      content:
+        'יש שינויים מההפעלה הקודמת שלא נשמרו, אבל הקובץ עצמו התעדכן בינתיים.' +
+        ' לפתוח את השינויים שלא נשמרו? „לא” יפתח את הקובץ כפי שהוא בדיסק.',
+    }))
+  ) {
+    return null;
+  }
+
+  return readDraftBytes(session?.draft?.path ?? DRAFT_PATH);
+}
+
+/** בייטי הטיוטה כ-Blob שאפשר למסור למנוע, או `null` כשאין. */
+async function readDraftBytes(path: string): Promise<Blob | null> {
+  const bytes = await readWorkspaceBytes(path);
+  return bytes ? new Blob([bytes], { type: DOCX_MIME }) : null;
 }
 </script>
 

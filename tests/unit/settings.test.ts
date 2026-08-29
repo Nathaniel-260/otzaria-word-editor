@@ -8,8 +8,9 @@ import {
   forgetLastDocument,
   loadAutosaveEnabled,
   loadLastDocument,
+  loadSessionRecord,
   saveAutosaveEnabled,
-  saveLastDocument,
+  saveSessionRecord,
 } from '../../src/host/settings';
 
 function hostReturns(data: unknown): ReturnType<typeof vi.fn> {
@@ -73,18 +74,7 @@ describe('loadLastDocument', () => {
   });
 });
 
-describe('saveLastDocument / forgetLastDocument', () => {
-  it('שומר token, שם ומצב כתיבה', async () => {
-    const call = hostReturns(true);
-
-    await saveLastDocument({ token: 'tok', name: 'א.docx', writable: true });
-
-    expect(call).toHaveBeenCalledWith('storage.set', {
-      key: 'last-document',
-      value: { token: 'tok', name: 'א.docx', writable: true },
-    });
-  });
-
+describe('forgetLastDocument', () => {
   it('שוכח את המסמך', async () => {
     const call = hostReturns(true);
 
@@ -130,5 +120,27 @@ describe('loadAutosaveEnabled / saveAutosaveEnabled', () => {
       key: 'autosave-enabled',
       value: false,
     });
+  });
+});
+
+/**
+ * רשומת ההפעלה. המודול הזה אינו מפרש אותה — הפירוש והאימות ב-
+ * sessions/session-state.ts — ולכן מה שנבדק כאן הוא מה שבאחריותו: המפתח,
+ * ושכשל קריאה אינו הופך לחריגה בעלייה.
+ */
+describe('רשומת ההפעלה', () => {
+  it('נקראת ונכתבת תחת המפתח session', async () => {
+    const call = hostReturns({ version: 1 });
+
+    await expect(loadSessionRecord()).resolves.toEqual({ version: 1 });
+    expect(call).toHaveBeenCalledWith('storage.get', { key: 'session' });
+
+    await saveSessionRecord({ version: 1 });
+    expect(call).toHaveBeenCalledWith('storage.set', { key: 'session', value: { version: 1 } });
+  });
+
+  it('היעדר SDK מוחזר כ-null ואינו זורק', async () => {
+    await expect(loadSessionRecord()).resolves.toBeNull();
+    await expect(saveSessionRecord({ version: 1 })).resolves.toBeUndefined();
   });
 });

@@ -8,6 +8,7 @@
  * ולכן ה-token הוא מה שנשמר, ובעלייה חוזרת קוראים `fs.resolveFileUrl`.
  */
 import { call, tryCall, isPermissionDenied } from './otzaria-client';
+import { bytesToBase64 } from './base64';
 import { DOCX_MIME } from '../engine/export';
 import { EMBEDDABLE_IMAGE_EXTENSIONS, imageMimeForFileName } from '../engine/payloads';
 
@@ -172,22 +173,6 @@ function tooLarge(): ImageDataUrlResult {
     reason: 'too-large',
     message: `התמונה גדולה מ-${limit}MB. כדאי להקטין אותה לפני ההוספה`,
   };
-}
-
-/**
- * בייטים ל-base64.
- *
- * בגושים ולא במעבר אחד: `String.fromCharCode(...bytes)` על מערך של מיליוני
- * איברים חורג ממגבלת הארגומנטים של המנוע וזורק `RangeError` — כלומר דווקא
- * התמונות הגדולות היו נכשלות. 32KB לגוש הוא בטוח בכל מנוע.
- */
-function bytesToBase64(bytes: Uint8Array): string {
-  const CHUNK = 0x8000;
-  let binary = '';
-  for (let offset = 0; offset < bytes.byteLength; offset += CHUNK) {
-    binary += String.fromCharCode(...bytes.subarray(offset, offset + CHUNK));
-  }
-  return btoa(binary);
 }
 
 export interface WriteTicket {

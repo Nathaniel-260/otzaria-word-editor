@@ -16,6 +16,8 @@ import {
 interface Harness {
   coordinator: SaveCoordinator;
   commits: SaveCommitInput[];
+  /** כל commit מוצלח, כפי שדווח דרך `onSaved`. */
+  saved: Array<{ token: string; name: string; size: number }>;
   /** ה-writeTokens ששוחררו דרך fs.abortBinaryWrite. */
   aborts: string[];
   uploads: Array<{ url: string; size: number }>;
@@ -31,6 +33,7 @@ interface Harness {
 
 function harness(): Harness {
   const commits: SaveCommitInput[] = [];
+  const saved: Array<{ token: string; name: string; size: number }> = [];
   const aborts: string[] = [];
   const uploads: Array<{ url: string; size: number }> = [];
   const states: SaveSnapshot[] = [];
@@ -69,11 +72,13 @@ function harness(): Harness {
       await abortImpl(writeToken);
     },
     onStateChange: (snapshot) => states.push(snapshot),
+    onSaved: (info) => saved.push(info),
   });
 
   return {
     coordinator,
     commits,
+    saved,
     aborts,
     uploads,
     states,
@@ -122,7 +127,13 @@ describe('saveNow', () => {
 
     const outcome = await h.coordinator.saveNow();
 
-    expect(outcome).toEqual({ status: 'saved', token: 'token-new', name: 'חידושים.docx' });
+    expect(outcome).toEqual({
+      status: 'saved',
+      token: 'token-new',
+      name: 'חידושים.docx',
+      // גודל הבייטים שנכתבו. ראו `onSaved` — זה הבסיס להשוואה מול הדיסק.
+      size: 4,
+    });
     // בלי targetToken — כלומר ה-commit פותח דיאלוג.
     expect(h.commits[0].targetToken).toBeUndefined();
     expect(h.coordinator.snapshot).toMatchObject({
@@ -923,3 +934,52 @@ describe('„שמור בשם” על מסמך נקי', () => {
   });
 });
 
+/**
+ * `onSaved` הוא ההודעה „העבודה בדיסק”, והוא קיים מפני שרוב השמירות **אינן**
+ * עוברות במעטפת: ה-autosave יורה מתוך הקואורדינטור עצמו. מי שנתלה על אתר
+ * הקריאה ל-`saveNow` שומע רק את השמירה הידנית — וזה בדיוק מה שהשאיר טיוטת
+ * שחזור חיה אחרי שמירה אוטומטית.
+ */
+describe('onSaved', () => {
+  it('נורה גם על שמירה אוטומטית, לא רק על שמירה ידנית', async () => {
+    vi.useFakeTimers();
+    try {
+      const h = harness();
+      h.coordinator.adoptTarget({ token: 'tok', name: 'א.docx' });
+      h.coordinator.markDirty();
+
+      await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(h.commits, 'ה-autosave אכן רץ').toHaveLength(1);
+      expect(h.saved).toHaveLength(1);
+      expect(h.saved[0].token).toBe('tok');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('נושא את גודל הבייטים שנכתבו בפועל', async () => {
+    // זה הנתון שמאפשר לזהות אחר כך עריכה חיצונית של הקובץ. בלעדיו נשאלת
+    // שאלה על „קובץ שהשתנה מבחוץ” אחרי כל שמירה רגילה.
+    const h = harness();
+    h.onExport(() => new Blob(['0123456789']));
+    h.coordinator.adoptTarget({ token: 'tok', name: 'א.docx' });
+    h.coordinator.markDirty();
+
+    await h.coordinator.saveNow();
+
+    expect(h.saved[0].size).toBe(10);
+  });
+
+  it('אינו נורה כשהשמירה נכשלה או בוטלה', async () => {
+    const h = harness();
+    h.onCommit(async () => ({ cancelled: true }));
+    h.coordinator.adoptTarget({ token: 'tok', name: 'א.docx' });
+    h.coordinator.markDirty();
+
+    await h.coordinator.saveNow({ forceSaveAs: true });
+
+    expect(h.saved, 'ביטול אינו שמירה').toHaveLength(0);
+  });
+});

@@ -7,7 +7,15 @@
  */
 import { call, tryCall } from './otzaria-client';
 
-/** המסמך שהיה פתוח לאחרונה. */
+/**
+ * המסמך שהיה פתוח לאחרונה.
+ *
+ * **מפתח מדור קודם.** מאז ש„חזרה בדיוק למה שהיה” כוללת גם את הסמן, את התצוגה
+ * ואת מה שלא נשמר, זהות המסמך היא שדה אחד ברשומת ההפעלה (`SESSION_KEY`)
+ * ואינה נכתבת לכאן יותר. הקריאה נשארה בשביל מסלול אחד בלבד: משתמש שמעדכן
+ * מגרסה קודמת ויש לו רק את המפתח הזה. אחרי שהוא נקרא פעם אחת הוא נמחק, כדי
+ * שלא יישאר מקור שני לאותה שאלה.
+ */
 export interface LastDocument {
   token: string;
   name: string;
@@ -34,13 +42,24 @@ export async function loadLastDocument(): Promise<LastDocument | null> {
   };
 }
 
-export async function saveLastDocument(document: LastDocument): Promise<void> {
-  await tryCall('storage.set', { key: LAST_DOCUMENT_KEY, value: document });
-}
-
-/** לאחר שהמשתמש פתח מסמך חדש שאין לו token, או שה-token חדל להיות תקף. */
+/** נמחק אחרי שהומר לרשומת ההפעלה — ראו ההערה על `LastDocument`. */
 export async function forgetLastDocument(): Promise<void> {
   await tryCall('storage.remove', { key: LAST_DOCUMENT_KEY });
+}
+
+const SESSION_KEY = 'session';
+
+/**
+ * הרשומה הגולמית של מצב ההפעלה. הפירוש שלה — כולל אימות הגרסה והמסלול
+ * ממשתמש שיש לו רק `last-document` מגרסה קודמת — יושב ב-sessions/session-state.ts,
+ * כדי שההחלטות יהיו נבדקות בלי לזייף את הגשר.
+ */
+export async function loadSessionRecord(): Promise<unknown> {
+  return tryCall<unknown>('storage.get', { key: SESSION_KEY });
+}
+
+export async function saveSessionRecord(value: unknown): Promise<void> {
+  await tryCall('storage.set', { key: SESSION_KEY, value });
 }
 
 const AUTOSAVE_KEY = 'autosave-enabled';

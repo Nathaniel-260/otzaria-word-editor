@@ -59,6 +59,10 @@ const stub = vi.hoisted(() => ({
   storedRuler: false,
   /** מה שנכתב לאחסון בשביל הסרגל, לפי הסדר. */
   persistedRuler: [] as boolean[],
+  /** רשומת ההפעלה שה-storage מחזיר בעלייה. */
+  storedSession: null as unknown,
+  /** כל מה שנכתב לרשומת ההפעלה, לפי הסדר. */
+  persistedSessions: [] as unknown[],
   searchOpens: 0,
   /** ה-deps שהמעטפת נתנה לקואורדינטור — דרך לדחוף snapshot כמו המנוע. */
   saveDeps: null as SaveCoordinatorDeps | null,
@@ -68,6 +72,22 @@ const stub = vi.hoisted(() => ({
   superdoc: null as SuperdocDouble | null,
   /** האדפטר שהמעטפת תזריק לרצועה. */
   adapter: null as unknown,
+  /** מה שכל פתיחה קיבלה כמקור: URL, Blob, או undefined למסמך ריק. */
+  openSources: [] as unknown[],
+  /** מה ש-`resolveFileUrl` מחזיר — `null` = הקובץ אינו נגיש יותר. */
+  resolvedFile: null as unknown,
+  /** בייטי הטיוטה שבמרחב הפרטי, או `null` כשאין. */
+  draftBytes: null as Uint8Array | null,
+  /** כמה פעמים נמחקה הטיוטה. */
+  draftRemovals: 0,
+  /** מה ש-`ui.selection.apply` קיבל — כלומר לאן הסמן הוחזר. */
+  caretApplied: [] as unknown[],
+  /** המפתח הישן, בשביל מסלול השדרוג. */
+  lastDocument: null as unknown,
+  /** האם המפתח הישן נמחק אחרי שהומר. */
+  forgotLastDocument: false,
+  /** כמה פתיחות הבאות ייכשלו. */
+  openFailures: 0,
 }));
 
 vi.mock('../../src/engine/create-editor', () => ({
@@ -83,9 +103,31 @@ vi.mock('../../src/sessions/editor-swap', () => ({
     get isOpening() {
       return false;
     },
-    open: async () => ({ status: 'opened', session: stub.session }),
+    open: async (source?: unknown) => {
+      stub.openSources.push(source);
+      if (stub.openFailures > 0) {
+        stub.openFailures -= 1;
+        return { status: 'failed', error: new Error('worker לא עלה') };
+      }
+      return { status: 'opened', session: stub.session };
+    },
     destroy: () => {},
   }),
+}));
+
+vi.mock('../../src/host/files', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/host/files')>()),
+  resolveFileUrl: async () => stub.resolvedFile,
+}));
+
+vi.mock('../../src/host/workspace', () => ({
+  MAX_PAYLOAD_BYTES: 10,
+  MAX_CONTENT_BYTES: 7,
+  readWorkspaceBytes: async () => stub.draftBytes,
+  writeWorkspaceBytes: async () => true,
+  deleteWorkspaceEntry: async () => {
+    stub.draftRemovals += 1;
+  },
 }));
 
 vi.mock('../../src/sessions/save-coordinator', async (importOriginal) => ({
@@ -113,7 +155,10 @@ vi.mock('../../src/sessions/save-coordinator', async (importOriginal) => ({
       },
       saveNow: async (options?: { forceSaveAs?: boolean; suggestedName?: string }) => {
         stub.saveNowCalls.push(options);
-        return { status: 'saved', token: 'token-1', name: 'מסמך.docx' };
+        // הכפיל מודיע על השמירה כמו הקואורדינטור האמיתי. בלי זה כל בדיקה
+        // כאן הייתה מודדת מעטפת שאינה שומעת שמירה אוטומטית בכלל.
+        stub.saveDeps?.onSaved?.({ token: 'token-1', name: 'מסמך.docx', size: 4_096 });
+        return { status: 'saved', token: 'token-1', name: 'מסמך.docx', size: 4_096 };
       },
       dispose: () => {},
     };
@@ -168,9 +213,10 @@ vi.mock('../../src/engine/document-defaults', () => ({
 }));
 
 vi.mock('../../src/host/settings', () => ({
-  loadLastDocument: async () => null,
-  saveLastDocument: async () => {},
-  forgetLastDocument: async () => {},
+  loadLastDocument: async () => stub.lastDocument,
+  forgetLastDocument: async () => {
+    stub.forgotLastDocument = true;
+  },
   loadAutosaveEnabled: async () => stub.storedAutosave,
   saveAutosaveEnabled: async (enabled: boolean) => {
     stub.persistedAutosave.push(enabled);
@@ -178,6 +224,10 @@ vi.mock('../../src/host/settings', () => ({
   loadRulerVisible: async () => stub.storedRuler,
   saveRulerVisible: async (visible: boolean) => {
     stub.persistedRuler.push(visible);
+  },
+  loadSessionRecord: async () => stub.storedSession,
+  saveSessionRecord: async (value: unknown) => {
+    stub.persistedSessions.push(value);
   },
 }));
 
@@ -199,6 +249,16 @@ beforeEach(() => {
   stub.autosaveCalls.length = 0;
   stub.saveNowCalls.length = 0;
   stub.persistedAutosave.length = 0;
+  stub.persistedSessions.length = 0;
+  stub.storedSession = null;
+  stub.openSources.length = 0;
+  stub.resolvedFile = null;
+  stub.draftBytes = null;
+  stub.draftRemovals = 0;
+  stub.caretApplied.length = 0;
+  stub.lastDocument = null;
+  stub.forgotLastDocument = false;
+  stub.openFailures = 0;
   stub.markDirtyCalls = 0;
   stub.resetCalls = 0;
   stub.searchOpens = 0;
@@ -213,7 +273,18 @@ beforeEach(() => {
     // ה-controller המזויף: רק מה שהמעטפת נוגעת בו ישירות. שאר הקוראים
     // (`observeZoom`, `observeFontOptions`, `observeStyleGallery`) מתוכננים
     // ליפול לברירת מחדל כשה-handle חסר, וזה מה שנמדד בבדיקות שלהם.
-    ui: { selection: { observe: () => () => {} } },
+    ui: {
+      selection: {
+        observe: () => () => {},
+        // מה ששחזור הסמן נשען עליו. `apply` מקליט את מה שהוא קיבל, ומצליח
+        // תמיד — השאלה כאן היא אם המעטפת חיווטה אותו, לא אם המנוע יודע.
+        apply: (target: unknown) => {
+          stub.caretApplied.push(target);
+          return { ok: true };
+        },
+      },
+      viewport: { scrollIntoView: async () => ({ success: true }) },
+    },
     onDispose: () => {},
     destroy: () => {},
   };
@@ -456,5 +527,248 @@ describe('ההעדפה של סרגל המידות', () => {
     await settle();
 
     expect(stub.persistedRuler[stub.persistedRuler.length - 1], 'הכיבוי נשמר').toBe(false);
+  });
+});
+
+/**
+ * „חוזרים לתוסף והוא נפתח בדיוק כמו לפני הסגירה”.
+ *
+ * מה שנמדד כאן הוא החיווט, ולא ההחלטות: ההחלטות עצמן נבדקות ביחידה
+ * (`sessions/session-state.ts`, `engine/caret-anchor.ts`), ומה שאף בדיקת
+ * יחידה אינה יכולה לתפוס הוא „הכול נכון, ואף אחד לא קרא לזה”.
+ */
+describe('חזרה למה שהיה', () => {
+  const REMEMBERED = { token: 'tok', name: 'חידושים.docx', writable: true };
+
+  /** רשומת הפעלה מלאה, עם מה שהבדיקה רוצה לשנות בה. */
+  function storedSession(patch: Record<string, unknown> = {}): unknown {
+    return {
+      version: 1,
+      document: REMEMBERED,
+      view: { zoom: null, focusMode: false, ribbonTab: null, ribbonCollapsed: false },
+      caret: null,
+      draft: null,
+      ...patch,
+    };
+  }
+
+  it('המסמך האחרון נפתח מה-URL שאוצריא נתנה עכשיו', async () => {
+    // ה-URL של הריצה הקודמת מת — הפורט מתחלף — ולכן מה שנשמר הוא ה-token,
+    // ובעלייה הוא נפתר מחדש.
+    stub.storedSession = storedSession();
+    stub.resolvedFile = { token: 'tok', url: 'loopback://fresh', name: 'חידושים.docx', size: 120 };
+
+    await mountShell();
+
+    expect(stub.openSources).toEqual(['loopback://fresh']);
+  });
+
+  it('קובץ שאינו נגיש יותר נפתח כמסמך חדש, עם הודעה', async () => {
+    stub.storedSession = storedSession();
+    stub.resolvedFile = null;
+
+    const wrapper = await mountShell();
+
+    expect(stub.openSources, 'מסמך ריק, בלי מקור').toEqual([undefined]);
+    expect(wrapper.find('.word-statusbar').text()).toContain('לא נמצא');
+  });
+
+  it('קובץ שאינו נגיש — העבודה שלא נשמרה נפתחת כמסמך חדש ולא נמחקת', async () => {
+    // אין לה יעד כתיבה בכל מקרה („שמור” יפתח „שמור בשם”), ולכן פתיחתה כמסמך
+    // חדש אינה יכולה לדרוס דבר — והיא הדרך היחידה שלא לאבד אותה.
+    stub.storedSession = storedSession({
+      draft: { path: 'session-draft.docx', savedAt: 1, documentToken: 'tok', sourceSize: 120 },
+    });
+    stub.resolvedFile = null;
+    stub.draftBytes = new Uint8Array([80, 75, 3, 4]);
+
+    const wrapper = await mountShell();
+
+    expect(stub.openSources[0]).toBeInstanceOf(Blob);
+    expect(wrapper.find('.word-statusbar').text()).toContain('נפתחו כמסמך חדש');
+  });
+
+  it('טיוטה שלא נשמרה נפתחת במקום הקובץ, והמסמך מסומן כלא-שמור', async () => {
+    // זה המסלול שבו סגירת אוצריא הייתה מוחקת עבודה: מה שנכתב ולא נשמר.
+    stub.storedSession = storedSession({
+      draft: { path: 'session-draft.docx', savedAt: 1, documentToken: 'tok', sourceSize: 120 },
+    });
+    stub.resolvedFile = { token: 'tok', url: 'loopback://fresh', name: 'חידושים.docx', size: 120 };
+    stub.draftBytes = new Uint8Array([80, 75, 3, 4]);
+
+    const wrapper = await mountShell();
+
+    expect(stub.openSources[0], 'הבייטים של הטיוטה, לא ה-URL').toBeInstanceOf(Blob);
+    expect(stub.markDirtyCalls, 'עבודה שאינה בדיסק חייבת להיראות כך').toBeGreaterThan(0);
+    expect(wrapper.find('.word-statusbar').text()).toContain('שוחזרו שינויים');
+  });
+
+  it('טיוטה של מסמך אחר אינה נפתחת מעל המסמך הזה', async () => {
+    // התרחיש היחיד שבו התכונה יכולה למחוק עבודה: תוכן של מסמך אחד שנפתח מעל
+    // מסמך אחר, ואז נשמר לקובץ שלו.
+    stub.storedSession = storedSession({
+      draft: { path: 'session-draft.docx', savedAt: 1, documentToken: 'other', sourceSize: 1 },
+    });
+    stub.resolvedFile = { token: 'tok', url: 'loopback://fresh', name: 'חידושים.docx', size: 120 };
+    stub.draftBytes = new Uint8Array([80, 75, 3, 4]);
+
+    await mountShell();
+
+    expect(stub.openSources).toEqual(['loopback://fresh']);
+  });
+
+  it('מסמך חדש שמעולם לא נשמר חוזר מהטיוטה', async () => {
+    // אין קובץ, אין token, ואין לאן לשמור — הטיוטה היא הדבר היחיד שמחזיק
+    // את מה שנכתב.
+    stub.storedSession = storedSession({
+      document: null,
+      draft: { path: 'session-draft.docx', savedAt: 1, documentToken: null, sourceSize: null },
+    });
+    stub.draftBytes = new Uint8Array([80, 75, 3, 4]);
+
+    await mountShell();
+
+    expect(stub.openSources[0]).toBeInstanceOf(Blob);
+  });
+
+  it('מצב המיקוד והלשונית ברצועה חוזרים', async () => {
+    stub.storedSession = storedSession({
+      view: { zoom: null, focusMode: true, ribbonTab: 'references', ribbonCollapsed: false },
+    });
+
+    const wrapper = await mountShell();
+
+    expect(wrapper.find('.word-app-shell').classes()).toContain('focus-mode');
+    const active = wrapper.findAll('.word-tab-btn').filter((tab) => tab.classes('active'));
+    expect(active).toHaveLength(1);
+    expect(active[0].text()).toBe('הפניות');
+  });
+
+  it('לשונית שאינה מוכרת נופלת ל„בית” ואינה משאירה רצועה ריקה', async () => {
+    stub.storedSession = storedSession({
+      view: { zoom: null, focusMode: false, ribbonTab: 'לשונית שנמחקה', ribbonCollapsed: false },
+    });
+
+    const wrapper = await mountShell();
+
+    const active = wrapper.findAll('.word-tab-btn').filter((tab) => tab.classes('active'));
+    expect(active[0].text()).toBe('בית');
+  });
+
+  it('הזום והסמן חוזרים למסמך שנפתח', async () => {
+    stub.storedSession = storedSession({
+      view: { zoom: 150, focusMode: false, ribbonTab: null, ribbonCollapsed: false },
+      caret: { start: { blockId: 'b9', ordinal: 8, offset: 4 }, end: null },
+    });
+    stub.resolvedFile = { token: 'tok', url: 'loopback://fresh', name: 'חידושים.docx', size: 120 };
+
+    await mountShell();
+
+    const zoomCall = (stub.adapter as { calls: Array<{ id: string; payload?: unknown }> }).calls.find(
+      (call) => call.id === 'zoom',
+    );
+    // `zoomPayload` הוא אחוז ולא אובייקט — ראו engine/payloads.ts.
+    expect(zoomCall?.payload).toBe(150);
+    expect(stub.caretApplied).toEqual([
+      {
+        kind: 'selection',
+        start: { kind: 'text', blockId: 'b9', offset: 4 },
+        end: { kind: 'text', blockId: 'b9', offset: 4 },
+      },
+    ]);
+  });
+
+  it('זום וסמן של מסמך אחר אינם מוחלים על מה שנפתח', async () => {
+    // ה-token לא נפתר, נפתח מסמך חדש — וקפיצה לאמצע מסמך אחר עליו היא
+    // בדיוק מה שאסור.
+    stub.storedSession = storedSession({
+      view: { zoom: 150, focusMode: false, ribbonTab: null, ribbonCollapsed: false },
+      caret: { start: { blockId: 'b9', ordinal: 8, offset: 4 }, end: null },
+    });
+    stub.resolvedFile = null;
+
+    await mountShell();
+
+    expect(stub.caretApplied).toEqual([]);
+  });
+
+  it('הרשומה נכתבת בפועל, ולא רק „הייתה אמורה להיכתב”', async () => {
+    stub.storedSession = storedSession();
+    stub.resolvedFile = { token: 'tok', url: 'loopback://fresh', name: 'חידושים.docx', size: 120 };
+
+    await mountShell();
+
+    expect(stub.persistedSessions.length, 'שום דבר לא נשמר להפעלה הבאה').toBeGreaterThan(0);
+    const record = stub.persistedSessions[stub.persistedSessions.length - 1] as {
+      document?: { token?: string };
+    };
+    expect(record.document?.token).toBe('tok');
+  });
+
+  it('פתיחה שנכשלה אינה מוחקת את הטיוטה ואינה שוכחת את המסמך', async () => {
+    // כשל בפתיחה עשוי להיות זמני — worker שלא עלה, קובץ נעול. מחיקת הטיוטה
+    // או רישום המסמך הריק היו הופכים אותו לאובדן קבוע.
+    stub.storedSession = storedSession({
+      draft: { path: 'session-draft.docx', savedAt: 1, documentToken: 'tok', sourceSize: 120 },
+    });
+    stub.resolvedFile = { token: 'tok', url: 'loopback://fresh', name: 'חידושים.docx', size: 120 };
+    stub.draftBytes = new Uint8Array([80, 75, 3, 4]);
+    stub.openFailures = 1;
+
+    await mountShell();
+
+    expect(stub.draftRemovals, 'הטיוטה היא הדבר היחיד שמחזיק את העבודה').toBe(0);
+
+    // המסמך הריק שנפתח כגיבוי אינו נרשם. כל רשומה שנכתבה בכל זאת חייבת
+    // עדיין לנקוב במסמך האחרון — אחרת ההפעלה הבאה לא תדע במה לנסות שוב,
+    // וגם לא לְמי הטיוטה שייכת.
+    const forgotten = (stub.persistedSessions as Array<{ document?: unknown } | null>).filter(
+      (record) => record?.document == null,
+    );
+    expect(forgotten, 'רשומה ששכחה את המסמך האחרון').toEqual([]);
+  });
+
+  it('שמירה אוטומטית מוחקת את הטיוטה — לא רק שמירה ידנית', async () => {
+    // הרגרסיה: הזוכר היה נתלה על `onSave` של המעטפת, ואילו ה-autosave יורה
+    // מתוך הקואורדינטור ואינו עובר שם. התוצאה הייתה טיוטה שנשארת חיה
+    // ומפסיקה להתעדכן — ואז נפתחת בהפעלה הבאה מעל עבודה חדשה ממנה, ונכתבת
+    // לקובץ. כאן הקואורדינטור מדווח כמו שהוא מדווח על סבב אוטומטי.
+    stub.storedSession = storedSession({
+      draft: { path: 'session-draft.docx', savedAt: 1, documentToken: 'tok', sourceSize: 120 },
+    });
+    stub.resolvedFile = { token: 'tok', url: 'loopback://fresh', name: 'חידושים.docx', size: 120 };
+    stub.draftBytes = new Uint8Array([80, 75, 3, 4]);
+
+    await mountShell();
+    expect(stub.draftRemovals, 'עוד לא נשמר דבר').toBe(0);
+
+    stub.saveDeps?.onSaved?.({ token: 'tok', name: 'חידושים.docx', size: 250 });
+    await settle(6);
+
+    expect(stub.draftRemovals, 'העבודה בדיסק — הטיוטה מיותרת ומסוכנת').toBe(1);
+  });
+
+  it('פתיחה רגילה אינה מוחקת שום טיוטה', async () => {
+    stub.storedSession = storedSession({
+      draft: { path: 'session-draft.docx', savedAt: 1, documentToken: 'other', sourceSize: 1 },
+    });
+    stub.resolvedFile = { token: 'tok', url: 'loopback://fresh', name: 'חידושים.docx', size: 120 };
+    stub.draftBytes = new Uint8Array([80, 75, 3, 4]);
+
+    await mountShell();
+
+    expect(stub.draftRemovals).toBe(0);
+  });
+
+  it('משתמש שמעדכן מגרסה קודמת אינו מאבד את המסמך שעבד עליו', async () => {
+    // אין רשומת הפעלה, ויש רק את המפתח הישן.
+    stub.storedSession = null;
+    stub.lastDocument = REMEMBERED;
+    stub.resolvedFile = { token: 'tok', url: 'loopback://fresh', name: 'חידושים.docx', size: 120 };
+
+    await mountShell();
+
+    expect(stub.openSources).toEqual(['loopback://fresh']);
+    expect(stub.forgotLastDocument, 'המפתח הישן נמחק כדי שלא יישאר מקור שני').toBe(true);
   });
 });
