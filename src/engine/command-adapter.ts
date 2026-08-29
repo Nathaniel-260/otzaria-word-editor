@@ -34,6 +34,7 @@ export const REASON_TEXT: Record<SuperDocUIReason, string> = {
   'table-context-unavailable': 'יש למקם את הסמן בתוך תא בטבלה',
   'operation-unavailable': 'הפעולה אינה זמינה כרגע',
   'bulk-decisions-disabled': 'קבלה או דחייה של כל השינויים אינה מאופשרת',
+  'tracked-change-decisions-disabled': 'קבלה או דחייה של שינויים אינה מאופשרת',
   'host-capability-unavailable': 'היכולת הדרושה לפעולה אינה זמינה',
   'history-empty': 'אין פעולה לבטל',
   'search-unavailable': 'החיפוש אינו זמין במסמך הזה',

@@ -86,6 +86,7 @@ function strictSearchHandle(behaviour: Behaviour = {}): Double {
     available: true,
     caseSensitive: false,
     includeDeletedText: false,
+    includeTrackedDeletions: false,
     regex: false,
     canReplace: true,
     ...behaviour.slice,
