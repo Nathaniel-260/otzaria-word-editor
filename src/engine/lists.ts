@@ -29,7 +29,14 @@ import { receiptFailureText, thrownText, type DocReceipt } from './document-api'
 
 const UNAVAILABLE_TEXT = 'אינו זמין בגרסה זו';
 
-/** ערכי `numFmt` של ECMA-376 בהם נעשה שימוש הגיוני במסמך עברי/כללי. */
+/**
+ * ערכי `numFmt` של ECMA-376 בהם נעשה שימוש הגיוני במסמך עברי/כללי.
+ *
+ * `hebrew1` היה כאן מלכתחילה — החוזה מקבל `numberStyle` כמחרוזת חופשית,
+ * ונמדד ש-`w:numFmt="hebrew1"` אכן נכתב ל-numbering.xml. מה שלא נמדד אז הוא
+ * שה**סמן צויר ריק**: על superdoc@2.8.0 המשתמש קיבל „. ” בלי אות, כלומר
+ * מסמך נכון ומסך ריק. במעבר ל-2.10.0 הסמנים מצוירים, ולכן `hebrew2` מצטרף.
+ */
 export const NUMBER_STYLES: readonly string[] = [
   'decimal',
   'upperLetter',
@@ -37,17 +44,29 @@ export const NUMBER_STYLES: readonly string[] = [
   'upperRoman',
   'lowerRoman',
   'hebrew1',
+  'hebrew2',
   'bullet',
 ];
 
-/** תוויות לתצוגה. */
+/**
+ * תוויות לתצוגה.
+ *
+ * התווית של `hebrew1` הייתה „א׳, ב׳, ג׳ — עברי” והיא תוקנה: המנוע אינו מצייר
+ * גרש. עשרים פריטים ברצף נמדדו על ה-dist הבנוי, וזה מה שיצא:
+ *
+ *     hebrew1 → א ב ג … י יא יב יג יד טו טז יז יח יט כ   (גימטריה)
+ *     hebrew2 → א ב ג … י כ  ל  מ  נ  ס  ע  פ  צ  ק  ר   (סדר האלף-בית)
+ *
+ * שניהם זהים בעשרת הראשונים, ולכן התוויות מראות היכן הם נפרדים.
+ */
 export const NUMBER_STYLE_LABELS: Record<string, string> = {
   decimal: '1, 2, 3',
   upperLetter: 'A, B, C',
   lowerLetter: 'a, b, c',
   upperRoman: 'I, II, III',
   lowerRoman: 'i, ii, iii',
-  hebrew1: 'א׳, ב׳, ג׳ — עברי',
+  hebrew1: 'א, ב, ג … יא, יב (גימטריה)',
+  hebrew2: 'א, ב, ג … כ, ל (אלף־בית)',
   bullet: 'תבליט',
 };
 

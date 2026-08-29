@@ -1489,24 +1489,45 @@ describe('applyPageNumbering', () => {
     expect(legalSectPr(withoutStart.xml)).not.toContain('w:start');
   });
 
-  it('מספור עברי אינו נשלח — הוא אינו ב-union והמנוע זורק עליו', async () => {
-    // הממצא המרכזי של הגל: `hebrew1` הוא אסימון Word תקני, ובכל זאת אין דרך
-    // ציבורית לכתוב אותו. הפקד אינו מציע אותו, ומי שינסה בכל זאת נעצר אצלנו
-    // לפני שהמנוע זורק.
+  /**
+   * הבדיקה הזאת קבעה את ההפך: שמספור עברי אינו נשלח, מפני שב-2.8.0 ה-union
+   * של המנוע נאכף בזמן ריצה ודחה אותו. במעבר ל-superdoc@2.10.0 הוא נכנס
+   * ל-`SectionPageNumberingFormat`, ונמדד שהקריאה כותבת
+   * `<w:pgNumType w:fmt="hebrew1"/>` ל-docx המיוצא. הבדיקה הוחלפה בהיפוכה
+   * כדי שהיא תישאר השומרת של אותה נקודה — רק לכיוון הנכון.
+   */
+  it('מספור עברי נשלח למנוע — שני הפורמטים', async () => {
+    for (const format of ['hebrew1', 'hebrew2'] as const) {
+      const { host, calls } = fakeEngine();
+
+      const outcome = await applyPageNumbering(host, { format, start: null });
+
+      expect(outcome).toEqual({ ok: true });
+      expect(calls[0]!.input).toEqual({
+        target: { kind: 'section', sectionId: 's0' },
+        format,
+      });
+    }
+
+    const offered = PAGE_NUMBER_FORMATS.map((item) => item.id);
+    expect(offered).toContain('hebrew1');
+    expect(offered).toContain('hebrew2');
+  });
+
+  it('פורמט שאינו מוכר עדיין נעצר אצלנו, לפני שהמנוע זורק', async () => {
     const { host, calls } = fakeEngine();
 
     const outcome = await applyPageNumbering(host, {
-      format: 'hebrew1' as never,
+      format: 'hebrew9' as never,
       start: null,
     });
 
     expect(outcome).toEqual({
       ok: false,
-      message: 'שינוי מספור העמודים נכשל: אין פורמט מספור בשם hebrew1',
+      message: 'שינוי מספור העמודים נכשל: אין פורמט מספור בשם hebrew9',
       reason: 'unknown-page-number-format',
     });
     expect(calls).toEqual([]);
-    expect(PAGE_NUMBER_FORMATS.map((item) => item.id)).not.toContain('hebrew1');
   });
 
   it('מספר התחלה פסול נעצר לפני המנוע', async () => {
@@ -1681,10 +1702,27 @@ describe('readPageLayoutState', () => {
     expect(state.headerDistanceCm).toEqual({ header: 0.5 * 2.54, footer: 0.5 * 2.54 });
   });
 
+  /**
+   * זה היה המקרה שהדגים את הפער: מסמך שנוצר ב-Word עם מספור עברי החזיר
+   * `hebrew1`, והטופס נאלץ להציג `null` — כי אישור על הערך היה נכשל. מאז
+   * המעבר ל-superdoc@2.10.0 הערך בתוך ה-union, ולכן הוא חוזר כמו שהוא
+   * והמסמך עובר הלוך-ושוב בלי לאבד את המספור.
+   */
+  it('מספור עברי שהגיע מהמסמך מוצג כמו שהוא', async () => {
+    for (const format of ['hebrew1', 'hebrew2'] as const) {
+      const { host } = fakeEngine({ pageNumbering: { format, start: 1 } });
+
+      const state = await readPageLayoutState(host);
+
+      expect(state.pageNumberFormat).toBe(format);
+      expect(state.pageNumberStart).toBe(1);
+    }
+  });
+
   it('פורמט שאינו ב-union אינו מוצג — הוא היה נשלח בחזרה ונזרק', async () => {
-    // מסמך שנוצר ב-Word עם מספור עברי הוא בדיוק המקרה: `hebrew1` יגיע
-    // מהקריאה, והטופס אינו יכול להציע אותו כי אישור עליו ייכשל.
-    const { host } = fakeEngine({ pageNumbering: { format: 'hebrew1', start: 1 } });
+    // `ordinal` קיים בצד המנוע אך אינו בטבלה שלנו, ולכן הטופס אינו יכול
+    // להציע אותו: אישור עליו היה נשלח בחזרה ונדחה.
+    const { host } = fakeEngine({ pageNumbering: { format: 'ordinal', start: 1 } });
 
     const state = await readPageLayoutState(host);
 

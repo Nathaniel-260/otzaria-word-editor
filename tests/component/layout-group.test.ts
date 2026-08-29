@@ -202,10 +202,11 @@ describe('מספור עמודים', () => {
   });
 
   it('פורמט שאינו ב-union אינו מוצג בדיאלוג', async () => {
-    // מסמך שנוצר ב-Word עם מספור עברי: `hebrew1` מגיע מהקריאה, והטופס אינו
-    // יכול להציע אותו כי `setPageNumbering` זורק עליו.
+    // `ordinal` קיים בצד המנוע אך אינו בטבלה שלנו, ולכן הטופס אינו מציע
+    // אותו. עד המעבר ל-superdoc@2.10.0 המקרה הזה הודגם דווקא עם `hebrew1`,
+    // שהיה נזרק — היום הוא נתמך, ויש לו בדיקה משלו למטה.
     const superdoc = createSuperdocDouble({
-      sections: { pageNumbering: { start: 1, format: 'hebrew1' } },
+      sections: { pageNumbering: { start: 1, format: 'ordinal' } },
     });
     const harness = mountUi(LayoutTab, { superdoc });
     await settle();
@@ -214,6 +215,21 @@ describe('מספור עמודים', () => {
     await settle();
 
     expect(harness.wrapper.findComponent(PageNumberingDialog).props('format')).toBe(null);
+  });
+
+  it('מספור עברי שהגיע מהמסמך מוצג בדיאלוג', async () => {
+    for (const format of ['hebrew1', 'hebrew2']) {
+      const superdoc = createSuperdocDouble({
+        sections: { pageNumbering: { start: 1, format } },
+      });
+      const harness = mountUi(LayoutTab, { superdoc });
+      await settle();
+
+      await harness.wrapper.find(`button[title="${PAGE_NUMBERING}"]`).trigger('click');
+      await settle();
+
+      expect(harness.wrapper.findComponent(PageNumberingDialog).props('format')).toBe(format);
+    }
   });
 
   it('אישור שולח פורמט ומספר התחלה, וסוגר', async () => {

@@ -8,6 +8,7 @@ import {
   continuePreviousList,
   convertListToText,
   NUMBER_STYLES,
+  NUMBER_STYLE_LABELS,
   restartListAt,
   setListNumberStyle,
 } from '../../src/engine/lists';
@@ -67,9 +68,35 @@ describe('setListNumberStyle', () => {
     expect(calls.get('setLevelNumberStyle')).toHaveLength(0);
   });
 
+  /**
+   * `hebrew2` נוסף במעבר ל-superdoc@2.10.0. הוא לא נחסם קודם — החוזה מקבל
+   * מחרוזת חופשית — אלא פשוט לא הוצע, כי הסמן צויר ריק. שני הפורמטים נמדדו
+   * על ה-dist הבנוי: `hebrew1` הוא גימטריה (…יד, טו, טז, יז…) ו-`hebrew2`
+   * הוא סדר האלף-בית (…י, כ, ל, מ…).
+   */
+  it('hebrew2 נשלח ברמה 0 — מספור לפי סדר האלף-בית', async () => {
+    const { host, calls } = fakeDoc();
+
+    const outcome = await setListNumberStyle(host, 'hebrew2');
+
+    expect(outcome).toEqual({ ok: true });
+    expect(calls.get('setLevelNumberStyle')?.[0]).toEqual({
+      target: { kind: 'block', nodeType: 'listItem', nodeId: 'li1' },
+      level: 0,
+      numberStyle: 'hebrew2',
+    });
+  });
+
   it('כל הערכים ב-NUMBER_STYLES מוכרים', () => {
     expect(NUMBER_STYLES).toContain('hebrew1');
+    expect(NUMBER_STYLES).toContain('hebrew2');
     expect(NUMBER_STYLES).toContain('decimal');
+  });
+
+  it('לכל ערך ב-NUMBER_STYLES יש תווית — אחרת הוא יופיע בתפריט כמזהה גולמי', () => {
+    for (const style of NUMBER_STYLES) {
+      expect(NUMBER_STYLE_LABELS[style], style).toBeTruthy();
+    }
   });
 });
 

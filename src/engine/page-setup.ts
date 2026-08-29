@@ -1067,15 +1067,26 @@ export type PageNumberFormat =
   | 'upperLetter'
   | 'lowerRoman'
   | 'upperRoman'
-  | 'numberInDash';
+  | 'numberInDash'
+  | 'hebrew1'
+  | 'hebrew2';
 
 /**
- * ששת הפורמטים שה-union מתיר, וכולם אסימוני `ST_NumberFormat` תקניים.
+ * שמונת הפורמטים שה-union מתיר, וכולם אסימוני `ST_NumberFormat` תקניים.
  *
- * **אין כאן מספור עברי.** `format: 'hebrew1'` — המספור שספר תורני רוצה —
- * נזרק בזמן ריצה עם רשימת ה-union, ואין דרך ציבורית אחרת לכתוב את התכונה.
- * זו הבחנה מול הערות השוליים, שבהן אותו ערך דווקא מגיע ל-XML; ההנמקה בהערת
- * הפתיחה ובמסמך הפערים.
+ * **שני האחרונים נוספו במעבר ל-superdoc@2.10.0.** עד 2.8.0 ה-union נאכף
+ * בזמן ריצה בלי מספור עברי, ו-`format: 'hebrew1'` נזרק — זה תועד כאן, וגם
+ * ב-docs/engine-gaps.md, כפער שאין לו מסלול ציבורי. הוא נסגר.
+ *
+ * ההבדל בין השניים נמדד על ה-dist הבנוי, עשרים פריטים ברצף — ולא נלקח
+ * משמות האסימונים, שאינם אומרים דבר:
+ *
+ *     hebrew1 → א ב ג ד ה ו ז ח ט י יא יב יג יד טו טז יז יח יט כ
+ *     hebrew2 → א ב ג ד ה ו ז ח ט י כ  ל  מ  נ  ס  ע  פ  צ  ק  ר
+ *
+ * כלומר `hebrew1` הוא גימטריה — הערך המספרי של האותיות, כולל טו/טז במקום
+ * יה/יו — ו-`hebrew2` הוא סדר האלף-בית, אות אחת לכל פריט. שניהם נראים זהים
+ * בעשרת הראשונים, ולכן התוויות מציגות את המקום שבו הם נפרדים.
  */
 export const PAGE_NUMBER_FORMATS: readonly { id: PageNumberFormat; label: string }[] = [
   { id: 'decimal', label: '1, 2, 3' },
@@ -1084,6 +1095,8 @@ export const PAGE_NUMBER_FORMATS: readonly { id: PageNumberFormat; label: string
   { id: 'upperRoman', label: 'I, II, III' },
   { id: 'lowerRoman', label: 'i, ii, iii' },
   { id: 'numberInDash', label: '- 1 -, - 2 -, - 3 -' },
+  { id: 'hebrew1', label: 'א, ב, ג … יא, יב (גימטריה)' },
+  { id: 'hebrew2', label: 'א, ב, ג … כ, ל (אלף־בית)' },
 ];
 
 export const PAGE_NUMBER_START_HINT = `מספר ההתחלה חייב להיות מספר שלם בין 1 ל-${NUMBER_START_MAX}`;

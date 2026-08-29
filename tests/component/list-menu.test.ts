@@ -45,8 +45,12 @@ describe('תפריט „רשימה" בלשונית „בית"', () => {
     expect(labels).toContain('התחל מחדש מ-1');
     expect(labels).toContain('המשך מספור קודם');
     expect(labels.some((label) => label.includes('המר לטקסט'))).toBe(true);
-    // המספור העברי (hebrew1) הוא אחד מסגנונות המספור שברשימה — engine/lists.ts.
-    expect(labels.some((label) => label.includes('עברי'))).toBe(true);
+    // שני סגנונות המספור העברי הם חלק מהרשימה — engine/lists.ts. התוויות
+    // אינן נושאות את המילה „עברי”: הן נבדלות זו מזו בשיטה (גימטריה מול סדר
+    // האלף-בית), וזה מה שהמשתמש צריך לבחור לפיו. האותיות עצמן כבר אומרות
+    // שזה עברי.
+    expect(labels.some((label) => label.includes('גימטריה'))).toBe(true);
+    expect(labels.some((label) => label.includes('אלף־בית'))).toBe(true);
   });
 
   it('בחירת "התחל מחדש מ-1" מגיעה בפועל ל-Document API', async () => {
