@@ -228,6 +228,10 @@ supported by v2 yet”).
     setBreakType.breakType:'nextColumn' → „must be one of: continuous, nextPage, evenPage, oddPage.”
     setPageNumbering.format: 'hebrew1'  → „must be one of: decimal, lowerLetter, upperLetter,
                                             lowerRoman, upperRoman, numberInDash.”
+                                            ← נכון ל-2.8.0 בלבד. ב-2.10.0 ה-union
+                                              כולל hebrew1/hebrew2, והקריאה כותבת
+                                              <w:pgNumType w:fmt="hebrew1"/>.
+                                              ר' docs/superdoc-2.10-review.md
     setPageBorders.borders.display      → „must be one of: allPages, firstPage, notFirstPage.”
     sections.list limit: -3             → „limit must be a positive integer.”
     target מומצא                        → קבלה `TARGET_NOT_FOUND` („Section 'section-99' was not found.”)
