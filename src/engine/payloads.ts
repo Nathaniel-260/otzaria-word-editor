@@ -288,8 +288,12 @@ export function imagePayload(input: { src: string; alt?: string }): { src: strin
  * `javascript:` אינו כתובת חסרת טעם אלא הרצת קוד בהקשר של מי שיפתח את המסמך,
  * ו-`data:` הוא אותו דבר בעטיפה אחרת. רשימת שלילה הייתה מפספסת את הצורה הבאה
  * שאיש לא חשב עליה; רשימת היתר נכשלת סגור על כל מה שאינה מכירה.
+ *
+ * `otzaria:` הוא קישור פנימי לספרייה (`otzaria://open/book/12?index=57`).
+ * האפליקציה מפעילה אותו רק בלחיצת משתמש ורק לפעולות פתיחה, ומחוץ לאוצריא הוא
+ * כתובת שאין לה מטפל — כלומר אין בו יותר כוח מקישור רגיל.
  */
-export const LINK_SCHEMES = ['http:', 'https:', 'mailto:'] as const;
+export const LINK_SCHEMES = ['http:', 'https:', 'mailto:', 'otzaria:'] as const;
 
 /**
  * הכתובת בצורתה הקנונית, או `null` אם אין לשלוח אותה למנוע.
@@ -322,7 +326,8 @@ export function normalizeLinkHref(raw: string): string | null {
 }
 
 /** מה שהדיאלוג צריך להציג כשהכתובת נדחתה. נוסח אחד, במקום אחד. */
-export const LINK_HREF_HINT = 'הכתובת חייבת להתחיל ב-https:// או ב-mailto:';
+export const LINK_HREF_HINT =
+  'הכתובת חייבת להתחיל ב-https://‏, ב-mailto: או ב-otzaria://';
 
 /**
  * ה-payload של פקודת `link`, לפי מה ש-`executeLinkCommand` מחלץ:
