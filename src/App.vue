@@ -956,12 +956,26 @@ async function onExportPdf(): Promise<void> {
   setStatus(outcome.warning ? `${outcome.name} נשמר — ${outcome.warning}` : `${outcome.name} נשמר`);
 }
 
+/**
+ * „בטל”/„חזור” מפס הכותרת — דרך אותו מסלול כמו Ctrl+Z/Ctrl+Y.
+ *
+ * קודם עמד כאן `void commandAdapter.value?.run('undo')`, וה-`void` הוא הבאג:
+ * `run` מחזיר `{ok, message, reason}`, וזריקת התוצאה פירושה שסירוב של המנוע
+ * אינו מגיע לאף אחד. נמדד בשער המעטפת — לחיצה על „בטל”, הטקסט נשאר במסמך,
+ * ולמשתמש לא נאמר דבר.
+ *
+ * מה שקרה שם: ברגע הלחיצה המנוע דיווח `{enabled: false, reason: 'not-ready'}`
+ * בעוד הכפתור המצויר היה פעיל (החיווי מוחזק בכוונה, ראו engine/readout-hold.ts),
+ * הפקודה נדחתה, וההודעה „המסמך עדיין נטען” — שכבר קיימת ב-`REASON_TEXT` —
+ * נזרקה לפח. אותה פקודה בדיוק דרך המקלדת **כן** דיווחה, כי היא עוברת ב-
+ * `runShortcutCommand`. שני מסלולים לאותה פעולה, ורק אחד מהם מדבר.
+ */
 function onUndo(): void {
-  void commandAdapter.value?.run('undo');
+  void runShortcutCommand('undo');
 }
 
 function onRedo(): void {
-  void commandAdapter.value?.run('redo');
+  void runShortcutCommand('redo');
 }
 
 function onTitleUpdate(newTitle: string): void {

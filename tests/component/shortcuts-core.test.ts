@@ -249,6 +249,54 @@ describe('פקודות המנוע', () => {
     expect(wrapper.find('.status-message').text()).toContain('אין פעולה לבטל');
   });
 
+  /**
+   * אותה פקודה בדיוק דרך הכפתור בפס הכותרת.
+   *
+   * המסלולים היו שונים: הקיצור עבר ב-`runShortcutCommand` ודיווח, והכפתור
+   * עשה `void adapter.run('undo')` — כלומר זרק את התוצאה. נמדד בשער המעטפת:
+   * לחיצה על „בטל”, הטקסט נשאר במסמך, ולמשתמש לא נאמר דבר. הבדיקה מוצמדת
+   * לכפתור **ולא** לקיצור, כי הקיצור היה ירוק כל הזמן.
+   */
+  it('„בטל” מפס הכותרת מדווח סירוב, כמו הקיצור', async () => {
+    adapter = createCommandDouble({ failures: { undo: 'history-empty' } });
+    stub.adapter = adapter;
+    const wrapper = await mountShell();
+
+    // המצב נדחף כמו שהמנוע דוחף אותו. הכפתור מתחיל מנוטרל, ולחיצה על כפתור
+    // מנוטרל אינה מגיעה למטפל — הבדיקה הייתה עוברת בלי למדוד דבר.
+    adapter.setState('undo', { enabled: true });
+    await settle();
+
+    const undoButton = wrapper
+      .findAll('button')
+      .find((button) => (button.attributes('title') ?? '').startsWith('בטל'));
+    expect(undoButton, 'כפתור „בטל” לא נמצא בפס הכותרת').toBeTruthy();
+
+    await undoButton!.trigger('click');
+    await settle();
+
+    expect(wrapper.find('.status-message').text()).toContain('אין פעולה לבטל');
+  });
+
+  it('„חזור” מפס הכותרת מדווח סירוב אף הוא', async () => {
+    adapter = createCommandDouble({ failures: { redo: 'history-empty' } });
+    stub.adapter = adapter;
+    const wrapper = await mountShell();
+
+    adapter.setState('redo', { enabled: true });
+    await settle();
+
+    const redoButton = wrapper
+      .findAll('button')
+      .find((button) => (button.attributes('title') ?? '').startsWith('חזור'));
+    expect(redoButton, 'כפתור „חזור” לא נמצא בפס הכותרת').toBeTruthy();
+
+    await redoButton!.trigger('click');
+    await settle();
+
+    expect(wrapper.find('.status-message').text()).toContain('אין פעולה לבטל');
+  });
+
   it('פקודה שאינה זמינה: המנוע מסרב, והמשתמש מקבל הסבר', async () => {
     // ההבדל מכפתור: כפתור מנוטרל אינו נלחץ בכלל, וקיצור אין דרך „לנטרל”.
     // לכן הוא כן מגיע לאדפטר — והתשובה היא סירוב מנומק ולא שינוי שקט במסמך.
