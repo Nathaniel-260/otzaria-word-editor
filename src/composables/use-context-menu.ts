@@ -265,9 +265,18 @@ export function useContextMenu(deps: ContextMenuDeps): ContextMenuController {
    *
    * המלבנים נשארו כשכלול: ביום שהם יחזרו, נקודה שנופלת **בתוכם** תעצור את
    * ההזזה גם בלעדיהם. הם לעולם אינם מתירים הזזה שהכלל אוסר.
+   *
+   * ## למה `selection.empty` ולא `hasRange || text`
+   *
+   * `hasRange` נגזר מ„קטע שאפשר לעטוף בקישור” (doc-selection.ts) — וזה
+   * משאיר מחוץ להגנה בחירת **אובייקט** (תא בטבלה, תמונה, שורה שלמה): שם
+   * `target` הוא `null` וגם `hasRange` וגם `text` יוצאים `false`, למרות
+   * שהבחירה קיימת וממשית. `SelectionInfo.empty` של המנוע מוגדר "True when
+   * the selection is empty (cursor only, no range)" — בדיוק השאלה שנשאלת
+   * כאן, ולא רק על טווח טקסט שאפשר לעטוף.
    */
   function mayMoveCaret(at: MenuPoint, selection: DocSelectionSnapshot, host: SuperDoc): boolean {
-    if (selection.hasRange || selection.text.length > 0) return false;
+    if (!selection.empty) return false;
     return !pointInRects(at, rectsOf(host));
   }
 

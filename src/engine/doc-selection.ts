@@ -89,11 +89,33 @@ export interface DocSelectionSnapshot {
   blockId: string | null;
   /** ה-story, כשהבחירה אינה בגוף המסמך (כותרת עליונה/תחתונה). */
   story: unknown | null;
+  /**
+   * `info.empty` כמו שהמנוע דיווח אותו — לא נגזר מ-`hasRange`.
+   *
+   * ה-JSDoc של `SelectionInfo` במנוע מגדיר אותו כ„True when the selection is
+   * empty (cursor only, no range)”, ומבהיר ש-`target` יכול להיות `null` **גם**
+   * כשיש בחירה אמיתית שאינה טקסט (בחירת אובייקט — תא טבלה, תמונה): "node
+   * selection". `hasRange` לעומת זאת נגזר מ-`target.segments` ונועד לשאלה
+   * „אפשר לעטוף בקישור”, ולכן `false` גם כשיש בחירה כזאת. שדה זה הוא מה
+   * שמבחין בין השניים — ראו השימוש ב-`mayMoveCaret` (use-context-menu.ts).
+   *
+   * כשהמנוע אינו מדווח את השדה (`undefined`) נופלים לאחור לחוזה הקודם —
+   * `hasRange || text` — כדי לא לשנות התנהגות בגרסת מנוע שאינה חושפת אותו.
+   */
+  empty: boolean;
 }
 
 /** התצלום כשאין בחירה שאפשר לפעול עליה. לא קבוע משותף — כדי שקורא לא ישנה אותו לכולם. */
 export function emptySelectionSnapshot(): DocSelectionSnapshot {
-  return { target: null, selectionTarget: null, text: '', hasRange: false, blockId: null, story: null };
+  return {
+    target: null,
+    selectionTarget: null,
+    text: '',
+    hasRange: false,
+    blockId: null,
+    story: null,
+    empty: true,
+  };
 }
 
 function segmentsOf(info: SelectionInfoLike): readonly SelectionSegment[] {
@@ -140,6 +162,8 @@ export async function readDocSelection(
 
   const segments = segmentsOf(info);
   const first = segments.find((segment) => typeof segment?.blockId === 'string');
+  const hasWrappableRange = segments.some((segment) => isWrappableSegment(segment));
+  const text = typeof info.text === 'string' ? info.text : '';
 
   return {
     // `target` נמסר רק כשיש בו קטע שאפשר לפעול עליו. `{segments: []}` היה
@@ -152,7 +176,7 @@ export async function readDocSelection(
       info.selectionTarget !== null && typeof info.selectionTarget === 'object'
         ? info.selectionTarget
         : null,
-    text: typeof info.text === 'string' ? info.text : '',
+    text,
     // טווח, ולא `empty` של המנוע: `empty` מתייחס לבחירה כולה, ומה שקובע את
     // המסלול (`hyperlinks.wrap` מול `hyperlinks.insert`) הוא האם יש קטע
     // שהמנוע יתרגם לכתובת טקסט — כלומר **בדיוק** התנאי של
@@ -162,8 +186,9 @@ export async function readDocSelection(
     // היה מדווח `hasRange: true` לצד `target: null` — הדיאלוג היה מסתיר את
     // שדה הטקסט („הקישור יוחל על הטקסט המסומן”), הפקודה הייתה נשלחת בלי יעד,
     // ולא היה נכתב כלום. בדיקה תפסה את זה.
-    hasRange: segments.some((segment) => isWrappableSegment(segment)),
+    hasRange: hasWrappableRange,
     blockId: first?.blockId ?? null,
     story: info.target?.story ?? null,
+    empty: typeof info.empty === 'boolean' ? info.empty : !(hasWrappableRange || text.length > 0),
   };
 }

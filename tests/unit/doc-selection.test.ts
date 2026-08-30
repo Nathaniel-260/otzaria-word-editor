@@ -62,6 +62,7 @@ describe('readDocSelection', () => {
       hasRange: true,
       blockId: 'p7',
       story: null,
+      empty: false,
     });
   });
 
@@ -96,6 +97,30 @@ describe('readDocSelection', () => {
     expect(snapshot.hasRange).toBe(false);
     expect(snapshot.blockId).toBe('p7');
     expect(snapshot.text).toBe('');
+    expect(snapshot.empty).toBe(true);
+  });
+
+  it('בחירת אובייקט (תא טבלה/תמונה): target ריק אבל יש בחירה — `empty` מדווח את זה גם כש-hasRange ו-text שקריים', async () => {
+    // `SelectionInfo.empty` במנוע: "True when the selection is empty (cursor
+    // only, no range)" — ולא רק על טווח טקסט שאפשר לעטוף. בחירת אובייקט אינה
+    // מייצרת target/segments בכלל, ולכן hasRange ו-text נשארים false.
+    const { host } = hostReturning({ empty: false, target: null });
+
+    const snapshot = await readDocSelection(host);
+
+    expect(snapshot.empty).toBe(false);
+    expect(snapshot.hasRange).toBe(false);
+    expect(snapshot.text).toBe('');
+  });
+
+  it('מנוע שאינו מדווח `empty` — נופלים לאחור ל-hasRange||text', async () => {
+    const { host: withRange } = hostReturning({
+      target: { kind: 'text', segments: [{ blockId: 'p7', range: { start: 3, end: 9 } }] },
+    });
+    expect((await readDocSelection(withRange)).empty).toBe(false);
+
+    const { host: withoutRange } = hostReturning({ target: null });
+    expect((await readDocSelection(withoutRange)).empty).toBe(true);
   });
 
   it('מספר קטעים — די באחד עם טווח', async () => {

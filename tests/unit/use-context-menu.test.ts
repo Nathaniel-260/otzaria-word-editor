@@ -26,20 +26,24 @@ interface Fake {
 }
 
 function fakeSuperdoc(
-  over: { rects?: readonly unknown[]; anchor?: unknown; caret?: boolean } = {},
+  over: { rects?: readonly unknown[]; anchor?: unknown; caret?: boolean; objectSelection?: boolean } = {},
 ): Fake {
   const applyCalls: unknown[] = [];
   // סמן מכווץ: אין טווח ואין טקסט, כלומר אין מה לאבד בהזזת הסמן.
-  const selectionInfo = over.caret
-    ? { empty: true, text: '', target: { segments: [{ blockId: 'B1', range: { start: 4, end: 4 } }], story: { kind: 'story', storyType: 'body' } } }
-    : {
-        empty: false,
-        text: 'טקסט',
-        target: {
-          segments: [{ blockId: 'B1', range: { start: 0, end: 4 } }],
-          story: { kind: 'story', storyType: 'body' },
-        },
-      };
+  const selectionInfo = over.objectSelection
+    ? // בחירת אובייקט (תא טבלה/תמונה): אין target/segments בכלל — hasRange
+      // ו-text יוצאים false, אבל `empty: false` מדווח שיש בחירה אמיתית.
+      { empty: false, text: '', target: null }
+    : over.caret
+      ? { empty: true, text: '', target: { segments: [{ blockId: 'B1', range: { start: 4, end: 4 } }], story: { kind: 'story', storyType: 'body' } } }
+      : {
+          empty: false,
+          text: 'טקסט',
+          target: {
+            segments: [{ blockId: 'B1', range: { start: 0, end: 4 } }],
+            story: { kind: 'story', storyType: 'body' },
+          },
+        };
   const host = {
     ui: {
       selection: {
@@ -195,6 +199,21 @@ describe('הזזת הסמן', () => {
    */
   it('בחירה קיימת אינה נהרסת — גם כשאין גיאומטריה וגם רחוק ממנה', async () => {
     const { controller, documentArea } = setup({}, fakeSuperdoc({ rects: [] }));
+    const seen: string[] = [];
+    documentArea.addEventListener('mousedown', () => seen.push('mousedown'));
+    document.elementFromPoint = () => documentArea;
+
+    controller.handleContextMenu(rightClick(documentArea, { x: 900, y: 900 }));
+    await settle();
+
+    expect(seen).toEqual([]);
+    expect(controller.isOpen.value).toBe(true);
+  });
+
+  it('בחירת אובייקט (תא טבלה/תמונה) אינה נהרסת, גם ש-hasRange ו-text שקריים', async () => {
+    // ש1 מהביקורת: `hasRange`/`text` בלבד היו מזהים את זה כ„אין בחירה”
+    // (target הוא null, אין segments) ומריצים moveCaretTo למרות בחירה קיימת.
+    const { controller, documentArea } = setup({}, fakeSuperdoc({ rects: [], objectSelection: true }));
     const seen: string[] = [];
     documentArea.addEventListener('mousedown', () => seen.push('mousedown'));
     document.elementFromPoint = () => documentArea;
