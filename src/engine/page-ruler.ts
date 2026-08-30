@@ -1,6 +1,12 @@
 /**
  * המצב שהסרגל מצייר, והמקום היחיד שמודד את העמוד המצויר.
  *
+ * **קורא שני, מאז „גבולות עמוד”:** `measureAllPageRects`/`watchAllPageRects`
+ * בתחתית הקובץ נועדו לשכבת engine/page-border-layer.ts — היא צריכה את המלבן
+ * של **כל** עמוד, לא רק הראשון או הנראה ביותר. העיגון זהה (`data-page-index`)
+ * ולכן הוא יושב כאן ולא שם, לפי אותו כלל שהערת הפתיחה של הסרגל האנכי מנסחת:
+ * מקום אחד בלבד נוגע בעיגון. tests/unit/engine-boundaries.test.ts אוכף זאת.
+ *
  * ## שלושה מקורות, וכל אחד ולמה דווקא הוא
  *
  * 1. **גיאומטריית הדף** — `sections.list()` דרך `readPageMargins`
@@ -306,6 +312,171 @@ export function watchPageRect(options: PageRectWatchOptions): PageRectWatch {
   const timers = new Set<ReturnType<typeof setTimeout>>();
 
   /** מדידה עכשיו, ועוד כמה אחריה — ראו SETTLE_DELAYS_MS. */
+  function measure(): void {
+    schedule();
+    for (const delay of SETTLE_DELAYS_MS) {
+      const timer = setTimeout(() => {
+        timers.delete(timer);
+        schedule();
+      }, delay);
+      timers.add(timer);
+    }
+  }
+
+  measureNow();
+
+  return {
+    measure,
+    dispose() {
+      disposed = true;
+      host?.removeEventListener('scroll', schedule);
+      resize?.disconnect();
+      for (const timer of timers) clearTimeout(timer);
+      timers.clear();
+      if (frame !== null && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(frame);
+      try {
+        unobserve?.();
+      } catch {
+        /* ביטול מנוי שנכשל אינו סיבה להפיל פירוק */
+      }
+    },
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/* המלבנים של **כל** העמודים                                          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * מלבן עמוד אחד מתוך רשימת כל העמודים, עם האינדקס שהמנוע עצמו סימן אותו בו
+ * (`data-page-index`) — לא סתם סדר ה-DOM, כדי ש-`v-for` ב-Vue יקבל מפתח יציב
+ * גם אם עמודים מתווספים/יורדים מהאמצע בעימוד מחדש.
+ */
+export interface IndexedPageRect extends PageRect {
+  pageIndex: number;
+}
+
+/**
+ * המלבנים של כל העמודים המצוירים, ביחס ל-`reference` — לא רק העמוד הראשון
+ * (כמו `measurePageRect`) אלא כולם. זה מה ששכבת „גבולות עמוד” צריכה: מסגרת
+ * סביב **כל** עמוד במסמך רב-עמודי, לא רק סביב זה שהסרגל עוקב אחריו.
+ *
+ * אותו עיגון בדיוק כמו `measurePageRect` (`data-page-index`), ואותה קריאה
+ * טהורה — `getBoundingClientRect` בלבד, בלי לגעת ב-DOM. ראו
+ * tests/unit/engine-boundaries.test.ts: רק הקובץ הזה רשאי לגעת בעיגון.
+ */
+export function measureAllPageRects(
+  host: HTMLElement | null,
+  reference: HTMLElement | null,
+): readonly IndexedPageRect[] {
+  if (!host || !reference) return [];
+  const pages = host.querySelectorAll(`[${PAGE_INDEX_ATTRIBUTE}]`);
+  if (pages.length === 0) return [];
+  const referenceBox = reference.getBoundingClientRect();
+
+  const out: IndexedPageRect[] = [];
+  pages.forEach((node) => {
+    if (!(node instanceof HTMLElement)) return;
+    const pageIndex = Number(node.getAttribute(PAGE_INDEX_ATTRIBUTE));
+    if (!Number.isInteger(pageIndex)) return;
+    const box = node.getBoundingClientRect();
+    if (!(box.width > 0) || !(box.height > 0)) return;
+    out.push({
+      pageIndex,
+      leftPx: box.left - referenceBox.left,
+      widthPx: box.width,
+      topPx: box.top - referenceBox.top,
+      heightPx: box.height,
+    });
+  });
+  return out;
+}
+
+/** כמו `sameRect`, על מערך שלם: אורך שונה או עמוד אחד ששינה דיו הם כבר שינוי. */
+function sameRects(a: readonly IndexedPageRect[], b: readonly IndexedPageRect[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i];
+    const y = b[i];
+    if (
+      x.pageIndex !== y.pageIndex ||
+      Math.abs(x.leftPx - y.leftPx) >= 0.5 ||
+      Math.abs(x.topPx - y.topPx) >= 0.5 ||
+      Math.abs(x.widthPx - y.widthPx) >= 0.5 ||
+      Math.abs(x.heightPx - y.heightPx) >= 0.5
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+export interface AllPageRectsWatchOptions {
+  /** מיכל הגלילה שהמנוע מצייר בתוכו. מגיע מ-`paintedHost`. */
+  host: HTMLElement | null;
+  /** האלמנט שביחס אליו נמדדים המלבנים — שכבת הציור שלנו עצמה. */
+  reference: HTMLElement | null;
+  /** ה-controller, בשביל `viewport.observe`. */
+  ui?: ViewportSource | null;
+  onChange: (rects: readonly IndexedPageRect[]) => void;
+}
+
+/**
+ * כמו `watchPageRect`, על כל העמודים יחד — אותה תשתית מעקב בדיוק (גלילה,
+ * שינוי גודל, `viewport.observe`, מדידות התיישבות ב-`SETTLE_DELAYS_MS`), רק
+ * שהמדידה וההשוואה הן על מערך ולא על עמוד יחיד. ראו `watchPageRect` להסבר
+ * המלא על כל אחד מהמקורות.
+ */
+export function watchAllPageRects(options: AllPageRectsWatchOptions): PageRectWatch {
+  const { host, reference, ui, onChange } = options;
+  let last: readonly IndexedPageRect[] = [];
+  let frame: number | null = null;
+  let pending = false;
+  let disposed = false;
+
+  function measureNow(): void {
+    if (disposed) return;
+    const next = measureAllPageRects(host, reference);
+    if (sameRects(next, last)) return;
+    last = next;
+    onChange(next);
+  }
+
+  function schedule(): void {
+    if (disposed || pending) return;
+    if (typeof requestAnimationFrame !== 'function') {
+      measureNow();
+      return;
+    }
+    pending = true;
+    frame = requestAnimationFrame(() => {
+      pending = false;
+      frame = null;
+      measureNow();
+    });
+  }
+
+  host?.addEventListener('scroll', schedule, { passive: true });
+
+  let resize: ResizeObserver | null = null;
+  if (typeof ResizeObserver === 'function' && host) {
+    resize = new ResizeObserver(schedule);
+    resize.observe(host);
+    if (reference) resize.observe(reference);
+  }
+
+  let unobserve: (() => void) | null = null;
+  const observe = ui?.viewport?.observe;
+  if (typeof observe === 'function') {
+    try {
+      unobserve = observe.call(ui?.viewport, schedule) ?? null;
+    } catch {
+      unobserve = null;
+    }
+  }
+
+  const timers = new Set<ReturnType<typeof setTimeout>>();
+
   function measure(): void {
     schedule();
     for (const delay of SETTLE_DELAYS_MS) {

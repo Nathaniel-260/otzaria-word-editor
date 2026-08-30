@@ -90,6 +90,11 @@
         ref="editorStackRef"
         class="editor-stack"
       />
+      <PageBorderOverlay
+        :host="rulerHost"
+        :viewport-source="rulerViewport"
+        :reading="pageBorders"
+      />
     </div>
 
     <!-- תפריט הלחצן הימני. אחרי אזור המסמך ולפני הדיאלוגים, כמו ה-z-index שלו. -->
@@ -164,6 +169,7 @@ import Ribbon from './ui/ribbon/Ribbon.vue';
 import StatusBar from './ui/shell/StatusBar.vue';
 import DocumentRuler from './ui/shell/DocumentRuler.vue';
 import VerticalRuler from './ui/shell/VerticalRuler.vue';
+import PageBorderOverlay from './ui/shell/PageBorderOverlay.vue';
 import FindReplaceDialog from './ui/panels/FindReplaceDialog.vue';
 import AboutDialog from './ui/panels/AboutDialog.vue';
 import LinkDialog from './ui/panels/LinkDialog.vue';
@@ -234,7 +240,13 @@ import {
   type RulerReading,
   type ViewportSource,
 } from './engine/page-ruler';
-import { readPageMargins } from './engine/page-setup';
+import {
+  createPageBorderModel,
+  readPageBorders,
+  readPageMargins,
+  type PageBorderModel,
+  type PageBordersReading,
+} from './engine/page-setup';
 import { readParagraphIndents } from './engine/paragraph-format';
 import type { RulerUnit } from './engine/ruler-geometry';
 import {
@@ -441,6 +453,12 @@ const rulerViewport = shallowRef<ViewportSource | null>(null);
 const rulerUnit = ref<RulerUnit>('cm');
 /** `false` במסמך שפתוח לקריאה בלבד — אז הידיות אינן נגררות. */
 const isDocumentEditable = ref(true);
+
+/**
+ * מצב „גבולות עמוד” של המסמך הפתוח, ל-ui/shell/PageBorderOverlay.vue.
+ * `null` כשאין `<w:pgBorders>` — השכבה מציירת אפס גבולות, לא גבול ריק.
+ */
+const pageBorders = shallowRef<PageBordersReading | null>(null);
 /** ההעדפה שנשמרת בין הפעלות. ראו host/settings.ts. */
 let rulerPreference = false;
 
@@ -460,6 +478,8 @@ let searchAdapter: SearchAdapter | null = null;
 let metrics: DocMetricsAdapter | null = null;
 /** קורא את מצב הסרגל של המסמך הפתוח. שייך ל-session, כמו המודד. */
 let ruler: RulerModel | null = null;
+/** קורא את מצב „גבולות עמוד” של המסמך הפתוח. שייך ל-session, כמו הסרגל. */
+let pageBorderModel: PageBorderModel | null = null;
 
 /** מרכוז העמוד בזום. יחיד למאגס — אינו מוחלף בין מסמכים. */
 let zoomCenter: ZoomCenter | null = null;
@@ -502,6 +522,18 @@ function reportCommand(outcome: CommandOutcome, commandId: string): void {
   }
   // הצלחה מנקה שגיאה קודמת שנשארה על המסך, ולא דורסת הודעה תקינה.
   if (isStatusError.value) setStatus('');
+
+  /**
+   * „גבולות עמוד” — נמדד ב-QA: `applyPageBorders`/`clearPageBorders`
+   * (engine/page-setup.ts, קריאת section-level) **אינן** מפעילות את
+   * `onUpdate` של המנוע בעצמן — בשונה משוליים/כיוון/עמודות, ששינוי שלהם
+   * כן מגיע דרך `onUpdate` (הערה ב-createEditor למעלה). בלי הרענון המפורש
+   * הזה `pageBorders.value` נשאר ישן עד לעריכת טקסט הבאה, כלומר גבול
+   * שנבחר לא מצטייר במשך שניות, וגבול שהוסר נשאר על המסך כ„גבול רפאים”.
+   * `refreshNow` ולא `noteDocumentChanged`: כאן הפעולה כבר הצליחה, ואין
+   * טעם בהשקטה שנועדה למנוע הצפת קריאות בזמן עריכה רציפה.
+   */
+  if (commandId === 'page-borders') pageBorderModel?.refreshNow();
 }
 
 provide(COMMAND_REPORTER, reportCommand);
@@ -750,6 +782,29 @@ async function openDocument(file?: UserFile, options: OpenOptions = {}): Promise
       rulerReading.value = null;
       rulerHost.value = null;
       rulerViewport.value = null;
+    }
+  });
+
+  /**
+   * „גבולות עמוד” של ה-session: אותה תבנית בדיוק כמו הסרגל, ומאותה סיבה —
+   * הוא קורא את המקטע של **המסמך הזה**, ולכן הוא נבנה ונפרק איתו. קריאה
+   * מיידית מיד אחרי היצירה (`refreshNow`) ולא רק בהמתנה ל-`onUpdate` הראשון:
+   * מסמך שנפתח עם `<w:pgBorders>` כבר בתוכו (מ-Word) צריך לצייר אותו מיד,
+   * לא רק אחרי העריכה הראשונה.
+   */
+  const sessionPageBorders = createPageBorderModel({
+    read: () => readPageBorders(editor.superdoc),
+    onChange: (next) => {
+      pageBorders.value = next;
+    },
+  });
+  pageBorderModel = sessionPageBorders;
+  sessionPageBorders.refreshNow();
+  editor.onDispose(() => {
+    sessionPageBorders.dispose();
+    if (pageBorderModel === sessionPageBorders) {
+      pageBorderModel = null;
+      pageBorders.value = null;
     }
   });
 
@@ -1761,6 +1816,9 @@ onMounted(async () => {
           // שוליים או כניסות יכולים להשתנות גם מפעולה ברצועה (גלריית
           // „שוליים”, דיאלוג הפסקה) ולא רק מהסרגל עצמו.
           ruler?.noteDocumentChanged();
+          // וגם „גבולות עמוד” — אותה תחנה בדיוק, כדי שהתפריט ברצועה יעדכן
+          // את השכבה בלי רענון.
+          pageBorderModel?.noteDocumentChanged();
           // וגם זוכר-ההפעלה: זה הרגע שבו נולדת עבודה שאינה בדיסק.
           keeper?.noteChange();
         },
@@ -1980,6 +2038,10 @@ async function readDraftBytes(path: string): Promise<Blob | null> {
   display: flex;
   flex: 1 1 auto;
   min-height: 0;
+  /* מסגרת ההתייחסות של PageBorderOverlay.vue (`position: absolute; inset: 0`) —
+     כך השכבה מכסה גם את .editor-stack וגם את הפינה של הסרגל האנכי, ואת עצמה
+     היא ממקמת ביחס למלבן העמוד שנמדד, לא ביחס ל-CSS. */
+  position: relative;
 }
 
 .editor-stack {

@@ -236,6 +236,21 @@ interface SectionItem {
   headerFooterMargins?: { header?: number; footer?: number };
   pageNumbering?: { start?: number; format?: string };
   verticalAlign?: string;
+  /**
+   * `<w:pgBorders>` הנוכחי, או `undefined` כשאין. `sections.list()` מחזיר
+   * אותו מלא (נמדד — ראו docs/engine-gaps.md, „`doc.sections`”), ולכן שכבת
+   * הציור של „גבולות עמוד” (engine/page-border-layer.ts) קוראת אותו מכאן
+   * ולא ממצב נפרד: זה בדיוק מה שהמסמך מחזיק, כולל גבול שהגיע מ-Word ולא
+   * מהתפריט שלנו.
+   */
+  pageBorders?: {
+    display?: string;
+    offsetFrom?: string;
+    top?: Partial<PageBorderSide>;
+    right?: Partial<PageBorderSide>;
+    bottom?: Partial<PageBorderSide>;
+    left?: Partial<PageBorderSide>;
+  };
 }
 
 export interface PageSetupDocumentApi {
@@ -1014,6 +1029,183 @@ export function applyPageBorders(host: PageSetupTarget, presetId: string): Promi
         },
       });
   });
+}
+
+/**
+ * צד אחד של גבול, כפי שהוא נקרא — לא בהכרח מה שהתפריט היה כותב.
+ *
+ * `style`/`color` נשארים `string` גולמי בכוונה: `readPageBorders` הוא זה
+ * שמסנן ערך שאינו קביל, לא הטיפוס. כך `PageBordersReading` תמיד מתאר בדיוק
+ * את ה-`<w:pgBorders>` של המסמך, כולל גבול שהגיע מ-Word ולא מהתפריט שלנו.
+ */
+export interface PageBorderSideReading {
+  style: string;
+  /** `w:sz` — שמיניות נקודה. */
+  sizeEighthPoints: number;
+  /** `w:space` — נקודות. */
+  spacePoints: number;
+  color: string;
+}
+
+export type PageBorderDisplay = 'allPages' | 'firstPage' | 'notFirstPage';
+
+export interface PageBordersReading {
+  display: PageBorderDisplay;
+  offsetFrom: 'page' | 'text';
+  top: PageBorderSideReading;
+  right: PageBorderSideReading;
+  bottom: PageBorderSideReading;
+  left: PageBorderSideReading;
+}
+
+/** ברירת המחדל של Word לכל שדה שחסר או פסול בצד גבול — לא ל„אין גבול”. */
+const DEFAULT_BORDER_SIDE: PageBorderSideReading = {
+  style: 'single',
+  sizeEighthPoints: 4,
+  spacePoints: PAGE_BORDER_SPACE_POINTS,
+  color: PAGE_BORDER_COLOR,
+};
+
+/**
+ * צד גבול לקריאה, עם נפילה אחורה לכל שדה בנפרד.
+ *
+ * המנוע אינו מאמת `style`/`size`/`space`/`color` בכתיבה (נמדד —
+ * docs/engine-gaps.md, „ומה שכן נבלע”), ולכן מסמך יכול להחזיק `size: 999`
+ * או `style: ''`. השכבה מציירת מה שהיא יכולה: ברירת המחדל של Word לשדה
+ * שאינו בטווח, לא „בלי גבול” — אחרת מסמך עם ערך משוגע לגמרי היה נראה כאילו
+ * אין לו גבול בכלל, וזה בדיוק ההפך ממה ש-Word יציג.
+ */
+function readBorderSide(raw: Partial<PageBorderSide> | undefined): PageBorderSideReading {
+  const style = typeof raw?.style === 'string' && raw.style.trim() !== '' ? raw.style : DEFAULT_BORDER_SIDE.style;
+  const size =
+    typeof raw?.size === 'number' && Number.isFinite(raw.size) && raw.size > 0
+      ? raw.size
+      : DEFAULT_BORDER_SIDE.sizeEighthPoints;
+  const space =
+    typeof raw?.space === 'number' && Number.isFinite(raw.space) && raw.space >= 0
+      ? raw.space
+      : DEFAULT_BORDER_SIDE.spacePoints;
+  const color = typeof raw?.color === 'string' && raw.color.trim() !== '' ? raw.color : DEFAULT_BORDER_SIDE.color;
+  return { style, sizeEighthPoints: size, spacePoints: space, color };
+}
+
+function isPageBorderDisplay(value: unknown): value is PageBorderDisplay {
+  return value === 'allPages' || value === 'firstPage' || value === 'notFirstPage';
+}
+
+/**
+ * „גבולות עמוד” כפי שהמסמך מחזיק אותם עכשיו, או `null` כשאין `<w:pgBorders>`.
+ *
+ * נקרא ישירות מ-`sections.list()` של **המקטע הראשון** — אותה הכרעה כמו כל
+ * שאר המודול (ראו „על מה זה מוחל” בהערת הפתיחה) — ולא ממצב נפרד שיכול
+ * להתיישן: שכבת הציור קוראת מכאן בכל פעם שהמסמך משתנה, כולל שינוי שבא
+ * מ-Word ולא מהתפריט שלנו.
+ */
+export async function readPageBorders(host: PageSetupTarget): Promise<PageBordersReading | null> {
+  const list = (host as PageSetupHost | null | undefined)?.activeEditor?.doc?.sections?.list;
+  if (typeof list !== 'function') return null;
+
+  let first: SectionItem | undefined;
+  try {
+    first = (await list())?.items?.[0];
+  } catch {
+    return null;
+  }
+  if (!first) return null;
+
+  const borders = first.pageBorders;
+  if (!borders) return null;
+
+  return {
+    display: isPageBorderDisplay(borders.display) ? borders.display : 'allPages',
+    offsetFrom: borders.offsetFrom === 'text' ? 'text' : 'page',
+    top: readBorderSide(borders.top),
+    right: readBorderSide(borders.right),
+    bottom: readBorderSide(borders.bottom),
+    left: readBorderSide(borders.left),
+  };
+}
+
+/** השקטה בין קריאה לקריאה — ראו `createPageBorderModel`. */
+export const PAGE_BORDERS_DEBOUNCE_MS = 300;
+
+export interface PageBorderModelSource {
+  read: () => Promise<PageBordersReading | null>;
+  onChange: (reading: PageBordersReading | null) => void;
+}
+
+export interface PageBorderModel {
+  getState(): PageBordersReading | null;
+  /** קריאה מיידית, בלי השהיה — אחרי פתיחת מסמך. */
+  refreshNow(): void;
+  /** קריאה מושהית — אחרי שינוי כלשהו במסמך (עריכה, או פעולה ברצועה). */
+  noteDocumentChanged(): void;
+  dispose(): void;
+}
+
+/**
+ * מרכיבה את מצב „גבולות עמוד” וקוראת אותו בהשקטה — אותה תבנית בדיוק כמו
+ * `createRulerModel` (engine/page-ruler.ts) ו-`createDocMetrics`: מונה דורות
+ * שזורק תשובה של מסמך שכבר נסגר, ודיווח רק על שינוי אמיתי.
+ *
+ * השקטה אחת בלבד ולא שתיים (השוו ל-`createRulerModel`, שיש לו „סמן” ו„מסמך”
+ * נפרדים): אין כאן פעולה שמריצה קריאה בכל תזוזת סמן, ולכן אין צורך בהשקטה
+ * קצרה יותר לצידה.
+ */
+export function createPageBorderModel(source: PageBorderModelSource): PageBorderModel {
+  let state: PageBordersReading | null = null;
+  let disposed = false;
+  let generation = 0;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  function sameSide(a: PageBorderSideReading, b: PageBorderSideReading): boolean {
+    return (
+      a.style === b.style &&
+      a.sizeEighthPoints === b.sizeEighthPoints &&
+      a.spacePoints === b.spacePoints &&
+      a.color === b.color
+    );
+  }
+
+  function same(a: PageBordersReading | null, b: PageBordersReading | null): boolean {
+    if (a === null || b === null) return a === b;
+    return (
+      a.display === b.display &&
+      a.offsetFrom === b.offsetFrom &&
+      sameSide(a.top, b.top) &&
+      sameSide(a.right, b.right) &&
+      sameSide(a.bottom, b.bottom) &&
+      sameSide(a.left, b.left)
+    );
+  }
+
+  async function read(): Promise<void> {
+    const mine = ++generation;
+    let next: PageBordersReading | null;
+    try {
+      next = await source.read();
+    } catch {
+      next = null;
+    }
+    if (disposed || mine !== generation || same(next, state)) return;
+    state = next;
+    source.onChange(next);
+  }
+
+  return {
+    getState: () => state,
+    refreshNow: () => void read(),
+    noteDocumentChanged() {
+      if (disposed) return;
+      clearTimeout(timer);
+      timer = setTimeout(() => void read(), PAGE_BORDERS_DEBOUNCE_MS);
+    },
+    dispose() {
+      disposed = true;
+      generation += 1;
+      clearTimeout(timer);
+    },
+  };
 }
 
 /* ------------------------------------------------------------------ */

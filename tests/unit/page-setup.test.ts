@@ -36,7 +36,7 @@
  * `ST_HexColor` שש ספרות או `auto`, `w:fmt` מתוך `ST_NumberFormat`), ולא את
  * מה ששלחנו. מוטציה במודול נתפסת שם, גם כשהקבלה חוזרת מוצלחת.
  */
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   COLUMN_GAP_TWIPS,
   HEADER_DISTANCE_DEFAULT_CM,
@@ -45,7 +45,10 @@ import {
   LINE_NUMBER_CHOICES,
   MARGIN_PRESETS,
   NUMBER_START_MAX,
+  PAGE_BORDERS_DEBOUNCE_MS,
+  PAGE_BORDER_COLOR,
   PAGE_BORDER_PRESETS,
+  PAGE_BORDER_SPACE_POINTS,
   PAGE_NUMBER_FORMATS,
   PAPER_SIZES,
   TWIPS_PER_INCH,
@@ -62,9 +65,12 @@ import {
   readPageMargins,
   applyVerticalAlign,
   cmToInches,
+  createPageBorderModel,
   normalizeHeaderDistanceCm,
   normalizePageNumberStart,
+  readPageBorders,
   readPageLayoutState,
+  type PageBordersReading,
   type PageSetupDocumentApi,
   type PageSetupHost,
 } from '../../src/engine/page-setup';
@@ -1843,5 +1849,263 @@ describe('שער התקן עצמו — שהוא באמת תופס', () => {
     const { xml } = fakeEngine();
     Object.assign(xml.get('s0')!, { pgNumType: { start: STD_NUMBER_START_MAX + 1 } });
     expect(() => assertWordLegal(xml.get('s0')!)).toThrow();
+  });
+});
+
+/**
+ * `readPageBorders` — הקוראת שששכבת הציור (ui/shell/PageBorderOverlay.vue,
+ * דרך engine/page-border-layer.ts) נשענת עליה.
+ *
+ * לא דרך `fakeEngine()`: הכפיל המשותף שלמעלה בונה `sections.list()` שממופה
+ * ל-`pageSetup`/`margins`/`lineNumbering`/וכו', אבל **אינו** מחזיר `pageBorders`
+ * באובייקט הפריט (למרות ש-`section.pgBorders` הפנימי שלו כן קיים, לצורך
+ * רינדור ה-XML ו-`assertWordLegal` בלבד) — זה פער בכפיל עצמו, לא במודול,
+ * ותיקונו שייך לגל שיבדוק את `applyPageBorders` מול קריאה חוזרת אמיתית.
+ * הבדיקות כאן בונות `host` מינימלי משלהן, באותה שיטה בדיוק כמו המקרים
+ * המצומצמים ב-`readPageMargins` למעלה („מסמך שעדיין נטען מוחזר כ-null”).
+ */
+describe('readPageBorders', () => {
+  function hostWithBorders(pageBorders: unknown): PageSetupHost {
+    return {
+      activeEditor: {
+        doc: {
+          sections: {
+            list: () =>
+              Promise.resolve({
+                items: [{ address: { kind: 'section', sectionId: 's0' }, pageBorders }],
+              }),
+          },
+        },
+      },
+    } as unknown as PageSetupHost;
+  }
+
+  /** ברירת המחדל של Word לצד — מה שכל שדה פסול/חסר נופל אליו. ראו readBorderSide. */
+  const WORD_DEFAULT_SIDE = {
+    style: 'single',
+    sizeEighthPoints: 4,
+    spacePoints: PAGE_BORDER_SPACE_POINTS,
+    color: PAGE_BORDER_COLOR,
+  };
+
+  it('אין `pageBorders` על המקטע — `null`, לא „הכול ברירת מחדל”', async () => {
+    expect(await readPageBorders(hostWithBorders(undefined))).toBeNull();
+  });
+
+  it('קורא גבול תקין במלואו, וממיר ליחידות הקריאה', async () => {
+    const side = { style: 'dashed', size: 24, space: 12, color: '#FF0000' };
+    const reading = await readPageBorders(
+      hostWithBorders({ display: 'firstPage', offsetFrom: 'text', top: side, right: side, bottom: side, left: side }),
+    );
+
+    const expected = { style: 'dashed', sizeEighthPoints: 24, spacePoints: 12, color: '#FF0000' };
+    expect(reading).toEqual({
+      display: 'firstPage',
+      offsetFrom: 'text',
+      top: expected,
+      right: expected,
+      bottom: expected,
+      left: expected,
+    });
+  });
+
+  it('`display`/`offsetFrom` שאינם ב-union נופלים לברירת המחדל של המסך הרגיל', async () => {
+    // המנוע עצמו אינו מאמת את השדות האלה בכתיבה (docs/engine-gaps.md), ולכן
+    // מסמך יכול לשאת ערך שאינו קביל — הקריאה חייבת ליפול למשהו מוצג, לא לזרוק.
+    const side = { style: 'single', size: 4, space: 24, color: 'auto' };
+    const reading = await readPageBorders(
+      hostWithBorders({ display: 'everyPage', offsetFrom: 'margin', top: side, right: side, bottom: side, left: side }),
+    );
+
+    expect(reading?.display).toBe('allPages');
+    expect(reading?.offsetFrom).toBe('page');
+  });
+
+  it('צד חסר, וצד עם שדות פסולים בנפרד — כל שדה נופל לברירת המחדל שלו, לא כל הצד', async () => {
+    const reading = await readPageBorders(
+      hostWithBorders({
+        display: 'allPages',
+        offsetFrom: 'page',
+        top: { style: '', size: -5, space: -1, color: '' },
+        right: undefined,
+        // בצד הזה רק `size` פסול — `style`/`color` התקינים חייבים להישמר.
+        bottom: { style: 'double', size: 0, space: 6, color: '#123abc' },
+        left: {},
+      }),
+    );
+
+    expect(reading?.top).toEqual(WORD_DEFAULT_SIDE);
+    expect(reading?.right).toEqual(WORD_DEFAULT_SIDE);
+    expect(reading?.bottom).toEqual({ style: 'double', sizeEighthPoints: 4, spacePoints: 6, color: '#123abc' });
+    expect(reading?.left).toEqual(WORD_DEFAULT_SIDE);
+  });
+
+  it('מסמך שעדיין נטען, או בלי Document API — `null`, לא חריגה', async () => {
+    for (const host of [null, undefined, {}, { activeEditor: null }, { activeEditor: { doc: null } }]) {
+      expect(await readPageBorders(host as never)).toBeNull();
+    }
+  });
+
+  it('אין פריט במקטע הראשון — `null`', async () => {
+    const host = {
+      activeEditor: { doc: { sections: { list: () => Promise.resolve({ items: [] }) } } },
+    } as unknown as PageSetupHost;
+    expect(await readPageBorders(host)).toBeNull();
+  });
+
+  it('`list` שזורקת אינה מפילה את הקריאה', async () => {
+    const host = {
+      activeEditor: {
+        doc: {
+          sections: {
+            list: () => {
+              throw new Error('boom');
+            },
+          },
+        },
+      },
+    } as unknown as PageSetupHost;
+    expect(await readPageBorders(host)).toBeNull();
+  });
+});
+
+/**
+ * `createPageBorderModel` — אותה תבנית בדיוק כמו `createRulerModel`
+ * (tests/unit/page-ruler.test.ts): מונה דורות, השקטה, ודיווח רק על שינוי
+ * אמיתי. הבדיקות כאן מזינות `read` מפוברק ישירות — בלי `sections.list()` —
+ * מפני שהמודל אינו יודע דבר על Document API; הוא רק עוטף פונקציית קריאה.
+ */
+describe('createPageBorderModel', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const SIDE = { style: 'single', sizeEighthPoints: 4, spacePoints: 24, color: 'auto' };
+  const READING: PageBordersReading = {
+    display: 'allPages',
+    offsetFrom: 'page',
+    top: SIDE,
+    right: SIDE,
+    bottom: SIDE,
+    left: SIDE,
+  };
+
+  function model(overrides: Partial<Parameters<typeof createPageBorderModel>[0]> = {}) {
+    const readings: Array<PageBordersReading | null> = [];
+    const read = vi.fn(async (): Promise<PageBordersReading | null> => READING);
+    const source = { read, onChange: (next: PageBordersReading | null) => readings.push(next), ...overrides };
+    return { adapter: createPageBorderModel(source), readings, source, read };
+  }
+
+  it('`refreshNow` קוראת מיד, בלי השהיה', async () => {
+    const { adapter, readings } = model();
+    adapter.refreshNow();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(readings).toEqual([READING]);
+    expect(adapter.getState()).toEqual(READING);
+    adapter.dispose();
+  });
+
+  it('`noteDocumentChanged` משוהה, ושלושה שינויים רצופים הם קריאה אחת', async () => {
+    // זה בדיוק התיקון ל„גבול רפאים”/„גבול שלא מצטייר”: הבאג היה שקריאה כזאת
+    // לא הופעלה כלל אחרי `applyPageBorders`/`clearPageBorders`. הבדיקה כאן
+    // מוודאת את מנגנון ההשהיה עצמו ברמת יחידה — לא את חוט החיבור ב-App.vue.
+    const { adapter, read } = model();
+
+    adapter.noteDocumentChanged();
+    adapter.noteDocumentChanged();
+    adapter.noteDocumentChanged();
+    expect(read).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(PAGE_BORDERS_DEBOUNCE_MS + 5);
+    expect(read).toHaveBeenCalledTimes(1);
+    adapter.dispose();
+  });
+
+  it('מדווח רק על שינוי אמיתי — קריאה חוזרת עם אותו ערך אינה מרנדרת שוב', async () => {
+    const { adapter, readings } = model();
+    adapter.refreshNow();
+    await vi.advanceTimersByTimeAsync(0);
+    adapter.refreshNow();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(readings).toHaveLength(1);
+    adapter.dispose();
+  });
+
+  it('שינוי בצד אחד בלבד כן מדווח', async () => {
+    let reading: PageBordersReading | null = READING;
+    const { adapter, readings } = model({ read: vi.fn(async () => reading) });
+    adapter.refreshNow();
+    await vi.advanceTimersByTimeAsync(0);
+
+    reading = { ...READING, top: { ...SIDE, color: '#FF0000' } };
+    adapter.refreshNow();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(readings).toHaveLength(2);
+    expect(readings[1]?.top.color).toBe('#FF0000');
+    adapter.dispose();
+  });
+
+  it('גבול שהוסר (`null`) מדווח, וכך גם גבול שחזר אחריו — „גבול רפאים” נעלם', async () => {
+    let reading: PageBordersReading | null = READING;
+    const { adapter, readings } = model({ read: vi.fn(async () => reading) });
+    adapter.refreshNow();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(readings).toEqual([READING]);
+
+    reading = null;
+    adapter.refreshNow();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(readings).toEqual([READING, null]);
+    expect(adapter.getState()).toBeNull();
+
+    reading = READING;
+    adapter.refreshNow();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(readings).toEqual([READING, null, READING]);
+    adapter.dispose();
+  });
+
+  it('כשל בקריאה מוחזר כ„אין גבול”, ולא כחריגה', async () => {
+    // `??`, לא `toEqual([null])`: המצב לפני הקריאה הראשונה כבר `null`, ולכן
+    // `same(null, null)` אמיתי — ייתכן שאין דיווח כלל, וזה תקין (ראו
+    // page-ruler.test.ts, אותה בדיקה בדיוק על `createRulerModel`). מה שקובע
+    // הוא שהמצב הסופי `null` ולא חריגה שהופכת ל-unhandled rejection.
+    const { adapter, readings } = model({
+      read: vi.fn(async () => {
+        throw new Error('המסמך נסגר');
+      }),
+    });
+    adapter.refreshNow();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(readings[readings.length - 1] ?? null).toBeNull();
+    expect(adapter.getState()).toBeNull();
+    adapter.dispose();
+  });
+
+  it('אחרי הפירוק אין דיווח — גם מקריאה שכבר הייתה באוויר', async () => {
+    const pending: Array<(value: PageBordersReading) => void> = [];
+    const { adapter, readings } = model({
+      read: vi.fn(
+        () =>
+          new Promise<PageBordersReading>((resolve) => {
+            pending.push(resolve);
+          }),
+      ),
+    });
+    adapter.refreshNow();
+    adapter.dispose();
+    for (const resolve of pending) resolve(READING);
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(readings).toEqual([]);
   });
 });
