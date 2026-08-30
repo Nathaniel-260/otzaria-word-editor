@@ -8,6 +8,7 @@
     ]"
     @pointermove="onPointerMove"
     @pointerleave="revealed = null"
+    @contextmenu="contextMenu.handleContextMenu"
   >
     <!-- פס עליון -->
     <TitleBar
@@ -90,6 +91,15 @@
         class="editor-stack"
       />
     </div>
+
+    <!-- תפריט הלחצן הימני. אחרי אזור המסמך ולפני הדיאלוגים, כמו ה-z-index שלו. -->
+    <ContextMenu
+      :open="contextMenu.isOpen.value"
+      :point="contextMenu.point.value"
+      :sections="contextMenu.sections.value"
+      @run="contextMenu.run"
+      @close="closeContextMenu"
+    />
 
     <LinkDialog
       :is-open="linkDialog.isOpen.value"
@@ -287,6 +297,8 @@ import { insertNote } from './engine/footnotes';
 import { startParagraphOnNewPage } from './engine/page-break';
 import { createLinkDialog } from './composables/use-link-dialog';
 import { createShellActionRunner } from './ui/shortcuts/actions';
+import { useContextMenu } from './composables/use-context-menu';
+import ContextMenu from './ui/menu/ContextMenu.vue';
 import {
   createShortcutDispatcher,
   isTextEntryTarget,
@@ -1384,6 +1396,36 @@ async function onOpenLibrary(): Promise<void> {
  * עברית `Ctrl+S` מדווח `key: 'ד'`, ולכן כל הקיצורים מתו בדיוק כשהמשתמש עשה מה
  * שהתוסף נועד לו — כתב עברית. ההתאמה עברה ל-`event.code`, שאינו תלוי בפריסה.
  */
+/**
+ * תפריט הלחצן הימני. ההכרעות שלו — מה מוצג, איפה הוא נפתח, ומה קורה לסמן —
+ * ב-composables/use-context-menu.ts; כאן נשארת ההרכבה.
+ *
+ * `runAction` נמסר כסגירה ולא כהפניה ישירה: `runShellAction` מוגדר מיד אחרי,
+ * ואחת מהתלויות שלו (`openContextMenu`) היא של התפריט. שתי ההפניות נפתרות
+ * בזמן ריצה, וכל סדר אחר היה מחייב לפצל אחת מהן לשני מקומות.
+ */
+const contextMenu = useContextMenu({
+  superdoc: activeSuperdoc,
+  shell: shellRef,
+  isDocumentSurface,
+  isFocusMode,
+  isModalOpen: isModalDialogOpen,
+  runAction: (action) => runShellAction(action),
+  report: reportCommand,
+});
+
+/**
+ * סגירת התפריט **והחזרת המיקוד למסמך**.
+ *
+ * הכרטיס מחזיק מיקוד אמיתי, ולכן סגירה שאינה מחזירה אותו משאירה את המיקוד על
+ * `<body>`: הגלגלת סוגרת את התפריט, ומכאן ואילך ההקלדה אינה נכנסת לשום מקום
+ * עד שהמשתמש לוחץ שוב במסמך. זו הסגירה הנפוצה ביותר, ולא מקרה קצה.
+ */
+function closeContextMenu(): void {
+  contextMenu.close();
+  focusDocument(activeSuperdoc.value);
+}
+
 const runShellAction = createShellActionRunner({
   isSaving: () => saveSnapshot.value.isSaving,
   save: (saveAs) => void onSave(saveAs),
@@ -1406,6 +1448,7 @@ const runShellAction = createShellActionRunner({
   insertCitation: () => void onInsertCitation(),
   searchOtzaria: () => void onSearchOtzaria(),
   openLibrary: () => void onOpenLibrary(),
+  openContextMenu: () => contextMenu.openAtCaret(),
   toggleShortcutsHelp: () => {
     if (isShortcutsHelpOpen.value) {
       isShortcutsHelpOpen.value = false;
@@ -1431,6 +1474,14 @@ const runShellAction = createShellActionRunner({
     }
     if (linkDialog.isOpen.value) {
       linkDialog.close();
+      return true;
+    }
+    // התפריט **אחרי** החלונות המודאליים ולא לפניהם: הוא אמנם השכבה העליונה,
+    // אבל מודאל פתוח חוסם את פתיחתו מלכתחילה — ולכן „תפריט פתוח מעל מודאל”
+    // הוא מצב שלא אמור להתקיים. ענף ראשון היה מסכן בדיוק את מה שאינו אמור
+    // לקרות: `Escape` שסוגר תפריט תקוע במקום את הדיאלוג שהמשתמש רואה.
+    if (contextMenu.isOpen.value) {
+      closeContextMenu();
       return true;
     }
     if (isFindOpen.value) {
@@ -1557,9 +1608,17 @@ function isDocumentSurface(target: EventTarget | null): boolean {
   return host !== null && target instanceof Node && host.contains(target);
 }
 
-/** דיאלוג שמכריז `aria-modal`. מה שמאחוריו אינו זמין — גם לא לקיצור. */
+/**
+ * דיאלוג שמכריז `aria-modal`. מה שמאחוריו אינו זמין — גם לא לקיצור.
+ *
+ * שלושה הרפים שהמעטפת מחזיקה בעצמה, ובנוסף — שאילתת DOM: `aria-modal="true"`
+ * מוצהר גם ב-17 פאנלים שחיים בתוך לשוניות הרצועה עם מצב מקומי (פסקה, גופן,
+ * הערה וכל השאר), וללא השאילתה קיצורי מקלדת וניווט חצים ממשיכים לפעול מתחת
+ * להם — בדיוק ההצהרה שה-`aria-modal` שלהם מכחישה.
+ */
 function isModalDialogOpen(): boolean {
-  return isAboutOpen.value || linkDialog.isOpen.value || isShortcutsHelpOpen.value;
+  if (isAboutOpen.value || linkDialog.isOpen.value || isShortcutsHelpOpen.value) return true;
+  return document.querySelector('[aria-modal="true"]') !== null;
 }
 
 /**

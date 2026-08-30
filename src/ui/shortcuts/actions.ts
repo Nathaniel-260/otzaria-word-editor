@@ -45,6 +45,11 @@ export interface ShellActionDeps {
    * ואז אין לבלוע אותו.
    */
   toggleShortcutsHelp: () => boolean;
+  /**
+   * `Shift+F10` ומקש התפריט. מחזיר האם נפתח: העוגן הוא מלבן הסמן המצויר
+   * (`ui.selection.getAnchorRect`), וכשאין אחד — אין תפריט.
+   */
+  openContextMenu: () => boolean;
   /** `F6` — מעביר את המיקוד לאזור הבא. מחזיר האם היה לאן. */
   moveFocusRegion: (direction: 'next' | 'prev') => boolean;
 }
@@ -125,6 +130,10 @@ export function createShellActionRunner(deps: ShellActionDeps): (action: ShellAc
         return true;
       case 'shortcuts-help':
         return deps.toggleShortcutsHelp();
+      // „אין עוגן” אינו „טופל”: בלי מלבן סמן אין איפה לפתוח את התפריט, ובליעת
+      // הצירוף הייתה משאירה את המשתמש בלי תפריט ובלי הודעה.
+      case 'context-menu':
+        return deps.openContextMenu();
       // אזור שאין בו למה למקד אינו „מטופל”: בליעת F6 שלא הזיז דבר הייתה
       // לוקחת מהמשתמש את מקש הניווט של הדפדפן בלי לתת לו כלום בתמורה.
       case 'focus-next-region':

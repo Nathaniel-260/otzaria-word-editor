@@ -18,10 +18,11 @@
     "check:startup": "node scripts/startup-probe.mjs",
     "check:gutter": "node scripts/page-gutter-probe.mjs",
     "check:sdk": "node scripts/sdk-sync-check.mjs",
+    "check:menu": "node scripts/context-menu-probe.mjs",
     "check:readout": "node scripts/readout-probe.mjs",
     "check:tooltip": "node scripts/tooltip-probe.mjs",
     "check:session": "node scripts/session-probe.mjs",
-    "verify": "npm run typecheck && npm run test && npm run build && npm run check:dist && npm run check:boot && npm run check:fonts && npm run check:rtl && npm run check:ruler && npm run check:startup && npm run check:gutter && npm run check:readout && npm run check:tooltip && npm run check:session && npm run check:sdk",
+    "verify": "npm run typecheck && npm run test && npm run build && npm run check:dist && npm run check:boot && npm run check:fonts && npm run check:rtl && npm run check:ruler && npm run check:startup && npm run check:gutter && npm run check:readout && npm run check:tooltip && npm run check:session && npm run check:menu && npm run check:sdk",
     "preview": "vite preview"
   },
   "dependencies": {

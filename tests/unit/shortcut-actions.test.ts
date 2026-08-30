@@ -29,6 +29,7 @@ function setup(over: Partial<ShellActionDeps> = {}) {
     searchOtzaria: vi.fn(),
     openLibrary: vi.fn(),
     toggleShortcutsHelp: vi.fn(() => true),
+    openContextMenu: vi.fn(() => true),
     moveFocusRegion: vi.fn(() => true),
     ...over,
   };

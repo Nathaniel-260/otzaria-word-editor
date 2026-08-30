@@ -72,6 +72,7 @@ export type ShellAction =
   | 'search-otzaria'
   | 'open-library'
   | 'shortcuts-help'
+  | 'context-menu'
   | 'focus-next-region'
   | 'focus-prev-region';
 
@@ -702,6 +703,28 @@ export const SHORTCUTS = [
     code: 'F6',
     shift: true,
     action: 'focus-prev-region',
+  },
+  /**
+   * שתי רשומות ולא אחת עם שני `code`: `match.ts` דורש התאמת מקשים **מדויקת**,
+   * ורשומה משותפת עם `shift: true` הייתה הופכת את מקש התפריט הבודד למקש שאינו
+   * מתאים לעולם. שני הצירופים הם „אותו דבר” רק אצל המשתמש.
+   */
+  {
+    id: 'context-menu',
+    label: 'Shift+F10',
+    description: 'פתיחת תפריט ההקשר על הסמן',
+    group: 'app',
+    code: 'F10',
+    shift: true,
+    action: 'context-menu',
+  },
+  {
+    id: 'context-menu-key',
+    label: 'מקש התפריט',
+    description: 'פתיחת תפריט ההקשר על הסמן',
+    group: 'app',
+    code: 'ContextMenu',
+    action: 'context-menu',
   },
   {
     id: 'escape',

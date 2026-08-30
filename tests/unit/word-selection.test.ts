@@ -19,6 +19,7 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import {
   installWordSelection,
+  markSyntheticPointer,
   selectBlockAtSelection,
   selectWordAtSelection,
   wordBoundsIn,
@@ -395,6 +396,27 @@ describe('המאזין על ה-container', () => {
       start: { kind: 'text', blockId: 'B1', offset: 0 },
       end: { kind: 'text', blockId: 'B1', offset: VERSE.length },
     });
+  });
+
+  /**
+   * תפריט ההקשר מזיז את הסמן בלחיצה שהוא עצמו משגר, מפני שהמנוע מתעלם מכפתור
+   * ימני. לחיצה כזאת אינה של אדם, ואסור שתיספר: בלי זה שתי לחיצות ימניות
+   * באותה נקודה היו בוחרות מילה שאיש לא ביקש.
+   */
+  it('לחיצה שהתוסף שיגר אינה נספרת ברצף', async () => {
+    const { root, applied } = installed2();
+
+    press(root);
+    release(root);
+    root.dispatchEvent(
+      markSyntheticPointer(new MouseEvent('mousedown', { bubbles: true, clientX: 10, clientY: 10 })),
+    );
+    root.dispatchEvent(
+      markSyntheticPointer(new MouseEvent('click', { bubbles: true, clientX: 10, clientY: 10 })),
+    );
+    await flush();
+
+    expect(applied).toEqual([]);
   });
 
   it('לחיצה בודדת אינה נוגעת בבחירה', async () => {
