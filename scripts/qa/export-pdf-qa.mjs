@@ -7,7 +7,7 @@
  */
 import { openApp, createReport } from './harness.mjs';
 
-const report = createReport('ייצוא ל-PDF');
+const report = createReport('ייצוא ל-PDF', { strict: true });
 const app = await openApp({ name: 'exportpdf', port: Number(process.env.QA_PORT ?? 9530) });
 
 const host = (expr) => app.js(`(function(){ var H = window.__qaHost; return ${expr}; })()`);

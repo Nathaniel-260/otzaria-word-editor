@@ -4,7 +4,7 @@
  */
 import { openApp, createReport } from './harness.mjs';
 
-const report = createReport('מרוץ „החלף הכל"');
+const report = createReport('מרוץ „החלף הכל"', { strict: true });
 const count = (s, n) => s.split(n).length - 1;
 const NEEDLE = 'zzq';
 

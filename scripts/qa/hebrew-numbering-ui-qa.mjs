@@ -7,7 +7,7 @@
  */
 import { openApp, createReport } from './harness.mjs';
 
-const report = createReport('מספור עברי — דרך הממשק');
+const report = createReport('מספור עברי — דרך הממשק', { strict: true });
 const app = await openApp({ name: 'hebui', port: Number(process.env.QA_PORT ?? 9520) });
 
 try {

@@ -4,7 +4,7 @@
  */
 import { openApp, createReport } from './harness.mjs';
 
-const report = createReport('מספור עברי');
+const report = createReport('מספור עברי', { strict: true });
 const app = await openApp({ name: 'hebnum', port: Number(process.env.QA_PORT ?? 9490) });
 
 try {

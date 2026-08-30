@@ -352,7 +352,7 @@ const SCENARIOS = [
 ];
 
 const only = process.argv[2] ? Number(process.argv[2]) : null;
-const report = createReport('„מסמך חדש” — בידוד ההקפאה');
+const report = createReport('„מסמך חדש” — בידוד ההקפאה', { strict: true });
 
 if (only === 0) {
   await control(report);

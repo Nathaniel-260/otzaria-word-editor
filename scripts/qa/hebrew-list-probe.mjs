@@ -1,7 +1,7 @@
 /** האם אפשר לתת לרשימה מספור עברי, ומה מצויר על המסך. */
 import { openApp, createReport } from './harness.mjs';
 
-const report = createReport('מספור רשימה עברי');
+const report = createReport('מספור רשימה עברי', { strict: true });
 const app = await openApp({ name: 'heblist', port: Number(process.env.QA_PORT ?? 9492) });
 
 try {

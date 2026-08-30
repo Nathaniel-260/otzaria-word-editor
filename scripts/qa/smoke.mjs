@@ -6,7 +6,7 @@
  */
 import { openApp, createReport } from './harness.mjs';
 
-const report = createReport('שער עשן — המסגרת');
+const report = createReport('שער עשן — המסגרת', { strict: true });
 const app = await openApp({ name: 'smoke', port: Number(process.env.QA_PORT ?? 9351) });
 
 try {

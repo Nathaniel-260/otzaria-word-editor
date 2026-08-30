@@ -18,7 +18,7 @@
 import { openApp, createReport, sleep } from './harness.mjs';
 
 const PORT = Number(process.env.QA_PORT ?? 9373);
-const report = createReport('קבוצת „קובץ” ופס הכותרת');
+const report = createReport('קבוצת „קובץ” ופס הכותרת', { strict: true });
 
 function withTimeout(promise, ms, label) {
   let timer;

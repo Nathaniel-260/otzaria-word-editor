@@ -4,7 +4,7 @@
  */
 import { openApp, createReport } from './harness.mjs';
 
-const report = createReport('החלף הכל');
+const report = createReport('החלף הכל', { strict: true });
 const app = await openApp({ name: 'replaceall', port: Number(process.env.QA_PORT ?? 9470) });
 
 const count = (s, needle) => s.split(needle).length - 1;

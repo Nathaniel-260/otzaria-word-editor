@@ -374,13 +374,40 @@ export function unzip(buffer) {
 /* ------------------------------------------------------------------ */
 
 /**
- * אוסף תוצאות של שער אחד. כל בדיקה היא שורה בדוח, והיציאה נכשלת רק אם
- * `strict` — שערי הסקר מדווחים ואינם מפילים.
+ * אוסף תוצאות של שער אחד. כל בדיקה היא שורה בדוח.
+ *
+ * ## `strict`, ולמה הוא קיים
+ *
+ * `strict: true` — השער מפיל את הריצה כשיש שורה שבורה. `false` (ברירת המחדל)
+ * — שער **סקר**: הוא מודד ומדווח, והתמונה שהוא מצייר היא הערך שלו, לא פסק
+ * דין. שערי הסקר סוקרים לשוניות שלמות ובהן פקדים שידוע שאינם מלאים, ולכן
+ * „שבור” אצלם הוא מידע ולא רגרסיה.
+ *
+ * ההערה כאן הבטיחה את `strict` הזה עוד לפני שהוא נכתב, והחתימה קיבלה `title`
+ * בלבד. התוצאה הייתה שבעה שערים שקוראים `report.print()` ומשליכים את הערך
+ * המוחזר — כלומר מדפיסים „✗ … שבור” ויוצאים עם קוד 0. מי שהריץ אותם ראה פלט
+ * שאומר „נכשל” לצד ריצה שהצליחה, וזה גרוע משתי האפשרויות: שער שנכשל ביושר
+ * מתקן, ושער שעובר ביושר מרגיע.
+ *
+ * לכן שתי ההתנהגויות מפורשות מעתה, ואף אחת מהן אינה שתיקה: `strict` מציב
+ * `process.exitCode`, ובלעדיו נדפסת שורה שאומרת במפורש שקוד היציאה אינו נגזר
+ * מהשורות שלמעלה.
+ *
+ * `process.exitCode` ולא `process.exit()`, משתי סיבות שאינן „לא לקטוע את
+ * `finally`” — כל השערים קוראים `print()` **אחרי** ה-`finally`, ולכן
+ * `app.close()` ממילא כבר רץ. הסיבות האמיתיות: השורה שאחרי `print()` בשער
+ * צריכה להספיק להידפס, ושער שישכח לקרוא `process.exit()` עדיין ייכשל.
+ *
+ * ואכן, בשערים שכבר כותבים `process.exit(report.print() > 0 ? 1 : 0)` הערך
+ * שנקבע כאן נדרס מיד אחר כך — באותו ערך בדיוק. זה מכוון: המנגנון כאן הוא
+ * רשת ביטחון, לא המסלול הראשי, ומה שהשתנה בפועל אצל שערי הסקר הוא ההצהרה
+ * המפורשת שמתחת.
  */
-export function createReport(title) {
+export function createReport(title, { strict = false } = {}) {
   const rows = [];
   return {
     rows,
+    strict,
     pass(name, detail = '') {
       rows.push({ name, verdict: 'עובד', detail });
     },
@@ -393,16 +420,48 @@ export function createReport(title) {
     skip(name, detail = '') {
       rows.push({ name, verdict: 'לא נבדק', detail });
     },
+    /**
+     * הצעד לא הסתיים — הדף קפא, לא הפקד נכשל.
+     *
+     * ורדיקט נפרד מ-`fail`, כי אלה שני דברים שונים שנספרו יחד: בשער אחד נמדדו
+     * „20 שבורים”, ומתוכם **16 היו קפיאות headless** וארבע כשלים אמיתיים.
+     * מספר אחד שמערבב „הפקד שבור” עם „השער לא הצליח למדוד” אינו אומר דבר על
+     * אף אחד מהשניים, ומי שקורא אותו לומד את הדבר הלא נכון בכל כיוון.
+     *
+     * ואינו נספר כשבור גם ב-strict, מאותה סיבה: קפיאה היא כשל של סביבת
+     * המדידה, וגרירת השער לאדום בגללה הייתה מלמדת להתעלם ממנו.
+     */
+    stuck(name, detail = '') {
+      rows.push({ name, verdict: 'תקוע', detail });
+    },
     print() {
       console.log(`\n=== ${title} ===`);
       for (const row of rows) {
-        const mark = { עובד: '✓', שבור: '✗', חלקי: '~', 'לא נבדק': '·' }[row.verdict];
+        const mark = { עובד: '✓', שבור: '✗', חלקי: '~', תקוע: '⧗', 'לא נבדק': '·' }[row.verdict];
         console.log(`${mark} ${row.name}${row.detail ? ' — ' + row.detail : ''}`);
       }
-      const broken = rows.filter((r) => r.verdict === 'שבור').length;
-      const partial = rows.filter((r) => r.verdict === 'חלקי').length;
-      console.log(`\nסה"כ ${rows.length}: ${rows.length - broken - partial} עובדים, ${partial} חלקיים, ${broken} שבורים`);
-      console.log('JSON:' + JSON.stringify({ title, rows }));
+      const count = (verdict) => rows.filter((r) => r.verdict === verdict).length;
+      const broken = count('שבור');
+      const partial = count('חלקי');
+      const stuck = count('תקוע');
+      const skipped = count('לא נבדק');
+      // „עובדים” נספר במפורש ולא כשארית: החישוב הקודם היה
+      // `rows.length - broken - partial`, ולכן שורות „לא נבדק” נספרו כעובדות.
+      console.log(
+        `\nסה"כ ${rows.length}: ${count('עובד')} עובדים, ${partial} חלקיים, ${broken} שבורים` +
+          (stuck ? `, ${stuck} תקועים (קפיאת מדידה, לא כשל פקד)` : '') +
+          (skipped ? `, ${skipped} לא נבדקו` : ''),
+      );
+      if (strict) {
+        if (broken > 0) process.exitCode = 1;
+      } else {
+        console.log(
+          broken > 0
+            ? `שער סקר: ${broken} שורות שבורות **אינן** מפילות את הריצה — קוד היציאה כאן אינו עדות למצב שלמעלה.`
+            : 'שער סקר: קוד היציאה אינו נגזר מהשורות שלמעלה.',
+        );
+      }
+      console.log('JSON:' + JSON.stringify({ title, strict, rows }));
       return broken;
     },
   };

@@ -77,9 +77,9 @@ async function step(name, fn) {
   ]);
   if (!outcome.done) {
     log(`!! ${name}: תקוע — לא הגיב תוך ${STEP_TIMEOUT_MS}ms`);
-    report.fail(
+    report.stuck(
       name,
-      `תקוע: הדף לא הגיב תוך ${STEP_TIMEOUT_MS}ms — זו קפיאה של headless/השער, לא בהכרח כשל אצל משתמש אמיתי`,
+      `הדף לא הגיב תוך ${STEP_TIMEOUT_MS}ms — זו קפיאה של headless/השער, לא בהכרח כשל אצל משתמש אמיתי`,
     );
     return;
   }

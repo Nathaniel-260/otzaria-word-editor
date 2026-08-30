@@ -20,7 +20,10 @@ node scripts/qa/<שם>-qa.mjs
 ```js
 import { openApp, createReport } from './harness.mjs';
 
-const report = createReport('שם הקבוצה');
+// `strict: true` — שער שמפיל את הריצה על שורה שבורה. בלעדיו זהו שער **סקר**:
+// הוא מודד ומדווח, מכריז על עצמו בסוף שקוד היציאה אינו נגזר מהשורות, ואינו
+// מפיל. בחרו במפורש; ברירת המחדל היא סקר.
+const report = createReport('שם הקבוצה', { strict: true });
 const app = await openApp({ name: 'layout', port: 9361 });
 try {
   await app.caret(0);            // בלי סמן כל פקד מדווח „יש למקם את הסמן”

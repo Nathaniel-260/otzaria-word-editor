@@ -1,7 +1,7 @@
 /** „החלף הכל" דרך הדיאלוג האמיתי, כפי שהמשתמש עושה זאת. */
 import { openApp, createReport } from './harness.mjs';
 
-const report = createReport('החלף הכל — דרך הממשק');
+const report = createReport('החלף הכל — דרך הממשק', { strict: true });
 const app = await openApp({ name: 'replui', port: Number(process.env.QA_PORT ?? 9497) });
 const NEEDLE = 'zzq';
 const texts = (x) => (x.match(/<w:t[^>]*>[^<]*<\/w:t>/g) ?? []).join('');
