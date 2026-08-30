@@ -97,4 +97,47 @@ describe('DocDefaultsDialog', () => {
     const emissions = harness.wrapper.emitted('submit');
     expect(emissions?.[0]?.[0]).toEqual({ fontFamily: 'Assistant' });
   });
+
+  /**
+   * הכפתור היה פעיל על דיאלוג ריק, ולחיצה עליו סגרה בלי לעשות דבר — „אישור”
+   * שמתנהג כמו „ביטול”. נמדד בשער הפריסה: `אישור disabled=false`.
+   */
+  it('שני שדות ריקים: „אישור” נעול, ובלי הודעת שגיאה', async () => {
+    mountUi(DocDefaultsDialog, {
+      props: { isOpen: true, busy: false, currentSizePt: 12 },
+    });
+    await settle();
+
+    expect(footerButton('אישור').attributes('disabled')).toBeDefined();
+    // „לא הוקלד כלום” אינו שגיאה, ולכן אינו ראוי להודעה אדומה. נבדק ישירות
+    // מול ה-DOM: העוזר `teleported` זורק כשאין אלמנט, ולכן אינו יכול לבטא היעדר.
+    expect(document.querySelector('.dd-error')).toBeNull();
+  });
+
+  it('מילוי שדה אחד בלבד משחרר את „אישור”', async () => {
+    mountUi(DocDefaultsDialog, {
+      props: { isOpen: true, busy: false, currentSizePt: 12 },
+    });
+    await settle();
+
+    await teleported('#dd-family').setValue('David');
+    await settle();
+    expect(footerButton('אישור').attributes('disabled')).toBeUndefined();
+
+    // וריקון חוזר נועל אותו שוב — המצב נגזר מהשדות, ולא נקבע פעם אחת.
+    await teleported('#dd-family').setValue('');
+    await settle();
+    expect(footerButton('אישור').attributes('disabled')).toBeDefined();
+  });
+
+  it('רווחים בלבד אינם „מילוי” — הכפתור נשאר נעול', async () => {
+    mountUi(DocDefaultsDialog, {
+      props: { isOpen: true, busy: false, currentSizePt: 12 },
+    });
+    await settle();
+
+    await teleported('#dd-family').setValue('   ');
+    await settle();
+    expect(footerButton('אישור').attributes('disabled')).toBeDefined();
+  });
 });

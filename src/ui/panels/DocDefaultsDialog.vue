@@ -161,21 +161,34 @@ function parseSize(value: string | number): number | undefined | null {
 }
 
 const showError = computed(() => parseSize(fontSize.value) === null);
-const canSubmit = computed(() => !showError.value);
+
+/**
+ * לפחות שדה אחד מולא. שני השדות ריקים = אין מה להחיל.
+ *
+ * בלי זה „אישור” היה **פעיל** על דיאלוג ריק, ולחיצה עליו הייתה סוגרת אותו
+ * בלי לעשות דבר — כלומר כפתור ראשי שנראה כמו פעולה ומתנהג כמו „ביטול”. זה
+ * בדיוק סוג הכפתור המת שכל האודיט הזה נועד לחסל, והוא נמדד בשער הפריסה
+ * („ברירות מחדל — שני שדות ריקים”).
+ *
+ * שני התנאים נפרדים בכוונה: `showError` הוא „מה שהוקלד אינו גודל”, וזה מצב
+ * שמלווה בהודעת שגיאה. „לא הוקלד כלום” אינו שגיאה ואינו ראוי להודעה — הוא
+ * פשוט אינו פעולה, ולכן הוא נעילה שקטה של הכפתור.
+ */
+const hasChange = computed(
+  () => fontFamily.value.trim() !== '' || asText(fontSize.value).trim() !== '',
+);
+const canSubmit = computed(() => hasChange.value && !showError.value);
 
 function onSubmit(): void {
   if (props.busy || !canSubmit.value) return;
 
+  // `canSubmit` כבר מבטיח ששדה אחד לפחות מולא ושהגודל תקין, ולכן ה-patch כאן
+  // אינו יכול לצאת ריק — ואין ענף „אין מה לעשות”. הענף הזה היה קיים, והוא מה
+  // שהסתיר את הכפתור הפעיל: הוא הפך „אישור” על דיאלוג ריק לסגירה שקטה.
   const patch: { fontFamily?: string; fontSizePt?: number } = {};
   if (fontFamily.value.trim() !== '') patch.fontFamily = fontFamily.value.trim();
   const size = parseSize(fontSize.value);
   if (size !== null && size !== undefined) patch.fontSizePt = size;
-
-  if (Object.keys(patch).length === 0) {
-    // לחיצה בלי שום שדה ממולא — אין מה לעשות; סוגרים בלי קריאה.
-    emit('close');
-    return;
-  }
 
   emit('submit', patch);
 }

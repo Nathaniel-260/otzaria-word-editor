@@ -834,9 +834,22 @@ try {
     record('API: fontFamily כ-record (מה שהמודול שולח)',
       recordRecord?.ok ? 'עובד' : 'שבור',
       JSON.stringify(recordRecord?.ok ? recordRecord.receipt : recordRecord?.error), '');
-    record('API: fontFamily כמחרוזת',
-      stringRecord?.ok ? 'עובד' : 'שבור',
-      JSON.stringify(stringRecord?.ok ? stringRecord.receipt : stringRecord?.error), '');
+    /* דחייה כאן היא ההתנהגות **הנכונה**, ולכן היא „עובד” ולא „שבור”.
+     *
+     * `patch.fontFamily` הוא record של ascii/hAnsi/cs — זה מה שהשורה שמעל
+     * מוכיחה שהמודול שולח, וזה מה שעובר. מחרוזת אינה הצורה של החוזה, והמנוע
+     * דוחה אותה בהודעה מפורשת. השורה הזו קיימת כדי לתעד את הגבול, לא כדי
+     * לדרוש שיטושטש.
+     *
+     * למה זה תוקן: הרישום ההפוך ניפח את מונה השבורים בשער, ומי שקרא אותו
+     * הבין „יש לנו באג ב-fontFamily” — כשמה שיש הוא חוזה שנשמר. שער שמסמן
+     * התנהגות תקינה כשבורה מלמד להתעלם ממנו. */
+    record('API: fontFamily כמחרוזת נדחית (החוזה הוא record)',
+      stringRecord?.ok ? 'שבור' : 'עובד',
+      stringRecord?.ok
+        ? `התקבלה מחרוזת — החוזה נשבר: ${JSON.stringify(stringRecord.receipt)}`
+        : `נדחתה כמצופה: ${JSON.stringify(stringRecord?.error)}`,
+      stringRecord?.ok ? 'המנוע קיבל צורה שאינה בחוזה' : '');
     const sizeOnly = rows.find((r) => r.label === 'fontSize:36 בלבד');
     record('API: fontSize בלבד', sizeOnly?.ok ? 'עובד' : 'שבור',
       JSON.stringify(sizeOnly?.ok ? sizeOnly.receipt : sizeOnly?.error),
