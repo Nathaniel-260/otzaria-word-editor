@@ -128,9 +128,10 @@ vi.mock('../../src/engine/document-defaults', () => ({
 
 vi.mock('../../src/host/settings', () => ({
   loadLastDocument: async () => null,
-  saveLastDocument: async () => {},
   forgetLastDocument: async () => {},
   loadAutosaveEnabled: async () => true,
+  loadSessionRecord: async () => null,
+  saveSessionRecord: async () => {},
   saveAutosaveEnabled: async () => {},
   loadRulerVisible: async () => false,
   saveRulerVisible: async () => {},

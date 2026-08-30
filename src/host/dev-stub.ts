@@ -61,6 +61,7 @@ const UPLOAD_PREFIX = 'https://dev-stub.invalid/w/';
 let counter = 0;
 
 const storagePrefix = 'otzaria-word-dev:';
+const workspacePrefix = 'otzaria-word-dev-fs:';
 
 function pickFile(): Promise<{ file: File | null }> {
   return new Promise((resolve) => {
@@ -172,6 +173,39 @@ async function handle(method: string, payload: Record<string, unknown> = {}): Pr
     case 'storage.remove':
       window.localStorage.removeItem(storagePrefix + String(payload.key));
       return true;
+
+    /**
+     * המרחב הפרטי של התוסף (`fs.*`), על localStorage.
+     *
+     * למה זה חייב להיות ב-stub: בלעדיו אין דרך לעבור בפיתוח את המסלול שבו
+     * מסמך שלא נשמר חוזר אחרי סגירה — והמסלול הזה הוא בדיוק זה שאסור לו
+     * להישבר. הנתונים שורדים רענון, כמו שהם שורדים סגירה באוצריא.
+     */
+    case 'fs.writeFile': {
+      const content = String(payload.content ?? '');
+      window.localStorage.setItem(workspacePrefix + String(payload.path), content);
+      return { path: payload.path, size: content.length, usedBytes: content.length, quotaBytes: 0 };
+    }
+    case 'fs.readFile': {
+      const content = window.localStorage.getItem(workspacePrefix + String(payload.path));
+      if (content === null) throw new Error('error.not_found: no such file');
+      return { path: payload.path, encoding: payload.encoding ?? 'utf8', size: content.length, content };
+    }
+    case 'fs.deleteEntry':
+      window.localStorage.removeItem(workspacePrefix + String(payload.path));
+      return true;
+    case 'fs.stat': {
+      const content = window.localStorage.getItem(workspacePrefix + String(payload.path));
+      if (content === null) return { exists: false };
+      return {
+        exists: true,
+        path: payload.path,
+        name: String(payload.path),
+        type: 'file',
+        size: content.length,
+        modified: new Date().toISOString(),
+      };
+    }
 
     case 'ui.showConfirm':
       return {

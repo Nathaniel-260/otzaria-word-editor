@@ -27,7 +27,7 @@ export type SaveState = 'idle' | 'exporting' | 'uploading' | 'committing' | 'err
 
 export type SaveOutcome =
   /** נשמר, וה-token הוא היעד לשמירה הבאה. */
-  | { status: 'saved'; token: string; name: string }
+  | { status: 'saved'; token: string; name: string; size: number }
   /** אין מה לשמור. */
   | { status: 'clean' }
   /** המשתמש סגר את „שמור בשם”. המסמך נשאר כפי שהיה. */
@@ -70,6 +70,18 @@ export interface SaveCoordinatorDeps {
   abort: (writeToken: string) => Promise<void>;
   /** נקרא על כל שינוי מצב, כדי שהממשק יציג dirty/שומר/שגיאה. */
   onStateChange?: (snapshot: SaveSnapshot) => void;
+  /**
+   * נקרא אחרי **כל** commit מוצלח — ידני, אוטומטי, או „שמור לפני שפותחים
+   * אחר”. מי שצריך לדעת שהעבודה בדיסק חייב להיתלות כאן ולא באתר הקריאה
+   * ל-`saveNow`: שני מסלולי שמירה מתוך שלושה אינם עוברים דרך המעטפת בכלל —
+   * ה-autosave יורה מתוך הקואורדינטור עצמו. תלייה על אתר הקריאה השאירה
+   * טיוטת שחזור חיה אחרי שמירה אוטומטית, וטיוטה כזאת נפתחת בהפעלה הבאה
+   * מעל עבודה חדשה ממנה.
+   *
+   * `size` הוא גודל הבייטים שנכתבו בפועל, ולכן הוא גם הגודל של הקובץ בדיסק
+   * מיד אחרי הכתיבה — הנתון היחיד שמאפשר לזהות אחר כך עריכה **חיצונית**.
+   */
+  onSaved?: (info: { token: string; name: string; size: number }) => void;
 }
 
 export interface SaveSnapshot {
@@ -110,6 +122,15 @@ export interface SaveCoordinator {
   /** מאפס לספירה נקייה — לשימוש בפתיחת מסמך אחר. */
   reset(target?: { token: string; name: string } | null): void;
   saveNow(options?: { forceSaveAs?: boolean; suggestedName?: string }): Promise<SaveOutcome>;
+  /**
+   * ממתין לסבב השמירה שרץ, אם רץ. נפתר מיד כשאין אחד, ולעולם אינו נדחה —
+   * מי שקורא רוצה לדעת ש„הרגע הזה נגמר”, לא מה הייתה התוצאה.
+   *
+   * קיים בשביל היציאה: זוכר-ההפעלה אינו יכול לייצא במקביל לשמירה שמייצאת
+   * את אותו מסמך, ובלי המתנה הוא היה מוותר על הטיוטה האחרונה בדיוק ברגע
+   * שאין אחריו הזדמנות נוספת. ראו `flush` ב-sessions/session-keeper.ts.
+   */
+  settled(): Promise<void>;
   dispose(): void;
 }
 
@@ -284,7 +305,10 @@ export function createSaveCoordinator(deps: SaveCoordinatorDeps): SaveCoordinato
     // רק המהדורה שיוצאה נחשבת שמורה.
     if (exportedRevision > savedRevision) savedRevision = exportedRevision;
     stage('idle');
-    return { status: 'saved', token: result.token, name: name ?? '' };
+    // אחרי אימוץ ה-token ולפני החזרה: מי שמאזין צריך לראות מצב עקבי. הגודל
+    // הוא של ה-Blob שנכתב — ראו `onSaved`.
+    deps.onSaved?.({ token: result.token, name: name ?? '', size: blob.size });
+    return { status: 'saved', token: result.token, name: name ?? '', size: blob.size };
   }
 
   async function saveLoop(
@@ -373,6 +397,16 @@ export function createSaveCoordinator(deps: SaveCoordinatorDeps): SaveCoordinato
       dirtyRevision += 1;
       publish();
       scheduleAutosave();
+    },
+
+    async settled() {
+      // בלולאה ולא בהמתנה אחת: סבב שמסתיים עשוי לשרשר סבב חדש (ראו
+      // `saveNow`), והמתנה יחידה הייתה חוזרת בעוד שמירה רצה.
+      while (inFlight) {
+        const current = inFlight;
+        await current.catch(() => undefined);
+        if (inFlight === current) return;
+      }
     },
 
     setAutosaveEnabled(enabled) {
