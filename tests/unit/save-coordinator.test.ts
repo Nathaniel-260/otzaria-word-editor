@@ -983,3 +983,55 @@ describe('onSaved', () => {
     expect(h.saved, 'ביטול אינו שמירה').toHaveLength(0);
   });
 });
+
+describe('settled', () => {
+  it('נפתר מיד כשאין שמירה', async () => {
+    const h = harness();
+    await expect(h.coordinator.settled()).resolves.toBeUndefined();
+  });
+
+  it('ממתין לסבב שרץ, ורק אז מחזיר', async () => {
+    // זה החוזה שהיציאה נשענת עליו: זוכר-ההפעלה אינו מייצא במקביל לשמירה
+    // שמייצאת את אותו מסמך, ולכן הוא חייב לדעת מתי היא נגמרה.
+    const h = harness();
+    let release = (): void => {};
+    // השער נבנה לפני הסבב: השמה מתוך ה-callback הייתה מגיעה רק כשההעלאה
+    // מתחילה, ועד אז `release` היה עדיין הכלום שהוא אותחל אליו.
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    h.onUpload(() => gate);
+    h.coordinator.adoptTarget({ token: 'tok', name: 'א.docx' });
+    h.coordinator.markDirty();
+
+    const save = h.coordinator.saveNow();
+    let done = false;
+    const waiting = h.coordinator.settled().then(() => {
+      done = true;
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(done, 'עוד לא — השמירה באוויר').toBe(false);
+
+    release();
+    await save;
+    await waiting;
+    expect(done).toBe(true);
+    expect(h.coordinator.snapshot.isSaving).toBe(false);
+  });
+
+  it('אינו נדחה כששמירה נכשלת', async () => {
+    // הקורא רוצה לדעת ש„הרגע הזה נגמר”, לא מה הייתה התוצאה — ודחייה כאן
+    // הייתה מפילה את מסלול היציאה בדיוק כשהוא הכי נחוץ.
+    const h = harness();
+    h.onExport(() => {
+      throw new Error('הייצוא נכשל');
+    });
+    h.coordinator.adoptTarget({ token: 'tok', name: 'א.docx' });
+    h.coordinator.markDirty();
+
+    const save = h.coordinator.saveNow();
+    await expect(h.coordinator.settled()).resolves.toBeUndefined();
+    await save;
+  });
+});

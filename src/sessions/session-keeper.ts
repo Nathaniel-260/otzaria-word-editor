@@ -96,6 +96,10 @@ export interface SessionKeeperDeps {
   /** האם שמירה רצה כרגע. ייצוא נוסף בזמן הזה נדחה ואינו מבוטל. */
   isSaving: () => boolean;
   /**
+   * ממתין לסבב השמירה שרץ. בשימוש ב-`flush` בלבד — ראו את ההנמקה שם.
+   */
+  settleSave: () => Promise<void>;
+  /**
    * נקרא כשמסמך גדול מהמכסה, ולכן אין לו טיוטה כלל.
    *
    * זו אינה תקלה חולפת אלא תכונה של המסמך, ולכן היא מדווחת: ההבטחה של
@@ -212,7 +216,11 @@ export function createSessionKeeper(deps: SessionKeeperDeps): SessionKeeper {
     await deps.persist(state);
   }
 
-  async function writeDraftNow(): Promise<void> {
+  /**
+   * `final` = זו ההזדמנות האחרונה (יציאה), ואין סבב נוסף אחריה. ההבדל היחיד
+   * הוא מה עושים כששמירה רצה: בזמן רגיל דוחים, ביציאה ממתינים.
+   */
+  async function writeDraftNow(final = false): Promise<void> {
     if (disposed) return;
     draftTimer = clearTimer(draftTimer);
     if (!deps.isDirty() || revision === draftedRevision) {
@@ -227,9 +235,27 @@ export function createSessionKeeper(deps: SessionKeeperDeps): SessionKeeper {
     // מפני שהתקרה הגיעה, `scheduleDraft` היה מחשב המתנה של אפס ומתזמן את
     // עצמו מחדש בלולאה — עשרות בדיקות בשנייה לכל אורך הייצוא.
     if (deps.isSaving()) {
-      draftDeadline = Date.now() + DRAFT_DELAY_MS;
-      scheduleDraft();
-      return;
+      /**
+       * ביציאה אין „סבב הבא”. דחייה כאן פירושה שהעבודה שנעשתה מאז הטיוטה
+       * האחרונה תלויה כולה בהצלחת השמירה שרצה — וכשל שלה (הקובץ נעול, הרשת
+       * נפלה) היה משאיר אותה בלי שום עותק. לכן ממתינים לסבב ובודקים מחדש:
+       * אם הוא הצליח, `noteSaved` כבר ניקה ואין מה לכתוב; אם לא, הטיוטה
+       * נכתבת. ההמתנה בטוחה גם מפני שהיא מונעת שני ייצואים במקביל על אותו
+       * מנוע — בדיוק מה שהדחייה נועדה למנוע.
+       */
+      if (final) {
+        const mineBeforeWait = epoch;
+        await deps.settleSave();
+        if (disposed || mineBeforeWait !== epoch) return;
+        if (!deps.isDirty() || revision === draftedRevision) {
+          draftDeadline = null;
+          return;
+        }
+      } else {
+        draftDeadline = Date.now() + DRAFT_DELAY_MS;
+        scheduleDraft();
+        return;
+      }
     }
     // מכאן והלאה נכתבת טיוטה, ולכן הספירה לתקרה מתחילה מחדש בעריכה הבאה.
     draftDeadline = null;
@@ -424,7 +450,7 @@ export function createSessionKeeper(deps: SessionKeeperDeps): SessionKeeper {
         // הטיוטה קודם, והרשומה תמיד: `writeDraftNow` עשוי לצאת מוקדם — מסמך
         // נקי, או שכבר נכתבה טיוטה מאותו שינוי — ואז מצב תצוגה שהמתין
         // להשהיה שבוטלה כאן היה הולך לאיבוד.
-        if (deps.isDirty()) await writeDraftNow();
+        if (deps.isDirty()) await writeDraftNow(true);
         await persistNow();
       }).catch((error: unknown) => {
         console.warn('[otzaria-word] שמירת מצב ההפעלה נכשלה', error);

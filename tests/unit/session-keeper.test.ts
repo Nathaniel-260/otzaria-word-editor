@@ -38,6 +38,8 @@ interface Harness {
   writeResult: WorkspaceWrite;
   /** כמה פעמים נאמר למשתמש שהמסמך גדול מדי לטיוטה. */
   tooLargeReports: number;
+  /** מה שיוחזר מ-`settleSave`; ברירת המחדל היא הבטחה שנפתרת מיד. */
+  onSettleSave: (() => Promise<void>) | null;
   /** מריצה את הטיימרים שהבשילו וממתינה לשרשרת האסינכרונית שהם פתחו. */
   tick: (ms: number) => Promise<void>;
 }
@@ -53,6 +55,7 @@ function harness(): Harness {
     caret: null as CaretAnchor | null,
     writeResult: 'written' as WorkspaceWrite,
     tooLargeReports: 0,
+    onSettleSave: null as (() => Promise<void>) | null,
   };
 
   const deps: SessionKeeperDeps = {
@@ -75,6 +78,7 @@ function harness(): Harness {
     readCaret: async () => state.caret,
     isDirty: () => state.dirty,
     isSaving: () => state.saving,
+    settleSave: () => state.onSettleSave?.() ?? Promise.resolve(),
     onDraftTooLarge: () => {
       state.tooLargeReports += 1;
     },
@@ -123,6 +127,12 @@ function harness(): Harness {
     },
     get tooLargeReports() {
       return state.tooLargeReports;
+    },
+    get onSettleSave() {
+      return state.onSettleSave;
+    },
+    set onSettleSave(value: (() => Promise<void>) | null) {
+      state.onSettleSave = value;
     },
     async tick(ms: number) {
       await vi.advanceTimersByTimeAsync(ms);
@@ -511,6 +521,43 @@ describe('flush', () => {
     await h.keeper.flush();
 
     expect(h.drafts).toHaveLength(2);
+  });
+
+  it('בזמן שמירה ממתין לה, ואז כותב את מה שהשמירה לא הספיקה', async () => {
+    // ביציאה אין „סבב הבא”. דחייה כאן הייתה תולה את כל העבודה שמאז הטיוטה
+    // האחרונה בהצלחת השמירה שרצה — וכשל שלה היה משאיר אותה בלי עותק.
+    const h = harness();
+    h.dirty = true;
+    h.saving = true;
+    h.keeper.noteChange();
+
+    // השמירה נכשלה: המסמך נשאר מלוכלך גם אחריה.
+    h.onSettleSave = async () => {
+      h.saving = false;
+    };
+
+    await h.keeper.flush();
+
+    expect(h.drafts, 'הטיוטה נכתבת אחרי שהשמירה הסתיימה').toEqual([3]);
+  });
+
+  it('בזמן שמירה שהצליחה אינו מייצא לחינם', async () => {
+    // `noteSaved` כבר ניקה, והמסמך נקי — אין עבודה שאינה בדיסק, ולכן אין מה
+    // לכתוב. ייצוא כאן היה עבודה מיותרת בדיוק ברגע הרגיש ביותר.
+    const h = harness();
+    h.dirty = true;
+    h.saving = true;
+    h.keeper.noteChange();
+
+    h.onSettleSave = async () => {
+      h.saving = false;
+      h.dirty = false;
+    };
+
+    await h.keeper.flush();
+
+    expect(h.exports).toBe(0);
+    expect(h.drafts).toHaveLength(0);
   });
 
   it('אחרי dispose אינו כותב', async () => {

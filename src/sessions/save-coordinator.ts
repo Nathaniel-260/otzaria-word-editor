@@ -122,6 +122,15 @@ export interface SaveCoordinator {
   /** מאפס לספירה נקייה — לשימוש בפתיחת מסמך אחר. */
   reset(target?: { token: string; name: string } | null): void;
   saveNow(options?: { forceSaveAs?: boolean; suggestedName?: string }): Promise<SaveOutcome>;
+  /**
+   * ממתין לסבב השמירה שרץ, אם רץ. נפתר מיד כשאין אחד, ולעולם אינו נדחה —
+   * מי שקורא רוצה לדעת ש„הרגע הזה נגמר”, לא מה הייתה התוצאה.
+   *
+   * קיים בשביל היציאה: זוכר-ההפעלה אינו יכול לייצא במקביל לשמירה שמייצאת
+   * את אותו מסמך, ובלי המתנה הוא היה מוותר על הטיוטה האחרונה בדיוק ברגע
+   * שאין אחריו הזדמנות נוספת. ראו `flush` ב-sessions/session-keeper.ts.
+   */
+  settled(): Promise<void>;
   dispose(): void;
 }
 
@@ -388,6 +397,16 @@ export function createSaveCoordinator(deps: SaveCoordinatorDeps): SaveCoordinato
       dirtyRevision += 1;
       publish();
       scheduleAutosave();
+    },
+
+    async settled() {
+      // בלולאה ולא בהמתנה אחת: סבב שמסתיים עשוי לשרשר סבב חדש (ראו
+      // `saveNow`), והמתנה יחידה הייתה חוזרת בעוד שמירה רצה.
+      while (inFlight) {
+        const current = inFlight;
+        await current.catch(() => undefined);
+        if (inFlight === current) return;
+      }
     },
 
     setAutosaveEnabled(enabled) {

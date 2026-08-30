@@ -560,6 +560,7 @@ function initSessionKeeper(): SessionKeeper {
     },
     isDirty: () => save?.snapshot.isDirty === true,
     isSaving: () => save?.snapshot.isSaving === true,
+    settleSave: () => save?.settled() ?? Promise.resolve(),
     // שגיאה ולא הודעה רגילה: זו אינה התקדמות אלא רשת ביטחון שאינה פרושה,
     // והמשתמש צריך לדעת שעליו לשמור בעצמו.
     onDraftTooLarge: () => {
