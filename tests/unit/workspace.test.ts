@@ -73,7 +73,7 @@ describe('כתיבה', () => {
 
     await expect(
       writeWorkspaceBytes('session-draft.docx', new Uint8Array([1, 2, 3])),
-    ).resolves.toBe(true);
+    ).resolves.toBe('written');
 
     expect(call).toHaveBeenCalledWith('fs.writeFile', {
       path: 'session-draft.docx',
@@ -90,23 +90,27 @@ describe('כתיבה', () => {
     const oversize = new Uint8Array(MAX_CONTENT_BYTES + 1);
     expect(oversize.byteLength).toBeLessThan(MAX_PAYLOAD_BYTES);
 
-    await expect(writeWorkspaceBytes('draft.docx', oversize)).resolves.toBe(false);
+    // `too-large` ולא `failed`: זהו כשל קבוע — המסמך לא יקטן מעצמו — והוא
+    // היחיד שראוי להיאמר למשתמש. ההבחנה נעשית כאן מפני שכאן נמדד הגודל.
+    await expect(writeWorkspaceBytes('draft.docx', oversize)).resolves.toBe('too-large');
 
     expect(call, 'לא נשלחה קריאה בכלל').not.toHaveBeenCalled();
     expect(warn).toHaveBeenCalled();
   });
 
-  it('סירוב של אוצריא מוחזר כ-false ואינו זורק', async () => {
+  it('סירוב של אוצריא מוחזר כ-failed ואינו זורק', async () => {
+    // חולף, ולא תכונה של המסמך: הסבב הבא עשוי להצליח, ולכן אין מדווחים
+    // עליו למשתמש. ההפרדה מ-`too-large` היא בדיוק זו.
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     hostFails();
 
-    await expect(writeWorkspaceBytes('draft.docx', new Uint8Array([1]))).resolves.toBe(false);
+    await expect(writeWorkspaceBytes('draft.docx', new Uint8Array([1]))).resolves.toBe('failed');
     expect(warn).toHaveBeenCalled();
   });
 
   it('היעדר SDK אינו מפיל עריכה', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
-    await expect(writeWorkspaceBytes('draft.docx', new Uint8Array([1]))).resolves.toBe(false);
+    await expect(writeWorkspaceBytes('draft.docx', new Uint8Array([1]))).resolves.toBe('failed');
   });
 });
 

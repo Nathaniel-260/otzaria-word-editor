@@ -16,6 +16,7 @@ import {
 } from '../../src/sessions/session-keeper';
 import { DRAFT_PATH, emptySession, type SessionState } from '../../src/sessions/session-state';
 import type { CaretAnchor } from '../../src/engine/caret-anchor';
+import type { WorkspaceWrite } from '../../src/host/workspace';
 
 const anchor: CaretAnchor = { start: { blockId: 'b3', ordinal: 2, offset: 5 }, end: null };
 
@@ -34,7 +35,9 @@ interface Harness {
   dirty: boolean;
   saving: boolean;
   caret: CaretAnchor | null;
-  writeSucceeds: boolean;
+  writeResult: WorkspaceWrite;
+  /** כמה פעמים נאמר למשתמש שהמסמך גדול מדי לטיוטה. */
+  tooLargeReports: number;
   /** מריצה את הטיימרים שהבשילו וממתינה לשרשרת האסינכרונית שהם פתחו. */
   tick: (ms: number) => Promise<void>;
 }
@@ -48,7 +51,8 @@ function harness(): Harness {
     dirty: false,
     saving: false,
     caret: null as CaretAnchor | null,
-    writeSucceeds: true,
+    writeResult: 'written' as WorkspaceWrite,
+    tooLargeReports: 0,
   };
 
   const deps: SessionKeeperDeps = {
@@ -60,9 +64,9 @@ function harness(): Harness {
       return new Blob([new Uint8Array([1, 2, 3])]);
     },
     writeDraft: async (content) => {
-      if (!state.writeSucceeds) return false;
+      if (state.writeResult !== 'written') return state.writeResult;
       state.drafts.push(content.size);
-      return true;
+      return 'written';
     },
     removeDraft: async () => {
       state.removals += 1;
@@ -71,6 +75,9 @@ function harness(): Harness {
     readCaret: async () => state.caret,
     isDirty: () => state.dirty,
     isSaving: () => state.saving,
+    onDraftTooLarge: () => {
+      state.tooLargeReports += 1;
+    },
   };
 
   const keeper = createSessionKeeper(deps);
@@ -108,11 +115,14 @@ function harness(): Harness {
     set caret(value: CaretAnchor | null) {
       state.caret = value;
     },
-    get writeSucceeds() {
-      return state.writeSucceeds;
+    get writeResult() {
+      return state.writeResult;
     },
-    set writeSucceeds(value: boolean) {
-      state.writeSucceeds = value;
+    set writeResult(value: WorkspaceWrite) {
+      state.writeResult = value;
+    },
+    get tooLargeReports() {
+      return state.tooLargeReports;
     },
     async tick(ms: number) {
       await vi.advanceTimersByTimeAsync(ms);
@@ -247,21 +257,69 @@ describe('הטיוטה', () => {
     expect(h.drafts).toEqual([3]);
   });
 
-  it('כתיבה שנכשלה מוחקת את הטיוטה הישנה במקום להשאיר אותה', async () => {
-    // טיוטה ישנה יותר על הדיסק, ופתיחה שתעדיף אותה על הקובץ, היא נזק ולא
-    // שחזור.
+  it('כתיבה שנכשלה **משאירה** את הטיוטה הקודמת', async () => {
+    // טיוטה שעל הדיסק מאוחרת תמיד לשמירה האחרונה, ולכן היא מחזיקה עבודה
+    // שאין בקובץ. „ישנה” היא ביחס למה שעל המסך, לא ביחס לדיסק — ומחיקתה
+    // בגלל כתיבה שנכשלה משמידה את העותק היחיד ששרד.
     const h = harness();
     h.dirty = true;
     h.keeper.noteChange();
     await h.tick(DRAFT_DELAY_MS);
-    expect(last(h.persisted).draft).not.toBeNull();
+    const written = last(h.persisted).draft;
+    expect(written).not.toBeNull();
 
-    h.writeSucceeds = false;
+    h.writeResult = 'failed';
     h.keeper.noteChange();
     await h.tick(DRAFT_MAX_WAIT_MS);
 
-    expect(h.removals).toBeGreaterThan(0);
-    expect(last(h.persisted).draft).toBeNull();
+    expect(h.removals, 'אין למחוק עבודה בגלל כתיבה שנכשלה').toBe(0);
+    expect(last(h.persisted).draft).toEqual(written);
+  });
+
+  it('כתיבה שנכשלה מנסה שוב בסבב הבא', async () => {
+    // `draftedRevision` אינו מתקדם על כישלון, ולכן אותה עבודה עדיין ממתינה.
+    const h = harness();
+    h.dirty = true;
+    h.writeResult = 'failed';
+    h.keeper.noteChange();
+    await h.tick(DRAFT_MAX_WAIT_MS);
+    expect(h.drafts).toHaveLength(0);
+
+    h.writeResult = 'written';
+    h.keeper.noteChange();
+    await h.tick(DRAFT_MAX_WAIT_MS);
+    expect(h.drafts).toHaveLength(1);
+  });
+
+  it('מסמך גדול מהמכסה מדווח למשתמש פעם אחת, ולא בכל סבב', async () => {
+    // התשובה קבועה — המסמך לא יקטן מעצמו — ולכן חזרה עליה כל עשר שניות היא
+    // הטרדה. מסמך אחר מאפס: עליו התשובה אינה ידועה.
+    const h = harness();
+    h.dirty = true;
+    h.writeResult = 'too-large';
+
+    h.keeper.noteChange();
+    await h.tick(DRAFT_MAX_WAIT_MS);
+    h.keeper.noteChange();
+    await h.tick(DRAFT_MAX_WAIT_MS);
+    expect(h.tooLargeReports).toBe(1);
+
+    h.keeper.setDocument({ token: 'other', name: 'אחר.docx', writable: true });
+    h.keeper.noteChange();
+    await h.tick(DRAFT_MAX_WAIT_MS);
+    expect(h.tooLargeReports).toBe(2);
+  });
+
+  it('כשל חולף אינו מדווח למשתמש', async () => {
+    // הסבב הבא עשוי להצליח, ואין מה להטריד בו את מי שרק מקליד.
+    const h = harness();
+    h.dirty = true;
+    h.writeResult = 'failed';
+
+    h.keeper.noteChange();
+    await h.tick(DRAFT_MAX_WAIT_MS);
+
+    expect(h.tooLargeReports).toBe(0);
   });
 
   it('שמירה מוצלחת מוחקת את הטיוטה', async () => {

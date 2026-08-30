@@ -24,7 +24,8 @@
  *
  * 3. **לעולם לא זורק.** כל מה שהמודול הזה משרת הוא רשת ביטחון: כשל בכתיבת
  *    טיוטה אינו סיבה להפיל עריכה, וכשל בקריאתה אינו סיבה שהתוסף לא יעלה.
- *    התשובה היא `false` / `null`, והפירוט הולך ללוג של אוצריא.
+ *    התשובה היא ערך מוחזר — `WorkspaceWrite` בכתיבה, `null` בקריאה — והפירוט
+ *    הולך ללוג של אוצריא.
  */
 import { tryCall } from './otzaria-client';
 import { base64ToBytes, bytesToBase64, base64Length } from './base64';
@@ -39,20 +40,36 @@ export const MAX_PAYLOAD_BYTES = 10 * 1024 * 1024;
 export const MAX_CONTENT_BYTES = Math.floor((MAX_PAYLOAD_BYTES * 3) / 4);
 
 /**
- * כותבת בייטים לקובץ במרחב הפרטי. `false` פירושו „לא נכתב” — גדול מדי, או
- * שאוצריא סירבה — ומי שקרא צריך להמשיך בלעדיו.
+ * תוצאת כתיבה. שלושה ערכים ולא `boolean`, מפני ששני מצבי הכשל שונים במה
+ * שראוי לעשות בהם:
+ *
+ * - **`too-large`** — המסמך גדול מהמכסה, וזה קבוע: כל ניסיון נוסף ייכשל
+ *   באותו אופן עד שהמסמך יקטן. מי שהבטיח למשתמש „לכל היותר דקה של עבודה
+ *   באוויר” חייב לומר לו שכאן ההבטחה אינה חלה.
+ * - **`failed`** — אוצריא סירבה, ולרוב באופן חולף (מכסה מלאה, דיסק עסוק).
+ *   הסבב הבא עשוי להצליח, ואין מה להטריד בו את המשתמש.
+ *
+ * ההבחנה יושבת כאן ולא אצל הקורא מפני שכאן היא ידועה — כאן נמדד הגודל.
+ */
+export type WorkspaceWrite = 'written' | 'too-large' | 'failed';
+
+/**
+ * כותבת בייטים לקובץ במרחב הפרטי.
  *
  * בייטים ולא `Blob`, אף שזה מה שהייצוא של המנוע מחזיר: המודול הזה מדבר עם
  * הגשר, וההמרה מ-`Blob` היא של מי שמחזיק את המנוע. כך גם אין כאן תלות
  * ב-API של `Blob` שסביבות שונות מממשות בחלקים שונים.
  */
-export async function writeWorkspaceBytes(path: string, bytes: Uint8Array): Promise<boolean> {
+export async function writeWorkspaceBytes(
+  path: string,
+  bytes: Uint8Array,
+): Promise<WorkspaceWrite> {
   if (bytes.byteLength > MAX_CONTENT_BYTES) {
     console.warn(
       `[otzaria-word] ${path} אינו נכתב למרחב הפרטי: ${bytes.byteLength} בייטים` +
         ` (${base64Length(bytes.byteLength)} ב-base64) מעל המכסה של ${MAX_PAYLOAD_BYTES}`,
     );
-    return false;
+    return 'too-large';
   }
 
   const result = await tryCall<{ path?: string }>('fs.writeFile', {
@@ -62,9 +79,9 @@ export async function writeWorkspaceBytes(path: string, bytes: Uint8Array): Prom
   });
   if (result === null) {
     console.warn(`[otzaria-word] כתיבת ${path} למרחב הפרטי נכשלה`);
-    return false;
+    return 'failed';
   }
-  return true;
+  return 'written';
 }
 
 /**

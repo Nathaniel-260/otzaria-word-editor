@@ -260,6 +260,7 @@ import {
   DRAFT_PATH,
   decideDraftRecovery,
   documentViewFor,
+  draftAgeLabel,
   normalizeSession,
   sessionFromLastDocument,
   type SessionState,
@@ -559,6 +560,14 @@ function initSessionKeeper(): SessionKeeper {
     },
     isDirty: () => save?.snapshot.isDirty === true,
     isSaving: () => save?.snapshot.isSaving === true,
+    // שגיאה ולא הודעה רגילה: זו אינה התקדמות אלא רשת ביטחון שאינה פרושה,
+    // והמשתמש צריך לדעת שעליו לשמור בעצמו.
+    onDraftTooLarge: () => {
+      setStatus(
+        'המסמך גדול מכדי לשמור ממנו עותק לשחזור — שינויים שלא יישמרו לקובץ עלולים לאבוד',
+        true,
+      );
+    },
   });
 }
 
@@ -1792,7 +1801,7 @@ async function reopenPreviousSession(session: SessionState | null): Promise<void
   const restore = documentViewFor(session, file?.token ?? null);
 
   if (await openDocument(file ?? undefined, { draft: draft ?? undefined, restore })) {
-    if (draft) setStatus('שוחזרו שינויים שלא נשמרו מההפעלה הקודמת');
+    if (draft) setStatus(restoredDraftMessage(session));
     return;
   }
 
@@ -1802,6 +1811,19 @@ async function reopenPreviousSession(session: SessionState | null): Promise<void
   // את העבודה. בהפעלה הבאה מנסים שוב, בדיוק מאותה נקודה.
   await openDocument(undefined, { remember: false });
   setStatus('המסמך האחרון לא נפתח — נפתח מסמך חדש', true);
+}
+
+/**
+ * ההודעה על שחזור, עם גיל הטיוטה כשהוא ידוע.
+ *
+ * הגיל אינו קישוט: הטיוטה נכתבת בקצב משלה ואינה בהכרח הרגע האחרון שלפני
+ * הסגירה (ראו `draftAgeLabel`). המספר הוא מה שמאפשר למשתמש לדעת מיד אם
+ * חסר לו משהו, במקום לגלות זאת מאוחר יותר.
+ */
+function restoredDraftMessage(session: SessionState | null): string {
+  const base = 'שוחזרו שינויים שלא נשמרו מההפעלה הקודמת';
+  const age = session?.draft ? draftAgeLabel(session.draft.savedAt, Date.now()) : null;
+  return age ? `${base} (נשמרו ${age})` : base;
 }
 
 /** ה-URL העדכני של הקובץ שנזכר. `null` = אינו נגיש יותר. */

@@ -15,6 +15,7 @@ import {
   decideDraftRecovery,
   defaultView,
   documentViewFor,
+  draftAgeLabel,
   emptySession,
   normalizeSession,
   sessionFromLastDocument,
@@ -182,5 +183,33 @@ describe('decideDraftRecovery', () => {
     expect(decideDraftRecovery({ draft: unsaved, openingToken: null, diskSize: null })).toEqual({
       action: 'restore',
     });
+  });
+});
+
+describe('גיל הטיוטה', () => {
+  const now = 1_700_000_000_000;
+
+  it('אומר „פחות מדקה” על טיוטה טרייה', () => {
+    expect(draftAgeLabel(now - 30_000, now)).toBe('לפני פחות מדקה');
+  });
+
+  it('נוקט לשון יחיד, זוגי ורבים כנדרש בעברית', () => {
+    expect(draftAgeLabel(now - 60_000, now)).toBe('לפני דקה');
+    expect(draftAgeLabel(now - 2 * 60_000, now)).toBe('לפני שתי דקות');
+    expect(draftAgeLabel(now - 7 * 60_000, now)).toBe('לפני 7 דקות');
+    expect(draftAgeLabel(now - 60 * 60_000, now)).toBe('לפני שעה');
+    expect(draftAgeLabel(now - 2 * 60 * 60_000, now)).toBe('לפני שעתיים');
+    expect(draftAgeLabel(now - 5 * 60 * 60_000, now)).toBe('לפני 5 שעות');
+    expect(draftAgeLabel(now - 24 * 60 * 60_000, now)).toBe('לפני יום');
+    expect(draftAgeLabel(now - 48 * 60 * 60_000, now)).toBe('לפני יומיים');
+    expect(draftAgeLabel(now - 4 * 24 * 60 * 60_000, now)).toBe('לפני 4 ימים');
+  });
+
+  it('שותק כשאין מה לומר', () => {
+    // `savedAt` שהוא 0 הוא „לא נרשם” (ראו `readDraft`), ושעון שזז אחורה בין
+    // הפעלות נותן גיל שלילי. „לפני מינוס שעה” גרוע משתיקה.
+    expect(draftAgeLabel(0, now)).toBeNull();
+    expect(draftAgeLabel(now + 60_000, now)).toBeNull();
+    expect(draftAgeLabel(Number.NaN, now)).toBeNull();
   });
 });

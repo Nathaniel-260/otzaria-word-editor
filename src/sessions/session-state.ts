@@ -267,3 +267,41 @@ export function decideDraftRecovery(input: DraftRecoveryInput): DraftDecision {
 
   return { action: 'restore' };
 }
+
+/**
+ * גיל הטיוטה במילים, או `null` כשאין מה לומר.
+ *
+ * ## למה זה נאמר בכלל
+ *
+ * הטיוטה נכתבת בקצב משלה, ולכן היא כמעט אף פעם אינה בדיוק מה שהיה על המסך
+ * ברגע הסגירה — בין השאר מפני שכתיבה שנכשלה משאירה בכוונה את הקודמת (ראו
+ * `writeDraftNow` ב-session-keeper.ts). „שוחזרו השינויים” לבדו מבטיח שלמות
+ * שאינה מובטחת, ומשתמש שיגלה זאת לבדו לא יבטח בשחזור שוב. מספר אחד — כמה
+ * זמן עבר — הופך „חלקית” לצפוי במקום למפתיע.
+ *
+ * `now` הוא פרמטר ולא `Date.now()`: זו פונקציה טהורה, וזמן שנקרא בתוכה אינו
+ * ניתן לבדיקה.
+ */
+export function draftAgeLabel(savedAt: number, now: number): string | null {
+  if (!Number.isFinite(savedAt) || savedAt <= 0) return null;
+
+  const elapsed = now - savedAt;
+  // שעון שזז אחורה בין הפעלות נותן גיל שלילי. „לפני מינוס שעה” גרוע משתיקה.
+  if (elapsed < 0) return null;
+
+  const minutes = Math.floor(elapsed / 60_000);
+  if (minutes < 1) return 'לפני פחות מדקה';
+  if (minutes === 1) return 'לפני דקה';
+  if (minutes === 2) return 'לפני שתי דקות';
+  if (minutes < 60) return `לפני ${minutes} דקות`;
+
+  const hours = Math.floor(minutes / 60);
+  if (hours === 1) return 'לפני שעה';
+  if (hours === 2) return 'לפני שעתיים';
+  if (hours < 24) return `לפני ${hours} שעות`;
+
+  const days = Math.floor(hours / 24);
+  if (days === 1) return 'לפני יום';
+  if (days === 2) return 'לפני יומיים';
+  return `לפני ${days} ימים`;
+}

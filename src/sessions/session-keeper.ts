@@ -33,6 +33,10 @@
  *   פירושה שהפתיחה הבאה תעדיף עותק ישן על פני הקובץ עצמו.
  * - **`discardDraft`** — המשתמש אמר במפורש „למחוק את השינויים”.
  *
+ * **כתיבה שנכשלה אינה מוחקת.** טיוטה שעל הדיסק מאוחרת תמיד לשמירה האחרונה,
+ * ולכן היא מחזיקה עבודה שאין בקובץ. „ישנה” היא ביחס למה שעל המסך, לא ביחס
+ * לדיסק — ומולו היא תמיד החדשה מבין השתיים.
+ *
  * **מעבר מסמך אינו מוחק.** זה נראה סביר — ובפועל השמיד עבודה בשלושה מסלולים
  * שאיש לא התכוון אליהם: פתיחה שנכשלה ונפלה למסמך ריק, טיוטה של מסמך אחר
  * שהמשתמש עוד יחזור אליו, ותשובת „לא” לשאלה על קובץ שהשתנה מבחוץ. בשלושתם
@@ -47,6 +51,7 @@
  * דקה של עבודה נמצאת באוויר**, מול ברירת המחדל של Word שהיא עשר דקות.
  */
 import type { CaretAnchor } from '../engine/caret-anchor';
+import type { WorkspaceWrite } from '../host/workspace';
 import {
   emptySession,
   type SessionDocument,
@@ -75,8 +80,8 @@ export interface SessionKeeperDeps {
   persist: (state: SessionState) => Promise<void>;
   /** מייצא את המסמך הפעיל, לטיוטה. */
   exportDocument: () => Promise<Blob>;
-  /** כותבת את הטיוטה. `false` = לא נכתבה (גדולה מדי, או כשל). */
-  writeDraft: (content: Blob) => Promise<boolean>;
+  /** כותבת את הטיוטה, ומדווחת אם לא נכתבה ומדוע. */
+  writeDraft: (content: Blob) => Promise<WorkspaceWrite>;
   /** מוחקת את קובץ הטיוטה. */
   removeDraft: () => Promise<void>;
   /** הנתיב שהטיוטה נכתבת אליו. נשמר ברשומה כדי שהפתיחה הבאה תדע איפה לחפש. */
@@ -90,6 +95,15 @@ export interface SessionKeeperDeps {
   isDirty: () => boolean;
   /** האם שמירה רצה כרגע. ייצוא נוסף בזמן הזה נדחה ואינו מבוטל. */
   isSaving: () => boolean;
+  /**
+   * נקרא כשמסמך גדול מהמכסה, ולכן אין לו טיוטה כלל.
+   *
+   * זו אינה תקלה חולפת אלא תכונה של המסמך, ולכן היא מדווחת: ההבטחה של
+   * המודול הזה — „לכל היותר דקה של עבודה באוויר” — פשוט אינה חלה כאן, ומי
+   * שאינו יודע זאת בוטח ברשת ביטחון שאינה פרושה. פעם אחת לכל מסמך, מפני
+   * שהתשובה קבועה וחזרה עליה כל עשר שניות היא הטרדה.
+   */
+  onDraftTooLarge?: () => void;
 }
 
 export interface SetDocumentOptions {
@@ -144,6 +158,9 @@ export function createSessionKeeper(deps: SessionKeeperDeps): SessionKeeper {
 
   /** גודל הקובץ בדיסק, כפי שדווח בפתיחה או בשמירה האחרונה. */
   let sourceSize: number | null = null;
+
+  /** האם כבר נאמר על המסמך הזה שהוא גדול מכדי שתיכתב לו טיוטה. */
+  let reportedTooLarge = false;
 
   /**
    * המועד שאחריו אסור לדחות עוד את כתיבת הטיוטה. `null` = אין עבודה שממתינה
@@ -231,12 +248,23 @@ export function createSessionKeeper(deps: SessionKeeperDeps): SessionKeeper {
     const written = await deps.writeDraft(exported);
     if (disposed || mine !== epoch) return;
 
-    if (!written) {
-      // כתיבה שנכשלה משאירה על הדיסק טיוטה **ישנה יותר**, ופתיחה שתעדיף
-      // אותה על הקובץ היא נזק ולא שחזור. מוחקים, וממשיכים בלי טיוטה.
-      await deps.removeDraft();
-      state = { ...state, draft: null };
-      await persistNow();
+    if (written !== 'written') {
+      /**
+       * הטיוטה הקודמת **נשארת**, ובכוונה.
+       *
+       * טיוטה שעל הדיסק מאוחרת תמיד לשמירה האחרונה — `noteSaved` מוחק אותה
+       * בכל שמירה — ולכן היא מחזיקה עבודה שאין בקובץ. „ישנה” כאן היא ביחס
+       * למה שעל המסך, לא ביחס לדיסק; מולו היא תמיד החדשה מבין השתיים.
+       * מחיקתה בגלל כתיבה שנכשלה הייתה משמידה את העבודה היחידה ששרדה, וזה
+       * ההפך הגמור ממה שהמודול הזה קיים בשבילו. גיל הטיוטה נאמר למשתמש
+       * בשחזור (`savedAt`), וכך „חלקית” אינה מגיעה בהפתעה.
+       *
+       * `draftedRevision` אינו מתקדם, ולכן הסבב הבא ינסה שוב את אותה עבודה.
+       */
+      if (written === 'too-large' && !reportedTooLarge) {
+        reportedTooLarge = true;
+        deps.onDraftTooLarge?.();
+      }
       return;
     }
 
@@ -293,6 +321,7 @@ export function createSessionKeeper(deps: SessionKeeperDeps): SessionKeeper {
       revision = 0;
       draftedRevision = 0;
       sourceSize = size;
+      reportedTooLarge = false;
 
       /**
        * הסמן נמחק רק כשהמסמך באמת התחלף.
