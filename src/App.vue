@@ -204,6 +204,7 @@ import {
 import { createEditorSwap, type EditorSwap } from './sessions/editor-swap';
 import { createSaveCoordinator, type SaveCoordinator, type SaveSnapshot } from './sessions/save-coordinator';
 import { createEditor, type EditorSession } from './engine/create-editor';
+import { preflightSource } from './engine/docx-preflight';
 import {
   anchorPageIndex,
   createDocMetrics,
@@ -636,7 +637,13 @@ async function openDocument(file?: UserFile, options: OpenOptions = {}): Promise
   const startedAt = performance.now();
   setStatus(file ? `פותח את ${file.name}…` : 'פותח מסמך ריק…');
 
-  const outcome = await swap.open(options.draft ?? file?.url);
+  // לפני המנוע ולא אחריו: ערך אחד ב-`word/settings.xml` שולח אותו ללולאה על
+  // החוט הראשי, ומשם אין חזרה — גם `OPEN_TIMEOUT_MS` אינו יכול לירות. ראו
+  // engine/docx-preflight.ts. השלב הזה אינו יכול להיכשל: הוא מחזיר את המקור
+  // כמות שהוא בכל מקרה שאינו „מצאתי בדיוק את הערך הזה”.
+  const source = await preflightSource(options.draft ?? file?.url);
+
+  const outcome = await swap.open(source);
   isOpening.value = swap.isOpening;
 
   if (outcome.status === 'superseded') return false;
