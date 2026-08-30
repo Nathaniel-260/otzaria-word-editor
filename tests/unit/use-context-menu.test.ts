@@ -26,7 +26,13 @@ interface Fake {
 }
 
 function fakeSuperdoc(
-  over: { rects?: readonly unknown[]; anchor?: unknown; caret?: boolean; objectSelection?: boolean } = {},
+  over: {
+    rects?: readonly unknown[];
+    anchor?: unknown;
+    caret?: boolean;
+    objectSelection?: boolean;
+    throwOnRects?: boolean;
+  } = {},
 ): Fake {
   const applyCalls: unknown[] = [];
   // סמן מכווץ: אין טווח ואין טקסט, כלומר אין מה לאבד בהזזת הסמן.
@@ -47,7 +53,10 @@ function fakeSuperdoc(
   const host = {
     ui: {
       selection: {
-        getRects: () => over.rects ?? [SELECTION_RECT],
+        getRects: () => {
+          if (over.throwOnRects) throw new Error('boom');
+          return over.rects ?? [SELECTION_RECT];
+        },
         getAnchorRect: () => over.anchor ?? { top: 300, bottom: 320, left: 400, right: 420 },
       },
     },
@@ -208,6 +217,18 @@ describe('הזזת הסמן', () => {
 
     expect(seen).toEqual([]);
     expect(controller.isOpen.value).toBe(true);
+  });
+
+  it('getRects שזורק נבלע לטובת „אין גיאומטריה”, ומדווח ללוג', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { controller, documentArea } = setup({}, fakeSuperdoc({ caret: true, throwOnRects: true }));
+    document.elementFromPoint = () => documentArea;
+
+    controller.handleContextMenu(rightClick(documentArea, { x: 150, y: 150 }));
+    await settle();
+
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
   });
 
   it('בחירת אובייקט (תא טבלה/תמונה) אינה נהרסת, גם ש-hasRange ו-text שקריים', async () => {

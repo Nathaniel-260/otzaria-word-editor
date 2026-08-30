@@ -109,8 +109,11 @@ function rectsOf(superdoc: SuperDoc | null): readonly ViewportRectLike[] {
   if (typeof handle?.getRects !== 'function') return [];
   try {
     return handle.getRects() ?? [];
-  } catch {
-    // גיאומטריה שאינה זמינה אינה סיבה לא לפתוח תפריט.
+  } catch (error) {
+    // גיאומטריה שאינה זמינה אינה סיבה לא לפתוח תפריט — אבל כן סיבה ללוג,
+    // כמו בכל שאילתת engine אופציונלית אחרת (doc-metrics.ts, caret-anchor.ts,
+    // readout-hold.ts).
+    console.warn('[otzaria-word] קריאת מלבני הבחירה נכשלה', error);
     return [];
   }
 }
