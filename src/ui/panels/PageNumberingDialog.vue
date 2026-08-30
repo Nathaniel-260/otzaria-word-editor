@@ -19,7 +19,8 @@
         <button
           type="button"
           class="pn-close-btn"
-          title="סגור (Esc)"
+          data-tip-title="סגור"
+          data-tip-shortcut="Esc"
           aria-label="סגור את עיצוב מספרי העמודים"
           @click="$emit('close')"
         >

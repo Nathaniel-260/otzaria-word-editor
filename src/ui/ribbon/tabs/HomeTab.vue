@@ -11,7 +11,7 @@
         :disabled="!canPaste"
         @click="doPaste"
       />
-      <div class="column-items">
+      <RibbonStack>
         <RibbonButton
           icon="cut"
           label="גזור"
@@ -40,7 +40,7 @@
           :disabled="!formatPainterCmd.enabled.value"
           @click="formatPainterCmd.run()"
         />
-      </div>
+      </RibbonStack>
     </RibbonGroup>
 
     <!-- קבוצה 2: גופן -->
@@ -107,7 +107,6 @@
         <RibbonButton
           label="מתקדם"
           variant="small"
-          tooltip="גופן מתקדם: ריווח תווים, מיקום, אפקטים וגופן מורכב"
           description="ריווח תווים, מיקום ביחס לשורה, אפקטים וגופן מורכב"
           :disabled="fontAdvInFlight"
           @click="onOpenFontAdvanced"
@@ -203,23 +202,43 @@
     >
       <!-- שורה עליונה: תבליטים, מספור, הזחה, כיווניות, סימני עיצוב -->
       <div class="word-group-row">
-        <RibbonButton
+        <!--
+          „תבליטים” ו„מספור” הם כפתורים מפוצלים: הגוף מחיל את הרשימה, והחץ
+          פותח את פעולות הרשימה. עד עכשיו הן ישבו בכפתור „רשימה” נפרד לצדם —
+          שלושה פקדים לדבר אחד, ומי שרצה מספור עברי היה צריך לדעת שהוא מסתתר
+          מאחורי כפתור שאינו הכפתור שיצר את הרשימה.
+        -->
+        <RibbonMenuButton
+          split
           icon="bulletList"
+          label="תבליטים"
           variant="icon-only"
           tooltip="תבליטים"
           description="הופך את הפסקאות המסומנות לרשימה מסומנת בנקודות"
+          menu-tooltip="פעולות תבליטים"
+          :menu-description="bulletMenuHint"
           :active="bulletCmd.active.value"
-          :disabled="!bulletCmd.enabled.value"
-          @click="bulletCmd.run()"
+          :action-disabled="!bulletCmd.enabled.value"
+          :disabled="!listsAvailable"
+          :items="bulletMenuItems"
+          @action="bulletCmd.run()"
+          @select="onListMenuSelect"
         />
-        <RibbonButton
+        <RibbonMenuButton
+          split
           icon="numberList"
+          label="מספור"
           variant="icon-only"
           tooltip="מספור"
           description="הופך את הפסקאות המסומנות לרשימה ממוספרת"
+          menu-tooltip="פעולות מספור"
+          :menu-description="numberMenuHint"
           :active="numberedCmd.active.value"
-          :disabled="!numberedCmd.enabled.value"
-          @click="numberedCmd.run()"
+          :action-disabled="!numberedCmd.enabled.value"
+          :disabled="!listsAvailable"
+          :items="numberMenuItems"
+          @action="numberedCmd.run()"
+          @select="onListMenuSelect"
         />
         <RibbonButton
           icon="indentDecrease"
@@ -238,20 +257,6 @@
           shortcut-id="indent-increase"
           :disabled="!indentIncCmd.enabled.value"
           @click="indentIncCmd.run()"
-        />
-
-        <!--
-          „רשימה" (גל 14א) — פעולות שאין להן פקודה ברצועה: מספור עברי
-          (hebrew1 — נמדד שנכתב ל-numbering.xml), התחלה מחדש, המשך מספור
-          קודם והמרה לטקסט. „המר לטקסט" בלתי-הפיך ולכן דורש לחיצה שנייה.
-        -->
-        <RibbonMenuButton
-          icon="numberList"
-          label="רשימה"
-          :tooltip="listsTooltip"
-          :disabled="!listsAvailable"
-          :items="listMenuItems"
-          @select="onListMenuSelect"
         />
 
         <div class="word-separator" />
@@ -378,7 +383,7 @@
 
     <!-- קבוצה 5: עריכה -->
     <RibbonGroup title="עריכה">
-      <div class="column-items">
+      <RibbonStack>
         <RibbonButton
           icon="search"
           label="חפש"
@@ -410,7 +415,7 @@
           :disabled="!canSelectAll"
           @click="doSelectAll"
         />
-      </div>
+      </RibbonStack>
     </RibbonGroup>
 
     <ParagraphDialog
@@ -438,6 +443,7 @@
 import { computed, inject, onUnmounted, ref, shallowRef, watch, type Ref } from 'vue';
 import type { SuperDoc } from 'superdoc';
 import RibbonGroup from '../common/RibbonGroup.vue';
+import RibbonStack from '../common/RibbonStack.vue';
 import RibbonButton from '../common/RibbonButton.vue';
 import RibbonMenuButton from '../common/RibbonMenuButton.vue';
 import RibbonSelect, { type SelectOption } from '../common/RibbonSelect.vue';
@@ -1196,20 +1202,64 @@ const convertArmed = shallowRef(false);
 
 const listsAvailable = computed(() => capabilities.value?.can('canManageLists') ?? false);
 
-const listMenuItems = computed(() => [
-  ...Object.entries(NUMBER_STYLE_LABELS).map(([id, label]) => ({ id: `style:${id}`, label })),
+/**
+ * סדר סגנונות המספור בתפריט — עברי ראשון.
+ *
+ * `NUMBER_STYLE_LABELS` הוא מפה, וסדר ההכנסה שלה הוא סדר ה-`numFmt` של
+ * ECMA-376: `decimal` בראש ו-`hebrew1` שישי. זה הסדר הנכון למי שקורא את
+ * התקן, ולא למי שכותב כאן מסמך — ולכן הסדר לתצוגה נכתב במפורש, ואינו נגזר
+ * מסדר המפה. `bullet` אינו כאן: הוא התפריט של „תבליטים”, לא של „מספור”.
+ */
+const NUMBER_STYLE_ORDER = [
+  'hebrew1',
+  'hebrew2',
+  'decimal',
+  'upperLetter',
+  'lowerLetter',
+  'upperRoman',
+  'lowerRoman',
+] as const;
+
+/** „המר לטקסט” — אותו פריט בשני התפריטים, כולל מצב החימוש. */
+const convertItem = computed(() => ({
+  id: 'convert',
+  label: convertArmed.value ? 'לחץ שוב לאישור — הפעולה בלתי-הפיכה' : 'המר לטקסט…',
+}));
+
+const numberMenuItems = computed(() => [
+  ...NUMBER_STYLE_ORDER.map((id) => ({ id: `style:${id}`, label: NUMBER_STYLE_LABELS[id] })),
   { id: 'restart', label: 'התחל מחדש מ-1' },
   { id: 'continue', label: 'המשך מספור קודם' },
-  {
-    id: 'convert',
-    label: convertArmed.value ? 'לחץ שוב לאישור — הפעולה בלתי-הפיכה' : 'המר לטקסט…',
-  },
+  convertItem.value,
 ]);
 
-const listsTooltip = computed(() => {
-  if (!listsAvailable.value) return capabilities.value?.explain('canManageLists') || 'המסמך עדיין נטען';
-  return 'פעולות רשימה: סגנון מספור (כולל עברי), התחלה מחדש והמרה לטקסט';
-});
+/**
+ * התפריט של „תבליטים”. `style:bullet` אינו כפילות של הכפתור שמעליו: הכפתור
+ * מחיל רשימה על פסקאות, וזה מחליף את סגנון המספור של רשימה **קיימת** —
+ * כלומר הדרך להפוך רשימה ממוספרת לתבליטים בלי לפרק אותה ולבנות מחדש.
+ */
+const bulletMenuItems = computed(() => [
+  { id: 'style:bullet', label: 'הפוך רשימה ממוספרת לתבליטים' },
+  convertItem.value,
+]);
+
+/**
+ * שורת ההסבר בטולטיפ של חץ התפריט — מה יש בו, ובמצב מנוטרל למה אין. השם
+ * עצמו („פעולות תבליטים” / „פעולות מספור”) קבוע ואינו מתחלף בין המצבים: הוא
+ * גם השם הנגיש של החץ, וגם הידית שבה שערי ה-QA מאתרים אותו.
+ */
+function listsMenuHint(available: string): string {
+  if (listsAvailable.value) return available;
+  return capabilities.value?.explain('canManageLists') || 'המסמך עדיין נטען';
+}
+
+const bulletMenuHint = computed(() =>
+  listsMenuHint('החלפת רשימה ממוספרת לתבליטים, והמרה לטקסט'),
+);
+
+const numberMenuHint = computed(() =>
+  listsMenuHint('סגנון מספור (כולל עברי), התחלה מחדש והמרה לטקסט'),
+);
 
 async function runList(action: () => Promise<CommandOutcome>): Promise<void> {
   if (listsInFlight.value) return;
@@ -1222,6 +1272,10 @@ async function runList(action: () => Promise<CommandOutcome>): Promise<void> {
 }
 
 function onListMenuSelect(id: string): void {
+  // כל פעולה שאינה „המר לטקסט” מנטרלת את החימוש שלו: המשתמש עשה משהו אחר
+  // בינתיים, ולחיצה הבאה על „המר” חייבת להיות שוב לחיצה ראשונה.
+  if (id !== 'convert') convertArmed.value = false;
+
   if (id.startsWith('style:')) {
     const style = id.slice('style:'.length);
     void runList(() => setListNumberStyle(superdoc.value, style));
@@ -1240,7 +1294,8 @@ function onListMenuSelect(id: string): void {
 
   if (id === 'convert') {
     // אישור דו-לחיצה: הפעולה בלתי-הפיכה (נמדד). לחיצה ראשונה חומשת,
-    // שנייה מבצעת; מעבר בין פתיחות התפריט מנטרל את החימוש.
+    // שנייה מבצעת. כל בחירה אחרת בדרך מנטרלת (ראו למעלה) — אחרת „המר
+    // לטקסט” היה נשאר חמוש בשני התפריטים עד סוף החיים של הלשונית.
     if (!convertArmed.value) {
       convertArmed.value = true;
       return;
@@ -1258,13 +1313,5 @@ function onListMenuSelect(id: string): void {
   gap: 0;
   height: 100%;
   width: 100%;
-}
-
-.column-items {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  justify-content: center;
-  flex-shrink: 0;
 }
 </style>

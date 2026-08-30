@@ -10,7 +10,7 @@
       <div
         v-if="pageText"
         class="status-item"
-        title="עמודי המסמך"
+        data-tip-title="עמודי המסמך"
       >
         <span>{{ pageText }}</span>
       </div>
@@ -21,7 +21,7 @@
       <div
         v-if="wordText"
         class="status-item"
-        title="מספר מילים במסמך"
+        data-tip-title="מספר מילים במסמך"
       >
         <span>{{ wordText }}</span>
       </div>
@@ -46,7 +46,8 @@
           class="sb-icon-btn"
           :class="{ active: isFocusMode }"
           :aria-pressed="isFocusMode"
-          title="מצב מיקוד"
+          data-tip-title="מצב מיקוד"
+          aria-label="מצב מיקוד"
           @pointerdown.prevent
           @click="$emit('toggle-focus')"
         >
@@ -64,7 +65,8 @@
         <button
           type="button"
           class="zoom-step-btn"
-          title="הקטן תצוגה"
+          data-tip-title="הקטן תצוגה"
+          aria-label="הקטן תצוגה"
           :disabled="zoomLevel <= zoomMin"
           @pointerdown.prevent
           @click="stepZoom(-ZOOM_STEP)"
@@ -78,14 +80,15 @@
           :step="ZOOM_STEP"
           :value="zoomLevel"
           class="zoom-slider"
-          title="שינוי גודל תצוגה"
+          data-tip-title="שינוי גודל תצוגה"
           aria-label="גודל תצוגה באחוזים"
           @input="onZoomSliderChange"
         >
         <button
           type="button"
           class="zoom-step-btn"
-          title="הגדל תצוגה"
+          data-tip-title="הגדל תצוגה"
+          aria-label="הגדל תצוגה"
           :disabled="zoomLevel >= zoomMax"
           @pointerdown.prevent
           @click="stepZoom(ZOOM_STEP)"
@@ -95,7 +98,8 @@
         <button
           type="button"
           class="zoom-pct-btn"
-          title="אפס ל-100%"
+          data-tip-title="אפס ל-100%"
+          aria-label="אפס ל-100%"
           @pointerdown.prevent
           @click="resetZoom"
         >

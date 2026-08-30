@@ -203,7 +203,7 @@ function makeCtx(app) {
   async function clickStyle(label) {
     const raw = await js(`(() => {
       const card = Array.from(document.querySelectorAll('.style-card'))
-        .find(c => (c.getAttribute('title') || '') === ${JSON.stringify(label)});
+        .find(c => (c.getAttribute('data-tip-title') || '') === ${JSON.stringify(label)});
       if (!card) return 'null';
       card.scrollIntoView({ block: 'nearest', inline: 'center' });
       const r = card.getBoundingClientRect();

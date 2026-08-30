@@ -16,13 +16,13 @@
  */
 import { describe, expect, it } from 'vitest';
 import HomeTab from '../../src/ui/ribbon/tabs/HomeTab.vue';
-import { autoUnmount, buttonByTitle, createCommandDouble, mountUi, settle } from './harness';
+import { autoUnmount, buttonByTip, createCommandDouble, mountUi, settle } from './harness';
 
 autoUnmount();
 
 /** מה שהבורר מציג בפועל ב-DOM. */
 function shown(harness: ReturnType<typeof mountUi>, title: string): string {
-  const select = harness.wrapper.find(`select[title="${title}"]`);
+  const select = harness.wrapper.find(`select[data-tip-title="${title}"]`);
   return (select.element as HTMLSelectElement).value;
 }
 
@@ -38,7 +38,7 @@ describe('מסמך שדוחה את הפקודה', () => {
     await settle();
     expect(shown(harness, 'גופן')).toBe('Assistant');
 
-    await harness.wrapper.find('select[title="גופן"]').setValue('TaameyDavidCLM');
+    await harness.wrapper.find('select[data-tip-title="גופן"]').setValue('TaameyDavidCLM');
     await settle();
 
     // הכשל דווח למשתמש (זה עבד), אבל התיבה הציגה גופן שלא הוחל על כלום.
@@ -54,7 +54,7 @@ describe('מסמך שדוחה את הפקודה', () => {
     await settle();
     expect(shown(harness, 'גודל גופן')).toBe('20');
 
-    await harness.wrapper.find('select[title="גודל גופן"]').setValue('36');
+    await harness.wrapper.find('select[data-tip-title="גודל גופן"]').setValue('36');
     await settle();
 
     expect(shown(harness, 'גודל גופן')).toBe('20');
@@ -65,7 +65,7 @@ describe('מסמך שדוחה את הפקודה', () => {
     await settle();
     const before = shown(harness, 'מרווח בין שורות');
 
-    await harness.wrapper.find('select[title="מרווח בין שורות"]').setValue('3.0');
+    await harness.wrapper.find('select[data-tip-title="מרווח בין שורות"]').setValue('3.0');
     await settle();
 
     expect(shown(harness, 'מרווח בין שורות')).toBe(before);
@@ -77,7 +77,7 @@ describe('מסמך שדוחה את הפקודה', () => {
     await settle();
 
     for (let click = 0; click < 3; click += 1) {
-      await buttonByTitle(harness.wrapper, 'הגדל גופן').trigger('click');
+      await buttonByTip(harness.wrapper, 'הגדל גופן').trigger('click');
       await settle();
     }
 
@@ -94,7 +94,7 @@ describe('מסמך שדוחה את הפקודה', () => {
     await settle();
 
     for (let click = 0; click < 3; click += 1) {
-      await buttonByTitle(harness.wrapper, 'הקטן גופן').trigger('click');
+      await buttonByTip(harness.wrapper, 'הקטן גופן').trigger('click');
       await settle();
     }
 
@@ -110,7 +110,7 @@ describe('מסמך שמקבל את הפקודה', () => {
     const harness = mountUi(HomeTab);
     await settle();
 
-    await harness.wrapper.find('select[title="גופן"]').setValue('Rubik');
+    await harness.wrapper.find('select[data-tip-title="גופן"]').setValue('Rubik');
     await settle();
 
     expect(harness.adapter.payloads('font-family')).toEqual(['Rubik']);
@@ -124,7 +124,7 @@ describe('מסמך שמקבל את הפקודה', () => {
     await settle();
 
     for (let click = 0; click < 3; click += 1) {
-      await buttonByTitle(harness.wrapper, 'הגדל גופן').trigger('click');
+      await buttonByTip(harness.wrapper, 'הגדל גופן').trigger('click');
       await settle();
     }
 
@@ -138,7 +138,7 @@ describe('מה שהמנוע מדווח', () => {
     const harness = mountUi(HomeTab, { adapter });
     await settle();
 
-    await harness.wrapper.find('select[title="גופן"]').setValue('Rubik');
+    await harness.wrapper.find('select[data-tip-title="גופן"]').setValue('Rubik');
     await settle();
 
     // הסמן זז לטקסט אחר, והמנוע דיווח גופן אחר.
@@ -186,7 +186,7 @@ describe('בחירה שנייה בזמן שהראשונה באוויר', () => {
     const harness = mountUi(HomeTab, { adapter });
     await settle();
 
-    const select = harness.wrapper.find('select[title="גופן"]');
+    const select = harness.wrapper.find('select[data-tip-title="גופן"]');
     await select.setValue('Rubik');
     await settle();
     expect(shown(harness, 'גופן')).toBe('Rubik');

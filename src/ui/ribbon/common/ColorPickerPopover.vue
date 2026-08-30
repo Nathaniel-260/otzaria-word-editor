@@ -10,7 +10,8 @@
       <button
         type="button"
         class="color-main-btn"
-        :title="menuString(title)"
+        :data-tip-title="menuString(title)"
+        :aria-label="menuString(title)"
         :disabled="disabled"
         @pointerdown.prevent
         @click="applyCurrentColor"
@@ -28,7 +29,8 @@
         type="button"
         class="color-arrow-btn"
         :disabled="disabled"
-        :title="menuString('בחירת צבע')"
+        :data-tip-title="menuString('בחירת צבע')"
+        :aria-label="menuString('בחירת צבע')"
         @pointerdown.prevent
         @click="toggleDropdown"
       >
@@ -84,7 +86,8 @@
               class="color-swatch"
               :class="{ selected: modelValue?.toLowerCase() === hex.toLowerCase() }"
               :style="{ backgroundColor: hex }"
-              :title="hex"
+              :data-tip-title="hex"
+              :aria-label="hex"
               @pointerdown.prevent
               @click="selectColor(hex)"
             />
@@ -105,7 +108,8 @@
             class="color-swatch"
             :class="{ selected: modelValue?.toLowerCase() === hex.toLowerCase() }"
             :style="{ backgroundColor: hex }"
-            :title="hex"
+            :data-tip-title="hex"
+            :aria-label="hex"
             @pointerdown.prevent
             @click="selectColor(hex)"
           />
@@ -247,7 +251,10 @@ onUnmounted(() => {
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
   transition: background 0.08s, border-color 0.08s;
-  height: 24px;
+  /* אותה שורה כמו `.btn-icon-only` ו-`RibbonSelect`: הפקד הזה יושב איתם
+     באותה `.word-group-row` ב„גופן”, ו-24px קשיח היה משאיר אותו גבוה מהם
+     בשתי נקודות. ראו tokens.css. */
+  height: var(--ribbon-row-h);
 }
 
 .color-btn-wrapper:hover {

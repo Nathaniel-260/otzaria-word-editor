@@ -24,7 +24,7 @@ import TablePicker from '../../src/ui/ribbon/common/TablePicker.vue';
 import StyleGallery from '../../src/ui/ribbon/common/StyleGallery.vue';
 import { GALLERY_SCROLL_STEP_PX, type StyleGalleryState } from '../../src/engine/style-gallery';
 import { POPOVER_GAP_PX } from '../../src/composables/popover-position';
-import { autoUnmount, clickOutside, mountUi, settle } from './harness';
+import { autoUnmount, clickOutside, mountUi, settle, tipOf } from './harness';
 
 autoUnmount();
 
@@ -64,7 +64,7 @@ describe('StyleGallery', () => {
     const harness = mountUi(StyleGallery);
     await settle();
 
-    expect(harness.wrapper.findAll('.style-card').map((card) => card.attributes('title'))).toEqual([
+    expect(harness.wrapper.findAll('.style-card').map((card) => tipOf(card).title)).toEqual([
       'רגיל',
       'ללא מרווח',
       'כותרת 1',
@@ -79,7 +79,7 @@ describe('StyleGallery', () => {
     await settle();
 
     const cards = harness.wrapper.findAll('.style-card');
-    expect(cards.map((card) => card.attributes('title'))).toEqual([
+    expect(cards.map((card) => tipOf(card).title)).toEqual([
       'Normal',
       'Heading1',
       'סגנון של המסמך',
@@ -110,7 +110,7 @@ describe('StyleGallery', () => {
       .findAll('.style-card')
       .filter((card) => card.attributes('aria-pressed') === 'true');
     expect(pressed).toHaveLength(1);
-    expect(pressed[0].attributes('title')).toBe('כותרת 2');
+    expect(tipOf(pressed[0]).title).toBe('כותרת 2');
   });
 
   it('לחיצה פולטת את מזהה הסגנון — לא את התווית', async () => {
@@ -203,7 +203,7 @@ describe('ColorPickerPopover', () => {
     await open(harness);
 
     expect(harness.wrapper.find('.color-palette-popover').exists()).toBe(true);
-    await harness.wrapper.find('.color-swatch[title="#c00000"]').trigger('click');
+    await harness.wrapper.find('.color-swatch[data-tip-title="#c00000"]').trigger('click');
     await settle();
 
     expect(harness.wrapper.emitted('change')).toEqual([['#c00000']]);

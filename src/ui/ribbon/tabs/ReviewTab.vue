@@ -50,25 +50,34 @@
       />
     </RibbonGroup>
 
-    <!-- שינויים -->
+    <!--
+      „שינויים”. שני הפקדים על השינוי הנוכחי גדולים, ושני פקדי „הכל” במחסנית
+      לצידם — הצורה של Word, שם „קבל” ו„דחה” הם שני כפתורים גדולים ווריאנטי
+      „הכל” יושבים בתפריט שמתחתם.
+
+      זו גם הקבוצה שבגללה כל הרצועה קפצה: היא החזיקה מחסנית של **ארבעה**
+      כפתורים קטנים (102px), הרצועה כאן יצאה 126px מול 96px בכל שאר הלשוניות,
+      והמסמך זז 30px בכל כניסה ויציאה מהלשונית. ארבעה בעמודה אחת גם לא היה
+      קריא: „קבל/דחה/קבל הכל/דחה הכל” הוא סולם, ולא שני צמדים.
+    -->
     <RibbonGroup title="שינויים">
-      <div class="column-items">
-        <RibbonButton
-          icon="accept"
-          label="קבל שינוי"
-          variant="small"
-          tooltip="קבלת השינוי הנוכחי"
-          :disabled="!acceptCmd.enabled.value"
-          @click="acceptCmd.run()"
-        />
-        <RibbonButton
-          icon="reject"
-          label="דחה שינוי"
-          variant="small"
-          tooltip="דחיית השינוי הנוכחי"
-          :disabled="!rejectCmd.enabled.value"
-          @click="rejectCmd.run()"
-        />
+      <RibbonButton
+        icon="accept"
+        label="קבל שינוי"
+        variant="large"
+        tooltip="קבלת השינוי הנוכחי"
+        :disabled="!acceptCmd.enabled.value"
+        @click="acceptCmd.run()"
+      />
+      <RibbonButton
+        icon="reject"
+        label="דחה שינוי"
+        variant="large"
+        tooltip="דחיית השינוי הנוכחי"
+        :disabled="!rejectCmd.enabled.value"
+        @click="rejectCmd.run()"
+      />
+      <RibbonStack>
         <RibbonButton
           icon="accept"
           label="קבל את כל השינויים"
@@ -85,7 +94,7 @@
           :disabled="!rejectAllCmd.enabled.value"
           @click="rejectAllCmd.run()"
         />
-      </div>
+      </RibbonStack>
     </RibbonGroup>
   </div>
 </template>
@@ -125,6 +134,7 @@
  */
 import { computed, inject, ref, shallowRef, watch } from 'vue';
 import RibbonGroup from '../common/RibbonGroup.vue';
+import RibbonStack from '../common/RibbonStack.vue';
 import RibbonButton from '../common/RibbonButton.vue';
 import { useCommand } from '../../../composables/useCommand';
 import {
@@ -250,13 +260,5 @@ function onToggleTrackChanges(): void {
   align-items: stretch;
   gap: 0;
   height: 100%;
-}
-
-.column-items {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  justify-content: center;
-  flex-shrink: 0;
 }
 </style>

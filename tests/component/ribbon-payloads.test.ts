@@ -19,7 +19,7 @@ import InsertTab from '../../src/ui/ribbon/tabs/InsertTab.vue';
 import ReviewTab from '../../src/ui/ribbon/tabs/ReviewTab.vue';
 import ViewTab from '../../src/ui/ribbon/tabs/ViewTab.vue';
 import ColorPickerPopover from '../../src/ui/ribbon/common/ColorPickerPopover.vue';
-import { autoUnmount, buttonByTitle, createCommandDouble, mountUi, settle } from './harness';
+import { autoUnmount, buttonByTip, createCommandDouble, mountUi, settle, tipSelector } from './harness';
 
 autoUnmount();
 
@@ -28,7 +28,7 @@ describe('גופן', () => {
     const harness = mountUi(HomeTab);
     await settle();
 
-    await harness.wrapper.find('select[title="גופן"]').setValue('TaameyDavidCLM');
+    await harness.wrapper.find('select[data-tip-title="גופן"]').setValue('TaameyDavidCLM');
     await settle();
 
     expect(harness.adapter.payloads('font-family')).toEqual(['TaameyDavidCLM']);
@@ -39,7 +39,7 @@ describe('גופן', () => {
     const harness = mountUi(HomeTab);
     await settle();
 
-    await harness.wrapper.find('select[title="גודל גופן"]').setValue('16');
+    await harness.wrapper.find('select[data-tip-title="גודל גופן"]').setValue('16');
     await settle();
 
     expect(harness.adapter.payloads('font-size')).toEqual([16]);
@@ -55,8 +55,8 @@ describe('גופן', () => {
     const harness = mountUi(HomeTab, { adapter });
     await settle();
 
-    await buttonByTitle(harness.wrapper, 'הגדל גופן').trigger('click');
-    await buttonByTitle(harness.wrapper, 'הקטן גופן').trigger('click');
+    await buttonByTip(harness.wrapper, 'הגדל גופן').trigger('click');
+    await buttonByTip(harness.wrapper, 'הקטן גופן').trigger('click');
     await settle();
 
     // סולם הגדלים של Word: מעל 20 בא 24, ומתחת ל-20 בא 18.
@@ -71,8 +71,8 @@ describe('צבע', () => {
 
     // בורר צבע הגופן הוא השני; הראשון הוא צבע הסימון.
     const picker = harness.wrapper.findAllComponents(ColorPickerPopover)[1];
-    await picker.find('button[title="בחירת צבע"]').trigger('click');
-    await picker.find('button[title="#c00000"]').trigger('click');
+    await picker.find('button[data-tip-title="בחירת צבע"]').trigger('click');
+    await picker.find('button[data-tip-title="#c00000"]').trigger('click');
     await settle();
 
     expect(harness.adapter.payloads('text-color')).toEqual([{ value: '#C00000' }]);
@@ -86,7 +86,7 @@ describe('צבע', () => {
     await settle();
 
     const picker = harness.wrapper.findAllComponents(ColorPickerPopover)[1];
-    await picker.find('button[title="בחירת צבע"]').trigger('click');
+    await picker.find('button[data-tip-title="בחירת צבע"]').trigger('click');
     await picker.find('.palette-clear-btn').trigger('click');
     await settle();
 
@@ -99,7 +99,7 @@ describe('צבע', () => {
     await settle();
 
     await harness.wrapper
-      .find('button[title="צבע סימון טקסט"]')
+      .find('button[data-tip-title="צבע סימון טקסט"]')
       .trigger('click');
     await settle();
 
@@ -120,7 +120,7 @@ describe('פסקה', () => {
     ] as const;
 
     for (const [title] of buttons) {
-      await buttonByTitle(harness.wrapper, title).trigger('click');
+      await buttonByTip(harness.wrapper, title).trigger('click');
     }
     await settle();
 
@@ -134,7 +134,7 @@ describe('פסקה', () => {
     const harness = mountUi(HomeTab);
     await settle();
 
-    await harness.wrapper.find('select[title="מרווח בין שורות"]').setValue('1.5');
+    await harness.wrapper.find('select[data-tip-title="מרווח בין שורות"]').setValue('1.5');
     await settle();
 
     expect(harness.adapter.payloads('line-height')).toEqual([{ lineHeight: 1.5 }]);
@@ -145,7 +145,7 @@ describe('פסקה', () => {
     const harness = mountUi(HomeTab);
     await settle();
 
-    await harness.wrapper.find('button[title="כותרת 1"]').trigger('click');
+    await harness.wrapper.find('button[data-tip-title="כותרת 1"]').trigger('click');
     await settle();
 
     expect(harness.adapter.payloads('linked-style')).toEqual([{ style: 'Heading1' }]);
@@ -158,7 +158,7 @@ describe('תצוגה ומצב', () => {
     const harness = mountUi(ViewTab);
     await settle();
 
-    await harness.wrapper.find('button[title="הצג את המסמך בגודלו האמיתי (100%)"]').trigger('click');
+    await harness.wrapper.find(tipSelector('הצג את המסמך בגודלו האמיתי (100%)')).trigger('click');
     await settle();
 
     expect(harness.adapter.payloads('zoom')).toEqual([100]);
@@ -170,7 +170,7 @@ describe('תצוגה ומצב', () => {
     const harness = mountUi(ReviewTab, { adapter });
     await settle();
 
-    const button = buttonByTitle(harness.wrapper, 'הפעלת מצב מעקב אחר שינויים במסמך');
+    const button = buttonByTip(harness.wrapper, 'הפעלת מצב מעקב אחר שינויים במסמך');
     await button.trigger('click');
     await settle();
     expect(adapter.payloads('document-mode')).toEqual([{ mode: 'suggesting' }]);
@@ -179,7 +179,7 @@ describe('תצוגה ומצב', () => {
     adapter.setState('document-mode', { value: 'suggesting' });
     await settle();
 
-    await buttonByTitle(harness.wrapper, 'כיבוי מצב מעקב אחר שינויים').trigger('click');
+    await buttonByTip(harness.wrapper, 'כיבוי מצב מעקב אחר שינויים').trigger('click');
     await settle();
 
     expect(adapter.payloads('document-mode')).toEqual([
@@ -193,7 +193,7 @@ describe('תצוגה ומצב', () => {
     const harness = mountUi(InsertTab);
     await settle();
 
-    await harness.wrapper.find('button[title="הוספת טבלה"]').trigger('click');
+    await harness.wrapper.find(tipSelector('הוספת טבלה')).trigger('click');
     // הגריד הוא 10×10 בסדר שורות, כלומר שורה 2 עמודה 3 היא התא ה-13.
     await harness.wrapper.findAll('.grid-cell')[12].trigger('click');
     await settle();

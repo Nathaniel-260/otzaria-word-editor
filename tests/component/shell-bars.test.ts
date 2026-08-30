@@ -17,7 +17,7 @@ import TitleBar from '../../src/ui/shell/TitleBar.vue';
 import StatusBar from '../../src/ui/shell/StatusBar.vue';
 import { docTitleWidthCh } from '../../src/composables/shell-format';
 import { FALLBACK_ZOOM } from '../../src/engine/zoom';
-import { autoUnmount, emittedCount, mountUi, settle } from './harness';
+import { autoUnmount, emittedCount, mountUi, settle, tipMessage } from './harness';
 
 autoUnmount();
 
@@ -47,7 +47,7 @@ describe('מתג השמירה האוטומטית', () => {
 
     const toggle = harness.wrapper.find('.autosave-toggle');
     expect(toggle.attributes('aria-checked')).toBe('false');
-    expect(toggle.attributes('title')).toContain('כבויה');
+    expect(tipMessage(toggle)).toContain('כבויה');
 
     await harness.wrapper.setProps({ autosaveEnabled: true });
     expect(harness.wrapper.find('.autosave-toggle').attributes('aria-checked')).toBe('true');
@@ -220,7 +220,7 @@ describe('בקרת הזום', () => {
     expect(buttons.length).toBeGreaterThan(0);
 
     for (const button of buttons) {
-      expect(button.attributes('disabled'), button.attributes('title')).toBeUndefined();
+      expect(button.attributes('disabled'), tipMessage(button)).toBeUndefined();
       await button.trigger('click');
     }
 

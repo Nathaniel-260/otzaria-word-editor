@@ -17,6 +17,7 @@ import {
   createCommandDouble,
   createSuperdocDouble,
   settle,
+  tipOf,
   type CommandDouble,
   type SuperdocDouble,
 } from './harness';
@@ -295,7 +296,7 @@ describe('פקודות המנוע', () => {
 
     const undoButton = wrapper
       .findAll('button')
-      .find((button) => (button.attributes('title') ?? '').startsWith('בטל'));
+      .find((button) => tipOf(button).title.startsWith('בטל'));
     expect(undoButton, 'כפתור „בטל” לא נמצא בפס הכותרת').toBeTruthy();
 
     await undoButton!.trigger('click');
@@ -433,7 +434,7 @@ describe('פקודות המנוע', () => {
 
     const undoButton = wrapper
       .findAll('button')
-      .find((button) => (button.attributes('title') ?? '').startsWith('בטל'));
+      .find((button) => (button.attributes('data-tip-title') ?? '').startsWith('בטל'));
     expect(undoButton, 'כפתור „בטל” לא נמצא בפס הכותרת').toBeTruthy();
     await undoButton!.trigger('click');
     await settle();
@@ -442,7 +443,7 @@ describe('פקודות המנוע', () => {
 
     const redoButton = wrapper
       .findAll('button')
-      .find((button) => (button.attributes('title') ?? '').startsWith('חזור'));
+      .find((button) => (button.attributes('data-tip-title') ?? '').startsWith('חזור'));
     expect(redoButton, 'כפתור „חזור” לא נמצא בפס הכותרת').toBeTruthy();
     await redoButton!.trigger('click');
     await settle();
@@ -460,7 +461,7 @@ describe('פקודות המנוע', () => {
 
     const redoButton = wrapper
       .findAll('button')
-      .find((button) => (button.attributes('title') ?? '').startsWith('חזור'));
+      .find((button) => tipOf(button).title.startsWith('חזור'));
     expect(redoButton, 'כפתור „חזור” לא נמצא בפס הכותרת').toBeTruthy();
 
     await redoButton!.trigger('click');

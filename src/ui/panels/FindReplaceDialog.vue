@@ -39,7 +39,8 @@
       <button
         type="button"
         class="fr-close-btn"
-        title="סגור (Esc)"
+        data-tip-title="סגור"
+        data-tip-shortcut="Esc"
         aria-label="סגור את חיפוש והחלפה"
         @click="$emit('close')"
       >

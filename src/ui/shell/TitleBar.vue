@@ -4,7 +4,7 @@
     <div class="titlebar-start">
       <div
         class="word-app-badge"
-        title="וורד לאוצריא"
+        data-tip-title="וורד לאוצריא"
       >
         <SvgIcon
           name="word"
@@ -24,7 +24,7 @@
         :class="{ active: autosaveEnabled }"
         role="switch"
         :aria-checked="autosaveEnabled"
-        :title="autosaveEnabled ? 'שמירה אוטומטית לדיסק — פועלת' : 'שמירה אוטומטית לדיסק — כבויה'"
+        :data-tip-title="autosaveEnabled ? 'שמירה אוטומטית לדיסק — פועלת' : 'שמירה אוטומטית לדיסק — כבויה'"
         @click="$emit('toggle-autosave')"
       >
         <span class="autosave-label">שמירה אוטומטית</span>
@@ -39,7 +39,10 @@
           type="button"
           class="qa-btn"
           :disabled="isSaving"
-          :title="saveTitle"
+          data-tip-title="שמור"
+          :data-tip-desc="isDirty ? 'ישנם שינויים שלא נשמרו' : undefined"
+          :data-tip-shortcut="label('save')"
+          :aria-label="saveTitle"
           @pointerdown.prevent
           @click="$emit('save')"
         >
@@ -55,7 +58,9 @@
         <button
           type="button"
           class="qa-btn"
-          :title="`בטל ${label('undo')}`"
+          data-tip-title="בטל"
+          :data-tip-shortcut="label('undo')"
+          :aria-label="`בטל ${label('undo')}`"
           :disabled="!canUndo"
           @pointerdown.prevent
           @click="$emit('undo')"
@@ -68,7 +73,9 @@
         <button
           type="button"
           class="qa-btn"
-          :title="`חזור ${label('redo')}`"
+          data-tip-title="חזור"
+          :data-tip-shortcut="label('redo')"
+          :aria-label="`חזור ${label('redo')}`"
           :disabled="!canRedo"
           @pointerdown.prevent
           @click="$emit('redo')"
@@ -88,14 +95,14 @@
           :style="{ width: `${docTitleWidthCh(title)}ch` }"
           spellcheck="false"
           aria-label="שם המסמך"
-          title="לחץ לעריכת שם המסמך"
+          data-tip-title="לחץ לעריכת שם המסמך"
           @change="$emit('update-title', ($event.target as HTMLInputElement).value)"
         >
         <span class="app-suffix">- Word</span>
         <span
           v-if="isDirty"
           class="dirty-indicator"
-          title="שינויים לא שמורים"
+          data-tip-title="שינויים לא שמורים"
         >•</span>
       </div>
     </div>
@@ -110,7 +117,8 @@
         type="button"
         class="search-box"
         aria-label="חיפוש והחלפה במסמך"
-        :title="`חיפוש והחלפה ${label('find')}`"
+        data-tip-title="חיפוש והחלפה"
+        :data-tip-shortcut="label('find')"
         @click="$emit('open-find')"
       >
         <SvgIcon

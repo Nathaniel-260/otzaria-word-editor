@@ -26,7 +26,8 @@
         <button
           type="button"
           class="about-close-btn"
-          title="סגור (Esc)"
+          data-tip-title="סגור"
+          data-tip-shortcut="Esc"
           aria-label="סגור את חלון האודות"
           @click="$emit('close')"
         >
