@@ -28,11 +28,19 @@
 import { shallowRef, type InjectionKey, type Ref } from 'vue';
 import type { EditorSession } from './create-editor';
 import {
+  HEBREW_MESSAGES,
   MacroKit,
   createSuperdocHost,
+  setMacroMessages,
   type SuperdocLike,
   type SuperdocMacroHost,
 } from 'superdoc-macros';
+
+// הודעות הריצה של החבילה בעברית — פעם אחת, בטעינת המודול. ברירת המחדל שלה
+// (מ-0.3.0) אנגלית, וכשל מאקרו מגיע לשורת המצב כמו כל כשל אחר בממשק — קול
+// אחד, עברית. לפני installMacros ולא בתוכו: ההודעות הן מצב מודול בחבילה,
+// לא מצב של session.
+setMacroMessages(HEBREW_MESSAGES);
 
 /** ההודעות שהמערכת מדווחת לשורת המצב. מרוכזות כדי שהבדיקות יטענו נוסח אחד. */
 export const MACRO_STATUS = {
