@@ -231,7 +231,10 @@ describe('preflightDocx', () => {
 
 describe('preflightSource', () => {
   it('מסמך ריק עובר כפי שהוא', async () => {
-    await expect(preflightSource(undefined)).resolves.toBeUndefined();
+    await expect(preflightSource(undefined)).resolves.toEqual({
+      source: undefined,
+      fontTable: null,
+    });
   });
 
   it('URL שאין בו מה לתקן נשאר URL', async () => {
@@ -241,9 +244,8 @@ describe('preflightSource', () => {
       vi.fn(async () => new Response(clean)),
     );
     // חשוב שהמקור יחזור זהה: כך מסלול הפתיחה של כל שאר המסמכים אינו משתנה.
-    await expect(preflightSource('http://127.0.0.1:1/doc.docx')).resolves.toBe(
-      'http://127.0.0.1:1/doc.docx',
-    );
+    const { source } = await preflightSource('http://127.0.0.1:1/doc.docx');
+    expect(source).toBe('http://127.0.0.1:1/doc.docx');
   });
 
   it('URL שיש בו מה לתקן מוחלף בבייטים מתוקנים', async () => {
@@ -253,7 +255,7 @@ describe('preflightSource', () => {
       vi.fn(async () => new Response(broken)),
     );
 
-    const source = await preflightSource('http://127.0.0.1:1/doc.docx');
+    const { source } = await preflightSource('http://127.0.0.1:1/doc.docx');
     expect(source).toBeInstanceOf(Blob);
     const bytes = new Uint8Array(await (source as Blob).arrayBuffer());
     expect(contains(bytes, bytesOf(`<w:defaultTabStop w:val="${DEFAULT_TAB_STOP_TWIPS}"/>`))).toBe(true);
@@ -266,15 +268,14 @@ describe('preflightSource', () => {
         throw new Error('אין רשת');
       }),
     );
-    await expect(preflightSource('http://127.0.0.1:1/doc.docx')).resolves.toBe(
-      'http://127.0.0.1:1/doc.docx',
-    );
+    const { source } = await preflightSource('http://127.0.0.1:1/doc.docx');
+    expect(source).toBe('http://127.0.0.1:1/doc.docx');
   });
 
   it('טיוטה שיש בה מה לתקן מתוקנת גם היא', async () => {
     // טיוטת שחזור מגיעה כ-Blob ולא כ-URL, וגם היא עלולה לשאת את הערך.
     const draft = new Blob([buildZip([{ name: SETTINGS_PART, content: SETTINGS_WITH_ZERO }])]);
-    const source = await preflightSource(draft);
+    const { source } = await preflightSource(draft);
     expect(source).not.toBe(draft);
     const bytes = new Uint8Array(await (source as Blob).arrayBuffer());
     expect(contains(bytes, bytesOf(`<w:defaultTabStop w:val="${DEFAULT_TAB_STOP_TWIPS}"/>`))).toBe(true);
