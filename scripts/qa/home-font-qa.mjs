@@ -124,6 +124,47 @@ async function ctx(label) {
   return { st, msgs, log, bad: !!st.error || msgs.some((m) => m.method === 'ui.showError') };
 }
 
+
+/**
+ * מריץ שלב מבודד: תקיעה או זריקה בו אינן מוחקות את השלבים שאחריו.
+ *
+ * ## למה זה נדרש
+ *
+ * כל השלבים ישבו ב-`try` אחד. `caretPara` זורק אחרי שלושה ניסיונות כושלים
+ * (תקיעה של צינור הקלט — ראו התיעוד שם), והזריקה הזאת בשלב 5 מחקה גם את
+ * 6, 7 ו-8. כלומר תקלה אחת בהזרקת עכבר עלתה בארבעה שלבים שלא נמדדו כלל,
+ * והשער דווח כ„לא מסתיים”.
+ *
+ * ## למה „תקוע” ולא „שבור”
+ *
+ * התקיעה הנמדדת כאן היא ב-`Input.dispatchMouseEvent` בזמן שה-JS בדף ממשיך
+ * לענות — כלומר צינור הקלט של CDP, לא הפקד ולא הדף. זהו כשל של סביבת
+ * המדידה, ורישומו כשבור היה שולח לחפש באג במקום שבו לא נמדד דבר. אותה
+ * הבחנה בדיוק כמו ב-file-shell-qa.
+ *
+ * השעון פר-שלב הוא שכבה שנייה: הוא תופס תקיעה שקורית **מחוץ** ל-`caretPara`,
+ * שם אין ניסיונות חוזרים ואין `T()`.
+ */
+const STAGE_TIMEOUT_MS = 180_000;
+
+async function stage(n, body) {
+  if (!on(n)) return;
+  const outcome = await Promise.race([
+    body().then(() => ({ ok: true }), (error) => ({ ok: false, error })),
+    new Promise((resolve) => setTimeout(() => resolve({ timedOut: true }), STAGE_TIMEOUT_MS)),
+  ]);
+  if (outcome?.timedOut) {
+    note(`!! שלב ${n}: לא סיים תוך ${STAGE_TIMEOUT_MS}ms — ממשיכים לשלב הבא`);
+    report.stuck(`שלב ${n}`, `לא סיים תוך ${STAGE_TIMEOUT_MS}ms`);
+  } else if (!outcome.ok) {
+    const message = String(outcome.error?.message ?? outcome.error);
+    note(`!! שלב ${n} נפל: ${message}`);
+    // „תקיעת קלט” היא סביבה; כל שאר הזריקות הן כשל אמיתי של השלב.
+    if (/תקיעה|לא נענה בשלושה ניסיונות/.test(message)) report.stuck(`שלב ${n}`, message);
+    else report.fail(`שלב ${n}`, message);
+  }
+}
+
 const LINES = ['alfa beta gama deta', 'cola diva', 'fntx sizx', 'hilo colo', 'advx ncdx', 'clra rfmt', 'srcx dstx', 'cutx cpyx'];
 
 try {
@@ -172,7 +213,7 @@ try {
   note('פיקסטורה:', JSON.stringify(await T(app.screenText(), 'screenText')));
 
   /* ================= שלב 1 — B / I / U / S ================= */
-  if (on(1)) {
+  await stage(1, async () => {
     note('===== שלב 1: מודגש / נטוי / קו תחתון / קו חוצה =====');
     const toggles = [
       { name: 'מודגש', cmd: 'bold', word: 'alfa', from: 0, to: 4, tag: 'b' },
@@ -209,10 +250,10 @@ try {
       else if (!applied) report.fail(t.name, `לא נכתב ל-rPr: ${JSON.stringify(rpr)}`);
       else report.pass(t.name);
     }
-  }
+  });
 
   /* ================= שלב 2 — כתב תחתי / עליון ================= */
-  if (on(2)) {
+  await stage(2, async () => {
     note('===== שלב 2: כתב תחתי / כתב עליון =====');
     for (const v of [
       { name: 'כתב תחתי', word: 'cola', from: 0, to: 4, val: 'subscript' },
@@ -243,11 +284,11 @@ try {
       else if (ok1) report.partial(v.name, `הוחל; כיבוי=${off} rPr2=${rpr2}`);
       else report.fail(v.name, `לא נכתב vertAlign: ${JSON.stringify(rpr)} status=${JSON.stringify(c1.st)}`);
     }
-  }
+  });
 
   /* ================= שלב 3 — גופן / גודל / הגדל / הקטן ================= */
   let sizeAfterGrow = null;
-  if (on(3)) {
+  await stage(3, async () => {
     note('===== שלב 3: בורר גופן / בורר גודל / הגדל / הקטן =====');
     await app.reset();
     await caretPara(2);
@@ -299,10 +340,10 @@ try {
     note(`הקטן גופן: תיבה ${shownK0} → ${(await app.state('גודל גופן')).value}; rPr=${JSON.stringify(rprK)}`);
     const cK = await ctx('הקטן גופן');
     (sizeK && sizeAfterGrow && sizeK < sizeAfterGrow && !cK.bad) ? report.pass('הקטן גופן', `w:sz ${sizeAfterGrow} → ${sizeK}`) : report.fail('הקטן גופן', `rPr=${JSON.stringify(rprK)}`);
-  }
+  });
 
   /* ================= שלב 4 — צבעים ================= */
-  if (on(4)) {
+  await stage(4, async () => {
     note('===== שלב 4: צבע סימון טקסט / צבע גופן =====');
     // הכפתור הראשי (מחיל את הצבע הנוכחי/ברירת המחדל)
     await app.reset();
@@ -367,10 +408,10 @@ try {
     await T(app.escape(), 'escape');
     const colApplied = !!rprC && /<w:color w:val="FF0000"/i.test(rprC);
     colApplied && !cC.bad ? report.pass('צבע גופן', 'נכתב w:color=FF0000') : report.fail('צבע גופן', `rPr=${JSON.stringify(rprC)}`);
-  }
+  });
 
   /* ================= שלב 5 — מתקדם ================= */
-  if (on(5)) {
+  await stage(5, async () => {
     note('===== שלב 5: „מתקדם" (דיאלוג הגופן המתקדם) =====');
     await app.reset();
     await caretPara(4);
@@ -408,10 +449,10 @@ try {
     if (allHit && !cA.bad) report.pass('מתקדם (דיאלוג הגופן)', 'כל ששת השדות נכתבו ל-rPr');
     else if (Object.values(hits).some(Boolean)) report.partial('מתקדם (דיאלוג הגופן)', `חלקי: ${JSON.stringify(hits)}`);
     else report.fail('מתקדם (דיאלוג הגופן)', `לא נכתב דבר. dlg=${!!dlg} status=${JSON.stringify(cA.st)} msgs=${JSON.stringify(cA.msgs)}`);
-  }
+  });
 
   /* ================= שלב 6 — נקה את כל העיצוב ================= */
-  if (on(6)) {
+  await stage(6, async () => {
     note('===== שלב 6: נקה את כל העיצוב =====');
     await app.reset();
     await caretPara(5);
@@ -434,10 +475,10 @@ try {
     const cleaned = !isOn(rprPost, 'b') && !isOn(rprPost, 'i');
     (hadFmt && cleaned && !cCl.bad) ? report.pass('נקה את כל העיצוב', 'b ו-i הוסרו')
       : report.fail('נקה את כל העיצוב', `לפני=${JSON.stringify(rprPre)} אחרי=${JSON.stringify(rprPost)}`);
-  }
+  });
 
   /* ================= שלב 7 — מברשת עיצוב ================= */
-  if (on(7)) {
+  await stage(7, async () => {
     note('===== שלב 7: מברשת עיצוב =====');
     await app.reset();
     await caretPara(6);
@@ -494,10 +535,10 @@ try {
     const worked = isOn(rprDstA, 'b') || isOn(rprDstB, 'b');
     worked ? report.pass('מברשת עיצוב', 'העיצוב עבר ליעד')
       : report.fail('מברשת עיצוב', `הכפתור מחמש (active=${fpAfter.active}) אך שום דבר אינו מחיל. אחרי סימון היעד=${JSON.stringify(rprDstA)}; אחרי לחיצה שנייה=${JSON.stringify(rprDstB)}; אחרי notifyPointerUp ידני=${JSON.stringify(rprDstC)} ← זו סיבת השורש`);
-  }
+  });
 
   /* ================= שלב 8 — לוח ================= */
-  if (on(8)) {
+  await stage(8, async () => {
     note('===== שלב 8: לוח — העתק / הדבק / גזור =====');
 
     /* 8א — מרוץ התצלום: מתי „העתק" מסרב על בחירה שקיימת */
@@ -590,10 +631,17 @@ try {
     } else {
       report.fail('גזור', `המסמך לא השתנה. status=${JSON.stringify(cCut.st)}`);
     }
-  }
+  });
 
   note('===== סוף =====');
-  note('לוג הדף:', JSON.stringify(await T(app.log(), 'log')));
+  /* קריאת הלוג הסופית היא אבחון, לא בדיקה. כשהדף מורעב היא נתקעת, הזריקה
+   * מגיעה ל-catch הכללי, והשער נחתם ב„השער עצמו — תקיעה ב-log” — שורה
+   * אדומה שאינה אומרת דבר על אף פקד. נמדד בשתי ריצות רצופות. */
+  try {
+    note('לוג הדף:', JSON.stringify(await T(app.log(), 'log', 15_000)));
+  } catch (e) {
+    note('לוג הדף לא נקרא:', String((e && e.message) || e));
+  }
 } catch (e) {
   note('שגיאה בשער:', String((e && e.stack) || e));
   report.fail('השער עצמו', String((e && e.message) || e));
