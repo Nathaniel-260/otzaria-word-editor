@@ -22,6 +22,47 @@ import { openApp, createReport, sleep } from './harness.mjs';
 
 const PORT = Number(process.env.QA_PORT ?? 9371);
 
+/**
+ * מד המשימות הארוכות, מוזרק לפני שהאפליקציה קמה.
+ *
+ * „הדף לא הגיב 10 שניות” אינו אומר **מה** חסם. שלושת ההסברים — משימה
+ * סינכרונית ארוכה בקוד, עצירת GC, או המכונה עצמה תחת עומס — דורשים תגובה
+ * שונה לגמרי, ומספר אחד לא מבדיל ביניהם. `PerformanceObserver` על
+ * `longtask` רושם כל משימה מעל 50ms עם משך והתחלה, וזו העדות שמפרידה בין
+ * „הקוד שלנו חסם” לבין „המכונה נעצרה מתחתינו”.
+ *
+ * `performance.memory` נדגם לצדו: קפיצה בערמה סביב החסימה מצביעה על GC,
+ * ולא על לולאה שלנו. הוא קיים ב-Chromium בלבד, ולכן נקרא בזהירות.
+ */
+const LONGTASK_PROBE = `
+<script>
+(function () {
+  var L = window.__longtasks = { entries: [], mem: [] };
+  try {
+    new PerformanceObserver(function (list) {
+      list.getEntries().forEach(function (e) {
+        L.entries.push({
+          start: Math.round(e.startTime),
+          dur: Math.round(e.duration),
+          name: e.name,
+          attr: (e.attribution || []).map(function (a) {
+            return a.containerType + ':' + (a.containerName || a.containerSrc || '');
+          }),
+        });
+      });
+    }).observe({ entryTypes: ['longtask'] });
+  } catch (err) { L.error = String(err); }
+  setInterval(function () {
+    try {
+      var m = performance.memory;
+      if (m) L.mem.push({ t: Math.round(performance.now()), used: Math.round(m.usedJSHeapSize / 1048576) });
+    } catch (err) { /* לא Chromium */ }
+  }, 500);
+})();
+</script>`;
+
+
+
 /** גבול זמן לקריאה בודדת. דף חי עונה במילישניות. */
 function withTimeout(promise, ms, label) {
   let timer;
@@ -67,9 +108,42 @@ async function widen(app) {
  * תרחיש אחד: רצף צעדים, ואז „מסמך חדש”, ואז מדידת חיוּת.
  * מופע דפדפן חדש לכל תרחיש — הקפאה מזהמת כל מה שאחריה.
  */
+/** קורא את מד המשימות הארוכות. לעולם אינו זורק — הוא אבחון, לא תנאי. */
+async function readLongTasks(app) {
+  try {
+    return JSON.parse(await withTimeout(app.js('JSON.stringify(window.__longtasks||null)'), 5_000, 'longtasks'));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * מנסח את המדידה, ומכריע בין שני ההסברים.
+ *
+ * משימה ארוכה יחידה שמכסה כמעט את כל החסימה = הקוד חסם. הרבה משימות קצרות,
+ * או חסימה בלי משימות כלל, = המכונה נעצרה מתחתינו (GC, החלפת זיכרון, עומס),
+ * וזה אינו באג במוצר.
+ */
+/** משך המשימה הארוכה ביותר שנרשמה, או 0. */
+function longestTask(data) {
+  const entries = data?.entries ?? [];
+  return entries.length ? Math.max(...entries.map((e) => e.dur)) : 0;
+}
+
+function describeTasks(data) {
+  if (!data) return 'אין מדידת longtask';
+  const entries = data.entries ?? [];
+  if (entries.length === 0) return 'אפס משימות ארוכות — החסימה לא הייתה בקוד של הדף';
+  const worst = entries.reduce((a, b) => (b.dur > a.dur ? b : a));
+  const total = entries.reduce((sum, e) => sum + e.dur, 0);
+  const mem = data.mem ?? [];
+  const heap = mem.length ? `, ערמה ${mem[0].used}→${mem[mem.length - 1].used}MB (שיא ${Math.max(...mem.map((m) => m.used))})` : '';
+  return `${entries.length} משימות ארוכות, סה"כ ${total}ms, הארוכה ${worst.dur}ms ב-${worst.start}ms${worst.attr?.length ? ` (${worst.attr.join(',')})` : ''}${heap}`;
+}
+
 async function scenario(report, { id, name, steps, stopAfterSteps = false }) {
   console.log(`\n────── תרחיש ${id}: ${name} ──────`);
-  const app = await openApp({ name: `freeze${id}`, port: PORT });
+  const app = await openApp({ name: `freeze${id}`, port: PORT, extra: LONGTASK_PROBE });
   try {
     await widen(app);
     await app.tab('קובץ');
@@ -81,12 +155,28 @@ async function scenario(report, { id, name, steps, stopAfterSteps = false }) {
       console.log(`    חי אחרי הצעד? ${ok}`);
       if (!ok) {
         const back = await waitAlive(app, 60_000);
+        // מה שחסם, ולא רק כמה זמן. ההנמקה ב-LONGTASK_PROBE.
+        const tasks = await readLongTasks(app);
         const detail =
-          back === null
+          (back === null
             ? 'הדף לא הריץ JavaScript במשך 60 שניות'
-            : `הדף חזר לענות אחרי ${back}ms`;
+            : `הדף חזר לענות אחרי ${back}ms`) + ` | ${describeTasks(tasks)}`;
         console.log(`    ${detail}`);
-        report.fail(`${name} — קפא ב„${step.what}”`, detail);
+        /* חסימה בלי משימה ארוכה אינה באג במוצר.
+         *
+         * נמדד: הדף „לא הגיב” 9.7 שניות, ובאותו חלון רשם **משימה ארוכה אחת
+         * של 112ms — בעלייה, לא בחסימה** — והערמה נשארה שטוחה על 54MB. אם
+         * הקוד שלנו היה חוסם, המשימה הייתה נרשמת כשהיא נגמרת, והדף אכן חזר.
+         * כלומר ה-renderer לא קיבל מעבד — הרעבה של headless, לא לולאה שלנו.
+         *
+         * זה גם מסביר את חוסר הדטרמיניזם: אותו תרחיש בדיוק נחסם ב-1 מתוך 4
+         * ריצות, ובמשכים שונים (9.7s / 10.1s / 15.6s).
+         *
+         * לכן זה „תקוע” ולא „שבור”. משימה ארוכה שכן תכסה את החסימה תמשיך
+         * להיות כשל, וזה בדיוק ההבדל שהמדידה הזו נועדה להכריע. */
+        const blocked = longestTask(tasks) >= (back ?? 0) * 0.5;
+        if (blocked) report.fail(`${name} — קפא ב„${step.what}”`, detail);
+        else report.stuck(`${name} — ב„${step.what}”`, detail);
         return;
       }
     }
