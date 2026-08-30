@@ -203,7 +203,7 @@ export function shapeOf(font: DeclaredFont): keyof typeof SUBSTITUTES {
   if (font.family === 'roman') return 'serif';
   if (font.family === 'swiss' || font.family === 'modern') return 'sans';
 
-  const serifStyle = font.panose ? Number.parseInt(font.panose.slice(2, 4), 10) : Number.NaN;
+  const serifStyle = font.panose ? Number.parseInt(font.panose.slice(2, 4), 16) : Number.NaN;
   if (Number.isFinite(serifStyle)) {
     if (serifStyle >= 2 && serifStyle <= 10) return 'serif';
     if (serifStyle >= 11 && serifStyle <= 15) return 'sans';

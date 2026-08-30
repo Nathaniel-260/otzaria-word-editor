@@ -94,7 +94,17 @@ describe('shapeOf', () => {
 
   it('בלי `w:family` נופלים ל-PANOSE', () => {
     expect(shapeOf(hebrewFont({ panose: '0203000000000000000' }))).toBe('serif');
-    expect(shapeOf(hebrewFont({ panose: '0211000000000000000' }))).toBe('sans');
+    // serif-style 11 ("Normal Sans") נכתב הקסה כ-"0B", לא כ-"11".
+    expect(shapeOf(hebrewFont({ panose: '020B000000000000000' }))).toBe('sans');
+  });
+
+  it('ספרת serif-style הקסדצימלית (A–F) נקראת נכון', () => {
+    // "020B0604020202020204" הוא ה-PANOSE האמיתי של Arial: family=2,
+    // serif-style=11 ("Normal Sans", נכתב "0B"). serif-style בטווח 10-15
+    // חייב הקסה כדי להיקרא נכון — parseInt במסד 10 היה עוצר ב-"0" ומחזיר
+    // 'serif' בטעות.
+    expect(shapeOf(hebrewFont({ family: null, panose: '020B0604020202020204' }))).toBe('sans');
+    expect(shapeOf(hebrewFont({ family: null, panose: '020F000000000000000' }))).toBe('sans');
   });
 
   it('בלי מידע — סריפי, כי זה מה שגופני ספרים עבריים הם', () => {
