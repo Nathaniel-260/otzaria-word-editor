@@ -23,6 +23,7 @@ const SELECTION_RECT = { top: 100, bottom: 200, left: 100, right: 200 };
 interface Fake {
   host: SuperDoc;
   applyCalls: unknown[];
+  capabilitiesGetCalls: number;
 }
 
 function fakeSuperdoc(
@@ -35,6 +36,7 @@ function fakeSuperdoc(
   } = {},
 ): Fake {
   const applyCalls: unknown[] = [];
+  let capabilitiesGetCalls = 0;
   // סמן מכווץ: אין טווח ואין טקסט, כלומר אין מה לאבד בהזזת הסמן.
   const selectionInfo = over.objectSelection
     ? // בחירת אובייקט (תא טבלה/תמונה): אין target/segments בכלל — hasRange
@@ -64,23 +66,29 @@ function fakeSuperdoc(
       doc: {
         selection: { current: () => selectionInfo },
         capabilities: {
-          get: () => ({
-            operations: {
-              'clipboard.serializeSelection': { enabled: true },
-              'clipboard.insert': { enabled: true },
-              delete: { enabled: true },
-              'hyperlinks.insert': { enabled: true },
-              'footnotes.insert': { enabled: true },
-              'ranges.resolve': { enabled: true },
-            },
-          }),
+          get: () => {
+            capabilitiesGetCalls += 1;
+            return {
+              operations: {
+                'clipboard.serializeSelection': { enabled: true },
+                'clipboard.insert': { enabled: true },
+                delete: { enabled: true },
+                'hyperlinks.insert': { enabled: true },
+                'footnotes.insert': { enabled: true },
+                'ranges.resolve': { enabled: true },
+              },
+            };
+          },
         },
         focus: () => {},
       },
     },
   } as unknown as SuperDoc;
 
-  return { host, applyCalls };
+  const fake: Fake = { host, applyCalls, capabilitiesGetCalls: 0 };
+  // `capabilitiesGetCalls` על ה-fake הוא getter חי, לא העתק שנקפא ב-0.
+  Object.defineProperty(fake, 'capabilitiesGetCalls', { get: () => capabilitiesGetCalls });
+  return fake;
 }
 
 interface Setup {
@@ -414,6 +422,36 @@ describe('מרוץ התצלום', () => {
     await settle();
 
     expect(controller.isOpen.value).toBe(false);
+  });
+
+  it('היכולות נקראות פעם אחת למופע superdoc — לא בכל פתיחה', async () => {
+    const fake = fakeSuperdoc();
+    const { controller, documentArea } = setup({}, fake);
+
+    controller.handleContextMenu(rightClick(documentArea, { x: 100, y: 100 }));
+    await settle();
+    controller.close();
+    controller.handleContextMenu(rightClick(documentArea, { x: 200, y: 200 }));
+    await settle();
+
+    expect(fake.capabilitiesGetCalls).toBe(1);
+  });
+
+  it('החלפת מסמך קוראת יכולות מחדש — לא ממשיכה עם המטמון של הקודם', async () => {
+    const first = fakeSuperdoc();
+    const superdoc = shallowRef<SuperDoc | null>(first.host);
+    const { controller, documentArea } = setup({ superdoc }, first);
+
+    controller.handleContextMenu(rightClick(documentArea));
+    await settle();
+
+    const second = fakeSuperdoc();
+    superdoc.value = second.host;
+    controller.handleContextMenu(rightClick(documentArea));
+    await settle();
+
+    expect(first.capabilitiesGetCalls).toBe(1);
+    expect(second.capabilitiesGetCalls).toBe(1);
   });
 
   it('מודל ריק (המסמך עדיין נטען) אינו פותח תפריט בלתי-נראה', async () => {

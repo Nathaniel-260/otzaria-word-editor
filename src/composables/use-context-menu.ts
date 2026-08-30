@@ -28,7 +28,11 @@
 import { ref, type Ref } from 'vue';
 import type { SuperDoc } from 'superdoc';
 import { readDocSelection, type DocSelectionSnapshot } from '../engine/doc-selection';
-import { readDocCapabilities, type DocCapabilityQuestion } from '../engine/doc-capabilities';
+import {
+  readDocCapabilities,
+  type DocCapabilityQuestion,
+  type DocCapabilityReport,
+} from '../engine/doc-capabilities';
 import { copySelection, cutSelection, pasteFromClipboard } from '../engine/clipboard';
 import { focusDocument } from '../engine/focus';
 import { markSyntheticPointer } from '../engine/word-selection';
@@ -198,6 +202,22 @@ export function useContextMenu(deps: ContextMenuDeps): ContextMenuController {
   const sections = ref<readonly ContextMenuSection[]>([]);
 
   /**
+   * מוזכר לפי מופע `host`, לא לפי `request`: כמו ב-HomeTab.vue (אותה
+   * `watch(superdoc, ...)` בדיוק), היכולות הן שאלה על **בניית** המסמך ולא על
+   * הרגע, ולכן קריאה אחת למופע נשארת נכונה עד שהמסמך מתחלף. בלי הזיכרון הזה
+   * כל לחיצה ימנית — הטריגר התכוף ביותר לתפריט — הייתה מריצה מחדש את כל
+   * ~40 השאלות של `readDocCapabilities` מול המנוע.
+   */
+  let capabilitiesCache: { host: SuperDoc; promise: Promise<DocCapabilityReport> } | null = null;
+
+  function capabilitiesFor(host: SuperDoc): Promise<DocCapabilityReport> {
+    if (capabilitiesCache?.host === host) return capabilitiesCache.promise;
+    const promise = readDocCapabilities(host);
+    capabilitiesCache = { host, promise };
+    return promise;
+  }
+
+  /**
    * הסדר כאן אינו קוסמטי: משטח ההקלדה של המנוע הוא `<textarea>` **בתוך** אזור
    * המסמך (ui/shortcuts/dispatch.ts), ולכן שאלת „שדה טקסט” לפני שאלת „אזור
    * המסמך” הייתה מוסרת את המסמך עצמו לתפריט של WebView2.
@@ -303,7 +323,7 @@ export function useContextMenu(deps: ContextMenuDeps): ContextMenuController {
 
     const [selection, capabilities] = await Promise.all([
       readDocSelection(host, { includeText: true }),
-      readDocCapabilities(host),
+      capabilitiesFor(host),
     ]);
 
     // המסמך יכול היה להתחלף באמצע — ואז התצלום מתאר מסמך שכבר אינו על המסך.
