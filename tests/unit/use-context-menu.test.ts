@@ -184,6 +184,23 @@ describe('ניתוב המשטח', () => {
     expect(controller.sections.value.length).toBeGreaterThan(0);
   });
 
+  it('openAtCaret בזמן שהתפריט כבר פתוח הוא no-op — לא פותח מחדש', async () => {
+    // ContextMenu.vue's onKeydown אינו עוצר F10/מקש התפריט, ולכן לחיצה שנייה
+    // בזמן שהתפריט פתוח יכולה להגיע לכאן שוב. פתיחה חוזרת הייתה מרעננת
+    // sections/point בלי לפרק את ContextMenuButton, ומשאירה frozen תקוע.
+    const { controller, documentArea } = setup();
+
+    controller.handleContextMenu(rightClick(documentArea));
+    await settle();
+    expect(controller.isOpen.value).toBe(true);
+    const pointAfterFirstOpen = controller.point.value;
+
+    expect(controller.openAtCaret()).toBe(true);
+    await settle();
+
+    expect(controller.point.value).toEqual(pointAfterFirstOpen);
+  });
+
   it('מודאל פתוח חוסם גם את הלחיצה וגם את המקלדת', async () => {
     const { controller, documentArea } = setup();
     const dialog = document.createElement('div');

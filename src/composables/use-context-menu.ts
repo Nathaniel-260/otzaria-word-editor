@@ -358,8 +358,15 @@ export function useContextMenu(deps: ContextMenuDeps): ContextMenuController {
    * `Shift+F10` ומקש התפריט. העוגן הוא מלבן הסמן המצויר
    * (`ui.selection.getAnchorRect`) — כלומר התפריט נפתח היכן שהמשתמש עומד, ולא
    * בפינה שרירותית.
+   *
+   * `isOpen` כבר `true` הוא לא רק ייעול: `ContextMenu.vue`'s `onKeydown` אינו
+   * עוצר את `F10`/מקש התפריט (רק Arrow/Home/End/Tab), ולכן לחיצה שנייה בזמן
+   * שהתפריט כבר פתוח מגיעה גם לכאן. פתיחה חוזרת הייתה מרעננת `sections`/
+   * `point` בלי לפרק את מופעי `ContextMenuButton` (אותם `id`-ים ב-`v-for`
+   * ממוינים) — ו-`frozen` שלהם (ContextMenuButton.vue) לעולם אינו מתאפס.
    */
   function openAtCaret(): boolean {
+    if (isOpen.value) return true;
     const host = deps.superdoc.value;
     if (!host || isBlockedByModal()) return false;
 
