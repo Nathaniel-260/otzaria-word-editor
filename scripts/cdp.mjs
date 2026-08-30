@@ -173,6 +173,37 @@ export async function openPage(fileUrl, { port = Number(process.env.CDP_PORT ?? 
     if (!targets) throw new Error('CDP לא נפתח');
 
     const cdp = await connect(targets[0].webSocketDebuggerUrl);
+
+    /*
+     * הדף קיים — אבל הוא עדיין לא נקרא.
+     *
+     * הלולאה שלמעלה מחכה שיופיע **יעד** מסוג `page` בכתובת `file://`, וזה קורה
+     * ברגע ש-Chrome פותח לשונית — לפני שהוא פרס שורה אחת של ה-HTML. מי שקורא
+     * ל-`evaluate` מיד מקבל `document.body` ריק, וכל `querySelector` מחזיר
+     * `null`.
+     *
+     * זה לא היה תיאורטי: `scripts/ruler-check.mjs` מדד מיד, קיבל `null` על
+     * `.doc-ruler`, ונפל ב-`Cannot read properties of null`. נמדד — באותו דף
+     * בדיוק, מיד: גוף ריק; אחרי 1.5 שניות: 20 מספרים ו-8,390 תווי CSS. זו
+     * תחרות, ולכן היא גם מנצחת במכונה אחת ומפסידה באחרת — הצורה הגרועה ביותר
+     * של כשל.
+     *
+     * ההמתנה כאן ולא בכל קורא: ארבעה סקריפטים (ruler-check, zoom-center-probe,
+     * zoom-qa, zoom-stale-qa) מייבאים `openPage` בלי `sleep` בכלל, כלומר אף
+     * אחד מהם אינו מוגן. השאר „פתרו” את זה בהמתנה קבועה משלהם, שהיא ניחוש.
+     *
+     * `complete` ולא `interactive`: הוא כולל את תת-המשאבים, ושער הסרגל תלוי
+     * בגופן הארוז — רוחב הספרה הוא חלק ממה שהוא מודד.
+     *
+     * ויוצאים בשקט כשנגמר התקציב, ולא בשגיאה: הבטחה של „הדף מוכן” שנשברת
+     * צריכה להיכשל אצל מי שמודד, עם מה שהוא מודד, ולא כאן — דף שאינו מגיע
+     * ל-`complete` הוא עדיין דף שאפשר לשאול אותו שאלות.
+     */
+    for (let waited = 0; waited < 15_000; waited += 100) {
+      if ((await cdp.evaluate('document.readyState')) === 'complete') break;
+      await sleep(100);
+    }
+
     return {
       cdp,
       close() {
