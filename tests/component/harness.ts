@@ -54,6 +54,7 @@ import {
   STYLE_GALLERY,
 } from '../../src/composables/keys';
 import { ACTIVE_SUPERDOC } from '../../src/engine/document-api';
+import { ACTIVE_MACROS, type MacrosHandle } from '../../src/engine/macros';
 import { fallbackFontOptions, type FontOptions } from '../../src/engine/font-options';
 import { fallbackStyleGallery, type StyleGalleryState } from '../../src/engine/style-gallery';
 import type { ReadoutSelection } from '../../src/engine/readout-hold';
@@ -1254,6 +1255,22 @@ export function mountUi(component: Component, options: HarnessOptions = {}): Har
     options.styleGallery ?? fallbackStyleGallery(),
   );
   provide[ACTIVE_SUPERDOC as unknown as symbol] = superdocRef;
+  /**
+   * מערכת המאקרו מלווה כל מסמך פתוח (App.vue קובע אותה יחד עם
+   * `activeSuperdoc`), ולכן הכפיל עוקב אחרי אותו כלל: יש מופע — יש מערכת.
+   * הכפתורים ברצועה קוראים ממנה רק את `recording`; ה-kit עצמו אינו נצרך
+   * בהרכבת לשונית, ולכן אינו ממומש — בדיקת הדיאלוג בונה kit אמיתי בעצמה.
+   */
+  const macrosStub: MacrosHandle = {
+    kit: undefined as unknown as MacrosHandle['kit'],
+    recording: shallowRef(false),
+    toggleRecording: () => undefined,
+    replayLast: () => undefined,
+    dispose: () => undefined,
+  };
+  provide[ACTIVE_MACROS as unknown as symbol] = shallowRef<MacrosHandle | null>(
+    superdoc ? macrosStub : null,
+  );
   const readoutSelectionRef = shallowRef<ReadoutSelection>(
     options.readoutSelection ?? SETTLED_CARET,
   );

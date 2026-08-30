@@ -53,6 +53,9 @@
       @insert-citation="onInsertCitation"
       @search-otzaria="onSearchOtzaria"
       @open-library="onOpenLibrary"
+      @manage-macros="isMacrosOpen = true"
+      @macro-record="onMacroRecord"
+      @macro-play="onMacroPlay"
     />
 
     <!-- שורת הסרגל האופקי. הפינה שלפניו רחבה כמו הסרגל האנכי, וכך שניהם
@@ -164,6 +167,13 @@
       @close="isShortcutsHelpOpen = false"
     />
 
+    <MacrosDialog
+      :is-open="isMacrosOpen"
+      :handle="activeMacros"
+      @close="isMacrosOpen = false"
+      @status="setStatus"
+    />
+
     <!--
       הטולטיפ של כל התוכנה — מופע אחד, בסוף המעטפת. הוא מאזין במסירה על המסמך
       ולא נקשר לפקד מסוים, ולכן אין לו props: כל פקד שיש לו `title` או
@@ -234,7 +244,8 @@ import {
 import { createEditorSwap, type EditorSwap } from './sessions/editor-swap';
 import { createSaveCoordinator, type SaveCoordinator, type SaveSnapshot } from './sessions/save-coordinator';
 import { createEditor, type EditorSession } from './engine/create-editor';
-import { installMacros } from './engine/macros';
+import { ACTIVE_MACROS, installMacros, type MacrosHandle } from './engine/macros';
+import MacrosDialog from './ui/panels/MacrosDialog.vue';
 import { preflightSource } from './engine/docx-preflight';
 import { installDocumentFontAliases } from './engine/docx-fonts';
 import {
@@ -395,6 +406,36 @@ provide(ACTIVE_SUPERDOC, activeSuperdoc);
  */
 const documentGeneration = shallowRef(0);
 provide(DOCUMENT_GENERATION, documentGeneration);
+
+/**
+ * מערכת המאקרו של ה-session, בשביל כפתורי הרצועה ודיאלוג הניהול. אותו דפוס
+ * כמו `activeSuperdoc`: נקבעת אחרי פתיחה מוצלחת ומתאפסת בפירוק. ראו
+ * engine/macros.ts.
+ */
+const activeMacros = shallowRef<MacrosHandle | null>(null);
+provide(ACTIVE_MACROS, activeMacros);
+
+/** דיאלוג ניהול המאקרו (Alt+F8). */
+const isMacrosOpen = ref(false);
+
+/**
+ * שני המטפלים מחזירים „האם טופל”, בשביל מסלול הקיצורים: בלי מסמך פתוח אין
+ * מערכת מאקרו, והצירוף צריך להישאר של הדפדפן. הרצועה מתעלמת מערך ההחזרה —
+ * הכפתורים שלה ממילא מנוטרלים בלי מסמך.
+ */
+function onMacroRecord(): boolean {
+  const macros = activeMacros.value;
+  if (!macros) return false;
+  macros.toggleRecording();
+  return true;
+}
+
+function onMacroPlay(): boolean {
+  const macros = activeMacros.value;
+  if (!macros) return false;
+  macros.replayLast();
+  return true;
+}
 
 /**
  * האם יש מסמך פתוח — מה שפקדי לשונית „קובץ” נשענים עליו.
@@ -801,9 +842,16 @@ async function openDocument(file?: UserFile, options: OpenOptions = {}): Promise
 
   // מערכת המאקרו (superdoc-macros) שייכת ל-session: ההקלטה עוטפת את
   // ה-controller של המופע הזה, וההקלדה נקלטת מה-host של המסמך הפתוח.
-  // אותה תבנית פירוק כמו אדפטר החיפוש — ראו engine/macros.ts.
+  // אותה תבנית פירוק כמו אדפטר החיפוש — ראו engine/macros.ts. ה-`macros`
+  // המקומי ולא `activeMacros` בפירוק, מאותה מלכודת: סגירת המסמך הקודם קורית
+  // אחרי שהחדש כבר נרשם.
   if (editorStackRef.value) {
-    editor.onDispose(installMacros(editor, editorStackRef.value, setStatus).dispose);
+    const macros = installMacros(editor, editorStackRef.value, setStatus);
+    activeMacros.value = macros;
+    editor.onDispose(() => {
+      if (activeMacros.value === macros) activeMacros.value = null;
+      macros.dispose();
+    });
   }
 
   /**
@@ -1670,6 +1718,18 @@ const runShellAction = createShellActionRunner({
   insertCitation: () => void onInsertCitation(),
   searchOtzaria: () => void onSearchOtzaria(),
   openLibrary: () => void onOpenLibrary(),
+  toggleMacroRecording: onMacroRecord,
+  replayLastMacro: onMacroPlay,
+  toggleMacrosDialog: () => {
+    if (isMacrosOpen.value) {
+      isMacrosOpen.value = false;
+      return true;
+    }
+    // אותה הכרעה כמו `toggleShortcutsHelp`: מעל דיאלוג אחר אין לפתוח שני.
+    if (isModalDialogOpen()) return false;
+    isMacrosOpen.value = true;
+    return true;
+  },
   openContextMenu: () => contextMenu.openAtCaret(),
   toggleShortcutsHelp: () => {
     if (isShortcutsHelpOpen.value) {
@@ -1688,6 +1748,10 @@ const runShellAction = createShellActionRunner({
   closeTopmost: () => {
     if (isShortcutsHelpOpen.value) {
       isShortcutsHelpOpen.value = false;
+      return true;
+    }
+    if (isMacrosOpen.value) {
+      isMacrosOpen.value = false;
       return true;
     }
     if (isAboutOpen.value) {

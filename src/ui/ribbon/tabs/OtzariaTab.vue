@@ -31,6 +31,38 @@
       />
     </RibbonGroup>
 
+    <!-- מאקרו: הקלטה וניהול. הפעולות עצמן ב-engine/macros.ts, דרך App.vue. -->
+    <RibbonGroup title="מאקרו">
+      <RibbonButton
+        icon="macro"
+        label="ניהול מאקרו"
+        shortcut-id="macro-manage"
+        variant="large"
+        :tooltip="macrosTooltip('רשימת המאקרו, קטעי הטקסט והסקריפטים — הרצה, עריכה ושיתוף')"
+        :disabled="!macrosAvailable"
+        @click="$emit('manage-macros')"
+      />
+      <div class="column-items">
+        <RibbonButton
+          :label="isRecording ? 'עצור הקלטה' : 'הקלט מאקרו'"
+          shortcut-id="macro-record"
+          variant="small"
+          :tooltip="macrosTooltip('מקליט את הפעולות במסמך — הקלדה, עיצוב, רשימות — לניגון חוזר')"
+          :active="isRecording"
+          :disabled="!macrosAvailable"
+          @click="$emit('macro-record')"
+        />
+        <RibbonButton
+          label="נגן אחרון"
+          shortcut-id="macro-play"
+          variant="small"
+          :tooltip="macrosTooltip('מריץ את המאקרו האחרון שהוקלט, מהמקום שבו הסמן עומד')"
+          :disabled="!macrosAvailable"
+          @click="$emit('macro-play')"
+        />
+      </div>
+    </RibbonGroup>
+
     <!-- תבניות תורניות. ראו ההסבר ב-script: אין למנוע דרך ציבורית ליצור סגנון. -->
     <RibbonGroup title="סגנון תורני">
       <div class="column-items">
@@ -73,6 +105,7 @@ import type { SuperDoc } from 'superdoc';
 import RibbonGroup from '../common/RibbonGroup.vue';
 import RibbonButton from '../common/RibbonButton.vue';
 import { ACTIVE_SUPERDOC } from '../../../engine/document-api';
+import { ACTIVE_MACROS, type MacrosHandle } from '../../../engine/macros';
 import { isAvailable } from '../../../host/otzaria-client';
 import { canInsertText } from '../../../host/otzaria-reader';
 
@@ -80,9 +113,29 @@ defineEmits<{
   (e: 'insert-citation'): void;
   (e: 'search-otzaria'): void;
   (e: 'open-library'): void;
+  (e: 'manage-macros'): void;
+  (e: 'macro-record'): void;
+  (e: 'macro-play'): void;
 }>();
 
 const superdoc = inject(ACTIVE_SUPERDOC, shallowRef<SuperDoc | null>(null));
+
+/**
+ * מערכת המאקרו של המסמך הפתוח. `null` בלי מסמך — ואז הכפתורים מנוטרלים,
+ * מאותו טעם כמו `canSearch`: כפתור שאינו יכול לעבוד נראה כך לפני הלחיצה.
+ */
+const macros = inject(ACTIVE_MACROS, shallowRef<MacrosHandle | null>(null));
+const macrosAvailable = computed(() => macros.value !== null);
+
+/**
+ * מצב ההקלטה, מתוך ה-ref שה-handle חושף: הכפתור צריך להתחלף ל„עצור הקלטה”
+ * גם כשההקלטה התחילה מהמקלדת (Ctrl+Alt+R), לא רק מלחיצה עליו.
+ */
+const isRecording = computed(() => macros.value?.recording.value ?? false);
+
+function macrosTooltip(available: string): string {
+  return macrosAvailable.value ? available : 'יש לפתוח מסמך תחילה';
+}
 
 const OUTSIDE_OTZARIA = 'זמין רק כשהעורך פועל בתוך אוצריא';
 
