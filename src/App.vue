@@ -234,6 +234,7 @@ import {
 import { createEditorSwap, type EditorSwap } from './sessions/editor-swap';
 import { createSaveCoordinator, type SaveCoordinator, type SaveSnapshot } from './sessions/save-coordinator';
 import { createEditor, type EditorSession } from './engine/create-editor';
+import { installMacros } from './engine/macros';
 import { preflightSource } from './engine/docx-preflight';
 import { installDocumentFontAliases } from './engine/docx-fonts';
 import {
@@ -797,6 +798,13 @@ async function openDocument(file?: UserFile, options: OpenOptions = {}): Promise
       styleGallery.value = state;
     })
   );
+
+  // מערכת המאקרו (superdoc-macros) שייכת ל-session: ההקלטה עוטפת את
+  // ה-controller של המופע הזה, וההקלדה נקלטת מה-host של המסמך הפתוח.
+  // אותה תבנית פירוק כמו אדפטר החיפוש — ראו engine/macros.ts.
+  if (editorStackRef.value) {
+    editor.onDispose(installMacros(editor, editorStackRef.value, setStatus).dispose);
+  }
 
   /**
    * מודד המסמך שייך ל-session: `doc` הוא של המופע הפתוח, ו-`getAnchorRect`
