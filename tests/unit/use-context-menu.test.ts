@@ -342,6 +342,29 @@ describe('הזזת הסמן', () => {
     expect(seen).toEqual([]);
     expect(controller.point.value).toEqual({ x: 420, y: 320 });
   });
+
+  it('long-press ממסך מגע (אותה חתימה: button 0, detail 0) נפתח בנקודה שנלחצה, לא על העוגן', async () => {
+    const { controller, documentArea } = setup();
+
+    const event = new MouseEvent('contextmenu', {
+      bubbles: true,
+      cancelable: true,
+      button: 0,
+      clientX: 640,
+      clientY: 480,
+    });
+    Object.defineProperty(event, 'target', { value: documentArea });
+    // `sourceCapabilities.firesTouchEvents`: תוסף Chromium ל-MouseEvent
+    // שמסמן אירוע שסונתז מ-touch — הוא מה שמבחין בין long-press לבין
+    // Shift+F10, ששניהם מגיעים עם אותם button/detail.
+    Object.defineProperty(event, 'sourceCapabilities', {
+      value: { firesTouchEvents: true },
+    });
+    controller.handleContextMenu(event);
+    await settle();
+
+    expect(controller.point.value).toEqual({ x: 640, y: 480 });
+  });
 });
 
 describe('מרוץ התצלום', () => {

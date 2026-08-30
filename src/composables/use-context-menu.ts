@@ -345,8 +345,18 @@ export function useContextMenu(deps: ContextMenuDeps): ContextMenuController {
      * המחדל של `Shift+F10` ומקש התפריט, עם `button: 0` ו-`detail: 0`,
      * ובקואורדינטות שהוא בחר — ומי שמתייחס אליו כאל לחיצה מזיז את הסמן לנקודה
      * שרירותית ופותח שם. העוגן הנכון במקרה הזה הוא הסמן עצמו.
+     *
+     * אותה חתימה בדיוק (`button: 0`, `detail: 0`) מגיעה גם מ-long-press על
+     * מסך מגע ב-Chromium (וב-WebView2, שהוא Chromium) — שם יש נקודה אמיתית
+     * שנלחצה ולא סמן. `sourceCapabilities.firesTouchEvents` הוא תוסף לא-תקני
+     * של Chromium ל-`MouseEvent`, בדיוק בשביל ההבחנה הזאת: `true` כשהאירוע
+     * סונתז מ-touch. `undefined` בכל דפדפן/סביבה אחרת (וב-jsdom של הבדיקות)
+     * משאיר את ההתנהגות הקיימת כפי שהייתה.
      */
-    if (event.button !== 2 && event.detail === 0) {
+    const isTouchSynthesized =
+      (event as MouseEvent & { sourceCapabilities?: { firesTouchEvents?: boolean } })
+        .sourceCapabilities?.firesTouchEvents === true;
+    if (event.button !== 2 && event.detail === 0 && !isTouchSynthesized) {
       openAtCaret();
       return;
     }
