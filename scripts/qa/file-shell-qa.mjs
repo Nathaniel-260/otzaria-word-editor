@@ -597,14 +597,41 @@ async function sectionOtzariaTab() {
         "window.__qaHost.replies['reader.openSearchTab']=function(p){window.__lastSearch=p;" +
         "return Promise.resolve({success:true,data:true,error:null})}",
       );
+
+      /* הבחירה נמדדת לפני הלחיצה, ואינה מונחת.
+       *
+       * בלי זה הצעד היה מדווח `search=null` — שאינו אומר אם הפקד לא קרא
+       * למאחז, או שלא הייתה בחירה מלכתחילה ולכן **בצדק** לא קרא. השניים
+       * דורשים תיקון במקומות שונים לגמרי, והמספר היחיד לא הבדיל ביניהם.
+       *
+       * המלכודת שהסתירה את זה: כשאין בחירה הפקד מציג **הנחיה**, לא שגיאה,
+       * ו-`noise()` בודק `status.error` בלבד — כלומר המצב הזה עבר בשקט
+       * מוחלט. לכן טקסט המצב נכנס לדוח גם כשאינו שגיאה. */
+      const selection = await app.selection();
+      const statusBefore = await app.status();
+
       await app.reset();
       const clicked = await app.click('חיפוש באוצריא', { after: 1500 });
       const search = await app.js('JSON.stringify(window.__lastSearch||null)').then(JSON.parse);
+      const statusAfter = await app.status();
       const bad = await noise(app);
-      log('נלחץ:', clicked, '| reader.openSearchTab payload:', JSON.stringify(search), '| רעש:', bad || '(אין)');
-      if (clicked && search?.query && search.query.trim() !== '' && !bad)
+      log('נלחץ:', clicked, '| בחירה לפני:', JSON.stringify(selection), '| payload:', JSON.stringify(search),
+        '| מצב אחרי:', JSON.stringify(statusAfter), '| רעש:', bad || '(אין)');
+
+      if (clicked && search?.query && search.query.trim() !== '' && !bad) {
         report.pass('חיפוש באוצריא', `נקרא עם query="${search.query}"`);
-      else report.fail('חיפוש באוצריא', `search=${JSON.stringify(search)}; רעש: ${bad || 'אין'}`);
+      } else if (!selection || selection.empty !== false) {
+        // הפקד צדק; מה שנכשל הוא הכנת הבחירה בשער.
+        report.stuck(
+          'חיפוש באוצריא',
+          `השער לא הצליח לבחור טווח לפני הלחיצה (selection=${JSON.stringify(selection)}, status=${JSON.stringify(statusBefore)}) — אין ממה לגזור שאילתה`,
+        );
+      } else {
+        report.fail(
+          'חיפוש באוצריא',
+          `הייתה בחירה (${JSON.stringify(selection)}) והפקד לא קרא למאחז: search=${JSON.stringify(search)}, מצב=${JSON.stringify(statusAfter)}; רעש: ${bad || 'אין'}`,
+        );
+      }
     });
 
     await step('פתח ספרייה', async () => {
@@ -682,16 +709,35 @@ async function sectionTitleBar() {
     await step('בטל (Undo) — הטקסט נעלם מה-XML', async () => {
       const before = await snap(app);
       await app.reset();
+
+      /* מצב הפקודה **במנוע**, ולא רק מצב הכפתור.
+       *
+       * „הטקסט לא נעלם” אינו אומר איפה זה נשבר: הפקודה לא נשלחה, נשלחה
+       * ונדחתה, או רצה ולא עשתה דבר. שלושתן דורשות תיקון במקום אחר. הכפתור
+       * המצויר אינו עדות — הוא נגזר ממצב שנקרא מראש, וייתכן שהוא מיושן.
+       * `app.cmd('undo')` שואל את ה-controller עצמו. */
+      const cmdBefore = await app.cmd('undo');
       const clicked = await app.click('בטל', { after: 1200 });
+      const cmdAfter = await app.cmd('undo');
       const bad = await noise(app);
       const after = await snap(app);
       const hadBefore = /טקסט לבדיקת בטל/.test(before.doc);
       const hasAfter = /טקסט לבדיקת בטל/.test(after.doc);
       const redo = await app.state('חזור');
-      log('נלחץ:', clicked, '| טקסט לפני/אחרי:', hadBefore, hasAfter, '| "חזור" נדלק:', !redo.disabled, '| רעש:', bad || '(אין)');
-      if (clicked && hadBefore && !hasAfter && !redo.disabled && !bad)
+      log('נלחץ:', clicked, '| טקסט לפני/אחרי:', hadBefore, hasAfter,
+        '| undo לפני/אחרי:', JSON.stringify(cmdBefore), JSON.stringify(cmdAfter),
+        '| "חזור" נדלק:', !redo.disabled, '| רעש:', bad || '(אין)');
+
+      if (clicked && hadBefore && !hasAfter && !redo.disabled && !bad) {
         report.pass('בטל', 'הטקסט הוסר מה-document.xml, ו"חזור" נדלק');
-      else report.fail('בטל', `hadBefore=${hadBefore} hasAfter=${hasAfter} redo.disabled=${redo.disabled}; רעש: ${bad || 'אין'}`);
+      } else if (!hadBefore) {
+        report.stuck('בטל', 'הטקסט לבדיקה לא היה במסמך מלכתחילה — אין מה לבטל, והמדידה אינה על הפקד');
+      } else {
+        report.fail(
+          'בטל',
+          `hasAfter=${hasAfter} redo.disabled=${redo.disabled}; מצב undo במנוע לפני=${JSON.stringify(cmdBefore)} אחרי=${JSON.stringify(cmdAfter)}; רעש: ${bad || 'אין'}`,
+        );
+      }
     });
 
     await step('חזור (Redo) — הטקסט חוזר', async () => {
