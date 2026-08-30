@@ -317,14 +317,17 @@ export async function insertCitation(
   }
 
   const snapshot = await readDocSelection(host);
-  const placement: CitationPlacement = snapshot.target ? 'at-cursor' : 'document-end';
+  // `selectionTarget` ולא `target`: `insert` מקבל **רק** את הצורה הזו, ומסירת
+  // רשימת הקטעים נכשלה סגור עם `target must be a SelectionTarget object.` —
+  // המשתמש ראה הודעת שגיאה ושום דבר לא נכתב. ההבחנה מתועדת ב-doc-selection.ts.
+  const placement: CitationPlacement = snapshot.selectionTarget ? 'at-cursor' : 'document-end';
 
   let receipt: DocReceipt;
   try {
     receipt = await insert({
       value: text,
       type: 'text',
-      ...(snapshot.target ? { target: snapshot.target } : {}),
+      ...(snapshot.selectionTarget ? { target: snapshot.selectionTarget } : {}),
     });
   } catch (error) {
     return { ok: false, reason: 'threw', message: thrownText(failedAction, error) };

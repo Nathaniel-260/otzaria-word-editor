@@ -29,9 +29,20 @@ function hostReturning(info: SelectionInfoLike | undefined) {
   return { host: hostWith(current), current };
 }
 
+/**
+ * שני השדות יחד, כמו שהמנוע מחזיר. הפיקסטורה שהייתה כאן נשאה `target` בלבד,
+ * וזה בדיוק מה שאיפשר ל-`insertCitation` לשלוח את הצורה הלא נכונה בלי שאף
+ * בדיקה תרגיש: כפיל שאינו מדמה את התשובה המלאה מאשר גם קוד ששואל את השדה
+ * הלא נכון.
+ */
 const RANGE_INFO: SelectionInfoLike = {
   empty: false,
   target: { kind: 'text', segments: [{ blockId: 'p7', range: { start: 3, end: 9 } }] },
+  selectionTarget: {
+    kind: 'selection',
+    start: { kind: 'text', blockId: 'p7', offset: 3 },
+    end: { kind: 'text', blockId: 'p7', offset: 9 },
+  },
   text: 'בראשית',
 };
 
@@ -46,11 +57,36 @@ describe('readDocSelection', () => {
 
     return expect(readDocSelection(host, { includeText: true })).resolves.toEqual({
       target: RANGE_INFO.target,
+      selectionTarget: RANGE_INFO.selectionTarget,
       text: 'בראשית',
       hasRange: true,
       blockId: 'p7',
       story: null,
     });
+  });
+
+  /**
+   * שני השדות נמסרים בנפרד, כי הצרכנים שלהם שונים: `hyperlinks.wrap` מקבל את
+   * רשימת הקטעים, ו-`doc.insert` מקבל **רק** את ה-SelectionTarget. ערבוב
+   * ביניהם נכשל סגור עם `target must be a SelectionTarget object.`
+   */
+  it('שני היעדים נמסרים בנפרד ואינם מתערבבים', async () => {
+    const snapshot = await readDocSelection(hostReturning(RANGE_INFO).host);
+
+    expect(snapshot.target).toEqual(RANGE_INFO.target);
+    expect(snapshot.selectionTarget).toEqual(RANGE_INFO.selectionTarget);
+    expect(snapshot.selectionTarget).not.toEqual(snapshot.target);
+  });
+
+  it('selectionTarget שאינו אובייקט נדחה ל-null', async () => {
+    // מסירת ערך כזה ל-`insert` הייתה זריקת INVALID_INPUT במקום נפילה חזרה
+    // לסוף המסמך.
+    for (const bad of [null, undefined, 'selection', 7]) {
+      const snapshot = await readDocSelection(
+        hostReturning({ ...RANGE_INFO, selectionTarget: bad } as SelectionInfoLike).host,
+      );
+      expect(snapshot.selectionTarget).toBeNull();
+    }
   });
 
   it('סמן בלבד אינו טווח — וזה מה שקובע את המסלול במנוע', async () => {

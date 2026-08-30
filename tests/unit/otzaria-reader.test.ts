@@ -352,15 +352,27 @@ function fakeDoc(options: {
 }
 
 /** תצלום בחירה עם יעד שהמנוע יתרגם לכתובת טקסט. */
+/**
+ * שני השדות שהמנוע מחזיר, ולא רק אחד. הפיקסטורה שהייתה כאן נשאה `target`
+ * בלבד, ולכן הבדיקה אישרה קוד ששלח את `target` ל-`doc.insert` — צורה
+ * ש-`insert` דוחה סגור עם `target must be a SelectionTarget object.` המשתמש
+ * קיבל הודעת שגיאה ושום ציטוט לא נכתב, ושער המעטפת תפס את זה בזמן שהבדיקה
+ * הזו הייתה ירוקה.
+ */
 const CURSOR = {
   target: { kind: 'selection', segments: [{ blockId: 'p1', range: { start: 3, end: 3 } }] },
+  selectionTarget: {
+    kind: 'selection',
+    start: { kind: 'text', blockId: 'p1', offset: 3 },
+    end: { kind: 'text', blockId: 'p1', offset: 3 },
+  },
   segments: [{ blockId: 'p1', range: { start: 3, end: 3 } }],
 };
 
 describe('insertCitation', () => {
   it('מכניסה במיקום הסמן כשיש בחירה במסמך', async () => {
     const { host, insert } = fakeDoc({
-      selection: { empty: true, target: CURSOR.target },
+      selection: { empty: true, target: CURSOR.target, selectionTarget: CURSOR.selectionTarget },
     });
 
     await expect(insertCitation(host, 'וַיֹּאמֶר (בראשית פרק א)')).resolves.toEqual({
@@ -370,8 +382,25 @@ describe('insertCitation', () => {
     expect(insert).toHaveBeenCalledWith({
       value: 'וַיֹּאמֶר (בראשית פרק א)',
       type: 'text',
-      target: CURSOR.target,
+      target: CURSOR.selectionTarget,
     });
+  });
+
+  /**
+   * המנוע החזיר רשימת קטעים אבל לא SelectionTarget — למשל בחירה שאינה נפתרת
+   * לנקודות קצה. אז אין יעד חוקי ל-`insert`, וההכנסה נופלת חזרה לסוף המסמך
+   * ומדווחת על כך. מה שאסור הוא לשלוח את הצורה הלא נכונה ולקבל שגיאה.
+   */
+  it('בלי selectionTarget אינה שולחת את רשימת הקטעים כיעד', async () => {
+    const { host, insert } = fakeDoc({
+      selection: { empty: true, target: CURSOR.target },
+    });
+
+    await expect(insertCitation(host, 'ויאמר')).resolves.toEqual({
+      ok: true,
+      value: 'document-end',
+    });
+    expect(insert).toHaveBeenCalledWith({ value: 'ויאמר', type: 'text' });
   });
 
   it('בלי סמן מכניסה בסוף המסמך ומדווחת על כך', async () => {

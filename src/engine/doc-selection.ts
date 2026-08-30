@@ -66,6 +66,21 @@ export interface DocSelectionSnapshot {
    * מקבעת אצלנו צורה אחת מהשלוש.
    */
   target: unknown | null;
+  /**
+   * `SelectionTarget` — הצורה ש**פעולות הכתיבה** צורכות ישירות, ולא `target`.
+   *
+   * שני שדות ולא אחד, כי המנוע מחזיר שניים והם אינם מחליפים זה את זה:
+   * `target` הוא רשימת קטעים (`{segments}`) ואין בו נקודות קצה, ו-
+   * `selectionTarget` הוא `{kind:'selection', start, end}`. `hyperlinks.wrap`
+   * מקבל את הראשון (`textAddressesFromTarget` מכיר את שלוש הצורות שלו),
+   * ו-`doc.insert` מקבל **רק** את השני.
+   *
+   * מסירת `target` ל-`insert` נכשלת סגור עם `target must be a SelectionTarget
+   * object.` — נמדד בשער המעטפת על „ציטוט מהקורא”, שם המשתמש קיבל הודעת
+   * שגיאה ושום דבר לא נכתב. הפרדת השדות היא מה שמונע מכל קורא חדש ליפול לשם
+   * שוב, במקום לזכור מי מהשניים מתאים לאיזו פעולה.
+   */
+  selectionTarget: unknown | null;
   /** הטקסט המסומן. `''` כשאין בחירה או כשלא התבקש. */
   text: string;
   /** האם יש טווח ולא רק סמן. קובע אם הקישור יעטוף טקסט קיים או יכניס חדש. */
@@ -78,7 +93,7 @@ export interface DocSelectionSnapshot {
 
 /** התצלום כשאין בחירה שאפשר לפעול עליה. לא קבוע משותף — כדי שקורא לא ישנה אותו לכולם. */
 export function emptySelectionSnapshot(): DocSelectionSnapshot {
-  return { target: null, text: '', hasRange: false, blockId: null, story: null };
+  return { target: null, selectionTarget: null, text: '', hasRange: false, blockId: null, story: null };
 }
 
 function segmentsOf(info: SelectionInfoLike): readonly SelectionSegment[] {
@@ -131,6 +146,12 @@ export async function readDocSelection(
     // עובר את `linkPayloadHasExplicitTarget` (הוא אובייקט) ואז מייצר רשימת
     // כתובות ריקה — כלומר פקודה שנראית מוכנה ונכשלת סגור.
     target: first ? (info.target ?? null) : null,
+    // אובייקט בלבד: המנוע מחזיר `null` כשאין בחירה, ומסירת כל דבר אחר
+    // ל-`insert` הייתה זריקת `INVALID_INPUT` במקום נפילה חזרה לסוף המסמך.
+    selectionTarget:
+      info.selectionTarget !== null && typeof info.selectionTarget === 'object'
+        ? info.selectionTarget
+        : null,
     text: typeof info.text === 'string' ? info.text : '',
     // טווח, ולא `empty` של המנוע: `empty` מתייחס לבחירה כולה, ומה שקובע את
     // המסלול (`hyperlinks.wrap` מול `hyperlinks.insert`) הוא האם יש קטע
