@@ -1608,9 +1608,17 @@ function isDocumentSurface(target: EventTarget | null): boolean {
   return host !== null && target instanceof Node && host.contains(target);
 }
 
-/** דיאלוג שמכריז `aria-modal`. מה שמאחוריו אינו זמין — גם לא לקיצור. */
+/**
+ * דיאלוג שמכריז `aria-modal`. מה שמאחוריו אינו זמין — גם לא לקיצור.
+ *
+ * שלושה הרפים שהמעטפת מחזיקה בעצמה, ובנוסף — שאילתת DOM: `aria-modal="true"`
+ * מוצהר גם ב-17 פאנלים שחיים בתוך לשוניות הרצועה עם מצב מקומי (פסקה, גופן,
+ * הערה וכל השאר), וללא השאילתה קיצורי מקלדת וניווט חצים ממשיכים לפעול מתחת
+ * להם — בדיוק ההצהרה שה-`aria-modal` שלהם מכחישה.
+ */
 function isModalDialogOpen(): boolean {
-  return isAboutOpen.value || linkDialog.isOpen.value || isShortcutsHelpOpen.value;
+  if (isAboutOpen.value || linkDialog.isOpen.value || isShortcutsHelpOpen.value) return true;
+  return document.querySelector('[aria-modal="true"]') !== null;
 }
 
 /**

@@ -779,6 +779,23 @@ describe('מה שהקיצורים אינם עושים', () => {
     expect(event.defaultPrevented).toBe(false);
     expect(adapter.calls).toEqual([]);
   });
+
+  it('פאנל aria-modal שאינו אחד משלושת אלה שהמעטפת עוקבת אחריהם (למשל „פסקה…”) חוסם קיצור גם הוא', async () => {
+    // isModalDialogOpen הכיר במפורש רק About/LinkDialog/ShortcutsHelp, בעוד
+    // aria-modal מוצהר גם בפאנלים שחיים בתוך לשוניות הרצועה. Ctrl+B היה ממשיך
+    // לרוץ מתחת לפאנל כזה — בדיוק ההצהרה ש-aria-modal="true" מכחישה.
+    await mountShell();
+    const panel = document.createElement('div');
+    panel.setAttribute('aria-modal', 'true');
+    document.body.append(panel);
+
+    const event = press({ code: 'KeyB', ctrlKey: true });
+    await settle();
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(adapter.calls).toEqual([]);
+    panel.remove();
+  });
 });
 
 describe('Ctrl+K והכפתור נחסמים באותו תנאי', () => {
