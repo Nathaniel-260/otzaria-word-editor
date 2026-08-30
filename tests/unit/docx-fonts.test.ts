@@ -70,6 +70,16 @@ describe('parseFontTable', () => {
     expect([byCsb[0].hebrew, byUsb[0].hebrew, byCharset[0].hebrew]).toEqual([true, true, true]);
   });
 
+  it('csb0 ריק אינו מצהיר כלום — נופלים ל-usb0 ולא נעצרים עליו', () => {
+    // גופנים מודרניים רבים לא מכריזים דף קוד ותיק כלל (csb0 אפס) ומסתמכים רק
+    // על טווח היוניקוד. csb0="00000000" קיים בתג, ולכן "אין csb0 כלל" לבדו לא
+    // תופס אותו — חייבים להתייחס אליו כאילו לא הוצהר.
+    const font = parseFontTable(
+      '<w:font w:name="a"><w:sig w:csb0="00000000" w:usb0="00000800"/></w:font>',
+    );
+    expect(font[0].hebrew).toBe(true);
+  });
+
   it('גופן לטיני אינו מסומן כעברי', () => {
     const fonts = parseFontTable(REAL_FONT_TABLE);
     expect(fonts[0].hebrew).toBe(false);

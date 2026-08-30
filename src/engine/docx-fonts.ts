@@ -161,7 +161,9 @@ function decodeXml(value: string): string {
  * `FrankRuehl DP` (`00000021` — לטינית ועברית) ועל `Guttman Drogolin`
  * (`00000020` — עברית בלבד).
  *
- * `w:usb0` משמש רק כשאין `csb0` כלל, כגיבוי לגופנים ותיקים.
+ * `w:usb0` משמש כשאין `csb0` כלל, או כשהוא קיים אך ריק (`00000000`) — צורה
+ * נפוצה בגופנים מודרניים שמכריזים רק על טווחי יוניקוד ולא על דפי קוד ותיקים
+ * כלל. `csb0` ריק אינו "מצהיר על היעדר עברית": הוא לא מצהיר כלום.
  */
 function declaresHebrew(block: string, charset: string | null): boolean {
   if (charset !== null && Number.parseInt(charset, 16) === CHARSET_HEBREW) return true;
@@ -176,7 +178,7 @@ function declaresHebrew(block: string, charset: string | null): boolean {
   };
 
   const csb0 = read('w:csb0');
-  if (Number.isFinite(csb0)) {
+  if (Number.isFinite(csb0) && csb0 !== 0) {
     return (csb0 & CSB0_HEBREW_BIT) !== 0 && countBits(csb0) <= MAX_CODE_PAGES_FOR_HEBREW_FONT;
   }
 
