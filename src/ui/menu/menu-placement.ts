@@ -19,6 +19,7 @@
  * גובה — ולכן הוא **נלקח** מ-`popoverPlacement` ואינו משוכפל כאן.
  */
 import {
+  clamp,
   POPOVER_MARGIN_PX,
   popoverPlacement,
   type Placement,
@@ -34,10 +35,6 @@ export interface MenuPlacementOptions {
   /** ברירת המחדל היא ימין-לשמאל: זו הכיווניות של הממשק. */
   readonly rtl?: boolean;
   readonly margin?: number;
-}
-
-function clamp(value: number, low: number, high: number): number {
-  return Math.min(Math.max(value, low), high);
 }
 
 /**

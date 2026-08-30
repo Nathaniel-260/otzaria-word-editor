@@ -68,6 +68,7 @@ import { computed, nextTick, onUnmounted, ref, watch, type ComponentPublicInstan
 import ContextMenuButton from './ContextMenuButton.vue';
 import { contextMenuEntries, type ContextMenuEntry, type ContextMenuSection } from './context-menu-model';
 import { contextMenuPlacement, type MenuPoint } from './menu-placement';
+import { isRightToLeft } from '../../composables/popover-position';
 
 const props = defineProps<{
   open: boolean;
@@ -102,12 +103,6 @@ function registerButton(id: string, element: Element | ComponentPublicInstance |
 }
 
 const entries = computed(() => contextMenuEntries(props.sections));
-
-function isRightToLeft(element: HTMLElement): boolean {
-  const computedDirection = getComputedStyle(element).direction;
-  if (computedDirection) return computedDirection === 'rtl';
-  return (document.documentElement.dir || '').toLowerCase() === 'rtl';
-}
 
 function place(): void {
   const card = cardRef.value;

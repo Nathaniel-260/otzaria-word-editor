@@ -83,7 +83,7 @@ export interface PlacementOptions {
   align?: 'start' | 'center';
 }
 
-function clamp(value: number, low: number, high: number): number {
+export function clamp(value: number, low: number, high: number): number {
   return Math.min(Math.max(value, low), high);
 }
 
@@ -157,7 +157,7 @@ export interface PopoverPosition {
  * מזה שהאפליקציה רצה בו (`<html dir="rtl">` ב-index.html) — כלומר בדיקה ירוקה
  * שמאשרת יישור לקצה הלא נכון.
  */
-function isRightToLeft(element: HTMLElement): boolean {
+export function isRightToLeft(element: HTMLElement): boolean {
   const computed = getComputedStyle(element).direction;
   if (computed) return computed === 'rtl';
   const declared = element.closest('[dir]')?.getAttribute('dir') ?? document.documentElement.dir;
