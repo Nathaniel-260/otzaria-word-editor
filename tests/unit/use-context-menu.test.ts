@@ -339,6 +339,34 @@ describe('מרוץ התצלום', () => {
 
     expect(controller.isOpen.value).toBe(false);
   });
+
+  it('מודאל שנפתח באמצע (בזמן שהתצלום בדרך) מונע פתיחה — לא רק לפניו', async () => {
+    const { controller, documentArea } = setup();
+
+    controller.handleContextMenu(rightClick(documentArea));
+    // נפתח **אחרי** handleContextMenu אבל לפני שהתצלום השתקף — בדיוק החלון
+    // ש-isBlockedByModal אמור לחסום גם כשהוא נבדק רק לפני הלחיצה.
+    const dialog = document.createElement('div');
+    dialog.setAttribute('aria-modal', 'true');
+    document.body.append(dialog);
+    cleanup.push(() => dialog.remove());
+    await settle();
+
+    expect(controller.isOpen.value).toBe(false);
+  });
+
+  it('מודל ריק (המסמך עדיין נטען) אינו פותח תפריט בלתי-נראה', async () => {
+    const notReady = fakeSuperdoc();
+    (notReady.host as unknown as { activeEditor: { doc: { capabilities?: unknown } } }).activeEditor.doc.capabilities =
+      undefined;
+    const { controller, documentArea } = setup({}, notReady);
+
+    controller.handleContextMenu(rightClick(documentArea));
+    await settle();
+
+    expect(controller.isOpen.value).toBe(false);
+    expect(controller.sections.value).toEqual([]);
+  });
 });
 
 describe('הרצת פריט', () => {

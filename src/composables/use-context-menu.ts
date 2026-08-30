@@ -304,9 +304,11 @@ export function useContextMenu(deps: ContextMenuDeps): ContextMenuController {
     ]);
 
     // המסמך יכול היה להתחלף באמצע — ואז התצלום מתאר מסמך שכבר אינו על המסך.
-    if (token !== request || deps.superdoc.value !== host) return;
+    // ומודאל יכול היה להיפתח באמצע — ואז „תפריט פתוח מעל מודאל”, המצב ש-
+    // isBlockedByModal קיים כדי למנוע (ראו ההערה שם), נוצר דרך הפער הזה במקום.
+    if (token !== request || deps.superdoc.value !== host || isBlockedByModal()) return;
 
-    sections.value = contextMenuModel({
+    const built = contextMenuModel({
       // `available` ולא `true`: כשה-Document API אינו מוכן כל היכולות שקריות
       // וכל הפקדים אפורים, וכרטיס מלא בפקדים מתים הוא בדיוק מה שהמודל אמור
       // למנוע בענף „אין מסמך”.
@@ -315,6 +317,13 @@ export function useContextMenu(deps: ContextMenuDeps): ContextMenuController {
       storyType: storyTypeOf(selection.story),
       can: (question: DocCapabilityQuestion) => capabilities.can(question),
     });
+    // מקטעים ריקים (למשל המסמך עדיין נטען) הם „אין מה להציג”, לא „תפריט פתוח
+    // בלי תוכן”: ContextMenu.vue ממילא לא מרנדר (`sections.length > 0`), ובלי
+    // התנאי הזה isOpen נשאר true על תפריט בלתי-נראה — ו-Escape הבא נבלע על
+    // ידי closeTopmost's contextMenu.isOpen branch בלי אפקט.
+    if (built.length === 0) return;
+
+    sections.value = built;
     point.value = at;
     isOpen.value = true;
   }
