@@ -104,7 +104,10 @@ async function phase(label, body) {
   ]);
   if (!outcome.done) {
     log(`!! מקטע „${label}": תקוע — לא סיים תוך ${PHASE_TIMEOUT_MS}ms, ממשיכים בכוח למקטע הבא`);
-    report.fail(`מקטע „${label}" נתקע`, `לא סיים תוך ${PHASE_TIMEOUT_MS}ms — ראו תיעוד בראש הקובץ`);
+    // „תקוע” ולא „שבור”, מאותו טעם כמו בצעד הבודד: מקטע שלא סיים הוא כשל של
+    // סביבת המדידה, ולא פקד שנמדד ונמצא שבור. רישומו כשבור ניפח את המונה
+    // ושלח לחפש באג במקום שבו לא נמדד דבר.
+    report.stuck(`מקטע „${label}"`, `לא סיים תוך ${PHASE_TIMEOUT_MS}ms — ראו תיעוד בראש הקובץ`);
   } else if (!outcome.ok) {
     log(`!! מקטע „${label}" זרק:`, outcome.error?.stack ?? outcome.error);
     report.fail(`מקטע „${label}"`, `נפל: ${outcome.error?.message ?? outcome.error}`);
@@ -475,7 +478,8 @@ async function sectionFileTab() {
 
     await step('יציאה — על מסמך נקי (openLibrary/navigation.goTo)', async () => {
       await app.js(
-        "window.__qaHost.replies['navigation.goTo']=function(p){window.__lastNav=p;return Promise.resolve(true)}",
+        "window.__qaHost.replies['navigation.goTo']=function(p){window.__lastNav=p;" +
+        "return Promise.resolve({success:true,data:true,error:null})}",
       );
       await app.reset();
       const clicked = await app.click('יציאה', { after: 1500 });
@@ -590,7 +594,8 @@ async function sectionOtzariaTab() {
     await step('חיפוש באוצריא — עם בחירה', async () => {
       await selectWholeLine(app, 0);
       await app.js(
-        "window.__qaHost.replies['reader.openSearchTab']=function(p){window.__lastSearch=p;return Promise.resolve(true)}",
+        "window.__qaHost.replies['reader.openSearchTab']=function(p){window.__lastSearch=p;" +
+        "return Promise.resolve({success:true,data:true,error:null})}",
       );
       await app.reset();
       const clicked = await app.click('חיפוש באוצריא', { after: 1500 });
@@ -603,7 +608,8 @@ async function sectionOtzariaTab() {
     });
 
     await step('פתח ספרייה', async () => {
-      await app.js("window.__qaHost.replies['navigation.goTo']=function(p){window.__lastNav2=p;return Promise.resolve(true)}");
+      await app.js("window.__qaHost.replies['navigation.goTo']=function(p){window.__lastNav2=p;" +
+        "return Promise.resolve({success:true,data:true,error:null})}");
       await app.reset();
       const clicked = await app.click('פתח ספרייה', { after: 1200 });
       const nav = await app.js('JSON.stringify(window.__lastNav2||null)').then(JSON.parse);
@@ -614,7 +620,11 @@ async function sectionOtzariaTab() {
     });
 
     await step('פתח ספרייה — כשל מהמאחז מדווח ולא נבלע', async () => {
-      await app.js("window.__qaHost.replies['navigation.goTo']=function(){return Promise.resolve(false)}");
+      // סירוב אמיתי: מעטפת עם success:false, כמו שהמאחז מחזיר. `false` גולמי היה
+      // „עובד” רק במקרה — הלקוח דוחה כל דבר שאינו מעטפת, ולכן הבדיקה לא הבדילה
+      // בין „המאחז סירב” לבין „המאחז ענה בשפה אחרת”.
+      await app.js("window.__qaHost.replies['navigation.goTo']=function(){" +
+        "return Promise.resolve({success:false,data:null,error:{message:'לא ניתן לעבור',code:'error.failed'}})}");
       await app.reset();
       await app.click('פתח ספרייה', { after: 1000 });
       const st = await app.status();
