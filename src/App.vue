@@ -215,6 +215,7 @@ import { createEditorSwap, type EditorSwap } from './sessions/editor-swap';
 import { createSaveCoordinator, type SaveCoordinator, type SaveSnapshot } from './sessions/save-coordinator';
 import { createEditor, type EditorSession } from './engine/create-editor';
 import { preflightSource } from './engine/docx-preflight';
+import { installDocumentFontAliases } from './engine/docx-fonts';
 import {
   anchorPageIndex,
   createDocMetrics,
@@ -653,7 +654,12 @@ async function openDocument(file?: UserFile, options: OpenOptions = {}): Promise
   // החוט הראשי, ומשם אין חזרה — גם `OPEN_TIMEOUT_MS` אינו יכול לירות. ראו
   // engine/docx-preflight.ts. השלב הזה אינו יכול להיכשל: הוא מחזיר את המקור
   // כמות שהוא בכל מקרה שאינו „מצאתי בדיוק את הערך הזה”.
-  const source = await preflightSource(options.draft ?? file?.url);
+  const { source, fontTable } = await preflightSource(options.draft ?? file?.url);
+
+  // לפני שהמנוע מודד, ולא אחרי: `lineRule="auto"` גוזר את גובה השורה ממדדי
+  // הגופן שנבחר בפועל, ולכן גופן חסר משנה את פריסת כל המסמך — לא רק את מראהו.
+  // ראו engine/docx-fonts.ts. אינו יכול להיכשל, ואינו מעכב כשאין מה להחליף.
+  await installDocumentFontAliases(fontTable);
 
   const outcome = await swap.open(source);
   isOpening.value = swap.isOpening;

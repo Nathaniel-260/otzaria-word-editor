@@ -35,6 +35,14 @@ import { DOCX_MIME } from './export';
 export const SETTINGS_PART = 'word/settings.xml';
 
 /**
+ * החלק שמתאר את הגופנים שהמסמך משתמש בהם — כולל כאלה שאינם מותקנים.
+ *
+ * אינו מתוקן כאן ואינו נוגע לקיפאון; הוא נקרא ונמסר החוצה, מפני שזה המקום
+ * היחיד שכבר פותח את הארכיון. מה שנעשה איתו נמצא ב-engine/docx-fonts.ts.
+ */
+export const FONT_TABLE_PART = 'word/fontTable.xml';
+
+/**
  * ברירת המחדל של Word לעצירת טאב, ב-twips (720 = חצי אינץ' = 1.27 ס"מ).
  *
  * זה גם מה ש-OOXML מגדיר כערך כשהמאפיין נעדר לגמרי, ולכן כתיבתו במפורש שקולה
@@ -111,6 +119,14 @@ export function repairSettings(xml: string): string | null {
   );
 }
 
+/** מה שהשלב המקדים מוציא: המסמך שיימסר למנוע, ומה שנקרא עליו בדרך. */
+export interface PreflightResult {
+  /** המקור שיש למסור למנוע. זהה למקור שנכנס כשלא נגענו בו. */
+  source: string | File | Blob | undefined;
+  /** תוכן `FONT_TABLE_PART`, או `null` כשאין או שלא נקרא. */
+  fontTable: string | null;
+}
+
 /**
  * מקור המסמך, אחרי תיקון. מחזירה את המקור עצמו כשאין מה לתקן — כולל כשהבדיקה
  * עצמה לא הצליחה לרוץ.
@@ -118,11 +134,14 @@ export function repairSettings(xml: string): string | null {
  * המקור נשאר URL כשלא נגענו בו, ובכוונה: כך המסלול שבו כל המסמכים נפתחים היום
  * אינו משתנה בגללנו. המחיר הוא קריאה נוספת של הבייטים מ-loopback מקומי, והוא
  * זניח מול פתיחה שנתקעת לנצח.
+ *
+ * טבלת הגופנים נקראת באותה הזדמנות: הבייטים כבר כאן והארכיון כבר נפתח, ולכן
+ * קריאה שנייה שלהם רק בשביל הטבלה הייתה בזבוז.
  */
 export async function preflightSource(
   source: string | File | Blob | undefined,
-): Promise<string | File | Blob | undefined> {
-  if (source === undefined) return source;
+): Promise<PreflightResult> {
+  if (source === undefined) return { source, fontTable: null };
 
   let bytes: Bytes;
   try {
@@ -132,16 +151,26 @@ export async function preflightSource(
         : new Uint8Array(await source.arrayBuffer());
   } catch (error) {
     console.warn('[otzaria-word] הבדיקה המקדימה לא קראה את המסמך', error);
-    return source;
+    return { source, fontTable: null };
   }
 
+  const fontTable = await readDocxPart(bytes, FONT_TABLE_PART);
   const repaired = await preflightDocx(bytes);
-  if (!repaired) return source;
+  if (!repaired) return { source, fontTable };
 
   console.warn(
     `[otzaria-word] ${SETTINGS_PART}: defaultTabStop מתוקן ל-${DEFAULT_TAB_STOP_TWIPS} — הערך שהיה מקפיא את המנוע`,
   );
-  return new Blob([repaired], { type: DOCX_MIME });
+  return { source: new Blob([repaired], { type: DOCX_MIME }), fontTable };
+}
+
+/**
+ * תוכן חלק מתוך ה-DOCX כטקסט. `null` כשאינו קיים, כשהארכיון אינו נקרא, או
+ * כשהדחיסה אינה נתמכת — שלושה מקרים שבהם פשוט אין לנו מה לומר עליו.
+ */
+export async function readDocxPart(bytes: Bytes, name: string): Promise<string | null> {
+  const entry = readZip(bytes)?.find((candidate) => candidate.name === name);
+  return entry ? readEntryText(entry) : null;
 }
 
 /**
