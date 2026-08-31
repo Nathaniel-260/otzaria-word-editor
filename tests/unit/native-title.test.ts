@@ -48,11 +48,11 @@ const NATIVE_TAG = /^[a-z]/;
 
 const KNOWN_TIP_ATTRS = new Set([TIP_TITLE_ATTR, TIP_SHORTCUT_ATTR, TIP_DESCRIPTION_ATTR]);
 
-function vueFiles(dir: string, found: string[] = []): string[] {
+function sourceFiles(dir: string, suffix: string, found: string[] = []): string[] {
   for (const entry of readdirSync(dir)) {
     const path = join(dir, entry);
-    if (statSync(path).isDirectory()) vueFiles(path, found);
-    else if (path.endsWith('.vue')) found.push(path);
+    if (statSync(path).isDirectory()) sourceFiles(path, suffix, found);
+    else if (path.endsWith(suffix)) found.push(path);
   }
   return found;
 }
@@ -85,7 +85,7 @@ interface Finding {
 function domAttributes(): Array<Finding & { name: string }> {
   const found: Array<Finding & { name: string }> = [];
 
-  for (const file of vueFiles(SRC)) {
+  for (const file of sourceFiles(SRC, '.vue')) {
     const { descriptor, errors } = parse(readFileSync(file, 'utf8'), { filename: file });
     expect(errors, `${relative(SRC, file)} אינו נפרס`).toEqual([]);
 
@@ -147,5 +147,101 @@ describe('הטולטיפ המולד אינו יכול לחזור', () => {
     const tipTitles = ATTRIBUTES.filter((attribute) => attribute.name === TIP_TITLE_ATTR);
     expect(tipTitles.length).toBeGreaterThan(30);
     expect(ATTRIBUTES.some((attribute) => attribute.name === 'aria-label')).toBe(true);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* המסלול השני: כתיבה מ-JS                                            */
+/* ------------------------------------------------------------------ */
+
+/**
+ * `element.setAttribute('title', …)` מצייר את אותו מלבן בדיוק, והסריקה של
+ * התבניות אינה רואה אותו. זה אינו תרחיש תיאורטי: `engine/hf-chrome.ts` עושה
+ * את זה, וזה עבר את השער.
+ *
+ * שם זה מותר, ולכן ההיתר מפורש ומנומק ולא מרומז — ה-DOM של הכותרת העליונה
+ * והתחתונה הוא של המנוע, יושב בתוך `.editor-stack`, ו-`TIP_EXCLUDED_SELECTOR`
+ * מוציא אותו מהשכבה מכוונה. שם `title` הוא הטולטיפ **היחיד** שיש, והמרתו
+ * הייתה משתיקה אותו בלי תחליף.
+ */
+const TITLE_FROM_JS_ALLOWED = ['engine/hf-chrome.ts'];
+
+/**
+ * שלוש הצורות שכותבות את התכונה: `el.setAttribute('title', …)`, העוטף
+ * `setAttribute(el, 'title', …)` שיש כאן במאגר, ו-`el.title = …`.
+ *
+ * הצורה הראשונה נשכחה בגרסה הראשונה של השער, ובדיקת מוטציה היא שמצאה זאת —
+ * ולכן היא גם קבועה למטה כבדיקה, ולא נשארה פעולה חד-פעמית שנעשתה ביד.
+ */
+const TITLE_WRITE = /setAttribute\(\s*(?:[^,()]+,\s*)?(['"`])title\1|\.title\s*=(?!=)/;
+
+/** גם `<script>` בתוך קובץ Vue הוא JS, ולכן הוא נסרק כאן ולא ב-AST שלמעלה. */
+function scriptBodies(): Array<{ where: string; code: string }> {
+  const bodies: Array<{ where: string; code: string }> = [];
+
+  for (const file of sourceFiles(SRC, '.ts')) {
+    bodies.push({ where: relative(SRC, file), code: readFileSync(file, 'utf8') });
+  }
+  for (const file of sourceFiles(SRC, '.vue')) {
+    const { descriptor } = parse(readFileSync(file, 'utf8'), { filename: file });
+    const code = [descriptor.script?.content, descriptor.scriptSetup?.content]
+      .filter(Boolean)
+      .join('\n');
+    if (code) bodies.push({ where: relative(SRC, file), code });
+  }
+
+  return bodies;
+}
+
+const SCRIPTS = scriptBodies();
+
+describe('גם כתיבה מ-JS אינה יכולה להחזיר אותו', () => {
+  it('אף קובץ מלבד ההיתר המנומק אינו כותב title לאלמנט', () => {
+    const offenders = SCRIPTS.filter(
+      (body) => !TITLE_FROM_JS_ALLOWED.includes(body.where) && TITLE_WRITE.test(body.code),
+    ).map((body) => body.where);
+
+    expect(
+      offenders,
+      `יש להצהיר על טולטיפ ב-${TIP_TITLE_ATTR}. אם מדובר ב-DOM של המנוע בתוך ` +
+        '`.editor-stack` — להוסיף ל-TITLE_FROM_JS_ALLOWED עם הנימוק',
+    ).toEqual([]);
+  });
+
+  it('ההיתר עצמו אינו רקוב — הקובץ קיים, ובאמת כותב title', () => {
+    // היתר שאין לו מה להתיר הוא היתר שנשאר פתוח לשימוש הבא, שאינו מנומק.
+    for (const allowed of TITLE_FROM_JS_ALLOWED) {
+      const body = SCRIPTS.find((candidate) => candidate.where === allowed);
+      expect(body, `${allowed} אינו קיים עוד — יש להסיר אותו מ-TITLE_FROM_JS_ALLOWED`).toBeTruthy();
+      expect(TITLE_WRITE.test(body?.code ?? ''), `${allowed} אינו כותב title עוד`).toBe(true);
+    }
+  });
+
+  it('הסריקה מוצאת קוד — אחרת היא ירוקה על כלום', () => {
+    expect(SCRIPTS.length).toBeGreaterThan(50);
+    expect(SCRIPTS.some((body) => body.where.endsWith('.vue'))).toBe(true);
+  });
+
+  it('שלוש צורות הכתיבה נתפסות — כולל זו שנשכחה', () => {
+    // `el.setAttribute('title', …)` עברה את הגרסה הראשונה של הביטוי, שדרש
+    // ארגומנט לפני שם התכונה. בדיקת מוטציה מצאה זאת, וזו היא.
+    for (const violation of [
+      `el.setAttribute('title', 'x')`,
+      `setAttribute(el, 'title', 'x')`,
+      `el.title = 'x'`,
+      'element.setAttribute("title", name)',
+    ]) {
+      expect(TITLE_WRITE.test(violation), violation).toBe(true);
+    }
+
+    // ולא לתפוס את מה שאינו התכונה: `data-tip-title`, ו-`title` כמשתנה או prop.
+    for (const innocent of [
+      `el.setAttribute('data-tip-title', 'x')`,
+      `const title = 'x'`,
+      `props.title === 'x'`,
+      `el.setAttribute('aria-label', title)`,
+    ]) {
+      expect(TITLE_WRITE.test(innocent), innocent).toBe(false);
+    }
   });
 });
