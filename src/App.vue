@@ -333,7 +333,7 @@ import {
   type UserFile,
 } from './host/files';
 import { decideDocumentSwitch } from './sessions/open-flow';
-import { call, confirm, notifyError, on } from './host/otzaria-client';
+import { call, confirm, isAvailable, notifyError, on } from './host/otzaria-client';
 import { supportsPdfExport } from './host/host-capabilities';
 import { splashDone } from './host/splash';
 import {
@@ -2197,6 +2197,46 @@ let shortcuts: ShortcutDispatcher | null = null;
 let directionShortcut: { dispose: () => void } | null = null;
 let undoRedoWatcher: UndoRedoWatcher | null = null;
 
+/**
+ * „שלח למסמך” בתפריט ההקשר של הקורא.
+ *
+ * נקראת בסוף העלייה ולא בתוכה, ועטופה: `on` פונה ל-SDK דרך `bridge()`,
+ * שזורק כשאין `window.Otzaria`. קריאה מוקדמת יותר בתוך `onMounted` הפילה את
+ * כל מה שאחריה — המסמך לא נפתח, השמירה לא אותחלה, וההפעלה לא שוחזרה. פריט
+ * בתפריט ההקשר אינו תנאי לעלייה של העורך, ולכן כשל כאן נרשם וזהו: „ציטוט
+ * מהקורא” ברצועה עושה את אותו דבר מתוך העורך.
+ *
+ * הפריטים נשמרים בזיכרון בצד אוצריא, ולכן הרישום חוזר בכל boot.
+ */
+function registerSendToDocument(): void {
+  if (!isAvailable()) return;
+
+  try {
+    void registerSendToDocumentItem().then((outcome) => {
+      if (!outcome.ok) console.warn('[otzaria-word]', outcome.message);
+    });
+
+    // `openPlugin: true` מעביר ללשונית התוסף ומוסר את האירוע אחרי ה-boot —
+    // כלומר ייתכן שהוא יגיע לפני שהמנוע סיים לפרוס מסמך. `resolveHost` הוא
+    // מה שמאפשר ל-handler להמתין: הוא נקרא שוב בכל סבב, ומחזיר את המסמך
+    // הנוכחי ולא את זה שהיה ברגע הלחיצה.
+    contextMenuListener = on('reader.context_menu_item_clicked', (event) => {
+      void handleSendToDocument(event, {
+        host: activeSuperdoc.value,
+        resolveHost: () => activeSuperdoc.value,
+      }).then((outcome) => {
+        if (outcome.ok) {
+          setStatus(outcome.value === 'at-cursor' ? 'הקטע נוסף במקום הסמן' : 'הקטע נוסף בסוף המסמך');
+        } else if (outcome.message) {
+          setStatus(outcome.message);
+        }
+      });
+    });
+  } catch (error) {
+    console.warn('[otzaria-word] רישום „שלח למסמך” נכשל', error);
+  }
+}
+
 onMounted(async () => {
   /**
    * המנייה של גופני המכונה — ראשונה, ובלי `await`.
@@ -2264,29 +2304,6 @@ onMounted(async () => {
     // וההנמקה — ב-host/lifecycle.ts.
     hiddenListener = onPluginHidden(() => void keeper?.flush());
 
-    // „שלח למסמך” בתפריט ההקשר של הקורא. הפריטים נשמרים בזיכרון בצד אוצריא
-    // ולכן נרשמים מחדש בכל boot; כשל ברישום אינו מפיל את העלייה — הכפתור
-    // „ציטוט מהקורא” ברצועה עושה את אותו דבר מתוך העורך.
-    void registerSendToDocumentItem().then((outcome) => {
-      if (!outcome.ok) console.warn('[otzaria-word]', outcome.message);
-    });
-
-    // `openPlugin: true` מעביר ללשונית התוסף ומוסר את האירוע אחרי ה-boot —
-    // כלומר ייתכן שהוא יגיע לפני שהמנוע סיים לפרוס מסמך. `resolveHost` הוא
-    // מה שמאפשר ל-handler להמתין: הוא נקרא שוב בכל סבב, ומחזיר את המסמך
-    // הנוכחי ולא את זה שהיה ברגע הלחיצה.
-    contextMenuListener = on('reader.context_menu_item_clicked', (event) => {
-      void handleSendToDocument(event, {
-        host: activeSuperdoc.value,
-        resolveHost: () => activeSuperdoc.value,
-      }).then((outcome) => {
-        if (outcome.ok) {
-          setStatus(outcome.value === 'at-cursor' ? 'הקטע נוסף במקום הסמן' : 'הקטע נוסף בסוף המסמך');
-        } else if (outcome.message) {
-          setStatus(outcome.message);
-        }
-      });
-    });
 
     swap = createEditorSwap(editorStackRef.value, (host, source, signal) =>
       createEditor({
@@ -2332,6 +2349,8 @@ onMounted(async () => {
       // מה שצריך להיקרא.
       splashDone();
     }
+
+    registerSendToDocument();
   } else {
     splashDone();
   }
@@ -2353,8 +2372,9 @@ onUnmounted(() => {
   contextMenuListener?.();
   contextMenuListener = null;
   // הפריט עצמו מוסר גם הוא: הוא חי בזיכרון של אוצריא, ופריט שנשאר רשום אחרי
-  // שהדף פורק היה שולח את המשתמש ללשונית שאין בה מי שיטפל בלחיצה.
-  void unregisterSendToDocumentItem();
+  // שהדף פורק היה שולח את המשתמש ללשונית שאין בה מי שיטפל בלחיצה. מותנה
+  // ב-`isAvailable` מאותו טעם כמו הרישום: פירוק אינו מקום להיכשל בו.
+  if (isAvailable()) void unregisterSendToDocumentItem();
   keeper?.dispose();
   keeper = null;
   // ה-interval של הזחילה הוא הדבר היחיד כאן שממשיך לרוץ בלי בעלים.
