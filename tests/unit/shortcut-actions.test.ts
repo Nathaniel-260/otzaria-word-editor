@@ -28,6 +28,9 @@ function setup(over: Partial<ShellActionDeps> = {}) {
     insertCitation: vi.fn(),
     searchOtzaria: vi.fn(),
     openLibrary: vi.fn(),
+    toggleMacroRecording: vi.fn(() => true),
+    replayLastMacro: vi.fn(() => true),
+    toggleMacrosDialog: vi.fn(() => true),
     toggleShortcutsHelp: vi.fn(() => true),
     openContextMenu: vi.fn(() => true),
     moveFocusRegion: vi.fn(() => true),
@@ -49,6 +52,30 @@ describe('createShellActionRunner', () => {
     const { run } = setup({ toggleShortcutsHelp: () => false });
 
     expect(run('shortcuts-help')).toBe(false);
+  });
+
+  it('פעולות המאקרו מנותבות למטפלים ומדווחות שטופלו', () => {
+    const { deps, run } = setup();
+
+    expect(run('macro-record')).toBe(true);
+    expect(run('macro-play')).toBe(true);
+    expect(run('macro-manage')).toBe(true);
+    expect(deps.toggleMacroRecording).toHaveBeenCalledOnce();
+    expect(deps.replayLastMacro).toHaveBeenCalledOnce();
+    expect(deps.toggleMacrosDialog).toHaveBeenCalledOnce();
+  });
+
+  it('פעולות מאקרו בלי מסמך פתוח אינן נבלעות', () => {
+    // בלי מסמך אין מערכת מאקרו, והצירוף צריך להישאר של הדפדפן.
+    const { run } = setup({
+      toggleMacroRecording: () => false,
+      replayLastMacro: () => false,
+      toggleMacrosDialog: () => false,
+    });
+
+    expect(run('macro-record')).toBe(false);
+    expect(run('macro-play')).toBe(false);
+    expect(run('macro-manage')).toBe(false);
   });
 
   it('F6 מעביר אזור, ומדווח שטופל', () => {

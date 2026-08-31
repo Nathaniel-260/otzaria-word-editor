@@ -41,6 +41,15 @@ export interface ShellActionDeps {
   searchOtzaria: () => void;
   openLibrary: () => void;
   /**
+   * מתחיל או עוצר הקלטת מאקרו. מחזיר האם טופל: בלי מסמך פתוח אין מערכת
+   * מאקרו, ובליעת הצירוף הייתה לוקחת אותו מהדפדפן בלי לתת דבר.
+   */
+  toggleMacroRecording: () => boolean;
+  /** מנגן את המאקרו האחרון. מחזיר האם טופל — אותו כלל. */
+  replayLastMacro: () => boolean;
+  /** מתג דיאלוג ניהול המאקרו. מחזיר האם טופל — כמו `toggleShortcutsHelp`. */
+  toggleMacrosDialog: () => boolean;
+  /**
    * מתג רשימת הקיצורים. מחזיר האם טופל: מעל דיאלוג אחר הצירוף אינו פועל,
    * ואז אין לבלוע אותו.
    */
@@ -128,6 +137,12 @@ export function createShellActionRunner(deps: ShellActionDeps): (action: ShellAc
       case 'open-library':
         deps.openLibrary();
         return true;
+      case 'macro-record':
+        return deps.toggleMacroRecording();
+      case 'macro-play':
+        return deps.replayLastMacro();
+      case 'macro-manage':
+        return deps.toggleMacrosDialog();
       case 'shortcuts-help':
         return deps.toggleShortcutsHelp();
       // „אין עוגן” אינו „טופל”: בלי מלבן סמן אין איפה לפתוח את התפריט, ובליעת

@@ -371,7 +371,7 @@ describe('„אוצריא”', () => {
     Reflect.deleteProperty(window, 'Otzaria');
   });
 
-  it('בתוך אוצריא: שלושת הפקדים חיים, ושלושת הסגנונות התורניים מנוטרלים', async () => {
+  it('בתוך אוצריא: פקדי ה-SDK והמאקרו חיים, ושלושת הסגנונות התורניים מנוטרלים', async () => {
     const probes = await probeAll(OtzariaTab);
 
     const dead = probes
@@ -387,15 +387,19 @@ describe('„אוצריא”', () => {
     }
   });
 
-  it('מחוץ לאוצריא: שלושת הפקדים מנוטרלים ואינם מבטיחים כלום', async () => {
+  it('מחוץ לאוצריא: פקדי ה-SDK מנוטרלים, והמאקרו — שאינו תלוי ב-SDK — נשאר חי', async () => {
     Reflect.deleteProperty(window, 'Otzaria');
     const harness = mountUi(OtzariaTab, { superdoc: withSelection() });
     await settle();
 
     const live = harness.wrapper
       .findAll('button')
-      .filter((button) => button.attributes('disabled') === undefined);
-    expect(live).toEqual([]);
+      .filter((button) => button.attributes('disabled') === undefined)
+      .map((button) => button.text().trim());
+    // המאקרו רץ כולו בעורך ואינו קורא ל-SDK של אוצריא, ולכן ניטרול שלו מחוץ
+    // לאוצריא היה לוקח מהמשתמש יכולת שעובדת. פקדי הציטוט/חיפוש/ספרייה כן
+    // מנוטרלים — הם בדיוק מה שאין בלי ה-SDK.
+    expect(live).toEqual(['ניהול מאקרו', 'הקלט מאקרו', 'נגן אחרון']);
   });
 });
 

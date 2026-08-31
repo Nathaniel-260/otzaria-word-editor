@@ -96,6 +96,9 @@
         @insert-citation="$emit('insert-citation')"
         @search-otzaria="$emit('search-otzaria')"
         @open-library="$emit('open-library')"
+        @manage-macros="$emit('manage-macros')"
+        @macro-record="$emit('macro-record')"
+        @macro-play="$emit('macro-play')"
       />
     </div>
   </div>
@@ -205,6 +208,9 @@ defineEmits<{
   (e: 'insert-citation'): void;
   (e: 'search-otzaria'): void;
   (e: 'open-library'): void;
+  (e: 'manage-macros'): void;
+  (e: 'macro-record'): void;
+  (e: 'macro-play'): void;
 }>();
 
 /** רק הלשונית הפעילה נמצאת ב-tab order, ולכן החצים צריכים להזיז מיקוד בעצמם. */

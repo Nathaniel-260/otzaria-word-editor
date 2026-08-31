@@ -26,6 +26,7 @@ export type ShortcutGroup =
   | 'review'
   | 'view'
   | 'otzaria'
+  | 'macros'
   | 'app';
 
 export const SHORTCUT_GROUP_TITLES: Record<ShortcutGroup, string> = {
@@ -39,6 +40,7 @@ export const SHORTCUT_GROUP_TITLES: Record<ShortcutGroup, string> = {
   review: 'סקירה',
   view: 'תצוגה',
   otzaria: 'אוצריא',
+  macros: 'מאקרו',
   app: 'ניווט בממשק',
 };
 
@@ -71,6 +73,9 @@ export type ShellAction =
   | 'insert-citation'
   | 'search-otzaria'
   | 'open-library'
+  | 'macro-record'
+  | 'macro-play'
+  | 'macro-manage'
   | 'shortcuts-help'
   | 'context-menu'
   | 'focus-next-region'
@@ -648,6 +653,39 @@ export const SHORTCUTS = [
     ctrl: true,
     shift: true,
     action: 'open-library',
+  },
+  {
+    id: 'macro-record',
+    label: 'Ctrl+Alt+R',
+    description: 'הקלטת מאקרו — התחלה ועצירה',
+    group: 'macros',
+    code: 'KeyR',
+    ctrl: true,
+    alt: true,
+    action: 'macro-record',
+  },
+  {
+    id: 'macro-play',
+    label: 'Ctrl+Alt+P',
+    description: 'ניגון המאקרו האחרון',
+    group: 'macros',
+    code: 'KeyP',
+    ctrl: true,
+    alt: true,
+    action: 'macro-play',
+  },
+  {
+    // `Alt+F8` — הצירוף של דיאלוג המאקרו ב-Word עצמו, ולכן הוא מה שמשתמש
+    // Word מנסה קודם. מתג כמו `shortcuts-help`: אותו צירוף פותח וסוגר,
+    // ולכן `inModal` — בלעדיו הצירוף היה פותח בלבד.
+    id: 'macro-manage',
+    label: 'Alt+F8',
+    description: 'ניהול מאקרו וקטעי טקסט',
+    group: 'macros',
+    code: 'F8',
+    alt: true,
+    action: 'macro-manage',
+    inModal: true,
   },
   {
     id: 'direction-rtl',
