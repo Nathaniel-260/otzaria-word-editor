@@ -269,10 +269,14 @@ const FIND = `(function(){
 ### 5. שערים
 
 `npm run verify` = typecheck + vitest + build + `check:dist` + `check:boot` +
-`check:fonts` + `check:rtl` + `check:sdk`. **חייב לעבור.**
+`check:fonts` + `check:icons` + `check:rtl` + `check:sdk`. **חייב לעבור.**
 
 שתי אזהרות ידועות שאינן שלך ואין לתקן: `check:dist` על
 `cdnjs.cloudflare.com`, ו-`check:sdk` שמדלג כי ה-SDK אינו במכונה.
+
+`check:icons` מוריד את `@fluentui/svg-icons@1.1.338` מ-npm בכל הרצה (כ-35 שניות)
+ומדלג כשאין רשת. הוא נכשל כשאייקון חדש אינו נרשם ב-THIRD_PARTY_NOTICES.md — לא
+בטבלה ולא ברשימת החריגים — ולכן **אייקון חדש הוא גם שורה במסמך הרישוי**.
 
 שים לב: `tests/component/ribbon-tabs.test.ts` מחזיק `EXPECTED_DISABLED` —
 „רק הפקדים שאין להם API נשארים מנוטרלים”. פקד שמנוטרל מסיבת **מצב** דורש
