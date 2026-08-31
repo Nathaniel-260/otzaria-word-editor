@@ -10,6 +10,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import type { SuperDoc } from 'superdoc';
 import {
   MACRO_STATUS,
+  SCRIPTS_FLAG_KEY,
   installMacros,
   recordingSavedText,
   type MacrosSession,
@@ -114,6 +115,28 @@ describe('installMacros', () => {
     handle.toggleRecording();
 
     expect(handle.kit.listRecordings()[0]!.steps).toEqual([{ type: 'insert-text', text: 'שלום' }]);
+    handle.dispose();
+  });
+
+  it('ברירת המחדל: סקריפטים כבויים — ה-kit עצמו מסרב, לא רק הלשונית', async () => {
+    const { session } = createFakeSession();
+    const container = document.createElement('div');
+    const handle = installMacros(session, container, () => undefined);
+
+    expect(handle.scriptsEnabled).toBe(false);
+    const result = await handle.kit.runSource('return 1');
+    expect(result.ok).toBe(false);
+
+    handle.dispose();
+  });
+
+  it('הדלקת הדגל ב-localStorage מדליקה את הסקריפטים', () => {
+    localStorage.setItem(SCRIPTS_FLAG_KEY, 'on');
+    const { session } = createFakeSession();
+    const container = document.createElement('div');
+    const handle = installMacros(session, container, () => undefined);
+
+    expect(handle.scriptsEnabled).toBe(true);
     handle.dispose();
   });
 

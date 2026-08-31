@@ -55,6 +55,10 @@ export function recordingSavedText(name: string): string {
   return `המאקרו "${name}" נשמר (Ctrl+Alt+P לניגון)`;
 }
 
+export function recordingAutoStoppedText(name: string): string {
+  return `ההקלטה הגיעה לתקרת הצעדים ונשמרה — "${name}"`;
+}
+
 export function replayFailedText(message: string): string {
   return `ניגון המאקרו נכשל: ${message}`;
 }
@@ -129,6 +133,8 @@ export function installMacros(
     container,
   });
 
+  const allowScripts = scriptsEnabled();
+
   const kit = new MacroKit({
     host,
     onLog: (line) => onStatus(line),
@@ -137,10 +143,34 @@ export function installMacros(
     // נמסרות כמו שהן — מה שאינו ניתן לפירוק ("Ctrl + Shift ימני") פשוט
     // אינו ניתן גם להתנגשות, והחבילה מתעלמת ממנו.
     reservedShortcuts: SHORTCUTS.map((shortcut) => shortcut.label),
+    // ה-gate האמיתי יושב ב-kit ולא בדיאלוג: כשהדגל כבוי runScript/runSource
+    // מסרבים וקיצורי סקריפטים אינם נקשרים — סקריפט קיים או מיובא לא ירוץ
+    // בשום מסלול. הסתרת הלשונית היא רק הצד הקוסמטי של אותו מתג.
+    scriptsEnabled: allowScripts,
+    // הקלטה שנעצרה בתקרת הצעדים: ה-callback הוא מה שמעדכן את מחוון
+    // ה„מקליט” ושומר את מה שהוקלט — בלעדיו הכפתור היה ממשיך להבטיח הקלטה
+    // שכבר אינה קורית, והלחיצה הבאה הייתה זורקת את הצעדים.
+    onRecordingAutoStop: () => finishRecording(true),
   });
   seedDefaultSnippet(kit);
 
   const recording = shallowRef(false);
+
+  /** עצירה ושמירה — מסלול אחד ללחיצת המשתמש ולעצירה האוטומטית בתקרה. */
+  function finishRecording(auto: boolean): void {
+    recording.value = false;
+    try {
+      const name = `מאקרו ${kit.listRecordings().length + 1}`;
+      const saved = kit.stopRecording(name);
+      if (saved) onStatus(auto ? recordingAutoStoppedText(saved.name) : recordingSavedText(saved.name));
+      else onStatus(MACRO_STATUS.recordingEmpty, auto);
+    } catch (error) {
+      // רשימת ההקלטות מלאה (תקרת הפריטים של החבילה) — הצעדים אינם ניתנים
+      // לשמירה, וההודעה אומרת למשתמש מה לפנות.
+      kit.cancelRecording();
+      onStatus(error instanceof Error ? error.message : 'שמירת ההקלטה נכשלה', true);
+    }
+  }
 
   const unbindShortcuts = kit.attachShortcuts(container);
   const disableAutoText = kit.enableAutoText();
@@ -148,15 +178,12 @@ export function installMacros(
   let disposed = false;
   return {
     kit,
-    scriptsEnabled: scriptsEnabled(),
+    scriptsEnabled: allowScripts,
     recording,
 
     toggleRecording() {
       if (kit.isRecording) {
-        const name = `מאקרו ${kit.listRecordings().length + 1}`;
-        const saved = kit.stopRecording(name);
-        recording.value = false;
-        onStatus(saved ? recordingSavedText(saved.name) : MACRO_STATUS.recordingEmpty);
+        finishRecording(false);
       } else {
         kit.startRecording();
         recording.value = kit.isRecording;
