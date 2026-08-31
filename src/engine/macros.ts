@@ -54,9 +54,11 @@ export const MACRO_STATUS = {
   /** localStorage חסום או מלא — עובדים מהזיכרון, להפעלה הזאת בלבד. */
   storageUnavailable: 'שמירת מאקרו קבועה אינה זמינה — המאקרו יישמרו להפעלה הזאת בלבד',
   /** שמירת הקלטה נכשלה (למשל quota) — הצעדים שמורים בצד לניסיון נוסף. */
-  recordingKept: 'ההקלטה נשמרה בצד — פנו מקום (מחיקת מאקרו ישן בדיאלוג) ולחצו שוב Ctrl+Alt+R',
+  recordingKept: 'ההקלטה נשמרה בצד — לאחר תיקון הבעיה לחצו שוב Ctrl+Alt+R',
   /** המשתמש סירב לשמור הקלטה לא-שלמה. */
   incompleteDiscarded: 'ההקלטה בוטלה',
+  /** startRecording סירב משום שמאקרו אחר עדיין רץ. */
+  recordingUnavailable: 'אי אפשר להתחיל הקלטה בזמן שמאקרו אחר רץ',
 } as const;
 
 /** כותרת דיאלוג האישור להקלטה לא-שלמה. */
@@ -135,7 +137,7 @@ export type MacrosSession = Pick<EditorSession, 'superdoc'>;
  */
 export const SEEDED_FLAG_KEY = 'otzaria-word:macros-seeded';
 
-function seedDefaultSnippet(kit: MacroKit): void {
+function seedDefaultSnippet(kit: MacroKit, persistMarker = true): void {
   try {
     if (globalThis.localStorage?.getItem(SEEDED_FLAG_KEY) === 'yes') return;
   } catch {
@@ -144,6 +146,9 @@ function seedDefaultSnippet(kit: MacroKit): void {
   if (kit.listSnippets().length === 0) {
     kit.saveSnippet({ name: 'בס"ד', text: 'בס"ד', trigger: 'בסד' });
   }
+  // A memory-only fallback must not mark persistent seeding as complete. The
+  // next healthy startup still needs to write the example to durable storage.
+  if (!persistMarker) return;
   try {
     globalThis.localStorage?.setItem(SEEDED_FLAG_KEY, 'yes');
   } catch {
@@ -201,72 +206,140 @@ export function installMacros(
      פיצ'ר, לא תנאי. נפילה לאחסון-זיכרון משאירה את כל היכולות עובדות להפעלה
      הנוכחית, וההודעה אומרת בדיוק מה אבד — הקביעות. */
   let kit: MacroKit;
+  let loadedKit: MacroKit | null = null;
   try {
-    kit = buildKit();
-    seedDefaultSnippet(kit);
+    loadedKit = buildKit();
+    seedDefaultSnippet(loadedKit);
+    kit = loadedKit;
   } catch {
+    // The store may be readable but become unwritable on the first seed write.
+    // Preserve everything already loaded when falling back to session memory.
+    const loadedState = loadedKit?.exportState() ?? null;
     kit = buildKit(createMemoryStorage());
-    seedDefaultSnippet(kit);
+    if (loadedState) {
+      const restored = kit.importState(loadedState);
+      if (!restored.ok) {
+        console.warn('[otzaria-word] שחזור המאקרו לאחסון זמני נכשל:', restored.message);
+      }
+    }
+    seedDefaultSnippet(kit, false);
     onStatus(MACRO_STATUS.storageUnavailable, true);
   }
 
   const recording = shallowRef(false);
+  let disposed = false;
+  let finishRecordingInFlight = false;
+  // The generated name and consent belong to the pending snapshot. Retry the
+  // same logical save without renaming it or asking twice after a recoverable
+  // capacity/storage failure.
+  let pendingIncompleteApproved = false;
+  let pendingRecordingName: string | null = null;
+
+  function clearPendingFinalizationState(): void {
+    pendingIncompleteApproved = false;
+    pendingRecordingName = null;
+  }
+
+  function reportRetainedRecording(error: unknown): void {
+    const detail = error instanceof Error ? error.message : 'שמירת ההקלטה נכשלה';
+    onStatus(`${detail}. ${MACRO_STATUS.recordingKept}`, true);
+  }
 
   /**
    * עצירה ושמירה — מסלול אחד ללחיצת המשתמש, לעצירה האוטומטית בתקרה ולניסיון
    * חוזר אחרי כשל שמירה (ההקלטה שנעצרה נשמרת בחבילה בצד עד discard).
    */
   async function finishRecording(auto: boolean): Promise<void> {
+    if (disposed || finishRecordingInFlight) return;
+    finishRecordingInFlight = true;
     recording.value = false;
-    const name = `מאקרו ${kit.listRecordings().length + 1}`;
+    const name = pendingRecordingName ?? `מאקרו ${kit.listRecordings().length + 1}`;
+    pendingRecordingName = name;
     try {
-      const saved = kit.stopRecording(name);
-      if (saved) onStatus(auto ? recordingAutoStoppedText(saved.name) : recordingSavedText(saved.name));
-      else onStatus(MACRO_STATUS.recordingEmpty, auto);
-      return;
-    } catch (error) {
-      if (error instanceof MacroError && error.reason === 'recording-incomplete') {
-        // פעולה שאינה ניתנת להקלטה (תמונה, למשל) — שמירה חלקית רק בהסכמה.
-        const consent = await options.confirmIncomplete?.(
-          INCOMPLETE_CONFIRM_TITLE,
-          incompleteConfirmContent(error.message),
-        );
-        if (consent) {
+      try {
+        const saved = kit.stopRecording(name, undefined, {
+          allowIncomplete: pendingIncompleteApproved,
+        });
+        clearPendingFinalizationState();
+        if (saved) onStatus(auto ? recordingAutoStoppedText(saved.name) : recordingSavedText(saved.name));
+        else onStatus(MACRO_STATUS.recordingEmpty, auto);
+        return;
+      } catch (error) {
+        if (error instanceof MacroError && error.reason === 'recording-uncapturable') {
+          // There is no replayable step. A partial save would be an empty
+          // macro, so report the exact problem and discard explicitly.
+          clearPendingFinalizationState();
+          kit.cancelRecording();
+          onStatus(error.message, true);
+          return;
+        }
+        if (error instanceof MacroError && error.reason === 'recording-incomplete') {
+          let consent = false;
           try {
-            const saved = kit.stopRecording(name, undefined, { allowIncomplete: true });
-            if (saved) onStatus(recordingSavedText(saved.name));
-            return;
-          } catch (retryError) {
-            kit.cancelRecording();
-            onStatus(retryError instanceof Error ? retryError.message : 'שמירת ההקלטה נכשלה', true);
+            consent =
+              (await options.confirmIncomplete?.(
+                INCOMPLETE_CONFIRM_TITLE,
+                incompleteConfirmContent(error.message),
+              )) === true;
+          } catch (confirmError) {
+            // A host-dialog failure must not destroy the pending recording or
+            // surface as an unhandled rejection. A later retry may ask again.
+            reportRetainedRecording(confirmError);
             return;
           }
+          if (disposed) return;
+          if (consent) {
+            pendingIncompleteApproved = true;
+            try {
+              const saved = kit.stopRecording(name, undefined, { allowIncomplete: true });
+              clearPendingFinalizationState();
+              if (saved) onStatus(recordingSavedText(saved.name));
+              return;
+            } catch (retryError) {
+              if (
+                retryError instanceof MacroError &&
+                (retryError.reason === 'recording-too-large' ||
+                  retryError.reason === 'recording-uncapturable')
+              ) {
+                clearPendingFinalizationState();
+                kit.cancelRecording();
+                onStatus(retryError.message, true);
+                return;
+              }
+              // Capacity and persistence failures are retryable. The package
+              // retains the stopped capture; cancelling here would defeat it.
+              // Consent and name stay attached to this pending snapshot.
+              reportRetainedRecording(retryError);
+              return;
+            }
+          }
+          clearPendingFinalizationState();
+          kit.cancelRecording();
+          onStatus(MACRO_STATUS.incompleteDiscarded);
+          return;
         }
-        kit.cancelRecording();
-        onStatus(MACRO_STATUS.incompleteDiscarded);
-        return;
+        if (error instanceof MacroError && error.reason === 'recording-too-large') {
+          clearPendingFinalizationState();
+          kit.cancelRecording();
+          onStatus(error.message, true);
+          return;
+        }
+        reportRetainedRecording(error);
       }
-      if (error instanceof MacroError && error.reason === 'recording-too-large') {
-        // אין דרך לשמור אותה בכלל — ביטול מפורש עם ההסבר.
-        kit.cancelRecording();
-        onStatus(error.message, true);
-        return;
-      }
-      // כשל שמירה (quota, מצב מלא): הצעדים נשארים בצד — Ctrl+Alt+R הבא ינסה שוב.
-      onStatus(`${error instanceof Error ? error.message : 'שמירת ההקלטה נכשלה'}. ${MACRO_STATUS.recordingKept}`, true);
+    } finally {
+      finishRecordingInFlight = false;
     }
   }
 
   const unbindShortcuts = kit.attachShortcuts(container);
   const disableAutoText = kit.enableAutoText();
-
-  let disposed = false;
   return {
     kit,
     scriptsEnabled: allowScripts,
     recording,
 
     toggleRecording() {
+      if (disposed || finishRecordingInFlight) return;
       if (kit.isRecording) {
         void finishRecording(false);
       } else if (kit.hasPendingRecording) {
@@ -274,9 +347,11 @@ export function installMacros(
         // להתחיל הקלטה חדשה שהייתה זורקת אותה.
         void finishRecording(false);
       } else {
-        kit.startRecording();
-        recording.value = kit.isRecording;
-        onStatus(MACRO_STATUS.recordingStarted);
+        clearPendingFinalizationState();
+        const started = kit.startRecording();
+        recording.value = started;
+        if (started) onStatus(MACRO_STATUS.recordingStarted);
+        else onStatus(MACRO_STATUS.recordingUnavailable, true);
       }
     },
 
@@ -296,6 +371,7 @@ export function installMacros(
     dispose() {
       if (disposed) return;
       disposed = true;
+      clearPendingFinalizationState();
       // הקלטה שנשארה פתוחה בהחלפת מסמך נזרקת: הצעדים הבאים היו מוקלטים
       // מהמסמך הלא נכון.
       kit.cancelRecording();
