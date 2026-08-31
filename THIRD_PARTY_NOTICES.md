@@ -285,6 +285,14 @@ MDL2 היא הספרייה של Office UI Fabric שיצאה משימוש, System
 ה־path data של אייקוני לשונית „קובץ” — ראו [Fluent System Icons](#fluent-system-icons-11338--mit)
 למעלה. הקובץ המושפע הוא `src/ui/icons/icons.ts` בלבד.
 
-מלבד זה הממשק נכתב מאפס. מקורות שהיוו השראה חזותית בלבד מתועדים ב־
-[../docs/word-plugin-implementation-plan.md](../docs/word-plugin-implementation-plan.md) §3.3.
+מלבד זה הממשק נכתב מאפס. מקורות שהיוו השראה חזותית בלבד (ללא העתקת קוד):
+
+| מקור וקומיט שנבדק | מה מאמצים | מה לא מעתיקים |
+|---|---|---|
+| [LocalOffice `60bd8cef`](https://github.com/Anon5T4R/LocalOffice/commit/60bd8cef8f135a9cc9183f9a8217a0b8e8d84528) | פירוק Ribbon ללשוניות/קבוצות/כפתורים, mount של הלשונית הפעילה בלבד, dirty indicator, שורת מצב, שמירת format painter במעבר לשונית | פקודות TipTap, מודל המסמך וקוד React |
+| [SuperDoc `examples/custom-ui` ב־`b0ff2221`](https://github.com/superdoc/docx-editor/commit/b0ff2221645f79b7094e1c037723fe2a435ffd3c) | `ui: false`, שימוש ב־`superdoc.ui`, observe למצב פקודה, `mousedown.preventDefault()`, `executeAsync`, teardown | אין לסטות אל API פנימי; מוצמד לגרסת 2.8.0 המקורית ולא ל־main משתנה |
+| [Herramienta_Optimizacion_PBM `437d79d2`](https://github.com/T0m4s1n/Herramienta_Optimizacion_PBM/commit/437d79d203db44af384861fe588ea5a0dd57724f) | בורר טבלה, overflow אופקי, aria, Escape/outside-click וקיצורי מקלדת | חיבור SuperDoc v1 ו־`headless-toolbar`; אין רישיון מזוהה ולכן אין העתקת קוד |
+| [canvas-editor `03a481bb`](https://github.com/Hufe921/canvas-editor/commit/03a481bbd012f2dcb4044cd34471477db921fe52) | רעיונות לסרגל, עמודים, תפריטים הקשריים לטבלה/תמונה/קישור וחלוניות | import/export DOCX ומודל ה־Canvas אינם מקור אמת |
+| [ONLYOFFICE/web-apps `9c0ca538`](https://github.com/ONLYOFFICE/web-apps/commit/9c0ca538c3b211052347df09d2a4d6781f023403) | compact/full Ribbon, לשוניות הקשריות, state מרכזי לנעילת פקדים, ניווט ושורת מצב | אין לחלץ את מסגרת ה־frontend הגדולה או controllers שלה |
+
 כל העתקה נוספת מתועדת כאן עם קישור, גרסה, רישיון ורשימת הקבצים המושפעים.

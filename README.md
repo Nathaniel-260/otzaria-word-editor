@@ -190,7 +190,7 @@ const resolved = resolution.status === "uniform" ? resolution.value : void 0;
 - `src/sessions/` — פתיחת מסמכים, החלפת עורך, רכז השמירה, וזוכר ההפעלה.
 - `src/ui/` — הרצועה, המעטפת, הדיאלוגים והאייקונים.
 
-`public/` הוא מה שנארז כמו שהוא, ובראשו ה‑manifest. `scripts/` הם שערי הבנייה — `check:dist` ואחיו — ש‑`npm run verify` וה‑CI מריצים. `tests/` מחולק ל‑unit, contract ו‑component. `docs/` מכיל את תוכנית העבודה ואת מסמכי ה‑spike, ו‑`ai.md` הוא בירור התשתית והרישוי שממנו הכול התחיל.
+`public/` הוא מה שנארז כמו שהוא, ובראשו ה‑manifest. `scripts/` הם שערי הבנייה — `check:dist` ואחיו — ש‑`npm run verify` וה‑CI מריצים. `tests/` מחולק ל‑unit, contract ו‑component. `docs/` מכיל את מסמכי ה‑spike ואת [word-plugin-brief.md](docs/word-plugin-brief.md), תמצית ההחלטות התשתיתיות והרישוי.
 
 ## רישיון
 
@@ -211,4 +211,4 @@ const resolved = resolution.status === "uniform" ? resolution.value : void 0;
 ([issue #3927](https://github.com/superdoc/docx-editor/issues/3927#issuecomment-5383145303))
 שתוסף קוד פתוח תחת AGPLv3 רשאי לארוז ולהפיץ את המנוע וה‑Workers שלו בתוך חבילה אופליין —
 בתנאי שהמקור מפורסם וזהה למופץ, שמייבאים `superdoc` בלבד ולא את המנוע ישירות, ושכל הודעות
-הרישוי נשמרות. פירוט ב‑[docs/word-plugin-implementation-plan.md](docs/word-plugin-implementation-plan.md) §2.
+הרישוי נשמרות.

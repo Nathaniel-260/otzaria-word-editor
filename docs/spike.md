@@ -1,8 +1,7 @@
 # יומן שלב 0
 
 מטרת השלב: להוכיח ששרשרת SuperDoc v2 + מנוע ה־DOCX + ה־workers חיה בתוסף
-**ארוז** ב־WebView של אוצריא, לפני שנבנה ממשק מעליה. שערי ההחלטה:
-[../../docs/word-plugin-implementation-plan.md](../../docs/word-plugin-implementation-plan.md) §6.
+**ארוז** ב־WebView של אוצריא, לפני שנבנה ממשק מעליה.
 
 תאריך: 23.8.2026 · `superdoc@2.8.0` · `@superdoc/docx-engine@0.7.0`
 

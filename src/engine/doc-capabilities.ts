@@ -1,5 +1,5 @@
 /**
- * „לבדוק capability בעת boot” (docs/word-plugin-implementation-plan.md §12)
+ * „לבדוק capability בעת boot” (docs/remaining-waves.md)
  * מול הדרך הקנונית שהמנוע נותן לזה: `doc.capabilities.get()`.
  *
  * למה עטיפה ולא קריאה ישירה מכל פקד:

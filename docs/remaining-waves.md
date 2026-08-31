@@ -9,13 +9,52 @@ SuperDoc, גם בלי הקשר מהגלים הקודמים. אין צורך לק
 וביבליוגרפיה, כיתובים, ניהול הערות שוליים, ופריסת עמוד מתקדמת. טבלת מקורות
 נבדקה ו**נדחתה** במודע. לשוניות „הוספה” ו„הפניות” הושלמו.
 
-**שלושה מסמכים שחייבים לקרוא לפני שכותבים שורה:**
+**מסמך שחייבים לקרוא לפני שכותבים שורה:**
+**[`engine-gaps.md`](engine-gaps.md)** — כל מה שנמדד במנוע בעשרה גלים. **אל
+תמדוד מחדש מה שכתוב שם.** זהו המסמך החשוב ביותר במאגר לעבודה הזאת. הגל
+האחרון והתבנית הבשלה ביותר: `src/engine/page-setup.ts`.
 
-1. **[`engine-gaps.md`](engine-gaps.md)** — כל מה שנמדד במנוע בעשרה גלים. **אל
-   תמדוד מחדש מה שכתוב שם.** זהו המסמך החשוב ביותר במאגר לעבודה הזאת.
-2. **[`word-plugin-implementation-plan.md`](word-plugin-implementation-plan.md)**
-   §4 (ארכיטקטורה מחייבת) ו-§12 (capability בעת boot).
-3. הקובץ `src/engine/page-setup.ts` — הגל האחרון והתבנית הבשלה ביותר.
+### ארכיטקטורה מחייבת
+
+```text
+Vue UI בעברית
+  AppShell / Ribbon / Panels / StatusBar / Dialogs
+                │
+                ├── CommandAdapter ── superdoc.ui (מושאל מהמופע)
+                │                      commands, state, search, zoom,
+                │                      styles, comments, trackChanges
+                │
+                ├── DocumentAdapter ─ activeEditor.doc (API ציבורי)
+                │                      sections, tables, footnotes,
+                │                      headers/footers, TOC, images
+                │
+                ├── SessionStore ──── metadata + dirty revision + file tokens
+                │
+                └── OtzariaClient ─── theme, fs, storage, reader,
+                                       library, search, notifications
+```
+
+כללי מימוש:
+
+1. פעולת Ribbon קיימת כפקודה? משתמשים ב־`superdoc.ui.commands`.
+2. יכולת מבנית שאינה פקודת Ribbon? משתמשים רק ב־`activeEditor.doc` הציבורי.
+3. אין selector אל DOM פנימי של SuperDoc ואין import מנתיב שאינו export ציבורי בחבילה.
+4. כל mutation דרך Document API בודק receipt ומתרגם כשל להודעה בעברית.
+5. כל subscription מחזיר disposer ונרשם ב־`DisposableBag` של session.
+6. כפתור Ribbon מבטל `pointerdown/mousedown` כדי לא לאבד selection לפני הפקודה.
+
+### להוסיף feature חדש דרך Document API
+
+אין לבנות לשונית שלמה מראש. לכל feature מוסיפים adapter קטן, test fixture
+ו־round-trip test:
+
+- לבדוק capability בעת boot.
+- להשתמש ב־target/selection ציבורי.
+- לבדוק `receipt.success` ולתעד failure code.
+- לייצא, לפתוח מחדש ולהשוות את החלק הרלוונטי במסמך.
+
+פקד שאין לו API ציבורי אמין מסומן „לא זמין בגרסה זו”; לא מממשים אותו דרך XML
+ידני או DOM פנימי.
 
 ---
 
