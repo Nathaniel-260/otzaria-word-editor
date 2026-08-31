@@ -33,7 +33,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { basename, join, relative } from 'node:path';
 import { parse } from 'vue/compiler-sfc';
 import {
   TIP_DESCRIPTION_ATTR,
@@ -60,6 +60,7 @@ function sourceFiles(dir: string, suffix: string, found: string[] = []): string[
 interface TemplateNode {
   type: number;
   tag?: string;
+  loc?: { start: { line: number } };
   props?: Array<{
     type: number;
     name: string;
@@ -81,7 +82,41 @@ interface Finding {
   what: string;
 }
 
-/** כל התכונות שנכתבו על אלמנטי DOM, לפי קובץ ושורה. */
+/**
+ * הקומפוננטות שמצהירות על `title` כ-prop — ולכן הוא שלהן, ואינו מגיע ל-DOM.
+ *
+ * `<RibbonGroup title="קובץ ומסמך">` הוא כותרת הקבוצה. `<RibbonButton title=…>`
+ * הוא משהו אחר לגמרי: הקומפוננטה אינה מצהירה עליו, אין `inheritAttrs: false`
+ * באף עוטף במאגר, ולכן Vue מדביק אותו על ה-`<button>` השורשי — כלומר הבאג
+ * המקורי חוזר, ובכתיב שנראה בדיוק כמו כל prop אחר.
+ */
+function componentsWithTitleProp(): Set<string> {
+  const declared = new Set<string>();
+
+  for (const file of sourceFiles(SRC, '.vue')) {
+    const { descriptor } = parse(readFileSync(file, 'utf8'), { filename: file });
+    const setup = descriptor.scriptSetup?.content ?? '';
+    const props = /defineProps<\{([\s\S]*?)\}>/.exec(setup)?.[1] ?? '';
+    if (/(^|\n)\s*title\??\s*:/.test(props)) {
+      declared.add(basename(file, '.vue'));
+    }
+  }
+
+  return declared;
+}
+
+const TITLE_PROP_OWNERS = componentsWithTitleProp();
+
+/** תגי `<title>` שנמצאו בדרך — ראו הבדיקה שמייחדת להם. */
+const TITLE_TAGS: string[] = [];
+
+/**
+ * כל התכונות שיגיעו ל-DOM, לפי קובץ ושורה.
+ *
+ * תג באות קטנה הוא אלמנט, ולכן הכול עליו מגיע ל-DOM. תג באות גדולה הוא
+ * קומפוננטה, ומה שהיא לא הצהירה עליו **גם הוא** מגיע ל-DOM — דרך
+ * ה-fallthrough. שתי הדרכים נסרקות, וההבחנה היא ההצהרה ולא צורת הכתיב.
+ */
 function domAttributes(): Array<Finding & { name: string }> {
   const found: Array<Finding & { name: string }> = [];
 
@@ -94,16 +129,21 @@ function domAttributes(): Array<Finding & { name: string }> {
 
     const walk = (node: TemplateNode): void => {
       // 1 = ELEMENT ב-AST של Vue.
-      if (node.type === 1 && node.tag && NATIVE_TAG.test(node.tag)) {
+      if (node.type === 1 && node.tag === 'title') {
+        TITLE_TAGS.push(`${relative(SRC, file)}:${node.loc?.start.line ?? 0}`);
+      }
+      if (node.type === 1 && node.tag) {
+        const native = NATIVE_TAG.test(node.tag);
         for (const prop of node.props ?? []) {
           const name = attributeName(prop);
-          if (name) {
-            found.push({
-              name,
-              what: `<${node.tag}>`,
-              where: `${relative(SRC, file)}:${prop.loc.start.line}`,
-            });
-          }
+          if (!name) continue;
+          // prop מוצהר נעצר בקומפוננטה ואינו מגיע לדפדפן.
+          if (!native && TITLE_PROP_OWNERS.has(node.tag) && name === 'title') continue;
+          found.push({
+            name,
+            what: `<${node.tag}>${native ? '' : ' — נוזל דרך fallthrough'}`,
+            where: `${relative(SRC, file)}:${prop.loc.start.line}`,
+          });
         }
       }
       for (const child of node.children ?? []) walk(child);
@@ -129,6 +169,19 @@ describe('הטולטיפ המולד אינו יכול לחזור', () => {
       `יש להצהיר על טולטיפ ב-${TIP_TITLE_ATTR} (ובמידת הצורך ${TIP_SHORTCUT_ATTR} ` +
         `ו-${TIP_DESCRIPTION_ATTR}), ועל השם הנגיש ב-aria-label בנפרד`,
     ).toEqual([]);
+  });
+
+  it('אין תג <title> בתבנית ולא במחרוזות SVG — גם הוא מצייר מלבן מולד', () => {
+    // התכונה והתג הם שני דברים שונים: `<svg><title>שם</title></svg>` נותן
+    // טולטיפ מולד בדיוק כמו `title="שם"`, והבדיקה שלמעלה סורקת תכונות בלבד.
+    expect(TITLE_TAGS, 'שם נגיש לאייקון נכתב ב-aria-label על הפקד, לא ב-<title>').toEqual([]);
+
+    // האייקונים אינם תבנית אלא מחרוזות שנכנסות ב-`v-html` (ui/icons/icons.ts),
+    // ולכן ה-AST אינו רואה אותם כלל.
+    const inStrings = SCRIPTS.filter((body) => /<title[\s>]/.test(body.code)).map(
+      (body) => body.where,
+    );
+    expect(inStrings, '<title> בתוך מחרוזת SVG').toEqual([]);
   });
 
   it('אין תכונת data-tip- בשם שהשכבה אינה קוראת', () => {

@@ -109,6 +109,10 @@ const TIP_STATE = `(() => {
  * הבדיקה על כפתור בודד אינה מספיקה: התקלה שדווחה הייתה על „כיוון פסקה משמאל
  * לימין”, ומה שמגן עליה הוא שהתכונה אינה קיימת **בשום מקום**. מה שבתוך
  * `.editor-stack` הוא DOM של המנוע ואינו שלנו.
+ *
+ * „כל הדף” הוא הלשונית הפעילה בלבד: הלשוניות הן `v-if` (ui/ribbon/Ribbon.vue),
+ * ולכן שבע מתוך שמונה אינן ב-DOM בכלל. לכן המפקד רץ בלולאה על כולן — בלי זה
+ * הפרה בלשונית שאינה „בית” עוברת את השער, נמדד.
  */
 const TITLE_CENSUS = `(() => {
   const all = Array.from(document.querySelectorAll('[title]'));
@@ -118,7 +122,21 @@ const TITLE_CENSUS = `(() => {
     ours: ours.length,
     sample: ours.slice(0, 5).map((element) => element.tagName.toLowerCase() + ': ' + element.getAttribute('title')),
     svgTitles: document.querySelectorAll('svg title').length,
+    anchors: document.querySelectorAll('[data-tip-title]').length,
   };
+})()`;
+
+const TAB_LABELS = `(() => Array.from(document.querySelectorAll('.word-tab-btn')).map(
+  (button) => button.textContent.trim(),
+))()`;
+
+const clickTab = (label) => `(() => {
+  const found = Array.from(document.querySelectorAll('.word-tab-btn')).find(
+    (button) => button.textContent.trim() === ${JSON.stringify(label)},
+  );
+  if (!found) return false;
+  found.click();
+  return true;
 })()`;
 
 /** מה שקורא מסך יכריז על הכפתור. `title` היה זה עד עכשיו, ועכשיו `aria-label`. */
@@ -190,16 +208,35 @@ try {
   });
   if (!(await page.cdp.evaluate(READY))) throw new Error('הרצועה לא נטענה עם תכונות טולטיפ');
 
-  /* 0. המפקד. לפני ההמרה נמדדו כאן 61 תכונות `title`, כולן מהמקור שלנו. */
-  const census = await page.cdp.evaluate(TITLE_CENSUS);
-  console.log(
-    `   מפקד title: ${census.total} בדף, ${census.ours} מחוץ למנוע, ${census.svgTitles} בתוך svg`,
-  );
-  check(
-    census.ours === 0,
-    `אין title על אף אלמנט של המעטפת${census.sample.length ? ' — ' + census.sample.join(' | ') : ''}`,
-  );
-  check(census.svgTitles === 0, 'אין <title> בתוך אייקוני SVG — גם הוא מצייר מלבן מולד');
+  /* 0. המפקד, בכל שמונה הלשוניות. לפני ההמרה נמדדו 61 תכונות `title`. */
+  const tabs = await page.cdp.evaluate(TAB_LABELS);
+  check(tabs.length >= 8, `נמצאו ${tabs.length} לשוניות לסרוק`);
+
+  let ours = 0;
+  let svgTitles = 0;
+  const samples = [];
+  for (const label of tabs) {
+    check(await page.cdp.evaluate(clickTab(label)), `נבחרה הלשונית „${label}”`);
+    await sleep(250);
+    const census = await page.cdp.evaluate(TITLE_CENSUS);
+    ours += census.ours;
+    svgTitles += census.svgTitles;
+    if (census.sample.length) samples.push(`${label}: ${census.sample.join(' | ')}`);
+    console.log(
+      `   „${label}”: ${census.total} title בדף, ${census.ours} מחוץ למנוע, ` +
+        `${census.svgTitles} בתוך svg, ${census.anchors} עוגנים`,
+    );
+    // עוגן אחד לפחות בכל לשונית: „אין title” הוא חצי חוזה, ומה שהופך אותו
+    // למשמעותי הוא שיש טולטיפ במקומו.
+    check(census.anchors > 0, `„${label}”: יש פקדים שמצהירים על טולטיפ`);
+  }
+
+  check(ours === 0, `אין title על אף אלמנט של המעטפת${samples.length ? ' — ' + samples.join(' ; ') : ''}`);
+  check(svgTitles === 0, 'אין <title> בתוך אייקוני SVG — גם הוא מצייר מלבן מולד');
+
+  // חוזרים ל„בית”: שאר השער נשען על „מודגש” ועל „מברשת עיצוב” שיושבים שם.
+  await page.cdp.evaluate(clickTab(tabs[1] ?? 'בית'));
+  await sleep(250);
 
   /* 1. כפתור אייקון עם שלושת השדות — „מודגש”, Ctrl+B, וההסבר. */
   const bold = await page.cdp.evaluate(centerOf('button[data-tip-title="מודגש"]'));
