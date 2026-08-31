@@ -376,6 +376,53 @@ not cover the full document (contiguous 1 of 7 ordinals)`.
 
 זו תקלה אחרת לגמרי, והיא במנוע ולא אצלנו. היא לא נפתרה ב-2.10.0.
 
+**עדכון: תוקן אצלנו, בעקיפה מלאה של `ui.search`.** בהמשך לחקירה הזאת נבנה
+חיפוש-והחלפה עצמאי (`engine/search.ts`, `engine/text-search.ts`) שאינו
+קורא ל-`ui.search`/`ui.search.find` בכלל — לא לחיפוש ולא להחלפה. החיפוש
+קורא ל-`doc.blocks.list({includeText:true})` הציבורי (עם דפדוף
+`offset`/`limit`) — אותו API ש-`formatting-marks-layer.ts`/
+`line-number-layer.ts` כבר משתמשים בו לטקסט הקנוני המלא — ומוצא בעצמו את
+כל המופעים, בלוגיקה טהורה שאינה תלויה ב-projection בכלל. ההחלפה קוראת
+ל-`doc.replace({target, text})` עם `SelectionTarget` מדויק (`{kind:'text',
+blockId, offset}`) לכל מופע בנפרד — לא לקבוצת-התאמות של המנוע. „החלף
+הכל” מריץ קריאת `replace` אחת לכל מופע, מהאחרון לראשון בתוך כל בלוק (כדי
+שההיסטים לא יזוזו תחת הרגליים מהחלפות קודמות באותו בלוק).
+
+נמדד מול מסמך עם מופע אחד בכל אחת משמונה פסקאות נפרדות — בדיוק התרחיש
+שנמדד שבור למעלה: המונה בדיאלוג מציג „1 מתוך 8” (לא „1 מתוך 4”), ו„החלף
+הכל” מחליף את כל השמונה — אומת גם מול ה-docx המיוצא וגם מול הטקסט על
+המסך, בדפדפן headless אמיתי (`scripts/qa/replace-all-multiparagraph-qa.mjs`,
+`scripts/qa/find-replace-navigation-qa.mjs`). לוגיקת המציאה/הניווט/המיפוי
+הטהורה נבדקת ב-`tests/unit/text-search.test.ts`, והאדפטר ב-
+`tests/unit/search.test.ts` עם כפיל קפדני שאוכף `doc.blocks.list`/
+`doc.replace` בלבד — לא `ui.search`, בדיוק כמו שהכפיל הקודם אכף את
+`SearchHandle`. `npx vitest run`, `npm run typecheck` ו-`npm run build`
+עוברים.
+
+**עדכון שני: „החלף הכל” גם ב-`undo`-step יחיד.** ביקורת QA עצמאית תפסה
+רגרסיה נוספת שנפתחה בדיוק על ידי התיקון שלמעלה: `handle.replaceAll()`
+הישן היה batch יחיד במנוע, `undo`-step אחד; `doc.replace` הנקודתי (קריאה
+לכל מופע בנפרד) פתר את הכיסוי אבל דרש N ביטולים נפרדים ל-N מופעים (נמדד:
+3 מופעים → 3 Ctrl+Z). `doc.mutations.apply({atomic:true, steps})` נבדק
+כפתרון: `text.rewrite` עם `where:{by:'target', target:SelectionTarget}`
+(היעד המדויק שכבר יש לנו) **נדחה בזמן ריצה** — "v2 text.rewrite currently
+requires a ref produced by query.match/find or a single text selector".
+`BlockWhere` (כתיבה מחדש של כל טקסט הבלוק) עובד ונותן `undo` יחיד, אבל
+משטח עיצוב מעורב בתוך פסקה (נמדד: "bold" מודגש + "normal" רגיל באותה
+פסקה → הכול יצא מודגש) — נפסל, כי איבוד עיצוב שקט גרוע יותר מריבוי
+ביטולים. הפתרון שעבד: `where:{by:'select', select:{type:'text', pattern,
+mode:'contains', caseSensitive:false}, within:{kind:'block', nodeType,
+nodeId}, require:'all'}` — חיפוש-הטקסט של המנוע עצמו, מוגבל ל-`within`
+בלוק אחד ידוע-מראש (מ-`blocks.list` שלנו) ולכן אינו נתקל ב-projection
+הכל-המסמך. נמדד: מכסה 8 פסקאות נכון, `matchCount` תואם בדיוק את
+`findAllMatches` הטהור (כולל מופעים חופפים ותבנית מילולית), מחליף רק
+את תת-המחרוזת (עיצוב מעורב נשמר), ו-Ctrl+Z יחיד מבטל קריאה מרובת-צעדים.
+המימוש (`applyAtomicRewriteChunks`) מאמת `matchCount` לכל צעד ונופל
+לנתיב הנקודתי-מדויק לכל בלוק שלא אומת — נכונות מובטחת גם כשה-API חסר,
+זורק, או מחזיר תוצאה חלקית לא-אמינה. נבדק ב-`tests/unit/search.test.ts`
+וב-`scripts/qa/replace-all-undo-qa.mjs` (headless אמיתי: 8 מופעים, „החלף
+הכל”, Ctrl+Z אחד, כל השמונה חוזרים).
+
 בדרך התגלה מרוץ אמיתי, אבל **לא כזה שהמשתמש יכול להגיע אליו**: `search()`
 חוזר מיד עם `total: 0`, והתוצאה מתפרסמת דרך `observe` כ-5ms אחר כך. קריאה
 ישירה ל-`replaceAll` לפני הפליטה מקבלת `operation-unavailable` ולא מחליפה כלום.

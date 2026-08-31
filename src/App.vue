@@ -1014,7 +1014,10 @@ async function openDocument(file?: UserFile, options: OpenOptions = {}): Promise
   // אחרי תזוזת הסמן הראשונה.
   sessionRuler.refreshNow();
 
-  const sessionSearch = createSearchAdapter(editor.ui);
+  // `editor.superdoc` ולא `editor.ui`: החיפוש-והחלפה העצמאי צריך גם את
+  // `activeEditor.doc` (Document API — קריאת בלוקים והחלפה), וגם את `ui`
+  // (הדגשת המופע הפעיל) — שניהם חשופים על המופע עצמו, לא רק ה-controller.
+  const sessionSearch = createSearchAdapter(editor.superdoc);
   searchAdapter = sessionSearch;
   searchState.value = sessionSearch.getState();
   editor.onDispose(
@@ -1392,15 +1395,16 @@ function onPointerMove(event: PointerEvent): void {
  * הדיאלוג הוא שלנו ולא ה-surface המובנה של המנוע
  * (`modules: { surfaces: { findReplace: true } }`) — החלטה, לא שכחה: המנוע רץ
  * כאן ב-`ui: false`, הממשק כולו עברי ומימין לשמאל, ואילו ה-surface המובנה הוא
- * חלון באנגלית בעיצוב של SuperDoc שאין דרך ציבורית לתרגם או לעצב. הפעולות
- * עצמן כן עוברות דרך `ui.search` — אותה שכבה שה-surface הזה נשען עליה — ולכן
- * אין כאן מימוש חיפוש מקביל.
+ * חלון באנגלית בעיצוב של SuperDoc שאין דרך ציבורית לתרגם או לעצב.
+ *
+ * הפעולות עצמן **אינן** עוברות דרך `ui.search` — הוא נמדד שאינו מכסה מסמך
+ * רב-פסקאות (ראו הראש של engine/search.ts). המימוש שלנו עצמאי לגמרי:
+ * `doc.blocks.list`/`doc.replace` של ה-Document API הציבורי.
  */
 function openFindDialog(mode: 'find' | 'replace'): void {
   findMode.value = mode;
   isFindOpen.value = true;
-  // פתיחת הדיאלוג פותחת session במנוע; בלעדיו `search` נכשל סגור.
-  reportSearch(searchAdapter?.open());
+  void reportSearch(searchAdapter?.open());
 }
 
 function closeFindDialog(): void {
@@ -1409,21 +1413,28 @@ function closeFindDialog(): void {
   searchAdapter?.close();
 }
 
-/** התוצאה של כל פעולת חיפוש עוברת כאן: כשל לשורת המצב, הצלחה למונה. */
-function reportSearch(outcome: SearchOutcome | undefined): void {
-  if (!outcome) {
+/**
+ * התוצאה של כל פעולת חיפוש עוברת כאן: כשל לשורת המצב, הצלחה למונה.
+ *
+ * `async` כי `find()`/`open()` יכולים להגיע כ-Promise: קריאת `doc.blocks
+ * .list()` מהמנוע היא א-סינכרונית (ראו engine/search.ts). `await` על ערך
+ * שאינו Promise (כמו התוצאה הסינכרונית של `open()`) הוא no-op בטוח.
+ */
+async function reportSearch(outcome: SearchOutcome | Promise<SearchOutcome> | undefined): Promise<void> {
+  const resolved = await outcome;
+  if (!resolved) {
     setStatus('אין מסמך פתוח לחיפוש', true);
     return;
   }
-  if (!outcome.ok) {
-    setStatus(outcome.message, true);
+  if (!resolved.ok) {
+    setStatus(resolved.message, true);
     return;
   }
-  searchState.value = outcome.snapshot;
+  searchState.value = resolved.snapshot;
 }
 
 function onFindText(query: string, direction: 'next' | 'prev'): void {
-  reportSearch(searchAdapter?.find(query, direction));
+  void reportSearch(searchAdapter?.find(query, direction));
 }
 
 /** הקלדה בשדה החיפוש. ההשקטה עצמה באדפטר, כדי שתהיה נבדקת. */
@@ -1744,7 +1755,7 @@ function findAgain(direction: 'next' | 'prev'): boolean {
     return true;
   }
 
-  reportSearch(searchAdapter?.find(query, direction));
+  void reportSearch(searchAdapter?.find(query, direction));
   return true;
 }
 
