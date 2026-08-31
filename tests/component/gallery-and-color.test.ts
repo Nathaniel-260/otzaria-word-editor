@@ -203,7 +203,11 @@ describe('ColorPickerPopover', () => {
     await open(harness);
 
     expect(harness.wrapper.find('.color-palette-popover').exists()).toBe(true);
-    await harness.wrapper.find('.color-swatch[data-tip-title="#c00000"]').trigger('click');
+    // הקוד ירד ל-`data-tip-desc`, והכותרת היא השם — זה מה שקורא מסך מכריז.
+    const swatch = harness.wrapper.find('.color-swatch[data-tip-desc="#c00000"]');
+    expect(swatch.attributes('data-tip-title')).toBe('אדום כהה');
+    expect(swatch.attributes('aria-label')).toBe('אדום כהה');
+    await swatch.trigger('click');
     await settle();
 
     expect(harness.wrapper.emitted('change')).toEqual([['#c00000']]);

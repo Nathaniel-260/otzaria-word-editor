@@ -72,7 +72,8 @@ describe('צבע', () => {
     // בורר צבע הגופן הוא השני; הראשון הוא צבע הסימון.
     const picker = harness.wrapper.findAllComponents(ColorPickerPopover)[1];
     await picker.find('button[data-tip-title="בחירת צבע"]').trigger('click');
-    await picker.find('button[data-tip-title="#c00000"]').trigger('click');
+    // המשבצת מזוהה בקוד שלה, שירד ל-`data-tip-desc`; הכותרת היא השם.
+    await picker.find('button[data-tip-desc="#c00000"]').trigger('click');
     await settle();
 
     expect(harness.adapter.payloads('text-color')).toEqual([{ value: '#C00000' }]);
