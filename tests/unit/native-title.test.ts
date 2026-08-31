@@ -97,7 +97,9 @@ function componentsWithTitleProp(): Set<string> {
     const { descriptor } = parse(readFileSync(file, 'utf8'), { filename: file });
     const setup = descriptor.scriptSetup?.content ?? '';
     const props = /defineProps<\{([\s\S]*?)\}>/.exec(setup)?.[1] ?? '';
-    if (/(^|\n)\s*title\??\s*:/.test(props)) {
+    // ברמה הראשונה בלבד: `meta?: { title: string }` הוא שדה בתוך prop אחר,
+    // ורישום בעלות עליו היה פותח את `title` על הקומפוננטה כולה.
+    if (/(^|\n) {4}title\??\s*:/.test(props)) {
       declared.add(basename(file, '.vue'));
     }
   }

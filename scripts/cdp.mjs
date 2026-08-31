@@ -10,8 +10,9 @@
  * בדיקה שמביא איתו עץ תלויות הוא כלי שיירקב.
  */
 import { spawn } from 'node:child_process';
-import { existsSync, rmSync } from 'node:fs';
+import { existsSync, realpathSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { tmpdir } from 'node:os';
 
 export const CHROME =
@@ -80,9 +81,52 @@ async function connect(url) {
  * פותחת דפדפן על `fileUrl` ומחזירה חיבור CDP + `close` שסוגר הכול.
  * פרופיל נפרד לכל קריאה: דפדפן שנהרג ממשיך לכתוב לתיקייה שלו לרגע.
  */
+/**
+ * האם מישהו כבר מחזיק את היציאה.
+ *
+ * שני המארחים, ומאותה סיבה שהלולאה למטה בודקת את שניהם: ‏Chrome קושר
+ * ל-IPv4 או ל-IPv6 לפי המערכת, ודפדפן זר שמחזיק רק את אחד מהם עדיין יכול
+ * להיענות לבקשות שלנו.
+ */
+async function portHolder(port) {
+  for (const host of ['127.0.0.1', '[::1]']) {
+    try {
+      const response = await fetch(`http://${host}:${port}/json/version`, {
+        signal: AbortSignal.timeout(1500),
+      });
+      if (response.ok) return host;
+    } catch {
+      /* אין שם דבר, וזה המצב התקין */
+    }
+  }
+  return null;
+}
+
 export async function openPage(fileUrl, { port = Number(process.env.CDP_PORT ?? 9333), label = '0' } = {}) {
   const profile = join(tmpdir(), `otzaria-word-cdp-${label}`);
   discard(profile);
+
+  /*
+   * היציאה חייבת להיות פנויה **לפני** שמריצים, וזה לא הידור.
+   *
+   * דפדפן שנשאר מריצה קודמת — Ctrl+C באמצע שער, סקריפט שמת לפני `close()` —
+   * ממשיך להחזיק אותה; ה-Chrome החדש אינו מצליח לקשור אותה, ו-`/json/list`
+   * מחזיר את הדפים של הישן. אם הדף הישן נושא את אותה כתובת (וזה בדיוק מה
+   * שקורה כשמפילים את **אותו** שער ומריצים אותו שוב), כל סינון לפי כתובת
+   * נצמד אליו — והשער מודד dist ישן ומדווח ירוק על באג קיים. נמדד, פעמיים.
+   *
+   * ההמתנה הקצרה היא לדפדפן שנסגר ברגע זה ועדיין לא שחרר את השקע.
+   */
+  for (let i = 0; i < 12; i++) {
+    if (!(await portHolder(port))) break;
+    if (i === 11) {
+      throw new Error(
+        `CDP: יציאה ${port} תפוסה בידי דפדפן אחר — כנראה נשאר מריצה קודמת. ` +
+          'הריצו `pkill -f otzaria-word-cdp`, או הגדירו CDP_PORT אחר.',
+      );
+    }
+    await sleep(250);
+  }
 
   const chrome = spawn(
     CHROME,
@@ -165,14 +209,15 @@ export async function openPage(fileUrl, { port = Number(process.env.CDP_PORT ?? 
      * נמדדה כ„0 title בדף”, כלומר **שער ירוק על באג קיים**. אין תסמין: אין
      * שגיאה, אין אזהרה, והמספרים נראים סבירים.
      *
-     * ## למה שם הקובץ, ולא השוואת כתובת
+     * ## הכתובת המלאה, ולא שם הקובץ
      *
      * ב-macOS ‏`/tmp` הוא קישור סמלי ל-`/private/tmp`, ו-Chrome מדווח את
-     * הכתובת המפורשת: `file:///private/tmp/...` מול `file:///tmp/...` שנשלח.
-     * השוואה מדויקת הייתה נופלת תמיד. כל שער כותב קובץ זמני בשם ייחודי
-     * (`tooltip-tmp.html`, `ribbon-geometry-tmp.html`), ולכן השם הוא מזהה מספק.
+     * הכתובת המפורשת — ולכן ההשוואה היא אחרי `realpath` משני הצדדים.
+     * שם הקובץ לבדו אינו מספיק: `/tmp/mainclean/dist/tooltip-tmp.html`
+     * ו-`/tmp/pr16wt/dist/tooltip-tmp.html` הם אותו basename, וזו בדיוק
+     * ההשוואה main-מול-ענף שמריצים כשבודקים ששער נופל על הקוד הישן.
      */
-    const wanted = fileUrl.split('/').pop();
+    const wanted = pathToFileURL(realpathSync(fileURLToPath(fileUrl))).href;
     let targets = null;
     let strangers = 0;
     for (let i = 0; i < 60 && !targets; i++) {
@@ -184,7 +229,7 @@ export async function openPage(fileUrl, { port = Number(process.env.CDP_PORT ?? 
           const response = await fetch(`http://${host}:${port}/json/list`);
           const list = await response.json();
           const pages = list.filter((t) => t.type === 'page' && t.url.startsWith('file://'));
-          const mine = pages.filter((t) => t.url.endsWith(wanted));
+          const mine = pages.filter((t) => t.url === wanted);
           strangers = pages.length - mine.length;
           if (mine.length) {
             targets = mine;
