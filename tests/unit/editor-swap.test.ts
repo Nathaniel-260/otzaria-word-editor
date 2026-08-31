@@ -239,4 +239,83 @@ describe('createEditorSwap', () => {
     // הפתיחה עוד באוויר, אבל ה-host שלה אינו נשאר על המסך.
     expect(hosts(container)).toHaveLength(0);
   });
+
+  /**
+   * ממצא QA (engine/page-break.ts, „QA עצמאי”): `PageBreakTracker.syncDocument`
+   * הוחלפה מהשוואת זהות `host` להשוואת `documentGeneration` — מונה מפורש
+   * שאינו נשען על התנהגות לא-מתועדת של `SuperDoc`. הבדיקות כאן על המונה עצמו:
+   * הוא עולה **רק** כש-`current` באמת מוחלף — לא בכל ניסיון פתיחה.
+   */
+  describe('documentGeneration', () => {
+    it('מתחיל מ-0 ועולה בפתיחה הראשונה המוצלחת', async () => {
+      const { opens, swap } = setup();
+      expect(swap.documentGeneration).toBe(0);
+
+      const open = swap.open('a.docx');
+      opens[0].deferred.resolve(fakeSession('a'));
+      await open;
+
+      expect(swap.documentGeneration).toBe(1);
+    });
+
+    it('עולה בכל פתיחה מוצלחת נוספת — מספר חדש לכל מסמך', async () => {
+      const { opens, swap } = setup();
+
+      const first = swap.open('a.docx');
+      opens[0].deferred.resolve(fakeSession('a'));
+      await first;
+      const afterFirst = swap.documentGeneration;
+
+      const second = swap.open('b.docx');
+      opens[1].deferred.resolve(fakeSession('b'));
+      await second;
+
+      expect(swap.documentGeneration).toBe(afterFirst + 1);
+      expect(swap.documentGeneration).not.toBe(afterFirst);
+    });
+
+    it('אינו עולה על פתיחה שנכשלה — המסמך הפעיל לא השתנה', async () => {
+      const { opens, swap } = setup();
+      const first = swap.open('a.docx');
+      opens[0].deferred.resolve(fakeSession('a'));
+      await first;
+      const before = swap.documentGeneration;
+
+      const failing = swap.open('corrupt.docx');
+      opens[1].deferred.reject(new Error('פגום'));
+      await failing;
+
+      expect(swap.documentGeneration).toBe(before);
+    });
+
+    it('אינו עולה על פתיחה שהוחלפה על ידי בקשה חדשה יותר (superseded)', async () => {
+      const { opens, swap } = setup();
+      const before = swap.documentGeneration;
+
+      const slow = swap.open('slow.docx');
+      const fast = swap.open('fast.docx');
+      opens[1].deferred.resolve(fakeSession('fast'));
+      await fast;
+      const afterFast = swap.documentGeneration;
+
+      opens[0].deferred.resolve(fakeSession('slow'));
+      await slow;
+
+      // המועמד האיטי "התיישב" אחרון, אבל הוא superseded ואינו נוגע במונה.
+      expect(swap.documentGeneration).toBe(afterFast);
+      expect(swap.documentGeneration).toBe(before + 1);
+    });
+
+    it('קריאות חוזרות בלי פתיחה חדשה מחזירות את אותו ערך — "אותו מסמך"', async () => {
+      const { opens, swap } = setup();
+      const open = swap.open('a.docx');
+      opens[0].deferred.resolve(fakeSession('a'));
+      await open;
+
+      const first = swap.documentGeneration;
+      const second = swap.documentGeneration;
+
+      expect(first).toBe(second);
+    });
+  });
 });

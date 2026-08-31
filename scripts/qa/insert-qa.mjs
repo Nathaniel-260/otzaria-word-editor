@@ -179,23 +179,54 @@ async function sectionPages() {
       log('פסקאות עם pageBreakBefore:', JSON.stringify(marked));
       log('רעש:', bad || '(אין)');
       const wasBefore = /<w:pageBreakBefore\/>/.test(before.doc);
+      const st = await app.state('התחל בעמוד חדש');
+      log('מצב הכפתור אחרי ההפעלה:', JSON.stringify(st));
+      const shownActive = st.active === true || st.pressed === 'true';
       if (!clicked) report.fail('התחל בעמוד חדש', 'הכפתור לא נמצא');
       else if (wasBefore) report.skip('התחל בעמוד חדש', 'המסמך כבר הכיל pageBreakBefore');
+      else if (marked.length === 1 && marked[0].text === 'bet' && !bad && shownActive)
+        report.pass(
+          'התחל בעמוד חדש',
+          `w:pageBreakBefore על הפסקה הנכונה; עמודים ${pagesBefore}→${pagesAfter}; הכפתור מציג „פעיל”`,
+        );
       else if (marked.length === 1 && marked[0].text === 'bet' && !bad)
-        report.pass('התחל בעמוד חדש', `w:pageBreakBefore על הפסקה הנכונה; עמודים ${pagesBefore}→${pagesAfter}`);
+        report.partial('התחל בעמוד חדש', `w:pageBreakBefore נכתב, אך הכפתור אינו מציג „פעיל” (${JSON.stringify(st)})`);
       else if (marked.length)
         report.partial('התחל בעמוד חדש', `נכתב על ${JSON.stringify(marked)}; רעש: ${bad || 'אין'}`);
       else report.fail('התחל בעמוד חדש', `לא נכתב pageBreakBefore. רעש: ${bad || 'אין'}`);
     });
 
-    await step('התחל בעמוד חדש — לחיצה שנייה (NO_OP)', async () => {
+    /*
+     * מכאן ואילך המתג הוא אמיתי (תוקן: docs/button-audit.md, שורה ד'). הפסקה
+     * „bet” כבר מסומנת מהצעד שמעל — הצעד הזה בודק שלחיצה שנייה **מכבה**
+     * בפועל (מסירה את w:pageBreakBefore מה-DOCX המיוצא, לא רק state פנימי),
+     * ושהכפתור חוזר להציג „לא פעיל”. זה בדיוק ההפך מ-NO_OP: לפני התיקון
+     * לחיצה שנייה הייתה שולחת שוב `pageBreakBefore:true` (NO_OP שקט), ולא
+     * הייתה שום דרך לכבות מהרצועה.
+     */
+    await step('התחל בעמוד חדש — לחיצה שנייה מכבה (הביטול)', async () => {
+      await caretLine(app, 1); // אותה פסקה, „bet" — הסמן עשוי לזוז בין צעדים
+      const before = await snap(app);
+      const wasMarked = /<w:pageBreakBefore\/>/.test(
+        (before.doc.match(/<w:p [^>]*>[\s\S]*?<\/w:p>/g) ?? []).find((p) => /<w:t[^>]*>bet</.test(p)) ?? '',
+      );
       await app.reset();
-      await app.click('התחל בעמוד חדש', { after: 1500 });
+      const clicked = await app.click('התחל בעמוד חדש', { after: 2000 });
       const bad = await noise(app);
-      log('רעש בלחיצה שנייה:', bad || '(אין)');
-      bad
-        ? report.fail('התחל בעמוד חדש — לחיצה שנייה', bad)
-        : report.pass('התחל בעמוד חדש — לחיצה שנייה', 'NO_OP בשקט, כמתוכנן');
+      const after = await snap(app);
+      const st = await app.state('התחל בעמוד חדש');
+      const betPara = (after.doc.match(/<w:p [^>]*>[\s\S]*?<\/w:p>/g) ?? []).find((p) => /<w:t[^>]*>bet</.test(p)) ?? '';
+      const stillMarked = /<w:pageBreakBefore\/>/.test(betPara);
+      const shownActive = st.active === true || st.pressed === 'true';
+      log('היה מסומן:', wasMarked, '| נשאר מסומן אחרי הלחיצה:', stillMarked, '| מצב הכפתור:', JSON.stringify(st));
+      log('רעש:', bad || '(אין)');
+      if (!clicked) report.fail('התחל בעמוד חדש — ביטול', 'הכפתור לא נמצא');
+      else if (!wasMarked) report.skip('התחל בעמוד חדש — ביטול', 'הפסקה לא הייתה מסומנת מלכתחילה');
+      else if (!stillMarked && !shownActive && !bad)
+        report.pass('התחל בעמוד חדש — ביטול', 'w:pageBreakBefore הוסר מה-DOCX, והכפתור חזר ל„לא פעיל”');
+      else if (!stillMarked)
+        report.partial('התחל בעמוד חדש — ביטול', `הוסר מה-DOCX, אך מצב הכפתור: ${JSON.stringify(st)}; רעש: ${bad || 'אין'}`);
+      else report.fail('התחל בעמוד חדש — ביטול', `w:pageBreakBefore עדיין ב-DOCX. רעש: ${bad || 'אין'}`);
     });
 
     await step('התחל בעמוד חדש — פסקה ראשונה (מה שנראה כ„לא עובד”)', async () => {
@@ -222,16 +253,147 @@ async function sectionPages() {
       else report.fail('התחל בעמוד חדש — פסקה ראשונה', `לא נכתב. רעש: ${bad || 'אין'}`);
     });
 
-    await step('התחל בעמוד חדש — האם אפשר לבטל', async () => {
+    await step('התחל בעמוד חדש — פסקה ראשונה, גם היא ניתנת לכיבוי', async () => {
+      // אותו round-trip כמו „bet" למעלה, על פסקה שנייה ובלתי-תלויה — מוודא
+      // שהמעקב הוא לפי nodeId ולא דגל בודד שהיה מתבלבל בין שתי הפסקאות.
+      await caretLine(app, 0);
+      await app.reset();
+      const clicked = await app.click('התחל בעמוד חדש', { after: 2000 });
+      const bad = await noise(app);
+      const after = await snap(app);
       const st = await app.state('התחל בעמוד חדש');
-      log('active/pressed אחרי ההחלה:', JSON.stringify(st));
-      if (st.active || st.pressed === 'true')
-        report.pass('התחל בעמוד חדש — מצב', 'הפקד מציג שהוא פעיל');
+      const first = (after.doc.match(/<w:p [^>]*>[\s\S]*?<\/w:p>/g) ?? [])[0] ?? '';
+      const stillMarked = /<w:pageBreakBefore\/>/.test(first);
+      const shownActive = st.active === true || st.pressed === 'true';
+      log('נלחץ:', clicked, '| נשאר מסומן:', stillMarked, '| מצב הכפתור:', JSON.stringify(st));
+      log('רעש:', bad || '(אין)');
+      if (!clicked) report.fail('התחל בעמוד חדש — כיבוי פסקה ראשונה', 'הכפתור לא נמצא');
+      else if (!stillMarked && !shownActive && !bad)
+        report.pass('התחל בעמוד חדש — כיבוי פסקה ראשונה', 'w:pageBreakBefore הוסר, והכפתור חזר ל„לא פעיל”');
+      else if (!stillMarked)
+        report.partial('התחל בעמוד חדש — כיבוי פסקה ראשונה', `הוסר, אך מצב הכפתור: ${JSON.stringify(st)}`);
+      else report.fail('התחל בעמוד חדש — כיבוי פסקה ראשונה', `w:pageBreakBefore עדיין קיים. רעש: ${bad || 'אין'}`);
+    });
+
+    /*
+     * ממצא QA שני, כמעט אחרון בסדר בכוונה: forgetAll (הפתרון) מוחקת את **כל**
+     * המעקב, לא רק את הפסקה שה-Undo נגע בה — ולכן הצעד הזה חייב לרוץ אחרי
+     * כל שאר הבדיקות בסעיף, לא ביניהן (הן נשענות על מעקב שנשאר תקף על
+     * "alef"/"bet" בין צעד לצעד). Ctrl+Z יכול לשנות pageBreakBefore בלי
+     * לעבור דרך הכפתור בכלל, ו-createShortcutDispatcher מדלג על אירוע
+     * defaultPrevented — כלומר runCommand('undo') שלנו לא רץ כש-ProseMirror
+     * כבר טיפל ב-Ctrl+Z בעצמו (נמדד). watchUndoRedoKeys (capture, לפני
+     * המנוע) הוא הפתרון. הצעד הזה בודק את זה בדפדפן אמיתי, לא רק ביחידה —
+     * וממשיך ישר ל-Redo (ממצא QA שלישי, פער 1): forgetAllKeepingSnapshot/
+     * restoreSnapshot אמורים להחזיר בדיוק את מה ש-Undo הסיר.
+     */
+    await step('התחל בעמוד חדש — Ctrl+Z מנקה, Ctrl+Shift+Z מחזיר', async () => {
+      await caretLine(app, 1); // "bet"
+      await app.reset();
+      await app.click('התחל בעמוד חדש', { after: 2000 });
+      const afterMark = await snap(app);
+      const betBefore = (afterMark.doc.match(/<w:p [^>]*>[\s\S]*?<\/w:p>/g) ?? []).find((p) => /<w:t[^>]*>bet</.test(p)) ?? '';
+      const markedBefore = /<w:pageBreakBefore\/>/.test(betBefore);
+      const stBefore = await app.state('התחל בעמוד חדש');
+
+      await app.press('z', 'KeyZ', 90, 2); // Ctrl+Z. modifiers=2 הוא הביט של Ctrl ב-CDP.
+      await app.sleep(1000);
+
+      const afterUndo = await snap(app);
+      const badUndo = await noise(app);
+      const betAfterUndo = (afterUndo.doc.match(/<w:p [^>]*>[\s\S]*?<\/w:p>/g) ?? []).find((p) => /<w:t[^>]*>bet</.test(p)) ?? '';
+      const stillMarked = /<w:pageBreakBefore\/>/.test(betAfterUndo);
+      const stAfterUndo = await app.state('התחל בעמוד חדש');
+      const shownActiveAfterUndo = stAfterUndo.active === true || stAfterUndo.pressed === 'true';
+      log('מסומן לפני Undo:', markedBefore, '| מצב לפני:', JSON.stringify(stBefore));
+      log('נשאר מסומן אחרי Undo:', stillMarked, '| מצב אחרי Undo:', JSON.stringify(stAfterUndo));
+      log('רעש (Undo):', badUndo || '(אין)');
+      if (!markedBefore) {
+        report.skip('Ctrl+Z מנקה חיווי', 'הפסקה לא הייתה מסומנת מלכתחילה');
+        report.skip('Ctrl+Shift+Z מחזיר חיווי', 'Undo לא רץ — אין מה לבדוק ב-Redo');
+        return;
+      }
+      if (stillMarked) {
+        report.skip('Ctrl+Z מנקה חיווי', 'Undo לא הסיר את w:pageBreakBefore — לא ניתן למדוד');
+        report.skip('Ctrl+Shift+Z מחזיר חיווי', 'Undo לא רץ — אין מה לבדוק ב-Redo');
+        return;
+      }
+      if (!shownActiveAfterUndo && !badUndo)
+        report.pass('Ctrl+Z מנקה חיווי', 'w:pageBreakBefore הוסר ב-Undo, והכפתור אינו נשאר תקוע על „פעיל”');
       else
-        report.partial(
-          'התחל בעמוד חדש — מצב/ביטול',
-          'אינו מתג: אינו מציג שהפסקה כבר מסומנת ואין דרך לבטל מהרצועה',
+        report.fail(
+          'Ctrl+Z מנקה חיווי',
+          `w:pageBreakBefore הוסר ב-Undo, אך הכפתור עדיין מציג „פעיל”: ${JSON.stringify(stAfterUndo)}; רעש: ${badUndo || 'אין'}`,
         );
+
+      await app.press('z', 'KeyZ', 90, 10); // Ctrl+Shift+Z. modifiers=2(Ctrl)+8(Shift)=10.
+      await app.sleep(1000);
+
+      const afterRedo = await snap(app);
+      const badRedo = await noise(app);
+      const betAfterRedo = (afterRedo.doc.match(/<w:p [^>]*>[\s\S]*?<\/w:p>/g) ?? []).find((p) => /<w:t[^>]*>bet</.test(p)) ?? '';
+      const markedAgain = /<w:pageBreakBefore\/>/.test(betAfterRedo);
+      const stAfterRedo = await app.state('התחל בעמוד חדש');
+      const shownActiveAfterRedo = stAfterRedo.active === true || stAfterRedo.pressed === 'true';
+      log('מסומן מחדש אחרי Redo:', markedAgain, '| מצב אחרי Redo:', JSON.stringify(stAfterRedo));
+      log('רעש (Redo):', badRedo || '(אין)');
+      if (!markedAgain)
+        report.fail('Ctrl+Shift+Z מחזיר חיווי', `Redo לא החזיר את w:pageBreakBefore. רעש: ${badRedo || 'אין'}`);
+      else if (shownActiveAfterRedo && !badRedo)
+        report.pass('Ctrl+Shift+Z מחזיר חיווי', 'w:pageBreakBefore חזר ב-Redo, והכפתור מציג „פעיל” — לא נשאר תקוע על „לא פעיל”');
+      else
+        report.fail(
+          'Ctrl+Shift+Z מחזיר חיווי',
+          `w:pageBreakBefore חזר ב-Redo, אך הכפתור לא מציג „פעיל”: ${JSON.stringify(stAfterRedo)}; רעש: ${badRedo || 'אין'}`,
+        );
+    });
+
+    /*
+     * ממצא QA שלישי, פער 2, ואחרון בסדר מאותה סיבה כמו הצעד שמעל (forgetAll
+     * הוא ניקוי גורף). watchUndoRedoKeys תפס בעבר כל keydown תואם ב-window
+     * בלי לבדוק event.target — כלומר Ctrl+Z בתוך שדה טקסט לא-קשור (כאן:
+     * #fr-search-input בדיאלוג חיפוש-והחלפה) ניקה את המעקב בטעות. isBlocked
+     * הוא הפתרון. הפסקה "bet" עדיין מסומנת מהצעד שמעל (הסתיים ב-Redo).
+     */
+    await step('התחל בעמוד חדש — Ctrl+Z בשדה חיפוש אינו נוגע בחיווי', async () => {
+      const stBefore = await app.state('התחל בעמוד חדש');
+      const wasActive = stBefore.active === true || stBefore.pressed === 'true';
+
+      await app.tab('בית');
+      const openedFind = await app.click('חפש', { after: 600 });
+      if (!openedFind) {
+        report.fail('Ctrl+Z בשדה חיפוש', 'כפתור "חפש" לא נמצא — לא ניתן למדוד');
+        return;
+      }
+      await app.js(
+        `(function(){var el=document.querySelector('#fr-search-input');if(el)el.focus();})()`,
+      );
+      await app.sleep(300);
+      const focused = await app.js(
+        `document.activeElement && document.activeElement.id === 'fr-search-input'`,
+      );
+
+      await app.press('z', 'KeyZ', 90, 2); // Ctrl+Z, בפוקוס על שדה החיפוש.
+      await app.sleep(800);
+
+      const bad = await noise(app);
+      // סוגרים את הדיאלוג וחוזרים ל"הוספה" **לפני** קריאת מצב הכפתור: הוא
+      // בכלל לא ב-DOM כשלשונית "בית" פעילה (רק הלשונית הפעילה מורכבת) —
+      // קריאה לפני החזרה הייתה תמיד מודדת {found:false}, לא את המעקב עצמו.
+      await app.escape();
+      await app.tab('הוספה');
+      await app.sleep(300);
+      const stAfter = await app.state('התחל בעמוד חדש');
+      const stillActive = stAfter.active === true || stAfter.pressed === 'true';
+
+      log('פוקוס בשדה החיפוש:', focused, '| היה פעיל:', wasActive, '| נשאר פעיל:', stillActive);
+      log('רעש:', bad || '(אין)');
+      if (!focused) report.skip('Ctrl+Z בשדה חיפוש', 'הפוקוס לא הגיע לשדה החיפוש — לא ניתן למדוד');
+      else if (!wasActive) report.skip('Ctrl+Z בשדה חיפוש', 'הפסקה לא הייתה מסומנת לפני הבדיקה');
+      else if (stillActive && !bad)
+        report.pass('Ctrl+Z בשדה חיפוש', 'הכפתור נשאר "פעיל" — Ctrl+Z בשדה לא-קשור לא ניקה את המעקב');
+      else
+        report.fail('Ctrl+Z בשדה חיפוש', `הכפתור הפסיק להציג "פעיל" (${JSON.stringify(stAfter)}); רעש: ${bad || 'אין'}`);
     });
   } finally {
     app.close();

@@ -14,6 +14,7 @@
         variant="large"
         :tooltip="pageBreakTooltip"
         :disabled="!pageBreak.available"
+        :active="pageBreakOn"
         @click="onStartOnNewPage"
       />
     </RibbonGroup>
@@ -256,7 +257,7 @@
  * שהציגה `Ctrl+Enter` כקיצור שלה. אף אחד מהם לא היה מנוטרל ואף אחד לא דיווח
  * כשל — כלומר שלושה כפתורים שנראים עובדים.
  */
-import { computed, inject, ref, shallowRef, watch } from 'vue';
+import { computed, inject, onUnmounted, ref, shallowRef, watch } from 'vue';
 import type { SuperDoc } from 'superdoc';
 import RibbonGroup from '../common/RibbonGroup.vue';
 import RibbonButton from '../common/RibbonButton.vue';
@@ -264,13 +265,15 @@ import RibbonMenuButton from '../common/RibbonMenuButton.vue';
 import TablePicker from '../common/TablePicker.vue';
 import BookmarkDialog from '../../panels/BookmarkDialog.vue';
 import { useCommand } from '../../../composables/useCommand';
-import { COMMAND_REPORTER, type CommandReporter } from '../../../composables/keys';
+import { COMMAND_REPORTER, DOCUMENT_GENERATION, type CommandReporter } from '../../../composables/keys';
 import { removeHyperlink } from '../../../engine/hyperlinks-manage';
 import type { CommandOutcome } from '../../../engine/command-adapter';
 import { ACTIVE_SUPERDOC } from '../../../engine/document-api';
 import {
   readPageBreakSupport,
-  startParagraphOnNewPage,
+  readPageBreakNodeId,
+  setParagraphPageBreak,
+  pageBreakTracker,
   type PageBreakSupport,
 } from '../../../engine/page-break';
 import {
@@ -324,6 +327,11 @@ const fallbackReporter: CommandReporter = (outcome, id) => {
 
 const superdoc = inject(ACTIVE_SUPERDOC, shallowRef<SuperDoc | null>(null));
 const report = inject(COMMAND_REPORTER, fallbackReporter);
+/**
+ * „מסמך אחר” לפי `sessions/editor-swap.ts`, לא לפי זהות `host` — ראו ההסבר
+ * המלא ב-composables/keys.ts וב„„QA עצמאי” בהערת הפתיחה של engine/page-break.ts.
+ */
+const documentGeneration = inject(DOCUMENT_GENERATION, shallowRef(0));
 
 const tableCmd = useCommand('table-insert');
 const imageCmd = useCommand('image');
@@ -435,6 +443,49 @@ const pageBreak = shallowRef<PageBreakSupport>({ available: false, explanation: 
  */
 let pageBreakGeneration = 0;
 
+/**
+ * האם ידוע לנו שהפסקה שהסמן בה **כרגע** מסומנת — מ-`pageBreakTracker`, לא
+ * מהמסמך. ההסבר המלא למה זה כך, ולא קריאה אמיתית מ-`doc.get()`, נמצא
+ * בהערת הפתיחה של engine/page-break.ts תחת „„אינו מתג””: `doc.get()` אינו
+ * מחזיר `pageBreakBefore` בתכונות הפסקה (נמדד), ואין API אחר לקרוא אותו.
+ */
+const pageBreakOn = shallowRef(false);
+
+/** מונה דורות נפרד לקריאת המצב: היא רצה הרבה יותר (כל תזוזת סמן), לא רק בפתיחת מסמך. */
+let pageBreakStateGeneration = 0;
+
+/** מזהה הפסקה שהסמן בה מול `pageBreakTracker`. לא זורקת — `readPageBreakNodeId` עצמה אינה. */
+async function refreshPageBreakOn(): Promise<void> {
+  const mine = ++pageBreakStateGeneration;
+  const nodeId = await readPageBreakNodeId(superdoc.value);
+  if (mine !== pageBreakStateGeneration) return;
+  pageBreakOn.value = pageBreakTracker.isOn(nodeId);
+}
+
+/**
+ * השהיית הקריאה אחרי תזוזת סמן — אותה תבנית ואותו ערך כמו
+ * `RULER_SELECTION_DEBOUNCE_MS` (engine/page-ruler.ts): תזוזה של סמן שמעדכנת
+ * חיווי חצי שנייה אחריה נראית תקועה.
+ */
+const PAGE_BREAK_SELECTION_DEBOUNCE_MS = 150;
+let pageBreakSelectionTimer: ReturnType<typeof setTimeout> | undefined;
+
+function schedulePageBreakRefresh(): void {
+  clearTimeout(pageBreakSelectionTimer);
+  pageBreakSelectionTimer = setTimeout(() => void refreshPageBreakOn(), PAGE_BREAK_SELECTION_DEBOUNCE_MS);
+}
+
+/**
+ * מנוי החיים על תזוזת סמן, כדי שהחיווי יתעדכן כשהסמן עובר לפסקה אחרת בלי
+ * שהמסמך עצמו השתנה. `ui.selection` הוא אותו handle ש-App.vue מאזין לו
+ * (`editor.ui.selection.observe`, לסרגל ולשורת המצב) — כאן הוא מחובר ישירות
+ * מהלשונית ולא ממעטפת מרכזית, כי זה הצרכן היחיד שצריך אותו. `observe` יורה
+ * מיד עם snapshot נוכחי ואז על כל שינוי (SnapshotSubscribable) — ולכן אין
+ * צורך בקריאה נפרדת ל„עכשיו” מלבד הקריאה המפורשת למטה, שמכסה גם מנוע ישן
+ * בלי `observe` בכלל.
+ */
+let unsubscribePageBreakSelection: (() => void) | null = null;
+
 watch(
   superdoc,
   async (host) => {
@@ -446,18 +497,70 @@ watch(
   { immediate: true }
 );
 
+watch(
+  superdoc,
+  (host) => {
+    // מסמך אחר: מאפסת את הידע ואת החיווי, ומחליפה מנוי. אותו מסמך בדיוק
+    // (לשונית שהוחלפה וחזרה) — `syncDocument` אינה מאפסת, וההסבר המלא נמצא
+    // לצידה ב-page-break.ts. המפתח הוא `documentGeneration.value` ולא `host`
+    // עצמו — ראו „QA עצמאי” בהערת הפתיחה של page-break.ts למה.
+    pageBreakTracker.syncDocument(documentGeneration.value);
+    pageBreakOn.value = false;
+
+    unsubscribePageBreakSelection?.();
+    unsubscribePageBreakSelection = null;
+
+    const observeSelection = (host as SuperDoc | null | undefined)?.ui?.selection?.observe;
+    if (typeof observeSelection === 'function') {
+      try {
+        unsubscribePageBreakSelection =
+          observeSelection.call((host as SuperDoc).ui.selection, schedulePageBreakRefresh) ?? null;
+      } catch {
+        unsubscribePageBreakSelection = null;
+      }
+    }
+    // נפילה בטוחה למנוע בלי `observe` בכלל, וגם קריאה ראשונה שאינה תלויה
+    // ב„ירה מיד” של המנוע.
+    schedulePageBreakRefresh();
+  },
+  { immediate: true }
+);
+
+/**
+ * מנוי על שינויים ב-`pageBreakTracker` עצמו — לא רק על תזוזת סמן. חובה בשביל
+ * `forgetAll()` (App.vue, אחרי Undo/Redo מוצלח): היא נקראת **מחוץ** לרכיב
+ * הזה, ואינה מזיזה את הסמן — כלומר `ui.selection.observe` שמעל לא יורה, וה-
+ * חיווי היה נשאר תקוע על „פעיל” עד לחיצה הבאה. נמדד ב-QA בדפדפן אמיתי לפני
+ * שהמנוי הזה נוסף. נרשם פעם אחת לכל חיי הרכיב, לא בתוך ה-watch שמעל.
+ */
+const unsubscribePageBreakTracker = pageBreakTracker.onChange(() => void refreshPageBreakOn());
+
+onUnmounted(() => {
+  unsubscribePageBreakTracker();
+  unsubscribePageBreakSelection?.();
+  clearTimeout(pageBreakSelectionTimer);
+});
+
 /**
  * ה-tooltip אומר בדיוק מה יקרה, ולא מבטיח את ההתנהגות של Word. פקד מנוטרל
  * מסביר **למה** הוא מנוטרל.
  */
-const pageBreakTooltip = computed(() =>
-  pageBreak.value.available
-    ? 'הפסקה שבה הסמן תתחיל בראש עמוד חדש'
-    : pageBreak.value.explanation
-);
+const pageBreakTooltip = computed(() => {
+  if (!pageBreak.value.available) return pageBreak.value.explanation;
+  return pageBreakOn.value
+    ? 'הפסקה הזאת כבר מתחילה בעמוד חדש. לחיצה תבטל זאת'
+    : 'הפסקה שבה הסמן תתחיל בראש עמוד חדש';
+});
 
+/**
+ * מתג אמיתי: לחיצה כשהפסקה „כבויה” שולחת `true`, וכשהיא „דלוקה” שולחת
+ * `false`. `pageBreakOn` הוא הידע שלנו על הפסקה **הנוכחית** בלבד (ראו
+ * ההסבר למעלה), ולכן נקרא מיד לפני השליחה ולא נשמר ממערכת נפרדת.
+ */
 async function onStartOnNewPage(): Promise<void> {
-  report(await startParagraphOnNewPage(superdoc.value), 'page-break-before');
+  const outcome = await setParagraphPageBreak(superdoc.value, !pageBreakOn.value, pageBreakTracker);
+  report(outcome, 'page-break-before');
+  await refreshPageBreakOn();
 }
 
 /* ------------------------------------------------------------------ */

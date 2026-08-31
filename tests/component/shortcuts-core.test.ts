@@ -20,6 +20,7 @@ import {
   type CommandDouble,
   type SuperdocDouble,
 } from './harness';
+import { pageBreakTracker } from '../../src/engine/page-break';
 import type { SaveCoordinatorDeps } from '../../src/sessions/save-coordinator';
 
 const stub = vi.hoisted(() => ({
@@ -167,6 +168,30 @@ async function mountShell() {
   return wrapper;
 }
 
+/**
+ * משטח ההקלדה של המנוע: `<textarea aria-label="Text composition input">`
+ * בתוך `.editor-stack`. במודול-רמה (לא בתוך describe אחד) כי גם „הפוקוס
+ * בתוך המסמך” וגם בדיקות Undo/Redo צריכות אותו — שניהם בודקים מה שקורה
+ * כשהקשה מקורה בפועל בתוך המסמך, לא רק על `window`.
+ */
+function composingSurface(wrapper: ReturnType<typeof mount>): HTMLTextAreaElement {
+  const host = wrapper.find('.editor-stack').element;
+  const surface = document.createElement('textarea');
+  surface.setAttribute('aria-label', 'Text composition input');
+  host.appendChild(surface);
+  return surface;
+}
+
+/** הקשה שמקורה במשטח ההקלדה, כמו אצל מי שמקליד במסמך. */
+function typeInDocument(
+  surface: HTMLElement,
+  over: Partial<KeyboardEventInit> & { code: string },
+): KeyboardEvent {
+  const event = new KeyboardEvent('keydown', { cancelable: true, bubbles: true, ...over });
+  surface.dispatchEvent(event);
+  return event;
+}
+
 /** אירוע מקלדת אמיתי על `window`, בדיוק כמו לחיצה של המשתמש. */
 function press(over: Partial<KeyboardEventInit> & { code: string }): KeyboardEvent {
   const event = new KeyboardEvent('keydown', { cancelable: true, bubbles: true, ...over });
@@ -277,6 +302,152 @@ describe('פקודות המנוע', () => {
     await settle();
 
     expect(wrapper.find('.status-message').text()).toContain('אין פעולה לבטל');
+  });
+
+  /**
+   * ממצא QA, ומכשול שני שנחשף תוך כדי תיקונו: Undo/Redo יכולים לשנות
+   * `pageBreakBefore` בלי לעבור דרך הכפתור ב-InsertTab.vue, ולכן
+   * `PageBreakTracker` לא היה שומע עליהם. הניסיון הראשון תפס את זה
+   * ב-`runShortcutCommand` (App.vue) — ונמדד ב-QA בדפדפן אמיתי **שזה לא
+   * מספיק**: `createShortcutDispatcher` מדלג על אירוע `defaultPrevented`,
+   * ו-Ctrl+Z/Ctrl+Y עם הפוקוס במסמך אמיתי כבר מטופלים ומבוטלים על ידי
+   * ה-`history` המובנה של ProseMirror לפני שהם מגיעים ל-`runShortcutCommand`
+   * בכלל — כלומר `adapter.run('undo')` **לא רץ**, גם שה-DOCX השתנה בפועל.
+   *
+   * הפתרון: `watchUndoRedoKeys` (ui/shortcuts/undo-redo-watch.ts) — מאזין
+   * נפרד ב-**capture**, שרואה את הלחיצה לפני שהמנוע מספיק לבטל אותה, ומנקה
+   * תמיד — בלי תלות בתוצאה של `adapter.run`. הבדיקות כאן מדגימות את שני
+   * ההבדלים מהגרסה הקודמת: המנוי אינו תלוי ב-`adapter.calls` בכלל, וגם
+   * לחיצה ש-`adapter.run` דוחה (`history-empty`) מנקה — כי אין דרך לדעת
+   * מבחוץ אם המנוע כן ביטל משהו.
+   */
+  it('Ctrl+Z מנקה את המעקב המקומי של „התחל בעמוד חדש”, בלי קשר לתוצאת adapter.run', async () => {
+    pageBreakTracker.remember('p-undo', true);
+    expect(pageBreakTracker.isOn('p-undo')).toBe(true);
+
+    await mountShell();
+
+    press({ code: 'KeyZ', ctrlKey: true });
+    await settle();
+
+    expect(pageBreakTracker.isOn('p-undo')).toBe(false);
+  });
+
+  it('Ctrl+Y מנקה את המעקב המקומי אף הוא', async () => {
+    pageBreakTracker.remember('p-redo', true);
+
+    await mountShell();
+
+    press({ code: 'KeyY', ctrlKey: true });
+    await settle();
+
+    expect(pageBreakTracker.isOn('p-redo')).toBe(false);
+  });
+
+  it('Ctrl+Z שה-controller דוחה (history-empty) עדיין מנקה — אין דרך לדעת מבחוץ שהמנוע לא ביטל', async () => {
+    adapter = createCommandDouble({ failures: { undo: 'history-empty' } });
+    stub.adapter = adapter;
+    pageBreakTracker.remember('p-blocked', true);
+
+    await mountShell();
+
+    press({ code: 'KeyZ', ctrlKey: true });
+    await settle();
+
+    expect(pageBreakTracker.isOn('p-blocked')).toBe(false);
+  });
+
+  /**
+   * ממצא QA שלישי, פער 1: Redo לא החזיר את הסימון. `watchUndoRedoKeys`
+   * ניקה (`forgetAll`) גם על Redo, ושום דבר לא זכר להחזיר — כלומר Redo
+   * (פעולה שהמשתמש **ביקש**) הציג כפתור „לא פעיל” על פסקה שה-DOCX שלה כן
+   * חזר להיות מסומן. התיקון: `forgetAllKeepingSnapshot`/`restoreSnapshot`
+   * (engine/page-break.ts) — Undo שומר תצלום, Redo מיידי שאחריו מחזיר אותו.
+   */
+  it('Ctrl+Z ואז Ctrl+Shift+Z (redo) בתוך המסמך משחזרים בדיוק את הסימון', async () => {
+    pageBreakTracker.remember('p-roundtrip', true);
+    const wrapper = await mountShell();
+    const surface = composingSurface(wrapper);
+
+    typeInDocument(surface, { code: 'KeyZ', ctrlKey: true }); // Undo
+    await settle();
+    expect(pageBreakTracker.isOn('p-roundtrip')).toBe(false);
+
+    typeInDocument(surface, { code: 'KeyZ', ctrlKey: true, shiftKey: true }); // Redo
+    await settle();
+
+    expect(pageBreakTracker.isOn('p-roundtrip')).toBe(true);
+  });
+
+  it('Redo בלי Undo קודם עדיין נופל בבטחה ל„לא ידוע" (forgetAll)', async () => {
+    pageBreakTracker.remember('p-redo-only', true);
+    const wrapper = await mountShell();
+    const surface = composingSurface(wrapper);
+
+    typeInDocument(surface, { code: 'KeyY', ctrlKey: true }); // Redo, בלי Undo קודם
+    await settle();
+
+    expect(pageBreakTracker.isOn('p-redo-only')).toBe(false);
+  });
+
+  /**
+   * ממצא QA שלישי, פער 2: Ctrl+Z בתוך שדה טקסט לא-קשור (למשל שדה בדיאלוג
+   * חיפוש) ניקה את המעקב בטעות — `watchUndoRedoKeys` תפס כל keydown תואם
+   * ב-window בלי לבדוק את event.target. התיקון: `isBlocked`, אותה בדיקה
+   * בדיוק ש-`createShortcutDispatcher`/`createDirectionShortcut` כבר עושים.
+   */
+  it('Ctrl+Z בתוך שדה טקסט של הממשק (לא המסמך) אינו נוגע במעקב', async () => {
+    pageBreakTracker.remember('p-untouched', true);
+    await mountShell();
+    const field = document.createElement('input');
+    document.body.appendChild(field);
+
+    const event = new KeyboardEvent('keydown', {
+      code: 'KeyZ',
+      ctrlKey: true,
+      cancelable: true,
+      bubbles: true,
+    });
+    field.dispatchEvent(event);
+    await settle();
+    field.remove();
+
+    expect(pageBreakTracker.isOn('p-untouched')).toBe(true);
+  });
+
+  /**
+   * הרגרסיה העצמית שנחשפה בזמן התיקון: `watchUndoRedoKeys` (מקלדת בלבד)
+   * החליף את הניקוי שישב קודם ב-`runShortcutCommand`, ומעולם לא כיסה את
+   * כפתורי „בטל”/„חזור” בפס הכותרת — הם אינם אירוע מקלדת. תוקן: `onUndo`/
+   * `onRedo` (App.vue) קוראים לאותו מנגנון תצלום/שחזור ישירות.
+   */
+  it('„בטל” ואז „חזור” בפס הכותרת משחזרים את הסימון, לא רק מנקים', async () => {
+    pageBreakTracker.remember('p-buttons', true);
+    const wrapper = await mountShell();
+
+    // הכפתורים מתחילים מנוטרלים עד שהמנוע מדווח `enabled` — אותו דפוס כמו
+    // ב„בטל” מפס הכותרת מדווח סירוב, כמו הקיצור" שמעל.
+    adapter.setState('undo', { enabled: true });
+    adapter.setState('redo', { enabled: true });
+    await settle();
+
+    const undoButton = wrapper
+      .findAll('button')
+      .find((button) => (button.attributes('title') ?? '').startsWith('בטל'));
+    expect(undoButton, 'כפתור „בטל” לא נמצא בפס הכותרת').toBeTruthy();
+    await undoButton!.trigger('click');
+    await settle();
+
+    expect(pageBreakTracker.isOn('p-buttons')).toBe(false);
+
+    const redoButton = wrapper
+      .findAll('button')
+      .find((button) => (button.attributes('title') ?? '').startsWith('חזור'));
+    expect(redoButton, 'כפתור „חזור” לא נמצא בפס הכותרת').toBeTruthy();
+    await redoButton!.trigger('click');
+    await settle();
+
+    expect(pageBreakTracker.isOn('p-buttons')).toBe(true);
   });
 
   it('„חזור” מפס הכותרת מדווח סירוב אף הוא', async () => {
@@ -833,25 +1004,8 @@ describe('הפוקוס בתוך המסמך', () => {
    * אזור המסמך. כלומר ברגע שהמשתמש מתחיל להקליד, `event.target` של כל הקשה
    * הוא TEXTAREA — והשומר של „שדה טקסט” חסם את כל הקיצורים בדיוק במצב היחיד
    * שבו הם נחוצים. הבדיקות הקודמות ירו על `window` ולכן לא ראו את זה.
+   * `composingSurface`/`typeInDocument` במודול-רמה, למעלה.
    */
-  function composingSurface(wrapper: ReturnType<typeof mount>): HTMLTextAreaElement {
-    const host = wrapper.find('.editor-stack').element;
-    const surface = document.createElement('textarea');
-    surface.setAttribute('aria-label', 'Text composition input');
-    host.appendChild(surface);
-    return surface;
-  }
-
-  /** הקשה שמקורה במשטח ההקלדה, כמו אצל מי שמקליד במסמך. */
-  function typeInDocument(
-    surface: HTMLElement,
-    over: Partial<KeyboardEventInit> & { code: string },
-  ): KeyboardEvent {
-    const event = new KeyboardEvent('keydown', { cancelable: true, bubbles: true, ...over });
-    surface.dispatchEvent(event);
-    return event;
-  }
-
   it('Ctrl+Z בזמן הקלדה מגיע לפקודה', async () => {
     const wrapper = await mountShell();
 

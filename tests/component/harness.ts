@@ -48,6 +48,7 @@ import {
 import {
   COMMAND_ADAPTER,
   COMMAND_REPORTER,
+  DOCUMENT_GENERATION,
   FONT_OPTIONS,
   READOUT_SELECTION,
   STYLE_GALLERY,
@@ -1173,6 +1174,21 @@ export function createSuperdocDouble(options: SuperdocDoubleOptions = {}): Super
 /* ההרכבה                                                             */
 /* ------------------------------------------------------------------ */
 
+/**
+ * מונה `DOCUMENT_GENERATION` (composables/keys.ts) לכפילי הבדיקה.
+ *
+ * מודול-רמה ולא מקומי ל-`mountUi`: `PageBreakTracker` (engine/page-break.ts)
+ * הוא מופע יחיד המשותף לכל התכנית — כולל בין קבצי בדיקה שרצים באותו worker —
+ * ובלי מונה שעולה בכל הרכבה, כל מסמכי הבדיקה היו משתפים את אותה ברירת מחדל
+ * `0` מ-`inject(DOCUMENT_GENERATION, shallowRef(0))`, ו-`syncDocument`
+ * (שמשווה לפי ערך) לא הייתה מזהה "מסמך אחר" אחרי ההרכבה הראשונה בכל התהליך —
+ * בדיוק הבאג שה-QA שהוסיף את המונה הזה נועד למנוע. עולה בכל `mountUi` **וגם**
+ * בכל `setSuperdoc`, ובכוונה שמרנית מדי (גם `setSuperdoc(sameDouble)` מעלה):
+ * איפוס-יתר של המעקב המקומי הוא בדיוק הכשל הבטוח (`isOn` חוזר `false`),
+ * ואיפוס-חסר הוא זה שהיה שקט ומטעה.
+ */
+let documentGenerationCounter = 0;
+
 export interface ReportedOutcome {
   outcome: CommandOutcome;
   commandId: string;
@@ -1242,6 +1258,8 @@ export function mountUi(component: Component, options: HarnessOptions = {}): Har
     options.readoutSelection ?? SETTLED_CARET,
   );
   provide[READOUT_SELECTION as unknown as symbol] = readoutSelectionRef;
+  const documentGenerationRef = shallowRef((documentGenerationCounter += 1));
+  provide[DOCUMENT_GENERATION as unknown as symbol] = documentGenerationRef;
 
   const wrapper = mount(component, {
     props: options.props,
@@ -1258,6 +1276,7 @@ export function mountUi(component: Component, options: HarnessOptions = {}): Har
     failures: () => reports.filter((report) => !report.outcome.ok),
     async setSuperdoc(next) {
       superdocRef.value = next ? next.host : null;
+      documentGenerationRef.value = documentGenerationCounter += 1;
       await settle();
     },
     async setAdapter(next) {

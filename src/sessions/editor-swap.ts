@@ -35,6 +35,21 @@ export interface EditorSwap {
   readonly current: EditorSession | null;
   /** האם יש פתיחה בתהליך. */
   readonly isOpening: boolean;
+  /**
+   * עולה ב-1 בכל פעם ש-`current` **באמת** הוחלף במסמך אחר — לא בכל ניסיון
+   * פתיחה. פתיחה שנכשלה או שהוחלפה על ידי בקשה חדשה יותר אינה נוגעת ב-`current`
+   * (ראו `SwapOutcome`), ולכן אינה מעלה את המונה הזה.
+   *
+   * למה זה קיים: `current.superdoc` הוא מופע `SuperDoc` חדש בכל פתיחה מוצלחת
+   * (`createEditor` בונה `new SuperDoc(...)` בכל קריאה — נמדד: תיוג
+   * `window.__otzariaEditor.superdoc` בדפדפן לפני „מסמך חדש”/„פתח קובץ” לא
+   * שרד אחרי), ולכן זהות אובייקט כבר מספיקה כדי לזהות מסמך אחר. המונה הזה
+   * קיים בכל זאת בשביל צרכן שרוצה איתות מפורש ובלתי-תלוי בפרט מימוש של
+   * SuperDoc (למשל `PageBreakTracker.syncDocument`, engine/page-break.ts) —
+   * מספר עולה מבטיח שאותו ערך לעולם לא חוזר, גם אם גרסת מנוע עתידית תשנה
+   * את חוזה הזהות של `superdoc`.
+   */
+  readonly documentGeneration: number;
   open(source?: string | File | Blob): Promise<SwapOutcome>;
   destroy(): void;
 }
@@ -43,6 +58,8 @@ export function createEditorSwap(container: HTMLElement, openEditor: OpenEditor)
   let current: EditorSession | null = null;
   let currentHost: HTMLElement | null = null;
   let generation = 0;
+  /** ראו `EditorSwap.documentGeneration`. עולה רק כש-`current` באמת מוחלף. */
+  let documentGeneration = 0;
   let pending = 0;
   /** hosts של פתיחות שעוד לא הסתיימו, כדי ש-destroy יוכל לנקות גם אותם. */
   const openingHosts = new Set<HTMLElement>();
@@ -73,6 +90,10 @@ export function createEditorSwap(container: HTMLElement, openEditor: OpenEditor)
 
     get isOpening() {
       return pending > 0;
+    },
+
+    get documentGeneration() {
+      return documentGeneration;
     },
 
     async open(source) {
@@ -110,6 +131,9 @@ export function createEditorSwap(container: HTMLElement, openEditor: OpenEditor)
       const previousHost = currentHost;
       current = session;
       currentHost = host;
+      // כאן ולא במקום אחר: זו הנקודה היחידה שבה `current` באמת מוחלף
+      // במסמך אחר — לא בכל ניסיון פתיחה (ראו `EditorSwap.documentGeneration`).
+      documentGeneration += 1;
       host.classList.remove(PENDING_CLASS);
       discard(previous, previousHost);
       return { status: 'opened', session };

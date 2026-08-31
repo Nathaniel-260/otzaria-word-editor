@@ -194,6 +194,7 @@ import type { CommandId } from './engine/capabilities';
 import {
   COMMAND_ADAPTER,
   COMMAND_REPORTER,
+  DOCUMENT_GENERATION,
   FONT_OPTIONS,
   READOUT_SELECTION,
   STYLE_GALLERY,
@@ -331,7 +332,7 @@ import {
 } from './engine/payloads';
 import { toggleVertAlign } from './engine/vert-align';
 import { insertNote } from './engine/footnotes';
-import { startParagraphOnNewPage } from './engine/page-break';
+import { startParagraphOnNewPage, pageBreakTracker } from './engine/page-break';
 import { createLinkDialog } from './composables/use-link-dialog';
 import { createShellActionRunner } from './ui/shortcuts/actions';
 import { useContextMenu } from './composables/use-context-menu';
@@ -342,6 +343,7 @@ import {
   type ShortcutDispatcher,
 } from './ui/shortcuts/dispatch';
 import { createDirectionShortcut } from './ui/shortcuts/direction';
+import { watchUndoRedoKeys, type UndoRedoWatcher } from './ui/shortcuts/undo-redo-watch';
 import { createFocusRing } from './ui/shortcuts/focus-ring';
 import { focusDocument } from './engine/focus';
 
@@ -384,6 +386,14 @@ provide(READOUT_SELECTION, readoutSelection);
  */
 const activeSuperdoc = shallowRef<SuperDoc | null>(null);
 provide(ACTIVE_SUPERDOC, activeSuperdoc);
+
+/**
+ * מונה "מסמך אחר" — ראו ההסבר המלא ב-composables/keys.ts. מעודכן מ-`swap.
+ * documentGeneration` באותו רגע בדיוק שבו `activeSuperdoc` מוחלף (openDocument),
+ * כדי ששני העדכונים יגיעו לצרכנים באותו tick.
+ */
+const documentGeneration = shallowRef(0);
+provide(DOCUMENT_GENERATION, documentGeneration);
 
 /**
  * האם יש מסמך פתוח — מה שפקדי לשונית „קובץ” נשענים עליו.
@@ -760,6 +770,9 @@ async function openDocument(file?: UserFile, options: OpenOptions = {}): Promise
   // ה-`editor.superdoc` המקומי ולא `activeSuperdoc.value` בפירוק: אותה מלכודת
   // כמו באדפטר החיפוש — סגירת המסמך הקודם קורית אחרי שהחדש כבר נרשם.
   activeSuperdoc.value = editor.superdoc;
+  // אותו tick בדיוק כמו ההשמה שמעל: מי שמשווה זהות `documentGeneration` בין
+  // שתי קריאות (`PageBreakTracker.syncDocument`) חייב לראות את שתיהן יחד.
+  documentGeneration.value = swap.documentGeneration;
   editor.onDispose(() => {
     if (activeSuperdoc.value === editor.superdoc) activeSuperdoc.value = null;
     // בלי האיפוס הרצועה הייתה ממשיכה להחזיק את הקריאה של המסמך שנסגר.
@@ -1344,12 +1357,23 @@ async function onExportPdf(): Promise<void> {
  * הפקודה נדחתה, וההודעה „המסמך עדיין נטען” — שכבר קיימת ב-`REASON_TEXT` —
  * נזרקה לפח. אותה פקודה בדיוק דרך המקלדת **כן** דיווחה, כי היא עוברת ב-
  * `runShortcutCommand`. שני מסלולים לאותה פעולה, ורק אחד מהם מדבר.
+ *
+ * `pageBreakTracker.forgetAllKeepingSnapshot`/`restoreSnapshot` כאן ולא רק
+ * ב-`watchUndoRedoKeys`: לחיצה על הכפתורים כאן היא נתיב שני ל-Undo/Redo
+ * שאינו עובר מקלדת בכלל — בלי הקריאה הישירה כאן, לחיצה על „בטל”/„חזור”
+ * בפס הכותרת לא הייתה מנקה/משחזרת את המעקב אף פעם (רגרסיה שנחשפה תוך כדי
+ * הוספת `watchUndoRedoKeys`: היא החליפה את הניקוי שישב קודם ב-
+ * `runShortcutCommand`, ומעולם לא כיסתה את הכפתורים — הם אינם אירוע מקלדת).
+ * בלי `isBlocked`: לחיצה מפורשת על כפתור תמיד עוסקת במסמך, לא במקום שהפוקוס
+ * היה בו קודם. ראו ההסבר המלא ב-engine/page-break.ts, „QA עצמאי” → „Undo/Redo”.
  */
 function onUndo(): void {
+  pageBreakTracker.forgetAllKeepingSnapshot();
   void runShortcutCommand('undo');
 }
 
 function onRedo(): void {
+  if (!pageBreakTracker.restoreSnapshot()) pageBreakTracker.forgetAll();
   void runShortcutCommand('redo');
 }
 
@@ -1771,7 +1795,19 @@ async function runPageBreak(): Promise<void> {
   reportCommand(await startParagraphOnNewPage(activeSuperdoc.value), 'page-break-before');
 }
 
-/** פקודת מנוע שמגיעה מקיצור. אותו מסלול, ואותו דיווח, כמו לחיצת כפתור. */
+/**
+ * פקודת מנוע שמגיעה מקיצור. אותו מסלול, ואותו דיווח, כמו לחיצת כפתור.
+ *
+ * **לא המקום שתופס Undo/Redo מהמקלדת** — זו הייתה ההנחה הראשונה וההיא הופרכה
+ * במדידה: `createShortcutDispatcher` (dispatch.ts) מדלג בכוונה על אירוע
+ * שכבר `defaultPrevented`, כדי לא להריץ קיצור שהמנוע כבר קשר בעצמו (Ctrl+B
+ * וכדומה) פעמיים. `Ctrl+Z`/`Ctrl+Y` הם בדיוק המקרה הזה — הם ה-`history`
+ * המובנה של ProseMirror, קשורים על אזור המסמך, ומבטלים את ברירת המחדל לפני
+ * שהאירוע מגיע לכאן בכלל. נמדד: `runShortcutCommand('undo')` **לא רץ** על
+ * Ctrl+Z אמיתי כשהפוקוס בתוך המסמך, גם שה-DOCX השתנה בפועל. `watchUndoRedoKeys`
+ * (ui/shortcuts/undo-redo-watch.ts) הוא הפתרון — מאזין נפרד ב-capture, לפני
+ * המנוע. ראו engine/page-break.ts, „QA עצמאי” → „Undo/Redo”.
+ */
 async function runShortcutCommand(id: CommandId, payload?: unknown): Promise<void> {
   const adapter = commandAdapter.value;
   if (!adapter) {
@@ -1809,6 +1845,18 @@ function isDocumentSurface(target: EventTarget | null): boolean {
 function isModalDialogOpen(): boolean {
   if (isAboutOpen.value || linkDialog.isOpen.value || isShortcutsHelpOpen.value) return true;
   return document.querySelector('[aria-modal="true"]') !== null;
+}
+
+/**
+ * הפוקוס אינו בעריכת המסמך: דיאלוג מודאלי פתוח, או שדה טקסט **של הממשק
+ * שלנו** (לא של המסמך — `isDocumentSurface` היא ההצלבה). משמשת כל מי שצריך
+ * לדעת שלחיצת מקלדת אינה אמורה לגעת במסמך: `createDirectionShortcut` (כיוון
+ * פסקה) ו-`watchUndoRedoKeys` (Undo/Redo) — לשניהם יש מנגנון נפרד שאינו עובר
+ * דרך `createShortcutDispatcher` הרגיל, ולכן אף אחד מהם לא מקבל את הבדיקה
+ * הזאת בחינם ממנו.
+ */
+function isOutsideDocumentEditing(target: EventTarget | null): boolean {
+  return isModalDialogOpen() || (isTextEntryTarget(target) && !isDocumentSurface(target));
 }
 
 /**
@@ -1883,6 +1931,7 @@ const focusRing = createFocusRing({
 
 let shortcuts: ShortcutDispatcher | null = null;
 let directionShortcut: { dispose: () => void } | null = null;
+let undoRedoWatcher: UndoRedoWatcher | null = null;
 
 onMounted(async () => {
   shortcuts = createShortcutDispatcher({
@@ -1896,8 +1945,21 @@ onMounted(async () => {
 
   directionShortcut = createDirectionShortcut({
     runCommand: (id) => void runShortcutCommand(id),
-    isBlocked: (target) =>
-      isModalDialogOpen() || (isTextEntryTarget(target) && !isDocumentSurface(target)),
+    isBlocked: isOutsideDocumentEditing,
+  });
+
+  // Undo/Redo יכולים לשנות pageBreakBefore בלי לעבור דרך הכפתור ב-InsertTab.vue,
+  // וגם בלי לעבור דרך `shortcuts` שמעל: ה-capture הנפרד כאן קיים בדיוק בגלל
+  // זה — ראו ui/shortcuts/undo-redo-watch.ts. תצוגת „לא ידוע” (נופלת ל„כבוי”)
+  // ב-InsertTab.vue עדיפה על „פעיל” כוזב שנשאר תקוע. `isBlocked` היא אותה
+  // בדיקה בדיוק שלמעלה — QA מדד ש-Ctrl+Z בתוך שדה טקסט של הממשק (חיפוש,
+  // למשל) ניקה את המעקב בלי שום קשר למסמך לפני שהיא נוספה.
+  undoRedoWatcher = watchUndoRedoKeys({
+    onUndo: () => pageBreakTracker.forgetAllKeepingSnapshot(),
+    onRedo: () => {
+      if (!pageBreakTracker.restoreSnapshot()) pageBreakTracker.forgetAll();
+    },
+    isBlocked: isOutsideDocumentEditing,
   });
 
   if (editorStackRef.value) {
@@ -1978,6 +2040,8 @@ onUnmounted(() => {
   zoomCenter = null;
   shortcuts?.dispose();
   directionShortcut?.dispose();
+  undoRedoWatcher?.dispose();
+  undoRedoWatcher = null;
   // חיפוש-בזמן-הקלדה שממתין ירוץ אחרי הפירוק על handle של controller מפורק.
   searchAdapter?.dispose();
   hiddenListener?.();

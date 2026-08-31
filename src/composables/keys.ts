@@ -53,3 +53,17 @@ export const STYLE_GALLERY: InjectionKey<Ref<StyleGalleryState>> = Symbol('style
  * `ui.selection` על אותו slice היו 38 עותקים של אותה תשובה.
  */
 export const READOUT_SELECTION: InjectionKey<Ref<ReadoutSelection>> = Symbol('readoutSelection');
+
+/**
+ * מונה שעולה בכל פעם שהמסמך הפעיל **באמת** הוחלף (`EditorSwap.documentGeneration`,
+ * sessions/editor-swap.ts) — לא בכל ניסיון פתיחה, ולא בכל מעבר ל-`null`.
+ *
+ * למה בכלל צריך מונה נפרד, ולא רק להשוות זהות של `ACTIVE_SUPERDOC`: ברוב
+ * הצרכנים זהות האובייקט מספיקה (`watch(superdoc, ...)` כבר עושה בדיוק זאת).
+ * המונה קיים לצרכן שרוצה איתות "מסמך אחר" **בלתי-תלוי** בחוזה הזהות של
+ * `SuperDoc` עצמו — כלומר לא צריך להניח ש-superdoc.instance !== previous
+ * תמיד נכון בכל גרסת מנוע. `PageBreakTracker.syncDocument` (engine/page-break.ts)
+ * הוא הצרכן הראשון: הוא צריך למחוק את הידע שלו כשמסמך אחר נפתח, ולא כשאותו
+ * מסמך בדיוק נטען מחדש ברכיב (למשל לשונית שהוחלפה וחזרה).
+ */
+export const DOCUMENT_GENERATION: InjectionKey<Ref<number>> = Symbol('documentGeneration');

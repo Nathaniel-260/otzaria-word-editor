@@ -13,7 +13,16 @@ import HomeTab from '../../src/ui/ribbon/tabs/HomeTab.vue';
 import InsertTab from '../../src/ui/ribbon/tabs/InsertTab.vue';
 import LayoutTab from '../../src/ui/ribbon/tabs/LayoutTab.vue';
 import ReferencesTab from '../../src/ui/ribbon/tabs/ReferencesTab.vue';
-import { autoUnmount, buttonByTitle, createCommandDouble, createSuperdocDouble, installSystemClipboard, mountUi, settle } from './harness';
+import {
+  autoUnmount,
+  buttonByTitle,
+  findButtonByTitle,
+  createCommandDouble,
+  createSuperdocDouble,
+  installSystemClipboard,
+  mountUi,
+  settle,
+} from './harness';
 
 autoUnmount();
 
@@ -233,6 +242,39 @@ describe('כשל של Document API', () => {
         },
       },
     ]);
+  });
+
+  it('„התחל בעמוד חדש” הוא מתג: לחיצה שנייה על אותה פסקה מבטלת', async () => {
+    // docs/button-audit.md, שורה ד': הכפתור לא היה מתג — לחיצה תמיד שלחה
+    // `true`, ולא הייתה דרך לכבות מהרצועה. כאן נמדד שהלחיצה השנייה שולחת
+    // `false` בפועל, ושהחיווי (aria-pressed, ה-title) עוקב אחריה.
+    const superdoc = createSuperdocDouble();
+    const harness = mountUi(InsertTab, { superdoc });
+    await settle();
+
+    const button = () => findButtonByTitle(harness.wrapper, 'הפסקה');
+    expect(button()?.attributes('aria-pressed')).toBe('false');
+
+    await button()!.trigger('click');
+    await settle();
+
+    expect(superdoc.inputs('format.paragraph.setFlowOptions')).toEqual([
+      expect.objectContaining({ pageBreakBefore: true, target: expect.objectContaining({ nodeId: 'block-1' }) }),
+    ]);
+    expect(button()?.attributes('aria-pressed')).toBe('true');
+    expect(button()?.attributes('title')).toContain('כבר מתחילה בעמוד חדש');
+    expect(harness.failures()).toEqual([]);
+
+    await button()!.trigger('click');
+    await settle();
+
+    expect(superdoc.inputs('format.paragraph.setFlowOptions')).toEqual([
+      expect.objectContaining({ pageBreakBefore: true }),
+      expect.objectContaining({ pageBreakBefore: false, target: expect.objectContaining({ nodeId: 'block-1' }) }),
+    ]);
+    expect(button()?.attributes('aria-pressed')).toBe('false');
+    expect(button()?.attributes('title')).toContain('הפסקה שבה הסמן תתחיל בראש עמוד חדש');
+    expect(harness.failures()).toEqual([]);
   });
 });
 
