@@ -52,6 +52,8 @@ export const READER_PERMISSIONS: Record<string, string> = {
   'reader.getCurrentState': 'reader.open',
   'reader.getSectionTextMap': 'reader.open',
   'navigation.goTo': 'navigation.write',
+  'reader.addContextMenuItem': 'reader.context_menu',
+  'reader.removeContextMenuItem': 'reader.context_menu',
 };
 
 /**
@@ -267,13 +269,22 @@ function citationSourceText(selection: ReaderSelection | null | undefined): stri
  * מחרוזת ריקה פירושה „אין מה להכניס”, והקורא בממשק הוא שמחליט מה לומר.
  */
 export function buildCitationText(selection: ReaderSelection | null | undefined): string {
-  const text = normalizeSelectedText(citationSourceText(selection));
-  if (!text) return '';
-
   const sections = Array.isArray(selection?.sections) ? selection.sections : [];
-  const ref = normalizeSelectedText(
+  return withRef(
+    citationSourceText(selection),
     firstText(selection?.currentRef, sections[0]?.currentRef),
   );
+}
+
+/**
+ * הצירוף עצמו: טקסט, ואחריו המקור בסוגריים. מופרד מ-`buildCitationText` כדי
+ * שגם המסלול שאין לו `ReaderSelection` מלא — פריט תפריט ההקשר, שעשוי לקבל את
+ * השדות מדור קודם בלבד — ייתן בדיוק את אותו מלל ולא ניסוח שני.
+ */
+function withRef(rawText: string, rawRef: string): string {
+  const text = normalizeSelectedText(rawText);
+  if (!text) return '';
+  const ref = normalizeSelectedText(rawRef);
   return ref ? `${text} (${ref})` : text;
 }
 
@@ -383,4 +394,135 @@ export async function insertCitation(
   }
 
   return { ok: true, value: placement };
+}
+
+/* ===========================================================================
+ *  „שלח למסמך” — פריט בתפריט ההקשר של הקורא
+ * ========================================================================= */
+
+/**
+ * המזהה של הפריט. יציב בין הפעלות, כי `addContextMenuItem` מחליף פריט קיים
+ * לפי `id` — רישום חוזר אחרי `plugin.boot` אינו צורך מקום נוסף במכסה של שני
+ * הפריטים העליונים שאוצריא מקצה לתוסף.
+ */
+export const SEND_TO_DOCUMENT_ITEM_ID = 'otzaria-word-send-to-document';
+
+/**
+ * כמה זמן פריט התפריט „מחכה” למסמך אחרי שאוצריא העבירה לדף התוסף.
+ *
+ * `openPlugin: true` מוסר את האירוע אחרי סיום ה-boot, אבל ה-boot מסתיים לפני
+ * שהמנוע סיים לפרוס מסמך — 16MB של באנדל ו-workers, כמתועד ב-README. בלי
+ * ההמתנה הזו לחיצה על הפריט כשלשונית התוסף סגורה הייתה נכשלת ב„אין מסמך
+ * פתוח” בדיוק במקרה הנפוץ ביותר: המשתמש קורא בספרייה ורוצה לשלוח קטע.
+ */
+const DOCUMENT_WAIT_MS = 15_000;
+const DOCUMENT_POLL_MS = 150;
+
+/**
+ * הצורה שנצרכת מאירוע הלחיצה. מוגדרת כאן ולא מיובאת מלאה: מהאירוע נדרשים
+ * שני שדות בלבד, והצרה מאפשרת לבדיקות למסור אובייקט מינימלי.
+ */
+export interface SendToDocumentEvent {
+  itemId?: string;
+  selection?: ReaderSelection | null;
+  /** שדה מדור קודם, כשאין `selection` מלא. */
+  selectedText?: string;
+  currentRef?: string | null;
+}
+
+/**
+ * רושמת את הפריט בתפריט ההקשר של הקורא.
+ *
+ * `openPlugin: true` הוא הלב: בלעדיו הלחיצה מגיעה רק לתוסף שכבר פתוח, וזה
+ * הפוך מהתרחיש — המשתמש נמצא בקורא, לא בעורך. איתו אוצריא מעבירה ללשונית
+ * התוסף ומוסרת את האירוע גם אם הדף נטען רק עכשיו.
+ *
+ * `contexts` אינו מוגדר בכוונה, ולכן הפריט מופיע בשני הקשרי הבחירה — בחירת
+ * טקסט ובחירת צורה בעמוד — כפי שהיה ברישום המקורי של ה-SDK.
+ */
+export function registerSendToDocumentItem(): Promise<ReaderResult> {
+  return callAck('reader.addContextMenuItem', 'רישום פריט תפריט ההקשר נכשל', {
+    id: SEND_TO_DOCUMENT_ITEM_ID,
+    label: 'שלח למסמך',
+    icon: 'document_text_24_regular',
+    openPlugin: true,
+  });
+}
+
+/** מסירה את הפריט. משמשת בפירוק, ובבדיקות. */
+export function unregisterSendToDocumentItem(): Promise<ReaderResult> {
+  return callAck('reader.removeContextMenuItem', 'הסרת פריט תפריט ההקשר נכשלה', {
+    id: SEND_TO_DOCUMENT_ITEM_ID,
+  });
+}
+
+/**
+ * ממתינה עד שיש מסמך שאפשר להכניס אליו טקסט, או עד שהזמן הקצוב עבר.
+ *
+ * `canInsertText` היא אותה בדיקה שהרצועה עושה לפני שהיא מאפשרת „ציטוט
+ * מהקורא”, ולכן „מוכן” כאן ו„מוכן” שם הם אותה שאלה בדיוק.
+ */
+async function waitForDocument(
+  host: CitationTarget,
+  resolveHost: (() => CitationTarget) | undefined,
+  now: () => number,
+  sleep: (ms: number) => Promise<void>,
+): Promise<CitationTarget> {
+  const deadline = now() + DOCUMENT_WAIT_MS;
+  // חסומה גם במספר הסבבים ולא רק בשעון. `now` מוזרק, וכל מקור זמן שאינו
+  // מתקדם — שעון מזויף בבדיקה, או `performance.now` בטאב ברקע שהדפדפן מקפיא —
+  // היה הופך את ההמתנה ללולאה שאינה נגמרת.
+  const maxAttempts = Math.ceil(DOCUMENT_WAIT_MS / DOCUMENT_POLL_MS);
+  let current = host;
+
+  for (let attempt = 0; attempt <= maxAttempts; attempt++) {
+    if (await canInsertText(current)) return current;
+    if (now() >= deadline) break;
+    await sleep(DOCUMENT_POLL_MS);
+    current = resolveHost ? resolveHost() : current;
+  }
+  return current;
+}
+
+/**
+ * מטפלת בלחיצה על הפריט: בונה את הציטוט מהבחירה ומכניסה אותו למסמך.
+ *
+ * הבנייה עוברת דרך `buildCitationText`, ולכן „שלח למסמך” ו„ציטוט מהקורא”
+ * מייצרים בדיוק את אותו טקסט — כולל העדפת `sourceSelectedText` על הטקסט
+ * המרונדר, שהיא ההבדל בין ציטוט שמשקף את הספר לציטוט שמשקף את המסך.
+ *
+ * לעולם אינה זורקת, מאותו טעם כמו `insertCitation`: היא נקראת מתוך מטפל
+ * אירוע, וחריגה משם אינה נתפסת בשום מקום.
+ */
+export async function handleSendToDocument(
+  event: SendToDocumentEvent | null | undefined,
+  deps: {
+    host: CitationTarget;
+    /** נקראת בכל סבב המתנה — המסמך עשוי להיווצר רק אחרי שהאירוע הגיע. */
+    resolveHost?: () => CitationTarget;
+    now?: () => number;
+    sleep?: (ms: number) => Promise<void>;
+  },
+): Promise<ReaderResult<CitationPlacement>> {
+  if (event?.itemId !== undefined && event.itemId !== SEND_TO_DOCUMENT_ITEM_ID) {
+    return { ok: false, reason: 'other-item', message: '' };
+  }
+
+  // `selection` הוא המסלול הרגיל; השדות השטוחים הם מה שמארח ישן מוסר, ושניהם
+  // מגיעים לאותו `withRef` כדי שלא ייווצר ניסוח שני לאותו ציטוט.
+  const text = event?.selection
+    ? buildCitationText(event.selection)
+    : withRef(event?.selectedText ?? '', event?.currentRef ?? '');
+  if (!text) {
+    return { ok: false, reason: 'empty-text', message: 'שליחת הקטע נכשלה: לא נמצא טקסט מסומן' };
+  }
+
+  const now = deps.now ?? (() => Date.now());
+  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const host = await waitForDocument(deps.host, deps.resolveHost, now, sleep);
+
+  if (!(await canInsertText(host))) {
+    return { ok: false, reason: 'no-document', message: 'שליחת הקטע נכשלה: אין מסמך פתוח' };
+  }
+  return insertCitation(host, text);
 }

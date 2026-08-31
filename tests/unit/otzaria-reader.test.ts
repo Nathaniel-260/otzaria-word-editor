@@ -20,6 +20,10 @@ import {
   normalizeSelectedText,
   openLibrary,
   openSearchTab,
+  registerSendToDocumentItem,
+  unregisterSendToDocumentItem,
+  handleSendToDocument,
+  SEND_TO_DOCUMENT_ITEM_ID,
 } from '../../src/host/otzaria-reader';
 
 /** כפיל שמצליח ומחזיר את מה שאוצריא מתועדת כמחזירה. */
@@ -477,5 +481,182 @@ describe('insertCitation', () => {
       value: 'document-end',
     });
     expect(insert).toHaveBeenCalledWith({ value: 'ויאמר', type: 'text' });
+  });
+});
+
+/* ===========================================================================
+ *  „שלח למסמך” — פריט תפריט ההקשר
+ * ========================================================================= */
+
+/**
+ * מסמך שמקבל הכנסות, ואוסף אותן כדי שהבדיקה תראה מה נכתב.
+ *
+ * `capabilities` אינו קישוט: `canInsertText` שואלת גם אותו, ומסמך מדומה
+ * שחושף `insert` בלבד נחשב „אינו מוכן”. הכפיל הראשון כאן היה כזה, וההמתנה
+ * ב-`handleSendToDocument` הסתובבה עליו עד שהבדיקה נתקעה — בדיוק הצורה
+ * שהמנוע האמיתי מדווח בה, ולכן אותה צורה גם כאן.
+ */
+function documentHost(options: { ready?: boolean } = {}): {
+  host: { activeEditor: { doc: Record<string, unknown> } };
+  inserted: string[];
+} {
+  const inserted: string[] = [];
+  const doc: Record<string, unknown> = {
+    insert: async ({ value }: { value: string }): Promise<DocReceipt> => {
+      inserted.push(value);
+      return { success: true } as DocReceipt;
+    },
+    capabilities: { get: () => ({ operations: { insert: { available: true } } }) },
+    getSelection: async (): Promise<SelectionInfoLike> => ({}) as SelectionInfoLike,
+  };
+  if (options.ready === false) delete doc.insert;
+  return { host: { activeEditor: { doc } }, inserted };
+}
+
+describe('registerSendToDocumentItem', () => {
+  it('רושמת פריט עם openPlugin, כדי שהלחיצה תגיע גם כשלשונית התוסף סגורה', async () => {
+    const call = hostReturns(true);
+
+    await expect(registerSendToDocumentItem()).resolves.toEqual({ ok: true, value: undefined });
+    expect(call).toHaveBeenCalledWith('reader.addContextMenuItem', {
+      id: SEND_TO_DOCUMENT_ITEM_ID,
+      label: 'שלח למסמך',
+      icon: 'document_text_24_regular',
+      openPlugin: true,
+    });
+  });
+
+  it('הרשאה חסרה מגיעה כהודעה בעברית שאומרת מה חסר', async () => {
+    hostFails('error.permission_denied', 'Permission denied');
+
+    const outcome = await registerSendToDocumentItem();
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) expect(outcome.message).toContain('reader.context_menu');
+  });
+
+  it('ההסרה שולחת את אותו מזהה', async () => {
+    const call = hostReturns(true);
+    await unregisterSendToDocumentItem();
+    expect(call).toHaveBeenCalledWith('reader.removeContextMenuItem', {
+      id: SEND_TO_DOCUMENT_ITEM_ID,
+    });
+  });
+});
+
+describe('handleSendToDocument', () => {
+  const noWait = { now: () => 0, sleep: async (): Promise<void> => {} };
+
+  it('מכניסה את הציטוט עם המקור, בדיוק כמו „ציטוט מהקורא”', async () => {
+    const { host, inserted } = documentHost();
+
+    const outcome = await handleSendToDocument(
+      {
+        itemId: SEND_TO_DOCUMENT_ITEM_ID,
+        selection: { text: 'וַיֹּאמֶר אֱלֹהִים', currentRef: 'בראשית פרק א' } as never,
+      },
+      { host, ...noWait },
+    );
+
+    expect(outcome).toEqual({ ok: true, value: 'document-end' });
+    expect(inserted).toEqual(['וַיֹּאמֶר אֱלֹהִים (בראשית פרק א)']);
+  });
+
+  it('מעדיפה את טקסט המקור על המרונדר — הציטוט משקף את הספר ולא את המסך', async () => {
+    const { host, inserted } = documentHost();
+
+    await handleSendToDocument(
+      {
+        itemId: SEND_TO_DOCUMENT_ITEM_ID,
+        selection: {
+          text: 'ויאמר',
+          renderedSelectedText: 'ויאמר',
+          sourceSelectedText: 'וַיֹּאמֶר',
+          currentRef: 'בראשית א',
+        } as never,
+      },
+      { host, ...noWait },
+    );
+
+    expect(inserted).toEqual(['וַיֹּאמֶר (בראשית א)']);
+  });
+
+  it('מארח ישן שמוסר שדות שטוחים בלבד נותן אותו מלל', async () => {
+    const { host, inserted } = documentHost();
+
+    await handleSendToDocument(
+      { itemId: SEND_TO_DOCUMENT_ITEM_ID, selectedText: 'ויאמר  אלהים', currentRef: 'בראשית א' },
+      { host, ...noWait },
+    );
+
+    expect(inserted).toEqual(['ויאמר אלהים (בראשית א)']);
+  });
+
+  it('מתעלמת מלחיצה על פריט של תוסף אחר', async () => {
+    const { host, inserted } = documentHost();
+
+    const outcome = await handleSendToDocument({ itemId: 'other-plugin-item' }, { host, ...noWait });
+
+    expect(outcome).toEqual({ ok: false, reason: 'other-item', message: '' });
+    expect(inserted).toEqual([]);
+  });
+
+  it('בלי טקסט מסומן אומרת זאת, ואינה כותבת כלום', async () => {
+    const { host, inserted } = documentHost();
+
+    const outcome = await handleSendToDocument(
+      { itemId: SEND_TO_DOCUMENT_ITEM_ID, selection: { text: '   ', currentRef: null } as never },
+      { host, ...noWait },
+    );
+
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) expect(outcome.message).toContain('לא נמצא טקסט מסומן');
+    expect(inserted).toEqual([]);
+  });
+
+  it('ממתינה למסמך שנפרס אחרי שהאירוע הגיע — זה המקרה של openPlugin', async () => {
+    const ready = documentHost();
+    let current: unknown = documentHost({ ready: false }).host;
+    let clock = 0;
+
+    const outcome = await handleSendToDocument(
+      {
+        itemId: SEND_TO_DOCUMENT_ITEM_ID,
+        selection: { text: 'ויאמר', currentRef: 'בראשית א' } as never,
+      },
+      {
+        host: current as never,
+        resolveHost: () => current as never,
+        now: () => clock,
+        sleep: async () => {
+          clock += 150;
+          if (clock >= 600) current = ready.host;
+        },
+      },
+    );
+
+    expect(outcome.ok).toBe(true);
+    expect(ready.inserted).toEqual(['ויאמר (בראשית א)']);
+  });
+
+  it('מוותרת אחרי הזמן הקצוב ואומרת שאין מסמך', async () => {
+    const notReady = documentHost({ ready: false });
+    let clock = 0;
+
+    const outcome = await handleSendToDocument(
+      {
+        itemId: SEND_TO_DOCUMENT_ITEM_ID,
+        selection: { text: 'ויאמר', currentRef: 'בראשית א' } as never,
+      },
+      {
+        host: notReady.host,
+        now: () => clock,
+        sleep: async () => {
+          clock += 5_000;
+        },
+      },
+    );
+
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) expect(outcome.message).toContain('אין מסמך פתוח');
   });
 });

@@ -15,6 +15,7 @@
     "fs.user_files.read",
     "fs.user_files.write",
     "reader.open",
+    "reader.context_menu",
     "navigation.write",
     "clipboard.read"
   ],

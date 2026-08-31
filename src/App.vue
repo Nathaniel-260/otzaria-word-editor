@@ -225,6 +225,9 @@ import {
   normalizeSelectedText,
   openLibrary,
   openSearchTab,
+  registerSendToDocumentItem,
+  unregisterSendToDocumentItem,
+  handleSendToDocument,
   type ReaderResult,
 } from './host/otzaria-reader';
 import {
@@ -330,7 +333,7 @@ import {
   type UserFile,
 } from './host/files';
 import { decideDocumentSwitch } from './sessions/open-flow';
-import { call, confirm, notifyError } from './host/otzaria-client';
+import { call, confirm, notifyError, on } from './host/otzaria-client';
 import { supportsPdfExport } from './host/host-capabilities';
 import { splashDone } from './host/splash';
 import {
@@ -648,6 +651,7 @@ let zoomCenter: ZoomCenter | null = null;
 let keeper: SessionKeeper | null = null;
 /** מבטל את ההאזנה למעבר לרקע. */
 let hiddenListener: (() => void) | null = null;
+let contextMenuListener: (() => void) | null = null;
 
 const saveStateMessage = computed(() => {
   const state = saveSnapshot.value.state;
@@ -2260,6 +2264,30 @@ onMounted(async () => {
     // וההנמקה — ב-host/lifecycle.ts.
     hiddenListener = onPluginHidden(() => void keeper?.flush());
 
+    // „שלח למסמך” בתפריט ההקשר של הקורא. הפריטים נשמרים בזיכרון בצד אוצריא
+    // ולכן נרשמים מחדש בכל boot; כשל ברישום אינו מפיל את העלייה — הכפתור
+    // „ציטוט מהקורא” ברצועה עושה את אותו דבר מתוך העורך.
+    void registerSendToDocumentItem().then((outcome) => {
+      if (!outcome.ok) console.warn('[otzaria-word]', outcome.message);
+    });
+
+    // `openPlugin: true` מעביר ללשונית התוסף ומוסר את האירוע אחרי ה-boot —
+    // כלומר ייתכן שהוא יגיע לפני שהמנוע סיים לפרוס מסמך. `resolveHost` הוא
+    // מה שמאפשר ל-handler להמתין: הוא נקרא שוב בכל סבב, ומחזיר את המסמך
+    // הנוכחי ולא את זה שהיה ברגע הלחיצה.
+    contextMenuListener = on('reader.context_menu_item_clicked', (event) => {
+      void handleSendToDocument(event, {
+        host: activeSuperdoc.value,
+        resolveHost: () => activeSuperdoc.value,
+      }).then((outcome) => {
+        if (outcome.ok) {
+          setStatus(outcome.value === 'at-cursor' ? 'הקטע נוסף במקום הסמן' : 'הקטע נוסף בסוף המסמך');
+        } else if (outcome.message) {
+          setStatus(outcome.message);
+        }
+      });
+    });
+
     swap = createEditorSwap(editorStackRef.value, (host, source, signal) =>
       createEditor({
         container: host,
@@ -2322,6 +2350,11 @@ onUnmounted(() => {
   searchAdapter?.dispose();
   hiddenListener?.();
   hiddenListener = null;
+  contextMenuListener?.();
+  contextMenuListener = null;
+  // הפריט עצמו מוסר גם הוא: הוא חי בזיכרון של אוצריא, ופריט שנשאר רשום אחרי
+  // שהדף פורק היה שולח את המשתמש ללשונית שאין בה מי שיטפל בלחיצה.
+  void unregisterSendToDocumentItem();
   keeper?.dispose();
   keeper = null;
   // ה-interval של הזחילה הוא הדבר היחיד כאן שממשיך לרוץ בלי בעלים.
