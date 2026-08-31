@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <!-- Teleport מאותו טעם כמו בשאר הדיאלוגים. ראו BookmarkDialog.vue. -->
   <Teleport to="body">
     <div
@@ -122,7 +122,7 @@
               class="md-error"
               role="alert"
             >
-              {{ SHORTCUT_HINT }}
+              {{ shortcutError }}
             </p>
           </template>
         </div>
@@ -212,7 +212,7 @@
             class="md-error"
             role="alert"
           >
-            {{ SHORTCUT_HINT }}
+            {{ shortcutError }}
           </p>
           <p
             class="md-note"
@@ -301,7 +301,7 @@
             class="md-error"
             role="alert"
           >
-            {{ SHORTCUT_HINT }}
+            {{ shortcutError }}
           </p>
           <p
             v-if="scriptResult"
@@ -489,7 +489,6 @@
  * לא יופעל (הלקח של BookmarkDialog מול `normalizeBookmarkName`).
  */
 import { computed, ref, shallowRef, watch } from 'vue';
-import { parseShortcut } from 'superdoc-macros';
 import type { RecordedMacro, SavedScript, Snippet } from 'superdoc-macros';
 import type { MacrosHandle } from '../../engine/macros';
 
@@ -509,18 +508,21 @@ const emit = defineEmits<{
 }>();
 
 const DIALOG_TITLE = 'ניהול מאקרו';
-const SHORTCUT_HINT = 'קיצור בצורת Ctrl+Alt+אות או ספרה, למשל: Ctrl+Alt+1';
 const SNIPPET_TEXT_PLACEHOLDER = 'הטקסט שיוכנס. אפשר לשלב {{date}}, {{time}}, {{selection}}';
 const SCRIPT_PLACEHOLDER = `await api.insertText('...');`;
 
 type Section = 'recordings' | 'snippets' | 'scripts' | 'transfer';
 
-const TABS: ReadonlyArray<{ id: Section; title: string }> = [
+/**
+ * לשונית הסקריפטים מוצגת רק כשהדגל דלוק (ראו SCRIPTS_FLAG_KEY ב-engine/macros.ts):
+ * מאקרו כתובים נשארים feature flag עד שההקשחה תוכרע. הקלטות וקטעים — תמיד.
+ */
+const TABS = computed<ReadonlyArray<{ id: Section; title: string }>>(() => [
   { id: 'recordings', title: 'הקלטות' },
   { id: 'snippets', title: 'קטעי טקסט' },
-  { id: 'scripts', title: 'סקריפטים' },
+  ...(props.handle?.scriptsEnabled ? [{ id: 'scripts' as const, title: 'סקריפטים' }] : []),
   { id: 'transfer', title: 'ייבוא וייצוא' },
-];
+]);
 
 const section = ref<Section>('recordings');
 
@@ -559,6 +561,8 @@ watch(
     refresh();
     clearForm();
     scriptResult.value = '';
+    // לשונית שהוסתרה (דגל הסקריפטים כבה בין הפעלות) אינה יכולה להישאר פעילה.
+    if (!TABS.value.some((tab) => tab.id === section.value)) section.value = 'recordings';
   },
   // `immediate`: הדיאלוג יכול להיוולד כבר פתוח (בדיקות, שחזור מצב), ואז
   // אין מעבר false→true שירענן את הרשימות.
@@ -581,8 +585,18 @@ function clearForm(): void {
 
 /* ---------- ולידציה ---------- */
 
-const shortcutInvalid = computed(
-  () => itemShortcut.value.trim() !== '' && parseShortcut(itemShortcut.value) === null
+/**
+ * הוולידציה היא `kit.validateShortcut` — אותה בדיקה שהשמירה אוכפת: קיצור
+ * חייב modifier אמיתי (אות בודדת הייתה יורה על כל הקלדה), אסור לו להתנגש
+ * בקיצור של העורך (רשימת הרג'יסטרי נמסרת ל-kit בהתקנה) או בפריט שמור אחר.
+ * שני נוסחים לאותה שאלה היו מאפשרים לאשר קיצור שהשמירה תדחה.
+ */
+const shortcutValidation = computed(
+  () => props.handle?.kit.validateShortcut(itemShortcut.value, selectedId.value || undefined) ?? { ok: true as const }
+);
+const shortcutInvalid = computed(() => !shortcutValidation.value.ok);
+const shortcutError = computed(() =>
+  shortcutValidation.value.ok ? '' : shortcutValidation.value.message
 );
 
 const canSaveItem = computed(() => itemName.value.trim() !== '' && !shortcutInvalid.value);
@@ -645,13 +659,29 @@ function onReplay(): void {
   });
 }
 
+/**
+ * השמירות עטופות: ה-kit אוכף את ולידציית הקיצור בזריקה, והדיאלוג אמנם בודק
+ * את אותה שאלה לפני שהכפתור נדלק — אבל בין הבדיקה ללחיצה פריט אחר יכול היה
+ * לתפוס את הקיצור (למשל עצירת הקלטה מהמקלדת). הכשל מגיע לשורת המצב במקום
+ * להפיל את הדיאלוג.
+ */
+function guardedSave(action: () => void): void {
+  try {
+    action();
+  } catch (error) {
+    emit('status', error instanceof Error ? error.message : 'השמירה נכשלה', true);
+  }
+}
+
 function onUpdateRecording(): void {
   const kit = props.handle?.kit;
   if (!kit || !selectedId.value || !canSaveItem.value) return;
-  kit.updateRecording({
-    id: selectedId.value,
-    name: itemName.value.trim(),
-    shortcut: itemShortcut.value.trim(),
+  guardedSave(() => {
+    kit.updateRecording({
+      id: selectedId.value,
+      name: itemName.value.trim(),
+      shortcut: itemShortcut.value.trim(),
+    });
   });
   refresh();
 }
@@ -659,15 +689,17 @@ function onUpdateRecording(): void {
 function onSaveSnippet(): void {
   const kit = props.handle?.kit;
   if (!kit || !canSaveSnippet.value) return;
-  const saved = kit.saveSnippet({
-    ...(selectedId.value ? { id: selectedId.value } : {}),
-    name: itemName.value.trim(),
-    text: snippetText.value,
-    trigger: snippetTrigger.value.trim() || undefined,
-    shortcut: itemShortcut.value.trim() || undefined,
+  guardedSave(() => {
+    const saved = kit.saveSnippet({
+      ...(selectedId.value ? { id: selectedId.value } : {}),
+      name: itemName.value.trim(),
+      text: snippetText.value,
+      trigger: snippetTrigger.value.trim() || undefined,
+      shortcut: itemShortcut.value.trim() || undefined,
+    });
+    selectedId.value = saved.id;
   });
   refresh();
-  selectedId.value = saved.id;
 }
 
 function onInsertSnippet(): void {
@@ -681,14 +713,16 @@ function onInsertSnippet(): void {
 function onSaveScript(): void {
   const kit = props.handle?.kit;
   if (!kit || !canSaveScript.value) return;
-  const saved = kit.saveScript({
-    ...(selectedId.value ? { id: selectedId.value } : {}),
-    name: itemName.value.trim(),
-    source: scriptSource.value,
-    shortcut: itemShortcut.value.trim() || undefined,
+  guardedSave(() => {
+    const saved = kit.saveScript({
+      ...(selectedId.value ? { id: selectedId.value } : {}),
+      name: itemName.value.trim(),
+      source: scriptSource.value,
+      shortcut: itemShortcut.value.trim() || undefined,
+    });
+    selectedId.value = saved.id;
   });
   refresh();
-  selectedId.value = saved.id;
 }
 
 /**

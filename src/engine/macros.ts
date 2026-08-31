@@ -27,6 +27,7 @@
  */
 import { shallowRef, type InjectionKey, type Ref } from 'vue';
 import type { EditorSession } from './create-editor';
+import { SHORTCUTS } from '../ui/shortcuts/registry';
 import {
   HEBREW_MESSAGES,
   MacroKit,
@@ -58,9 +59,31 @@ export function replayFailedText(message: string): string {
   return `ניגון המאקרו נכשל: ${message}`;
 }
 
+/**
+ * דגל הסקריפטים. המקליט וקטעי הטקסט פועלים תמיד; מאקרו כתובים — קוד שרץ,
+ * גם אם בארגז חול — נשארים מאחורי דגל עד שההקשחה תוכרע סופית (סבב הסקירה
+ * הראשון של ה-PR). ההדלקה מפורשת, מ-console:
+ *
+ *   localStorage.setItem('otzaria-word:macros-scripts', 'on')
+ *
+ * localStorage ולא ה-storage של אוצריא, בכוונה: הדגל נקרא סינכרונית בהתקנת
+ * ה-session, והוא כלי למי שיודע מה הוא עושה — לא הגדרה בממשק.
+ */
+export const SCRIPTS_FLAG_KEY = 'otzaria-word:macros-scripts';
+
+export function scriptsEnabled(): boolean {
+  try {
+    return globalThis.localStorage?.getItem(SCRIPTS_FLAG_KEY) === 'on';
+  } catch {
+    return false;
+  }
+}
+
 export interface MacrosHandle {
   /** הערכה עצמה — הדיאלוג עובד מולה. כל התוצאות שלה כבר בעברית. */
   kit: MacroKit;
+  /** האם לשונית הסקריפטים מוצגת. ראו SCRIPTS_FLAG_KEY. */
+  scriptsEnabled: boolean;
   /**
    * האם הקלטה רצה, כ-ref: `kit.isRecording` הוא getter רגיל ש-Vue אינו
    * רואה, וכפתור „הקלט/עצור” צריך להתעדכן בלי שאיש ילחץ עליו שוב.
@@ -106,7 +129,15 @@ export function installMacros(
     container,
   });
 
-  const kit = new MacroKit({ host, onLog: (line) => onStatus(line) });
+  const kit = new MacroKit({
+    host,
+    onLog: (line) => onStatus(line),
+    // כל קיצורי הרג'יסטרי חסומים לקיצורים אישיים: קיצור מאקרו נקשר בשלב
+    // הלכידה, ולכן התנגשות הייתה מאפילה בשקט על קיצור של העורך. התוויות
+    // נמסרות כמו שהן — מה שאינו ניתן לפירוק ("Ctrl + Shift ימני") פשוט
+    // אינו ניתן גם להתנגשות, והחבילה מתעלמת ממנו.
+    reservedShortcuts: SHORTCUTS.map((shortcut) => shortcut.label),
+  });
   seedDefaultSnippet(kit);
 
   const recording = shallowRef(false);
@@ -117,6 +148,7 @@ export function installMacros(
   let disposed = false;
   return {
     kit,
+    scriptsEnabled: scriptsEnabled(),
     recording,
 
     toggleRecording() {

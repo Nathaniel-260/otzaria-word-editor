@@ -80,6 +80,43 @@ describe('installMacros', () => {
     handle.dispose();
   });
 
+  it('הדבקה נקלטת להקלטה — גם כשהטקסט מגיע ב-dataTransfer', () => {
+    const { session } = createFakeSession();
+    const container = document.createElement('div');
+    const handle = installMacros(session, container, () => undefined);
+
+    handle.toggleRecording();
+    container.dispatchEvent(
+      new InputEvent('beforeinput', { inputType: 'insertFromPaste', data: 'מודבק', bubbles: true }),
+    );
+    handle.toggleRecording();
+
+    expect(handle.kit.listRecordings()[0]!.steps).toEqual([{ type: 'insert-text', text: 'מודבק' }]);
+    handle.dispose();
+  });
+
+  it('הקלדת IME מתלכדת לאירוע אחד מ-compositionend', () => {
+    const { session } = createFakeSession();
+    const container = document.createElement('div');
+    const handle = installMacros(session, container, () => undefined);
+
+    handle.toggleRecording();
+    container.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+    // אירועי הביניים של ההרכבה — כל אחד נושא את המועמד המצטבר — חייבים
+    // להיבלע, אחרת המילה הייתה מוקלטת פעם על כל הקשה.
+    container.dispatchEvent(
+      new InputEvent('beforeinput', { inputType: 'insertCompositionText', data: 'ש', bubbles: true }),
+    );
+    container.dispatchEvent(
+      new InputEvent('beforeinput', { inputType: 'insertCompositionText', data: 'שלום', bubbles: true }),
+    );
+    container.dispatchEvent(new CompositionEvent('compositionend', { data: 'שלום', bubbles: true }));
+    handle.toggleRecording();
+
+    expect(handle.kit.listRecordings()[0]!.steps).toEqual([{ type: 'insert-text', text: 'שלום' }]);
+    handle.dispose();
+  });
+
   it('replayLast בלי הקלטה מדווח שאין מה לנגן', () => {
     const { session } = createFakeSession();
     const container = document.createElement('div');

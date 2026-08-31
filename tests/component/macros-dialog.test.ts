@@ -40,6 +40,9 @@ function createFakeHost(): MacroHost & { text: string } {
       host.text = host.text.slice(0, -count);
       return { ok: true };
     },
+    async deleteForward(): Promise<MacroOutcome> {
+      return { ok: true };
+    },
     async getSelection() {
       return { text: '', hasRange: false, blockId: null, selectionTarget: null, empty: true };
     },
@@ -55,11 +58,15 @@ function createFakeHost(): MacroHost & { text: string } {
   return host;
 }
 
-function createHandle(): { handle: MacrosHandle; host: ReturnType<typeof createFakeHost> } {
+function createHandle(options: { scriptsEnabled?: boolean } = {}): {
+  handle: MacrosHandle;
+  host: ReturnType<typeof createFakeHost>;
+} {
   const host = createFakeHost();
   const kit = new MacroKit({ host, storage: createMemoryStorage(), runner: 'eval' });
   const handle: MacrosHandle = {
     kit,
+    scriptsEnabled: options.scriptsEnabled ?? true,
     recording: shallowRef(false),
     toggleRecording: () => undefined,
     replayLast: () => undefined,
@@ -122,6 +129,34 @@ describe('MacrosDialog', () => {
     await buttonByText('מחק').trigger('click');
     await settle();
     expect(handle.kit.listSnippets()).toHaveLength(0);
+  });
+
+  it('לשונית הסקריפטים מוסתרת כשהדגל כבוי', async () => {
+    const { handle } = createHandle({ scriptsEnabled: false });
+    mountUi(MacrosDialog, { props: { isOpen: true, handle } });
+    await settle();
+
+    const titles = dialog()
+      .findAll('[role="tab"]')
+      .map((tab) => tab.text());
+    expect(titles).toEqual(['הקלטות', 'קטעי טקסט', 'ייבוא וייצוא']);
+  });
+
+  it('קיצור שמתנגש בפריט שמור נחסם עם שם הפריט', async () => {
+    const { handle } = createHandle();
+    handle.kit.saveSnippet({ name: 'חתימה', text: 'בברכה', shortcut: 'Ctrl+Alt+5' });
+
+    mountUi(MacrosDialog, { props: { isOpen: true, handle } });
+    await settle();
+    await switchTab('קטעי טקסט');
+
+    await dialog().find('#md-snip-name').setValue('אחר');
+    await dialog().find('#md-snip-text').setValue('טקסט');
+    await dialog().find('#md-snip-shortcut').setValue('Ctrl+Alt+5');
+    await settle();
+
+    expect(dialog().find('[role="alert"]').text()).toContain('חתימה');
+    expect((buttonByText('הוסף').element as HTMLButtonElement).disabled).toBe(true);
   });
 
   it('קיצור פסול חוסם שמירה ומציג שגיאה', async () => {

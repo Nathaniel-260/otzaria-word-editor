@@ -1263,6 +1263,7 @@ export function mountUi(component: Component, options: HarnessOptions = {}): Har
    */
   const macrosStub: MacrosHandle = {
     kit: undefined as unknown as MacrosHandle['kit'],
+    scriptsEnabled: true,
     recording: shallowRef(false),
     toggleRecording: () => undefined,
     replayLast: () => undefined,
