@@ -206,7 +206,9 @@ defineEmits<{
  */
 .word-titlebar {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  /* עמודת אמצע הייתה `auto` (קשיחה ל-320px) וגלשה מחוץ למסך בחלון צר; `minmax(0, 320px)` מאפשר לה לכווץ כמו הצדדים. */
+  /* `minmax(160px, 1fr)` בצדדים: תיבת החיפוש הכי פחות חיונית ולכן מוותרת ראשונה על מקום; 160px משאיר לבאדג', לכפתורי הגישה המהירה ולתו אחד משם המסמך. */
+  grid-template-columns: minmax(160px, 1fr) minmax(0, 320px) minmax(160px, 1fr);
   user-select: none;
 }
 
@@ -215,9 +217,23 @@ defineEmits<{
   align-items: center;
   gap: 8px;
   min-width: 0;
+  /* בלי זה הפריט לא נמתח לעמודת ה-grid שלו וגולש מחוץ לחלון בחלון צר. */
+  width: 100%;
   justify-self: start;
   /* שם ארוך נחתך כאן ולא נדחק לתיבת החיפוש שבמרכז. */
   overflow: hidden;
+}
+
+/* באדג' המותג, מתג שמירה אוטומטית וסרגל הגישה המהירה לא מתכווצים לעולם — שם המסמך הוא זה שסופג את הלחץ. */
+.word-app-badge,
+.autosave-toggle,
+.quick-access-tools {
+  flex-shrink: 0;
+}
+
+/* שם המסמך סופג את הלחץ בחלון מצטמצם; `min-width: 0` דורס את `auto` שהיה מונע כיווץ מתחת לרוחב התוכן. */
+.doc-title-wrapper {
+  flex: 1 1 auto;
 }
 
 .word-app-badge {
@@ -395,6 +411,10 @@ defineEmits<{
   justify-self: center;
   display: flex;
   justify-content: center;
+  /* אותה הנמקה כמו titlebar-start/end: בלי זה תיבת החיפוש נשארת ברוחב המועדף שלה במקום לרדת עם העמודה. */
+  min-width: 0;
+  width: 100%;
+  overflow: hidden;
 }
 
 .search-box {
@@ -433,6 +453,11 @@ defineEmits<{
   align-items: center;
   gap: 8px;
   justify-self: end;
+  /* אותה הנמקה כמו titlebar-start: בלי זה הפריט יכול לגלוש מחוץ לחלון בחלון צר. */
+  min-width: 0;
+  width: 100%;
+  justify-content: flex-end;
+  overflow: hidden;
 }
 
 .save-state-pill {
@@ -451,5 +476,28 @@ defineEmits<{
 .save-state-pill.error {
   background: var(--color-error-subtle);
   color: var(--color-error);
+}
+
+/* שני סף רספונסיביות: הסרת תוכן "נחמד שיהיה" (סיומת "- Word", תווית "שמירה אוטומטית") לפני שהוא נדחק וחותך את מה שחשוב. */
+@media (max-width: 760px) {
+  .app-suffix {
+    display: none;
+  }
+
+  .autosave-label {
+    display: none;
+  }
+}
+
+@media (max-width: 560px) {
+  /* מוריד את הרוחב המועדף של תיבת החיפוש, כדי שהיא תוותר על מקום לפני שהיא נדחקת בכוח. */
+  .search-placeholder {
+    display: none;
+  }
+
+  .search-box {
+    padding-inline: 8px;
+    min-width: 0;
+  }
 }
 </style>

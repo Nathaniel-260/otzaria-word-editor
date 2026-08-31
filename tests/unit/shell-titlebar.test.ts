@@ -83,7 +83,13 @@ describe('פקדים אמיתיים בפס הכותרת', () => {
   it('אין יותר כפתור נסתר #open', () => {
     // שער ה-boot מודד `data-boot` (scripts/boot-check.mjs), ולא את קיום הכפתור.
     expect(TITLEBAR).not.toMatch(/id="open"/);
-    expect(TITLEBAR).not.toMatch(/display:\s*none/);
+    // `TEMPLATE` ולא `TITLEBAR`: הכוונה המקורית הייתה פקד שמוסתר לצמיתות
+    // ב-DOM (`display: none` על אלמנט בתבנית עצמה, כמו #open שהיה). זה שונה
+    // מ-`display: none` בתוך `@media` בבלוק ה-`<style>` — שם הוא הכלי
+    // הרגיל להסתרה **מותנית-רוחב** של תוכן משני (תווית „שמירה אוטומטית”,
+    // סיומת „- Word”), ולא פקד נסתר-לצמיתות. בדיקה על הקובץ כולו הייתה
+    // פוסלת כל שימוש לגיטימי ב-@media לרספונסיביות.
+    expect(TEMPLATE).not.toMatch(/display:\s*none/);
   });
 
   it('אין חץ פתיחה מדומה ליד שם המסמך', () => {
