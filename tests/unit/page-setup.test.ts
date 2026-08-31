@@ -65,11 +65,15 @@ import {
   readPageMargins,
   applyVerticalAlign,
   cmToInches,
+  createLineNumberingModel,
   createPageBorderModel,
   normalizeHeaderDistanceCm,
   normalizePageNumberStart,
+  readLineNumbering,
   readPageBorders,
   readPageLayoutState,
+  LINE_NUMBERING_DEBOUNCE_MS,
+  type LineNumberingReading,
   type PageBordersReading,
   type PageSetupDocumentApi,
   type PageSetupHost,
@@ -2097,6 +2101,221 @@ describe('createPageBorderModel', () => {
       read: vi.fn(
         () =>
           new Promise<PageBordersReading>((resolve) => {
+            pending.push(resolve);
+          }),
+      ),
+    });
+    adapter.refreshNow();
+    adapter.dispose();
+    for (const resolve of pending) resolve(READING);
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(readings).toEqual([]);
+  });
+});
+
+/**
+ * `readLineNumbering` — מה ששכבת „מספרי שורות” (engine/line-number-layer.ts,
+ * ui/shell/LineNumberOverlay.vue) קוראת. שני מקורות באותו קול: `lineNumbering`
+ * מ-`sections.list()` ישירות (כמו `readPageBorders`), ו-`page` שהוא בדיוק מה
+ * ש-`readPageMargins` כבר מחזיר — לא שכפול לוגיקה, קריאה לאותה פונקציה.
+ */
+describe('readLineNumbering', () => {
+  it('אין `lineNumbering` על המקטע — `null`, לא „הכול ברירת מחדל”', async () => {
+    const { host } = fakeEngine();
+    expect(await readLineNumbering(host)).toBeNull();
+  });
+
+  it('`enabled: false` — `null`, בדיוק כמו שאין `<w:lnNumType>` כלל', async () => {
+    const { host } = fakeEngine({ lineNumbering: { enabled: false, countBy: 5 } });
+    expect(await readLineNumbering(host)).toBeNull();
+  });
+
+  it('קורא countBy/start/restart תקינים, ומצרפת את geometry הדף', async () => {
+    const { host } = fakeEngine({
+      lineNumbering: { enabled: true, countBy: 5, start: 7, restart: 'newPage' },
+    });
+
+    const reading = await readLineNumbering(host);
+    expect(reading?.countBy).toBe(5);
+    expect(reading?.start).toBe(7);
+    expect(reading?.restart).toBe('newPage');
+    expect(reading?.page).toEqual(await readPageMargins(host));
+  });
+
+  it('`restart` חסר, או שאינו אחד משלושת אסימוני Word — נופל ל„רציף”', async () => {
+    for (const restart of [undefined, 'zigzag', 'eachSection', 3]) {
+      const { host } = fakeEngine({ lineNumbering: { enabled: true, restart: restart as never } });
+      expect((await readLineNumbering(host))?.restart, String(restart)).toBe('continuous');
+    }
+  });
+
+  it('countBy/start פסולים — אותה נפילה אחורה בדיוק כמו preservedLineNumbering', async () => {
+    const { host } = fakeEngine({
+      lineNumbering: { enabled: true, countBy: -3, start: 0 },
+    });
+    const reading = await readLineNumbering(host);
+    expect(reading?.countBy).toBe(1);
+    expect(reading?.start).toBe(1);
+  });
+
+  it('countBy בגבול העליון של Word עובר כמות שהוא, לא רק בכתיבה', async () => {
+    const { host } = fakeEngine({ lineNumbering: { enabled: true, countBy: LINE_COUNT_BY_MAX } });
+    expect((await readLineNumbering(host))?.countBy).toBe(LINE_COUNT_BY_MAX);
+  });
+
+  it('מסמך שעדיין נטען, או בלי Document API — `null`, לא חריגה', async () => {
+    for (const host of [null, undefined, {}, { activeEditor: null }, { activeEditor: { doc: null } }]) {
+      expect(await readLineNumbering(host as never)).toBeNull();
+    }
+  });
+
+  it('`list` שזורקת אינה מפילה את הקריאה', async () => {
+    const { host } = fakeEngine({ throwOnList: true });
+    expect(await readLineNumbering(host)).toBeNull();
+  });
+
+  it('geometry לא זמינה (readPageMargins מחזירה `null`) — `null` גם כשיש lineNumbering', async () => {
+    const host = {
+      activeEditor: {
+        doc: {
+          sections: {
+            list: () =>
+              Promise.resolve({
+                items: [{ lineNumbering: { enabled: true, countBy: 5 } /* בלי pageSetup/margins */ }],
+              }),
+          },
+        },
+      },
+    } as unknown as PageSetupHost;
+    expect(await readLineNumbering(host)).toBeNull();
+  });
+});
+
+/**
+ * `createLineNumberingModel` — אותה תבנית בדיוק כמו `createPageBorderModel`
+ * שמעל: מונה דורות, השקטה, ודיווח רק על שינוי אמיתי.
+ */
+describe('createLineNumberingModel', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const PAGE = {
+    pageWidthTwips: 12240,
+    pageHeightTwips: 15840,
+    leftTwips: 1440,
+    rightTwips: 1440,
+    topTwips: 1440,
+    bottomTwips: 1440,
+    effectiveTopTwips: 1440,
+    effectiveBottomTwips: 1440,
+    direction: 'rtl' as const,
+  };
+  const READING: LineNumberingReading = { countBy: 1, start: 1, restart: 'continuous', page: PAGE };
+
+  function model(overrides: Partial<Parameters<typeof createLineNumberingModel>[0]> = {}) {
+    const readings: Array<LineNumberingReading | null> = [];
+    const read = vi.fn(async (): Promise<LineNumberingReading | null> => READING);
+    const source = { read, onChange: (next: LineNumberingReading | null) => readings.push(next), ...overrides };
+    return { adapter: createLineNumberingModel(source), readings, source, read };
+  }
+
+  it('`refreshNow` קוראת מיד, בלי השהיה', async () => {
+    const { adapter, readings } = model();
+    adapter.refreshNow();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(readings).toEqual([READING]);
+    expect(adapter.getState()).toEqual(READING);
+    adapter.dispose();
+  });
+
+  it('`noteDocumentChanged` משוהה, ושלושה שינויים רצופים הם קריאה אחת', async () => {
+    // זו בדיוק המלכודת של „גבול רפאים”, כאן על מספרי שורות: בחירה בתפריט
+    // „מספרי שורות” אינה מפעילה `onUpdate` בעצמה (App.vue, `reportCommand`).
+    const { adapter, read } = model();
+
+    adapter.noteDocumentChanged();
+    adapter.noteDocumentChanged();
+    adapter.noteDocumentChanged();
+    expect(read).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(LINE_NUMBERING_DEBOUNCE_MS + 5);
+    expect(read).toHaveBeenCalledTimes(1);
+    adapter.dispose();
+  });
+
+  it('מדווח רק על שינוי אמיתי — קריאה חוזרת עם אותו ערך אינה מרנדרת שוב', async () => {
+    const { adapter, readings } = model();
+    adapter.refreshNow();
+    await vi.advanceTimersByTimeAsync(0);
+    adapter.refreshNow();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(readings).toHaveLength(1);
+    adapter.dispose();
+  });
+
+  it('שינוי ב-countBy בלבד כן מדווח', async () => {
+    let reading: LineNumberingReading | null = READING;
+    const { adapter, readings } = model({ read: vi.fn(async () => reading) });
+    adapter.refreshNow();
+    await vi.advanceTimersByTimeAsync(0);
+
+    reading = { ...READING, countBy: 5 };
+    adapter.refreshNow();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(readings).toHaveLength(2);
+    expect(readings[1]?.countBy).toBe(5);
+    adapter.dispose();
+  });
+
+  it('מספרי שורות שכובו (`null`) מדווח, וכך גם חזרתם — „מספור רפאים” נעלם', async () => {
+    let reading: LineNumberingReading | null = READING;
+    const { adapter, readings } = model({ read: vi.fn(async () => reading) });
+    adapter.refreshNow();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(readings).toEqual([READING]);
+
+    reading = null;
+    adapter.refreshNow();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(readings).toEqual([READING, null]);
+    expect(adapter.getState()).toBeNull();
+
+    reading = READING;
+    adapter.refreshNow();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(readings).toEqual([READING, null, READING]);
+    adapter.dispose();
+  });
+
+  it('כשל בקריאה מוחזר כ„אין מספור”, ולא כחריגה', async () => {
+    const { adapter, readings } = model({
+      read: vi.fn(async () => {
+        throw new Error('המסמך נסגר');
+      }),
+    });
+    adapter.refreshNow();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(readings[readings.length - 1] ?? null).toBeNull();
+    expect(adapter.getState()).toBeNull();
+    adapter.dispose();
+  });
+
+  it('אחרי הפירוק אין דיווח — גם מקריאה שכבר הייתה באוויר', async () => {
+    const pending: Array<(value: LineNumberingReading) => void> = [];
+    const { adapter, readings } = model({
+      read: vi.fn(
+        () =>
+          new Promise<LineNumberingReading>((resolve) => {
             pending.push(resolve);
           }),
       ),

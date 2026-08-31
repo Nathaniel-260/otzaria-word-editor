@@ -509,6 +509,230 @@ export function watchAllPageRects(options: AllPageRectsWatchOptions): PageRectWa
 }
 
 /* ------------------------------------------------------------------ */
+/* מלבני טקסט גולמיים בכל עמוד — למספרי שורות                          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * מלבן טקסט גולמי אחד, כפי ש-`Range.getClientRects()` מחזיר אותו — לפני כל
+ * קיבוץ לשורות או סינון קונטיינרים. engine/line-number-layer.ts הוא זה
+ * שהופך רשימה כזאת לשורות אמיתיות; כאן רק המדידה.
+ *
+ * ## קורא שלישי, מאז „מספרי שורות” — ולמה **לא** דרך selector אל המנוע
+ *
+ * מספרי שורות דורשים לדעת את המיקום האנכי של כל שורת טקסט מוצגת בעמוד, לא
+ * רק את מלבן העמוד השלם (`measureAllPageRects` למעלה). למנוע אין API
+ * ציבורי שמחזיר את זה, ואין ב-DOM המצויר class name או תכונה שהחוזה שלנו
+ * (tests/unit/engine-boundaries.test.ts) מרשה לנו לחפש: הבדיקה שם אוסרת
+ * `querySelector`/`querySelectorAll`/`closest` עם מחרוזת שמכילה `superdoc`
+ * או `.sd-` בכל קובץ מלבד שני העיגונים המתועדים (כותרות, ומלבן העמוד) —
+ * ומבנה ה-DOM הפנימי של המנוע (class names כמו „קו”/„קטע” לכל שורה) הוא
+ * בדיוק סוג הדבר שהחוזה הזה נועד להגן מפניו: המנוע עצמו מתעד את אותם class
+ * names כ„חוזה פנימי בין הצייר לקורא… שינוי כאן הוא breaking change לשניהם”
+ * — כלומר לא הבטחה ציבורית, ולא משהו שמותר לתוסף חיצוני להישען עליו.
+ *
+ * **הטכניקה שכן ציבורית:** `Range.selectNodeContents(pageEl)` ואז
+ * `range.getClientRects()` — API תקני של ה-DOM, לא selector אל מבנה פנימי.
+ * הוא מחזיר מלבן לכל תיבת טקסט שהטווח חוצה, כולל:
+ *   - כמה מלבנים על אותה שורה חזותית ממש (ריצות טקסט נפרדות — כיווניות,
+ *     או פשוט כמה `span` צמודים).
+ *   - מלבן-קונטיינר גדול לכל אלמנט בלוקי שכולו בתוך הטווח (פסקה שלמה,
+ *     כותרת) — זה בנוסף למלבנים של השורות שבתוכו, לא במקומם.
+ * שני אלה נמדדו (לא הונחו): על עמוד עם 51 שורות חזותיות אמיתיות, הטווח החזיר
+ * 107 מלבנים; רוב הפער (56) הם ריצות-טקסט נוספות על שורה קיימת וכמה מלבני
+ * קונטיינר. הסינון בין שורה לקונטיינר (`groupLinesFromRects`,
+ * engine/line-number-layer.ts) משתמש בגובה חריג ביחס לחציון — קונטיינר של
+ * פסקה שלמה גבוה משמעותית משורה בודדת — וקיבוץ ריצות על אותה שורה לפי `top`
+ * זהה. אחרי שני אלה: 51 קבוצות בדיוק, תואם אחד-לאחד (מיקום כולל) לשורות
+ * האמיתיות. איפה עובר הגבול בין כותרת/שוליים לגוף הטקסט — לא כאן: זו שאלה
+ * גיאומטרית (איזה פס גובה בעמוד), לא שאלת DOM, ונענית ב-line-number-layer.ts
+ * מתוך `readPageMargins` (engine/page-setup.ts) — לא מ-selector נוסף.
+ */
+export interface RawTextRect {
+  leftPx: number;
+  topPx: number;
+  widthPx: number;
+  heightPx: number;
+}
+
+/** מלבני הטקסט הגולמיים של עמוד אחד, ביחס ל-`reference`. */
+export function measurePageContentRects(
+  pageEl: HTMLElement,
+  reference: HTMLElement,
+): readonly RawTextRect[] {
+  if (typeof document === 'undefined' || typeof document.createRange !== 'function') return [];
+
+  let range: Range;
+  try {
+    range = document.createRange();
+    range.selectNodeContents(pageEl);
+  } catch {
+    return [];
+  }
+
+  const referenceBox = reference.getBoundingClientRect();
+  const out: RawTextRect[] = [];
+  const list = range.getClientRects();
+  for (let i = 0; i < list.length; i++) {
+    const r = list[i]!;
+    if (!(r.width > 0) || !(r.height > 0)) continue;
+    out.push({
+      leftPx: r.left - referenceBox.left,
+      topPx: r.top - referenceBox.top,
+      widthPx: r.width,
+      heightPx: r.height,
+    });
+  }
+  return out;
+}
+
+/** מלבני הטקסט הגולמיים של עמוד אחד, עם ה-`data-page-index` שלו. */
+export interface PageContentRects {
+  pageIndex: number;
+  rects: readonly RawTextRect[];
+}
+
+/** אותו עיגון בדיוק כמו `measureAllPageRects` — `data-page-index` תחת ה-host. */
+export function measureAllPageContentRects(
+  host: HTMLElement | null,
+  reference: HTMLElement | null,
+): readonly PageContentRects[] {
+  if (!host || !reference) return [];
+  const pages = host.querySelectorAll(`[${PAGE_INDEX_ATTRIBUTE}]`);
+  if (pages.length === 0) return [];
+
+  const out: PageContentRects[] = [];
+  pages.forEach((node) => {
+    if (!(node instanceof HTMLElement)) return;
+    const pageIndex = Number(node.getAttribute(PAGE_INDEX_ATTRIBUTE));
+    if (!Number.isInteger(pageIndex)) return;
+    out.push({ pageIndex, rects: measurePageContentRects(node, reference) });
+  });
+  return out;
+}
+
+/** כמו `sameRects`, אבל על מבנה מקונן (עמוד → רשימת מלבנים). */
+function sameContentRects(a: readonly PageContentRects[], b: readonly PageContentRects[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const pa = a[i]!;
+    const pb = b[i]!;
+    if (pa.pageIndex !== pb.pageIndex || pa.rects.length !== pb.rects.length) return false;
+    for (let j = 0; j < pa.rects.length; j++) {
+      const x = pa.rects[j]!;
+      const y = pb.rects[j]!;
+      if (
+        Math.abs(x.leftPx - y.leftPx) >= 0.5 ||
+        Math.abs(x.topPx - y.topPx) >= 0.5 ||
+        Math.abs(x.widthPx - y.widthPx) >= 0.5 ||
+        Math.abs(x.heightPx - y.heightPx) >= 0.5
+      ) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+export interface AllPageContentRectsWatchOptions {
+  /** מיכל הגלילה שהמנוע מצייר בתוכו. מגיע מ-`paintedHost`. */
+  host: HTMLElement | null;
+  /** האלמנט שביחס אליו נמדדים המלבנים — שכבת הציור שלנו עצמה. */
+  reference: HTMLElement | null;
+  /** ה-controller, בשביל `viewport.observe`. */
+  ui?: ViewportSource | null;
+  onChange: (rects: readonly PageContentRects[]) => void;
+}
+
+/**
+ * כמו `watchAllPageRects`, על מלבני הטקסט הגולמיים של כל עמוד — אותה תשתית
+ * מעקב בדיוק (גלילה, שינוי גודל, `viewport.observe`, מדידות התיישבות
+ * ב-`SETTLE_DELAYS_MS`). כפילות מכוונת ולא הפשטה משותפת: `watchAllPageRects`
+ * כבר כפל את `watchPageRect` באותה צורה בדיוק, ושתי הפונקציות הקיימות
+ * ממשיכות לעבוד — הפשטה משותפת כאן הייתה נוגעת בקוד נבדק כדי לשרת תכונה
+ * שלישית, לא מתקנת דבר בשתיים הראשונות.
+ */
+export function watchAllPageContentRects(options: AllPageContentRectsWatchOptions): PageRectWatch {
+  const { host, reference, ui, onChange } = options;
+  let last: readonly PageContentRects[] = [];
+  let frame: number | null = null;
+  let pending = false;
+  let disposed = false;
+
+  function measureNow(): void {
+    if (disposed) return;
+    const next = measureAllPageContentRects(host, reference);
+    if (sameContentRects(next, last)) return;
+    last = next;
+    onChange(next);
+  }
+
+  function schedule(): void {
+    if (disposed || pending) return;
+    if (typeof requestAnimationFrame !== 'function') {
+      measureNow();
+      return;
+    }
+    pending = true;
+    frame = requestAnimationFrame(() => {
+      pending = false;
+      frame = null;
+      measureNow();
+    });
+  }
+
+  host?.addEventListener('scroll', schedule, { passive: true });
+
+  let resize: ResizeObserver | null = null;
+  if (typeof ResizeObserver === 'function' && host) {
+    resize = new ResizeObserver(schedule);
+    resize.observe(host);
+    if (reference) resize.observe(reference);
+  }
+
+  let unobserve: (() => void) | null = null;
+  const observe = ui?.viewport?.observe;
+  if (typeof observe === 'function') {
+    try {
+      unobserve = observe.call(ui?.viewport, schedule) ?? null;
+    } catch {
+      unobserve = null;
+    }
+  }
+
+  const timers = new Set<ReturnType<typeof setTimeout>>();
+
+  function measure(): void {
+    schedule();
+    for (const delay of SETTLE_DELAYS_MS) {
+      const timer = setTimeout(() => {
+        timers.delete(timer);
+        schedule();
+      }, delay);
+      timers.add(timer);
+    }
+  }
+
+  measureNow();
+
+  return {
+    measure,
+    dispose() {
+      disposed = true;
+      host?.removeEventListener('scroll', schedule);
+      resize?.disconnect();
+      for (const timer of timers) clearTimeout(timer);
+      timers.clear();
+      if (frame !== null && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(frame);
+      try {
+        unobserve?.();
+      } catch {
+        /* ביטול מנוי שנכשל אינו סיבה להפיל פירוק */
+      }
+    },
+  };
+}
+
+/* ------------------------------------------------------------------ */
 /* יחידת המידה                                                         */
 /* ------------------------------------------------------------------ */
 

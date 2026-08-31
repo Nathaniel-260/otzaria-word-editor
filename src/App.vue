@@ -95,6 +95,11 @@
         :viewport-source="rulerViewport"
         :reading="pageBorders"
       />
+      <LineNumberOverlay
+        :host="rulerHost"
+        :viewport-source="rulerViewport"
+        :reading="lineNumbering"
+      />
     </div>
 
     <!-- תפריט הלחצן הימני. אחרי אזור המסמך ולפני הדיאלוגים, כמו ה-z-index שלו. -->
@@ -170,6 +175,7 @@ import StatusBar from './ui/shell/StatusBar.vue';
 import DocumentRuler from './ui/shell/DocumentRuler.vue';
 import VerticalRuler from './ui/shell/VerticalRuler.vue';
 import PageBorderOverlay from './ui/shell/PageBorderOverlay.vue';
+import LineNumberOverlay from './ui/shell/LineNumberOverlay.vue';
 import FindReplaceDialog from './ui/panels/FindReplaceDialog.vue';
 import AboutDialog from './ui/panels/AboutDialog.vue';
 import LinkDialog from './ui/panels/LinkDialog.vue';
@@ -241,9 +247,13 @@ import {
   type ViewportSource,
 } from './engine/page-ruler';
 import {
+  createLineNumberingModel,
   createPageBorderModel,
+  readLineNumbering,
   readPageBorders,
   readPageMargins,
+  type LineNumberingModel,
+  type LineNumberingReading,
   type PageBorderModel,
   type PageBordersReading,
 } from './engine/page-setup';
@@ -459,6 +469,11 @@ const isDocumentEditable = ref(true);
  * `null` כשאין `<w:pgBorders>` — השכבה מציירת אפס גבולות, לא גבול ריק.
  */
 const pageBorders = shallowRef<PageBordersReading | null>(null);
+/**
+ * מצב „מספרי שורות” של המסמך הפתוח, ל-ui/shell/LineNumberOverlay.vue.
+ * `null` כשאין `<w:lnNumType>` — השכבה מציירת אפס מספרים, לא מספור ריק.
+ */
+const lineNumbering = shallowRef<LineNumberingReading | null>(null);
 /** ההעדפה שנשמרת בין הפעלות. ראו host/settings.ts. */
 let rulerPreference = false;
 
@@ -480,6 +495,8 @@ let metrics: DocMetricsAdapter | null = null;
 let ruler: RulerModel | null = null;
 /** קורא את מצב „גבולות עמוד” של המסמך הפתוח. שייך ל-session, כמו הסרגל. */
 let pageBorderModel: PageBorderModel | null = null;
+/** קורא את מצב „מספרי שורות” של המסמך הפתוח. שייך ל-session, כמו גבולות עמוד. */
+let lineNumberModel: LineNumberingModel | null = null;
 
 /** מרכוז העמוד בזום. יחיד למאגס — אינו מוחלף בין מסמכים. */
 let zoomCenter: ZoomCenter | null = null;
@@ -534,6 +551,14 @@ function reportCommand(outcome: CommandOutcome, commandId: string): void {
    * טעם בהשקטה שנועדה למנוע הצפת קריאות בזמן עריכה רציפה.
    */
   if (commandId === 'page-borders') pageBorderModel?.refreshNow();
+
+  /**
+   * „מספרי שורות” — אותה מלכודת בדיוק כמו „גבולות עמוד” שמעל, ואותו תיקון:
+   * `applyLineNumbering` (engine/page-setup.ts, קריאת section-level) אינה
+   * מפעילה `onUpdate` בעצמה, ובלעדי הרענון המפורש הזה `lineNumbering.value`
+   * נשאר ישן עד לעריכת טקסט הבאה — בחירה בתפריט לא הייתה מצטיירת עד אז.
+   */
+  if (commandId === 'page-line-numbering') lineNumberModel?.refreshNow();
 }
 
 provide(COMMAND_REPORTER, reportCommand);
@@ -805,6 +830,27 @@ async function openDocument(file?: UserFile, options: OpenOptions = {}): Promise
     if (pageBorderModel === sessionPageBorders) {
       pageBorderModel = null;
       pageBorders.value = null;
+    }
+  });
+
+  /**
+   * „מספרי שורות” של ה-session: אותה תבנית בדיוק כמו „גבולות עמוד” שמעל,
+   * ומאותה סיבה — קריאה מיידית מיד אחרי היצירה כדי לצייר מסמך שהגיע עם
+   * `<w:lnNumType>` כבר בתוכו (מ-Word) מיד, לא רק אחרי העריכה הראשונה.
+   */
+  const sessionLineNumbering = createLineNumberingModel({
+    read: () => readLineNumbering(editor.superdoc),
+    onChange: (next) => {
+      lineNumbering.value = next;
+    },
+  });
+  lineNumberModel = sessionLineNumbering;
+  sessionLineNumbering.refreshNow();
+  editor.onDispose(() => {
+    sessionLineNumbering.dispose();
+    if (lineNumberModel === sessionLineNumbering) {
+      lineNumberModel = null;
+      lineNumbering.value = null;
     }
   });
 
@@ -1819,6 +1865,8 @@ onMounted(async () => {
           // וגם „גבולות עמוד” — אותה תחנה בדיוק, כדי שהתפריט ברצועה יעדכן
           // את השכבה בלי רענון.
           pageBorderModel?.noteDocumentChanged();
+          // וגם „מספרי שורות” — עריכת טקסט משנה את מספר השורות ואת מיקומן.
+          lineNumberModel?.noteDocumentChanged();
           // וגם זוכר-ההפעלה: זה הרגע שבו נולדת עבודה שאינה בדיסק.
           keeper?.noteChange();
         },
@@ -2038,9 +2086,10 @@ async function readDraftBytes(path: string): Promise<Blob | null> {
   display: flex;
   flex: 1 1 auto;
   min-height: 0;
-  /* מסגרת ההתייחסות של PageBorderOverlay.vue (`position: absolute; inset: 0`) —
-     כך השכבה מכסה גם את .editor-stack וגם את הפינה של הסרגל האנכי, ואת עצמה
-     היא ממקמת ביחס למלבן העמוד שנמדד, לא ביחס ל-CSS. */
+  /* מסגרת ההתייחסות של PageBorderOverlay.vue ו-LineNumberOverlay.vue
+     (`position: absolute; inset: 0`) — כך כל שכבה מכסה גם את .editor-stack
+     וגם את הפינה של הסרגל האנכי, ואת עצמה היא ממקמת ביחס למלבן העמוד
+     שנמדד, לא ביחס ל-CSS. */
   position: relative;
 }
 

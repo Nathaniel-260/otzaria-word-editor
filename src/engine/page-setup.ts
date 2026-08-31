@@ -941,6 +941,125 @@ export function applyLineNumbering(host: PageSetupTarget, choiceId: string): Pro
   });
 }
 
+function isLineNumberRestart(value: unknown): value is LineNumberRestart {
+  return value === 'continuous' || value === 'newPage' || value === 'newSection';
+}
+
+/**
+ * מה שנקרא מהמסמך לצורך שכבת הציור (engine/line-number-layer.ts,
+ * ui/shell/LineNumberOverlay.vue) — לא מה שהתפריט שלנו כתב, אלא מה
+ * שהמסמך מחזיק עכשיו, כולל מסמך שהגיע מ-Word.
+ *
+ * `page` הוא בדיוק מה ש-`readPageMargins` כבר מחזיר (אותה קריאה ל-
+ * `sections.list()` שהסרגל וגבולות העמוד כבר סומכים עליה) — השכבה צריכה
+ * אותו כדי לדעת איזה פס גובה בעמוד הוא כותרת/שוליים ואיזה גוף טקסט (ראו
+ * `filterBodyLines`, engine/line-number-layer.ts), ואיזה פס רוחב הוא
+ * שוליים ימין/שמאל לציור העמודה עצמה. `null` כשאין מדידה — בדיוק כמו
+ * שהסרגל מתנהג כשאין geometry.
+ */
+export interface LineNumberingReading {
+  countBy: number;
+  start: number;
+  restart: LineNumberRestart;
+  page: PageMarginsState;
+}
+
+export async function readLineNumbering(host: PageSetupTarget): Promise<LineNumberingReading | null> {
+  const list = (host as PageSetupHost | null | undefined)?.activeEditor?.doc?.sections?.list;
+  if (typeof list !== 'function') return null;
+
+  let first: SectionItem | undefined;
+  try {
+    first = (await list())?.items?.[0];
+  } catch {
+    return null;
+  }
+  if (!first?.lineNumbering?.enabled) return null;
+
+  const page = await readPageMargins(host);
+  if (!page) return null;
+
+  return {
+    countBy: boundedInteger(first.lineNumbering.countBy, 1, LINE_COUNT_BY_MAX) ?? 1,
+    start: boundedInteger(first.lineNumbering.start, 1, NUMBER_START_MAX) ?? 1,
+    restart: isLineNumberRestart(first.lineNumbering.restart) ? first.lineNumbering.restart : 'continuous',
+    page,
+  };
+}
+
+/** השקטה בין קריאה לקריאה — ראו `createLineNumberingModel`. אותו ערך כמו גבולות עמוד, מאותה סיבה. */
+export const LINE_NUMBERING_DEBOUNCE_MS = 300;
+
+export interface LineNumberingModelSource {
+  read: () => Promise<LineNumberingReading | null>;
+  onChange: (reading: LineNumberingReading | null) => void;
+}
+
+export interface LineNumberingModel {
+  getState(): LineNumberingReading | null;
+  /** קריאה מיידית, בלי השהיה — אחרי פתיחת מסמך. */
+  refreshNow(): void;
+  /** קריאה מושהית — אחרי שינוי כלשהו במסמך (עריכה, או פעולה ברצועה). */
+  noteDocumentChanged(): void;
+  dispose(): void;
+}
+
+/**
+ * מרכיבה את מצב „מספרי שורות” וקוראת אותו בהשקטה — אותה תבנית בדיוק כמו
+ * `createPageBorderModel`, מאותה סיבה: מונה דורות שזורק תשובה של מסמך
+ * שכבר נסגר, ודיווח רק על שינוי אמיתי.
+ */
+export function createLineNumberingModel(source: LineNumberingModelSource): LineNumberingModel {
+  let state: LineNumberingReading | null = null;
+  let disposed = false;
+  let generation = 0;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  function same(a: LineNumberingReading | null, b: LineNumberingReading | null): boolean {
+    if (a === null || b === null) return a === b;
+    return (
+      a.countBy === b.countBy &&
+      a.start === b.start &&
+      a.restart === b.restart &&
+      a.page.pageWidthTwips === b.page.pageWidthTwips &&
+      a.page.pageHeightTwips === b.page.pageHeightTwips &&
+      a.page.leftTwips === b.page.leftTwips &&
+      a.page.rightTwips === b.page.rightTwips &&
+      a.page.effectiveTopTwips === b.page.effectiveTopTwips &&
+      a.page.effectiveBottomTwips === b.page.effectiveBottomTwips &&
+      a.page.direction === b.page.direction
+    );
+  }
+
+  async function read(): Promise<void> {
+    const mine = ++generation;
+    let next: LineNumberingReading | null;
+    try {
+      next = await source.read();
+    } catch {
+      next = null;
+    }
+    if (disposed || mine !== generation || same(next, state)) return;
+    state = next;
+    source.onChange(next);
+  }
+
+  return {
+    getState: () => state,
+    refreshNow: () => void read(),
+    noteDocumentChanged() {
+      if (disposed) return;
+      clearTimeout(timer);
+      timer = setTimeout(() => void read(), LINE_NUMBERING_DEBOUNCE_MS);
+    },
+    dispose() {
+      disposed = true;
+      generation += 1;
+      clearTimeout(timer);
+    },
+  };
+}
+
 /* ------------------------------------------------------------------ */
 /* גבולות עמוד                                                        */
 /* ------------------------------------------------------------------ */
