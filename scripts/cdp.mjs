@@ -150,7 +150,31 @@ export async function openPage(fileUrl, { port = Number(process.env.CDP_PORT ?? 
   };
 
   try {
+    /*
+     * הדף שנפתח כאן, ולא „דף כלשהו ב-`file://`”.
+     *
+     * ## הכשל שזה סוגר, ולמה הוא מהגרועים
+     *
+     * היציאה קבועה (9333). דפדפן שנשאר מריצה קודמת — שער שנקטע, סקריפט שמת
+     * לפני `close()` — ממשיך להחזיק אותה, ה-Chrome החדש **אינו מצליח לקשור
+     * אותה**, ו-`/json/list` מחזיר את הדפים של הדפדפן **הישן**. הסינון שהיה
+     * כאן קיבל כל דף `file://`, ולכן השער נצמד לדף של הריצה הקודמת: קוד ישן,
+     * dist ישן — ומדד אותו בשקט.
+     *
+     * זה קרה בפועל, ובכיוון הכי מסוכן: הפרה אמיתית שהוזרקה למקור ונבנתה
+     * נמדדה כ„0 title בדף”, כלומר **שער ירוק על באג קיים**. אין תסמין: אין
+     * שגיאה, אין אזהרה, והמספרים נראים סבירים.
+     *
+     * ## למה שם הקובץ, ולא השוואת כתובת
+     *
+     * ב-macOS ‏`/tmp` הוא קישור סמלי ל-`/private/tmp`, ו-Chrome מדווח את
+     * הכתובת המפורשת: `file:///private/tmp/...` מול `file:///tmp/...` שנשלח.
+     * השוואה מדויקת הייתה נופלת תמיד. כל שער כותב קובץ זמני בשם ייחודי
+     * (`tooltip-tmp.html`, `ribbon-geometry-tmp.html`), ולכן השם הוא מזהה מספק.
+     */
+    const wanted = fileUrl.split('/').pop();
     let targets = null;
+    let strangers = 0;
     for (let i = 0; i < 60 && !targets; i++) {
       // שני המארחים ולא רק `127.0.0.1`: ב-Windows Chrome קושר את יציאת ה-CDP
       // ל-`::1` בלבד, ופנייה ל-IPv4 נכשלת בסירוב חיבור — הבדיקה נראתה כאילו
@@ -160,8 +184,10 @@ export async function openPage(fileUrl, { port = Number(process.env.CDP_PORT ?? 
           const response = await fetch(`http://${host}:${port}/json/list`);
           const list = await response.json();
           const pages = list.filter((t) => t.type === 'page' && t.url.startsWith('file://'));
-          if (pages.length) {
-            targets = pages;
+          const mine = pages.filter((t) => t.url.endsWith(wanted));
+          strangers = pages.length - mine.length;
+          if (mine.length) {
+            targets = mine;
             break;
           }
         } catch {
@@ -170,7 +196,14 @@ export async function openPage(fileUrl, { port = Number(process.env.CDP_PORT ?? 
       }
       if (!targets) await sleep(250);
     }
-    if (!targets) throw new Error('CDP לא נפתח');
+    if (!targets) {
+      throw new Error(
+        strangers > 0
+          ? `CDP: ביציאה ${port} יש דפדפן אחר עם ${strangers} דפים, ואין בו ${wanted}. ` +
+            'כנראה נשאר מריצה קודמת — `pkill -f otzaria-word-cdp`, או CDP_PORT אחר.'
+          : 'CDP לא נפתח',
+      );
+    }
 
     const cdp = await connect(targets[0].webSocketDebuggerUrl);
 
