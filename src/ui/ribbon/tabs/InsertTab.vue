@@ -269,6 +269,7 @@ import { COMMAND_REPORTER, DOCUMENT_GENERATION, type CommandReporter } from '../
 import { removeHyperlink } from '../../../engine/hyperlinks-manage';
 import type { CommandOutcome } from '../../../engine/command-adapter';
 import { ACTIVE_SUPERDOC } from '../../../engine/document-api';
+import { collectTableNodeIds, placeCursorAfterInsertedTable } from '../../../engine/table-insert';
 import {
   readPageBreakSupport,
   readPageBreakNodeId,
@@ -348,8 +349,15 @@ const imageTooltip = computed(() =>
   imageBusy.value ? 'התמונה נוספת למסמך…' : 'הוספת תמונה מקובץ (PNG או JPEG)'
 );
 
-function onInsertTable(dimensions: { rows: number; cols: number }): void {
-  void tableCmd.run({ rows: dimensions.rows, cols: dimensions.cols });
+/**
+ * המנוע מניח את הסמן בתא הראשון של הטבלה החדשה — נמדד. מיקום הסמן אחרי
+ * הטבלה נעשה מבחוץ, בהפרש טבלאות לפני/אחרי ההכנסה: ראו ההסבר המלא
+ * ב-engine/table-insert.ts למה זה לא נקרא מתוצאת הפקודה עצמה.
+ */
+async function onInsertTable(dimensions: { rows: number; cols: number }): Promise<void> {
+  const before = await collectTableNodeIds(superdoc.value);
+  const outcome = await tableCmd.run({ rows: dimensions.rows, cols: dimensions.cols });
+  if (outcome.ok) void placeCursorAfterInsertedTable(superdoc.value, before);
 }
 
 async function onInsertImage(): Promise<void> {
