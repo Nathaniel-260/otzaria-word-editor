@@ -29,6 +29,7 @@
 import { describe, expect, it } from 'vitest';
 import type { VueWrapper } from '@vue/test-utils';
 import HomeTab from '../../src/ui/ribbon/tabs/HomeTab.vue';
+import { NUMBER_STYLE_LABELS } from '../../src/engine/lists';
 import { autoUnmount, createSuperdocDouble, mountUi, settle } from './harness';
 
 autoUnmount();
@@ -130,6 +131,25 @@ describe('כפתורי הרשימה בלשונית „בית"', () => {
     expect(labels[1], 'אלף־בית אינו שני בתפריט').toContain('אלף־בית');
     // ו-„1, 2, 3” — שהיה ראשון כשהסדר נורש מהמפה — אחריהם.
     expect(labels.indexOf('1, 2, 3')).toBeGreaterThan(1);
+  });
+
+  it('כל סגנון מספור שהמנוע מכיר נמצא בתפריט', async () => {
+    // הסדר נכתב ביד כדי לא לרשת את סדר ה-numFmt, וזה עלה במחיר: הרשימה
+    // הידנית אינה נגזרת מהמפה, ולכן סגנון שיתווסף ל-`NUMBER_STYLE_LABELS`
+    // פשוט לא יופיע — בלי שגיאה, בלי אזהרה, ובלי דרך לראות זאת בקוד. וגם
+    // ההפך: סגנון שיימחק מהרשימה נעלם מהממשק בשקט.
+    //
+    // `bullet` הוא היוצא היחיד, והוא יוצא מוצהר: הוא התפריט של „תבליטים”.
+    const harness = mountUi(HomeTab, { superdoc: withSelection() });
+    await settle();
+
+    const labels = await openMenu(harness.wrapper, NUMBER);
+    const missing = Object.entries(NUMBER_STYLE_LABELS)
+      .filter(([id]) => id !== 'bullet')
+      .filter(([, label]) => !labels.includes(label))
+      .map(([id, label]) => `${id} (${label})`);
+
+    expect(missing, 'סגנון שהמנוע מכיר ואינו בתפריט').toEqual([]);
   });
 
   it('תפריט התבליטים אינו מציע סגנונות מספור', async () => {
