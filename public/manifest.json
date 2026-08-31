@@ -16,7 +16,8 @@
     "fs.user_files.write",
     "reader.open",
     "navigation.write",
-    "clipboard.read"
+    "clipboard.read",
+    "app.info.read"
   ],
   "contributes": {
     "toolTab": {

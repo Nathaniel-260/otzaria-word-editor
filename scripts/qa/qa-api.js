@@ -94,7 +94,9 @@
         disabled: !!el.disabled,
         active: el.classList.contains('active'),
         pressed: el.getAttribute('aria-pressed'),
-        value: el.tagName === 'SELECT' ? el.value : undefined,
+        // גם בורר החיפוש מדווח ערך: הוא `<input>`, וה-`value` שלו הוא הגופן
+      // הנוכחי כל עוד לא מקלידים בו (ראו RibbonCombo).
+      value: el.tagName === 'SELECT' || el.getAttribute('role') === 'combobox' ? el.value : undefined,
         cls: el.className,
       };
     });
@@ -141,26 +143,109 @@
     return el ? Q.rectOf(el) : null;
   };
 
-  /** בחירה ב-select — הוא פקד מקורי, ולחיצה עליו פותחת תפריט של מערכת ההפעלה. */
-  Q.selectValue = function (name, value) {
-    var el = Q.el(name, { selector: 'select' });
-    if (!el) return 'not-found';
-    var found = Array.prototype.some.call(el.options, function (o) {
-      return o.value === value;
+  /** שני סוגי בוררים: `<select>` נייטיב, ובורר החיפוש (RibbonCombo). */
+  var PICKER = 'select, input[role="combobox"]';
+
+  /**
+   * פותח את בורר החיפוש ומחזיר את האפשרויות שברשימה שלו.
+   *
+   * הרשימה קיימת ב-DOM רק כשהבורר פתוח — בניגוד ל-`<select>`, שאפשרויותיו שם
+   * תמיד. לכן כל קריאה כאן פותחת בפועל, ומי שקורא אחראי לסגור.
+   */
+  function comboOpen(el) {
+    el.focus();
+    // ניקוי השאילתה: פתיחה אחרי הקלדה קודמת הייתה מחזירה רשימה מסוננת.
+    var setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+    setter.call(el, '');
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+
+    /*
+      ההמתנה אינה נימוס — בלעדיה זה פשוט לא עובד. Vue מרנדר במיקרו-משימה,
+      ולכן מיד אחרי `focus` הרשימה עוד אינה ב-DOM ו-`getElementById` מחזיר
+      null. נמדד: `Q.el` מצא את הפקד ו-`Q.options` החזיר null באותה נשימה.
+
+      שלושה סבבים ולא אחד: הפתיחה מעדכנת גם את `activeIndex`, ויש `watch`
+      עם `nextTick` משלו. `Runtime.evaluate` נשלח עם `awaitPromise`, ולכן
+      החזרת Promise מכאן תקינה לגמרי.
+    */
+    var listId = el.getAttribute('aria-controls');
+    return Promise.resolve()
+      .then(function () { return null; })
+      .then(function () { return null; })
+      .then(function () {
+        return listId ? document.getElementById(listId) : null;
+      });
+  }
+
+  function comboClose(el) {
+    el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    el.blur();
+  }
+
+  function comboOptions(list) {
+    return Array.prototype.map.call(list.querySelectorAll('[role="option"]'), function (o) {
+      return {
+        value: o.getAttribute('data-value') || '',
+        label: (o.textContent || '').trim(),
+        group: o.getAttribute('data-group') || ''
+      };
     });
-    if (!found) {
-      return 'no-option:' + Array.prototype.map.call(el.options, function (o) { return o.value; }).join(',');
+  }
+
+  /**
+   * בחירה בבורר. ב-`<select>` — הצבה ואירוע; ב-RibbonCombo — פתיחה ולחיצה
+   * אמיתית על השורה, כי הקומפוננטה מקשיבה ל-`mousedown` ולא ל-`change`.
+   */
+  Q.selectValue = function (name, value) {
+    var el = Q.el(name, { selector: PICKER });
+    if (!el) return 'not-found';
+
+    if (el.tagName === 'SELECT') {
+      var found = Array.prototype.some.call(el.options, function (o) {
+        return o.value === value;
+      });
+      if (!found) {
+        return 'no-option:' + Array.prototype.map.call(el.options, function (o) { return o.value; }).join(',');
+      }
+      el.value = value;
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      return 'ok';
     }
-    el.value = value;
-    el.dispatchEvent(new Event('change', { bubbles: true }));
-    return 'ok';
+
+    return comboOpen(el).then(function (list) {
+      if (!list) { comboClose(el); return 'no-list'; }
+      var hit = list.querySelector('[role="option"][data-value="' + String(value).replace(/"/g, '\\"') + '"]');
+      if (!hit) {
+        var all = comboOptions(list).map(function (o) { return o.value; });
+        comboClose(el);
+        return 'no-option:' + all.slice(0, 40).join(',');
+      }
+      hit.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+      return 'ok';
+    });
   };
 
   Q.options = function (name) {
-    var el = Q.el(name, { selector: 'select' });
+    var el = Q.el(name, { selector: PICKER });
     if (!el) return null;
+
+    if (el.tagName !== 'SELECT') {
+      return comboOpen(el).then(function (list) {
+        var rows = list ? comboOptions(list) : null;
+        comboClose(el);
+        return rows;
+      });
+    }
+
     return Array.prototype.map.call(el.options, function (o) {
-      return { value: o.value, label: o.textContent.trim() };
+      return {
+        value: o.value,
+        label: o.textContent.trim(),
+        // כותרת ה-`<optgroup>` שהאפשרות יושבת בו, או '' לאפשרות חשופה. בורר
+        // הגופן מקבץ מרגע שהמכונה נמנתה (src/engine/system-fonts.ts), ובלי
+        // הקבוצה אי אפשר לדעת מהרשימה השטוחה אם הקיבוץ בכלל קרה.
+        group: o.parentElement && o.parentElement.tagName === 'OPTGROUP' ? o.parentElement.label : ''
+      };
     });
   };
 

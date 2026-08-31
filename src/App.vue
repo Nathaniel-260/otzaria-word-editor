@@ -192,7 +192,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, provide, onMounted, onUnmounted, computed, shallowRef, watch } from 'vue';
+import { ref, provide, onMounted, onUnmounted, computed, shallowRef, watch, watchEffect } from 'vue';
 import TitleBar from './ui/shell/TitleBar.vue';
 import Ribbon from './ui/ribbon/Ribbon.vue';
 import StatusBar from './ui/shell/StatusBar.vue';
@@ -232,7 +232,18 @@ import {
   observeStyleGallery,
   type StyleGalleryState,
 } from './engine/style-gallery';
-import { fallbackFontOptions, observeFontOptions, type FontOptions } from './engine/font-options';
+import {
+  composeFontOptions,
+  fallbackFontOptions,
+  observeFontSlice,
+  type FontOptions,
+  type FontsSliceLike,
+} from './engine/font-options';
+import {
+  emptyInstalledFonts,
+  loadInstalledFonts,
+  type InstalledFontsSnapshot,
+} from './engine/system-fonts';
 import {
   UNSETTLED_SELECTION,
   observeReadoutSelection,
@@ -388,6 +399,20 @@ provide(COMMAND_ADAPTER, commandAdapter);
  */
 const fontOptions = shallowRef<FontOptions>(fallbackFontOptions());
 provide(FONT_OPTIONS, fontOptions);
+
+/**
+ * שני המקורות שמרכיבים את הבורר, ולמה הם נפרדים.
+ *
+ * המנוע מדווח על גופני **המסמך** בכל פתיחה; המנייה מדווחת על מה שמותקן
+ * **במכונה**, פעם אחת, ונוחתת מתי שנוחתת. דחיפה ישירה משניהם ל-`fontOptions`
+ * הייתה גורמת למי שנחת שני למחוק את מה שהראשון הביא — ולכן שניהם refs,
+ * וההרכבה אחת. ראו engine/system-fonts.ts.
+ */
+const engineFontSlice = shallowRef<FontsSliceLike | null>(null);
+const installedFonts = shallowRef<InstalledFontsSnapshot>(emptyInstalledFonts());
+watchEffect(() => {
+  fontOptions.value = composeFontOptions(engineFontSlice.value, installedFonts.value);
+});
 
 /**
  * גלריית הסגנונות של המסמך הפתוח. מאותו טעם כמו אפשרויות הגופן, וביתר שאת:
@@ -915,8 +940,8 @@ async function openDocumentInto(
   // `observe` יורה מיד עם ה-snapshot ואז על כל שינוי: המנוע פותר את גופני
   // המסמך אחרי שהוא נפתח, ובלי האזנה הבורר היה קופא על הרשימה של הרגע הראשון.
   editor.onDispose(
-    observeFontOptions(editor.ui, (options) => {
-      fontOptions.value = options;
+    observeFontSlice(editor.ui, (slice) => {
+      engineFontSlice.value = slice;
     })
   );
 
@@ -2169,6 +2194,17 @@ let directionShortcut: { dispose: () => void } | null = null;
 let undoRedoWatcher: UndoRedoWatcher | null = null;
 
 onMounted(async () => {
+  /**
+   * המנייה של גופני המכונה — ראשונה, ובלי `await`.
+   *
+   * בלי `await` מפני שהיא אינה תנאי לשום דבר: עד שהיא נוחתת הבורר מציג את
+   * הרשימה הקבועה, וברגע שהיא נוחתת `watchEffect` מרכיב מחדש והבורר מתמלא.
+   * פתיחת המסמך הראשון אינה אמורה להמתין למנייה של מאות משפחות.
+   */
+  void loadInstalledFonts().then((snapshot) => {
+    installedFonts.value = snapshot;
+  });
+
   shortcuts = createShortcutDispatcher({
     runCommand: (id, payload) => void runShortcutCommand(id, payload),
     runAction: runShellAction,

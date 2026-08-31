@@ -54,7 +54,11 @@
           `:model-value` ולא `v-model`: הערך המוצג הוא computed שמקורו במנוע,
           ואין לפקד רשות לכתוב אליו. מה שהמשתמש בוחר עובר בפקודה, וחוזר משם.
         -->
-        <RibbonSelect
+        <!--
+          RibbonCombo ולא RibbonSelect: מרגע שהמכונה נמנית הרשימה מונה מאות
+          שמות, ובבורר נייטיב אין חיפוש. ראו common/RibbonCombo.vue.
+        -->
+        <RibbonCombo
           :model-value="selectedFontFamily"
           :options="familySelectOptions"
           :disabled="!fontFamilyCmd.enabled.value"
@@ -447,6 +451,7 @@ import RibbonStack from '../common/RibbonStack.vue';
 import RibbonButton from '../common/RibbonButton.vue';
 import RibbonMenuButton from '../common/RibbonMenuButton.vue';
 import RibbonSelect, { type SelectOption } from '../common/RibbonSelect.vue';
+import RibbonCombo from '../common/RibbonCombo.vue';
 import ColorPickerPopover from '../common/ColorPickerPopover.vue';
 import StyleGallery from '../common/StyleGallery.vue';
 import { useCommand } from '../../../composables/useCommand';
@@ -658,6 +663,8 @@ const familySelectOptions = computed(() =>
       value: option.value,
       label: option.label,
       preview: option.previewFamily,
+      // הקיבוץ נקבע במיזוג ולא כאן — ראו engine/font-options.ts.
+      group: option.group,
     })),
     selectedFontFamily.value,
   ),
