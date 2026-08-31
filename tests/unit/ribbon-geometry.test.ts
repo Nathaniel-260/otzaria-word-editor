@@ -128,6 +128,19 @@ describe('גאומטריה נגזרת', () => {
     expect(block(RIBBON_CSS, '\\.word-btn\\.btn-small')).toMatch(/height:\s*var\(--ribbon-row-h\)/);
   });
 
+  it('הריפוד והגבול של הגוף נגזרים מאותם טוקנים שהגובה בולע', () => {
+    // `+ 9px` מחובר ביד היה נכון רק כל עוד איש אינו נוגע בריפוד. שינוי שלו
+    // אינו מרחיב את הגוף (הגובה קבוע) אלא מקטין את המקום הפנוי — כלומר גלישה
+    // שקטה, ובדיוק בלי שום סימן.
+    const height = /--ribbon-height:([^;]*);/.exec(TOKENS)?.[1] ?? '';
+    expect(height).toMatch(/2\s*\*\s*var\(--ribbon-body-pad\)/);
+    expect(height).toMatch(/var\(--ribbon-body-border\)/);
+    expect(height, 'מספר קשיח בחשבון הגובה').not.toMatch(/\d+px/);
+    const body = block(RIBBON_CSS, '\\.word-ribbon-body');
+    expect(body).toMatch(/padding:\s*var\(--ribbon-body-pad\)/);
+    expect(body).toMatch(/border-block-end:\s*var\(--ribbon-body-border\)/);
+  });
+
   it('גוף הרצועה בגובה קבוע, ולא בגובה שהתוכן קובע', () => {
     // `min-height` הוא מה שנתן לכל לשונית את הגובה של הקבוצה הגבוהה שלה.
     const body = block(RIBBON_CSS, '\\.word-ribbon-body');

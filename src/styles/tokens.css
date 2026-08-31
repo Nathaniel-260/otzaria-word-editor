@@ -105,11 +105,16 @@
   --ribbon-scrollbar-h: 4px;
 
   /* `box-sizing: border-box` גלובלי (shell.css), ולכן הגובה בולע גם את הריפוד
-     (4px למעלה ולמטה) וגם את `border-block-end` (1px) של גוף הרצועה. ה-1px
-     הזה הוא ההפרש שהפך את החשבון הידני לשגוי. */
+     של גוף הרצועה וגם את `border-block-end` שלו. שניהם טוקנים, ולא 9px מחוברים
+     ביד: הקבוע ההוא נשאר נכון רק כל עוד איש אינו נוגע בריפוד, ושינוי שלו היה
+     מקטין את המקום הפנוי בשקט — הגובה קבוע, ולכן התוכן גולש ולא מרחיב.
+     ribbon.css צורך את אותם שני טוקנים, וזה מה שמחזיק את החשבון. */
+  --ribbon-body-pad: 4px;
+  --ribbon-body-border: 1px;
   --ribbon-height: calc(
     var(--ribbon-content-h) + var(--ribbon-group-footer-h) +
-      var(--ribbon-scrollbar-h) + 9px
+      var(--ribbon-scrollbar-h) + 2 * var(--ribbon-body-pad) +
+      var(--ribbon-body-border)
   );
 }
 
