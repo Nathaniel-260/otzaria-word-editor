@@ -25,6 +25,14 @@
  *    לא מיושרים.
  * 5. **`.column-items` אינו קיים יותר** — הוא היה משוכפל מילה במילה בארבעה
  *    בלוקים `scoped`, ו-`RibbonStack.vue` הוא הבעלים היחיד שלו עכשיו.
+ *
+ * ## מה השער הזה **אינו** בודק
+ *
+ * הוא קורא את המקור, ולכן הוא שומר על הכתיבה — לא על התוצאה. jsdom אינו מחשב
+ * `calc`, `flex` או גלישה, ולכן CSS תקין-למראה שהגובה שלו קופץ עובר כאן.
+ * הגובה בפועל, בכל שמונה הלשוניות ואחרי החלפה אמיתית, נמדד בדפדפן:
+ * `npm run check:ribbon` (scripts/ribbon-geometry-probe.mjs). נמדד שהוא באמת
+ * נופל על הקוד שלפני התיקון — 96/118/126/100, והמסמך זז 30px.
  */
 import { describe, expect, it } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
@@ -159,11 +167,25 @@ describe('פקדים שיושבים באותה שורה', () => {
     'ui/ribbon/common/ColorPickerPopover.vue',
   ];
 
+  /** השורש של כל אחד מהם — האלמנט שגובהו *הוא* גובה השורה. */
+  const ROW_ROOTS = [
+    { file: 'ui/ribbon/common/RibbonSelect.vue', selector: '\\.ribbon-select' },
+    { file: 'ui/ribbon/common/ColorPickerPopover.vue', selector: '\\.color-btn-wrapper' },
+  ];
+
   it('כולם נגזרים מ---ribbon-row-h ואינם כותבים מספר', () => {
-    const hardcoded = ROW_MATES.filter(
-      (file) => !read(file).includes('height: var(--ribbon-row-h)'),
+    const missing = ROW_MATES.filter((file) => !read(file).includes('height: var(--ribbon-row-h)'));
+    expect(missing, 'הגובה חייב להיגזר מהטוקן').toEqual([]);
+
+    // הנוכחות של הטוקן אינה מספיקה: 24px שנשאר על **שורש** הפקד הוא בדיוק
+    // מה שהשער נבנה למנוע, והבדיקה למעלה עוברת גם אז. מה שבתוך הפקד — פס
+    // החיווי, האייקון, המשבצת — הוא קישוט במידה קבועה, ואינו נוגע לשורה.
+    const hardcoded = ROW_ROOTS.flatMap(({ file, selector }) =>
+      [...block(read(file), selector).matchAll(/(?<![a-z-])height:\s*(\d+)px/g)].map(
+        (found) => `${file} ${selector}: height: ${found[1]}px`,
+      ),
     );
-    expect(hardcoded).toEqual([]);
+    expect(hardcoded, 'גובה בפיקסלים על שורש פקד שיושב בשורה משותפת').toEqual([]);
   });
 
   it('גלריית הסגנונות בגובה תוכן הקבוצה', () => {
