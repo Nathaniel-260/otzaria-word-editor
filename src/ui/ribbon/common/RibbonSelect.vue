@@ -69,6 +69,7 @@ defineEmits<{
   position: relative;
   display: inline-flex;
   align-items: center;
+  flex-shrink: 0;
 }
 
 .ribbon-select {

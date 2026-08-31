@@ -238,6 +238,7 @@ onUnmounted(() => {
 .color-picker-container {
   position: relative;
   display: inline-flex;
+  flex-shrink: 0;
 }
 
 .color-btn-wrapper {

@@ -145,6 +145,7 @@
   padding-inline: 8px;
   border-inline-end: 1px solid var(--word-group-border);
   min-width: max-content;
+  flex-shrink: 0;
   position: relative;
 }
 
@@ -175,6 +176,7 @@
   display: flex;
   align-items: center;
   gap: 2px;
+  flex-shrink: 0;
 }
 
 .word-group-footer {
@@ -210,6 +212,8 @@
   transition: background 0.08s ease, border-color 0.08s ease;
   white-space: nowrap;
   line-height: 1.2;
+  /* לא לסמוך רק על min-width:max-content שבהורה: כפתור מכווץ עם label נשפך על שכנו. */
+  flex-shrink: 0;
 }
 
 /* :not(.active) חובה: הסלקטור עם ה-hover ספציפי יותר מ-.word-btn.active, ובלעדיו

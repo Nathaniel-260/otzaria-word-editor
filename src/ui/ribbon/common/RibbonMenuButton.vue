@@ -140,6 +140,7 @@ onUnmounted(() => {
 .ribbon-menu {
   position: relative;
   display: inline-flex;
+  flex-shrink: 0;
 }
 
 /* `top` / `left` / `max-height` מגיעים מ-`:style` — ראו popover-position.ts.

@@ -257,5 +257,6 @@ function onToggleTrackChanges(): void {
   flex-direction: column;
   gap: 2px;
   justify-content: center;
+  flex-shrink: 0;
 }
 </style>
