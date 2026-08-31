@@ -30,7 +30,9 @@ import type { EditorSession } from './create-editor';
 import { SHORTCUTS } from '../ui/shortcuts/registry';
 import {
   HEBREW_MESSAGES,
+  MacroError,
   MacroKit,
+  createMemoryStorage,
   createSuperdocHost,
   setMacroMessages,
   type SuperdocLike,
@@ -49,7 +51,20 @@ export const MACRO_STATUS = {
   recordingEmpty: 'ההקלטה הופסקה — לא הוקלטו פעולות',
   noRecordings: 'אין מאקרו מוקלט לניגון',
   replayDone: 'המאקרו נוגן',
+  /** localStorage חסום או מלא — עובדים מהזיכרון, להפעלה הזאת בלבד. */
+  storageUnavailable: 'שמירת מאקרו קבועה אינה זמינה — המאקרו יישמרו להפעלה הזאת בלבד',
+  /** שמירת הקלטה נכשלה (למשל quota) — הצעדים שמורים בצד לניסיון נוסף. */
+  recordingKept: 'ההקלטה נשמרה בצד — פנו מקום (מחיקת מאקרו ישן בדיאלוג) ולחצו שוב Ctrl+Alt+R',
+  /** המשתמש סירב לשמור הקלטה לא-שלמה. */
+  incompleteDiscarded: 'ההקלטה בוטלה',
 } as const;
+
+/** כותרת דיאלוג האישור להקלטה לא-שלמה. */
+export const INCOMPLETE_CONFIRM_TITLE = 'לשמור הקלטה חלקית?';
+
+export function incompleteConfirmContent(detail: string): string {
+  return `${detail}. הניגון לא יכלול את הפעולות האלה. לשמור בכל זאת?`;
+}
 
 export function recordingSavedText(name: string): string {
   return `המאקרו "${name}" נשמר (Ctrl+Alt+P לניגון)`;
@@ -113,16 +128,43 @@ export const ACTIVE_MACROS: InjectionKey<Ref<MacrosHandle | null>> = Symbol('act
  */
 export type MacrosSession = Pick<EditorSession, 'superdoc'>;
 
-/** קטע לדוגמה, פעם אחת בלבד: בלי שום קטע ההשלמה האוטומטית בלתי נראית. */
+/**
+ * קטע לדוגמה, פעם אחת אי-פעם: בלי שום קטע ההשלמה האוטומטית בלתי נראית.
+ * הדגל נפרד מרשימת הקטעים בכוונה — משתמש שמחק את כל הקטעים אמר משהו,
+ * ושתילה חוזרת בכל פתיחת מסמך הייתה מתווכחת איתו.
+ */
+export const SEEDED_FLAG_KEY = 'otzaria-word:macros-seeded';
+
 function seedDefaultSnippet(kit: MacroKit): void {
-  if (kit.listSnippets().length > 0) return;
-  kit.saveSnippet({ name: 'בס"ד', text: 'בס"ד', trigger: 'בסד' });
+  try {
+    if (globalThis.localStorage?.getItem(SEEDED_FLAG_KEY) === 'yes') return;
+  } catch {
+    /* בלי localStorage אין גם persistence לקטעים — שתילה לזיכרון עדיין מועילה. */
+  }
+  if (kit.listSnippets().length === 0) {
+    kit.saveSnippet({ name: 'בס"ד', text: 'בס"ד', trigger: 'בסד' });
+  }
+  try {
+    globalThis.localStorage?.setItem(SEEDED_FLAG_KEY, 'yes');
+  } catch {
+    /* הדגל הוא נוחות; כישלון בכתיבתו אינו כשל של השתילה. */
+  }
+}
+
+export interface InstallMacrosOptions {
+  /**
+   * דיאלוג האישור להקלטה לא-שלמה (פעולה שאינה ניתנת להקלטה — למשל הכנסת
+   * תמונה, שה-payload שלה הוא הקובץ כולו). בלעדיו — או כשהוא מחזיר false —
+   * ההקלטה מבוטלת; שמירה חלקית דורשת הסכמה מפורשת, לא ברירת מחדל.
+   */
+  confirmIncomplete?: (title: string, content: string) => Promise<boolean>;
 }
 
 export function installMacros(
   editor: MacrosSession,
   container: HTMLElement,
   onStatus: (message: string, isError?: boolean) => void,
+  options: InstallMacrosOptions = {},
 ): MacrosHandle {
   /* ההצרה ל-SuperdocLike מבנית: החבילה מגדירה בעצמה את תת-הצורה שהיא צורכת
      (commands / doc / search / view), במקום לייבא את הטיפוסים הפנימיים של
@@ -135,40 +177,83 @@ export function installMacros(
 
   const allowScripts = scriptsEnabled();
 
-  const kit = new MacroKit({
-    host,
-    onLog: (line) => onStatus(line),
-    // כל קיצורי הרג'יסטרי חסומים לקיצורים אישיים: קיצור מאקרו נקשר בשלב
-    // הלכידה, ולכן התנגשות הייתה מאפילה בשקט על קיצור של העורך. התוויות
-    // נמסרות כמו שהן — מה שאינו ניתן לפירוק ("Ctrl + Shift ימני") פשוט
-    // אינו ניתן גם להתנגשות, והחבילה מתעלמת ממנו.
-    reservedShortcuts: SHORTCUTS.map((shortcut) => shortcut.label),
-    // ה-gate האמיתי יושב ב-kit ולא בדיאלוג: כשהדגל כבוי runScript/runSource
-    // מסרבים וקיצורי סקריפטים אינם נקשרים — סקריפט קיים או מיובא לא ירוץ
-    // בשום מסלול. הסתרת הלשונית היא רק הצד הקוסמטי של אותו מתג.
-    scriptsEnabled: allowScripts,
-    // הקלטה שנעצרה בתקרת הצעדים: ה-callback הוא מה שמעדכן את מחוון
-    // ה„מקליט” ושומר את מה שהוקלט — בלעדיו הכפתור היה ממשיך להבטיח הקלטה
-    // שכבר אינה קורית, והלחיצה הבאה הייתה זורקת את הצעדים.
-    onRecordingAutoStop: () => finishRecording(true),
-  });
-  seedDefaultSnippet(kit);
+  const buildKit = (storage?: ConstructorParameters<typeof MacroKit>[0]['storage']): MacroKit =>
+    new MacroKit({
+      host,
+      ...(storage ? { storage } : {}),
+      onLog: (line) => onStatus(line),
+      // כל קיצורי הרג'יסטרי חסומים לקיצורים אישיים: קיצור מאקרו נקשר בשלב
+      // הלכידה, ולכן התנגשות הייתה מאפילה בשקט על קיצור של העורך. התוויות
+      // נמסרות כמו שהן — מה שאינו ניתן לפירוק ("Ctrl + Shift ימני") פשוט
+      // אינו ניתן גם להתנגשות, והחבילה מתעלמת ממנו.
+      reservedShortcuts: SHORTCUTS.map((shortcut) => shortcut.label),
+      // ה-gate האמיתי יושב ב-kit ולא בדיאלוג: כשהדגל כבוי runScript/runSource
+      // מסרבים וקיצורי סקריפטים אינם נקשרים — סקריפט קיים או מיובא לא ירוץ
+      // בשום מסלול. הסתרת הלשונית היא רק הצד הקוסמטי של אותו מתג.
+      scriptsEnabled: allowScripts,
+      // הקלטה שנעצרה בתקרת הצעדים: ה-callback הוא מה שמעדכן את מחוון
+      // ה„מקליט” ושומר את מה שהוקלט — בלעדיו הכפתור היה ממשיך להבטיח הקלטה
+      // שכבר אינה קורית, והלחיצה הבאה הייתה זורקת את הצעדים.
+      onRecordingAutoStop: () => void finishRecording(true),
+    });
+
+  /* localStorage חסום, חסר או מלא אסור לו להפיל את פתיחת המסמך: המאקרו הם
+     פיצ'ר, לא תנאי. נפילה לאחסון-זיכרון משאירה את כל היכולות עובדות להפעלה
+     הנוכחית, וההודעה אומרת בדיוק מה אבד — הקביעות. */
+  let kit: MacroKit;
+  try {
+    kit = buildKit();
+    seedDefaultSnippet(kit);
+  } catch {
+    kit = buildKit(createMemoryStorage());
+    seedDefaultSnippet(kit);
+    onStatus(MACRO_STATUS.storageUnavailable, true);
+  }
 
   const recording = shallowRef(false);
 
-  /** עצירה ושמירה — מסלול אחד ללחיצת המשתמש ולעצירה האוטומטית בתקרה. */
-  function finishRecording(auto: boolean): void {
+  /**
+   * עצירה ושמירה — מסלול אחד ללחיצת המשתמש, לעצירה האוטומטית בתקרה ולניסיון
+   * חוזר אחרי כשל שמירה (ההקלטה שנעצרה נשמרת בחבילה בצד עד discard).
+   */
+  async function finishRecording(auto: boolean): Promise<void> {
     recording.value = false;
+    const name = `מאקרו ${kit.listRecordings().length + 1}`;
     try {
-      const name = `מאקרו ${kit.listRecordings().length + 1}`;
       const saved = kit.stopRecording(name);
       if (saved) onStatus(auto ? recordingAutoStoppedText(saved.name) : recordingSavedText(saved.name));
       else onStatus(MACRO_STATUS.recordingEmpty, auto);
+      return;
     } catch (error) {
-      // רשימת ההקלטות מלאה (תקרת הפריטים של החבילה) — הצעדים אינם ניתנים
-      // לשמירה, וההודעה אומרת למשתמש מה לפנות.
-      kit.cancelRecording();
-      onStatus(error instanceof Error ? error.message : 'שמירת ההקלטה נכשלה', true);
+      if (error instanceof MacroError && error.reason === 'recording-incomplete') {
+        // פעולה שאינה ניתנת להקלטה (תמונה, למשל) — שמירה חלקית רק בהסכמה.
+        const consent = await options.confirmIncomplete?.(
+          INCOMPLETE_CONFIRM_TITLE,
+          incompleteConfirmContent(error.message),
+        );
+        if (consent) {
+          try {
+            const saved = kit.stopRecording(name, undefined, { allowIncomplete: true });
+            if (saved) onStatus(recordingSavedText(saved.name));
+            return;
+          } catch (retryError) {
+            kit.cancelRecording();
+            onStatus(retryError instanceof Error ? retryError.message : 'שמירת ההקלטה נכשלה', true);
+            return;
+          }
+        }
+        kit.cancelRecording();
+        onStatus(MACRO_STATUS.incompleteDiscarded);
+        return;
+      }
+      if (error instanceof MacroError && error.reason === 'recording-too-large') {
+        // אין דרך לשמור אותה בכלל — ביטול מפורש עם ההסבר.
+        kit.cancelRecording();
+        onStatus(error.message, true);
+        return;
+      }
+      // כשל שמירה (quota, מצב מלא): הצעדים נשארים בצד — Ctrl+Alt+R הבא ינסה שוב.
+      onStatus(`${error instanceof Error ? error.message : 'שמירת ההקלטה נכשלה'}. ${MACRO_STATUS.recordingKept}`, true);
     }
   }
 
@@ -183,7 +268,11 @@ export function installMacros(
 
     toggleRecording() {
       if (kit.isRecording) {
-        finishRecording(false);
+        void finishRecording(false);
+      } else if (kit.hasPendingRecording) {
+        // הקלטה שנעצרה ושמירתה נכשלה ממתינה בצד — הלחיצה מנסה שוב במקום
+        // להתחיל הקלטה חדשה שהייתה זורקת אותה.
+        void finishRecording(false);
       } else {
         kit.startRecording();
         recording.value = kit.isRecording;

@@ -845,13 +845,27 @@ async function openDocument(file?: UserFile, options: OpenOptions = {}): Promise
   // אותה תבנית פירוק כמו אדפטר החיפוש — ראו engine/macros.ts. ה-`macros`
   // המקומי ולא `activeMacros` בפירוק, מאותה מלכודת: סגירת המסמך הקודם קורית
   // אחרי שהחדש כבר נרשם.
+  //
+  // עטוף ב-try/catch, ובכוונה: המאקרו הם פיצ'ר אופציונלי, וכשל בהקמתו —
+  // אחסון חסום, מנוע שהשתנה — אסור לו לעצור את פתיחת המסמך. ההתקנה עצמה
+  // כבר נופלת לאחסון-זיכרון בכשל localStorage; זו רשת הביטחון למה שמעבר.
   if (editorStackRef.value) {
-    const macros = installMacros(editor, editorStackRef.value, setStatus);
-    activeMacros.value = macros;
-    editor.onDispose(() => {
-      if (activeMacros.value === macros) activeMacros.value = null;
-      macros.dispose();
-    });
+    try {
+      const macros = installMacros(editor, editorStackRef.value, setStatus, {
+        // אישור שמירה של הקלטה לא-שלמה — פעולה שאינה ניתנת להקלטה (למשל
+        // הכנסת תמונה). הדיאלוג של אוצריא; מחוץ לאוצריא הוא מחזיר false,
+        // וההקלטה מבוטלת — שמירה חלקית לא קורית בלי הסכמה.
+        confirmIncomplete: (title, content) => confirm({ title, content }),
+      });
+      activeMacros.value = macros;
+      editor.onDispose(() => {
+        if (activeMacros.value === macros) activeMacros.value = null;
+        macros.dispose();
+      });
+    } catch (error) {
+      console.error('[otzaria-word] מערכת המאקרו לא הופעלה', error);
+      setStatus('מערכת המאקרו לא הופעלה — המסמך נפתח בלעדיה', true);
+    }
   }
 
   /**

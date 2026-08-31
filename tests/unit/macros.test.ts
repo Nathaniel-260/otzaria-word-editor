@@ -166,6 +166,57 @@ describe('installMacros', () => {
     second.dispose();
   });
 
+  it('מי שמחק את כל הקטעים לא מקבל את קטע הדוגמה בחזרה', () => {
+    const { session } = createFakeSession();
+    const container = document.createElement('div');
+    const first = installMacros(session, container, () => undefined);
+    first.kit.removeSnippet(first.kit.listSnippets()[0]!.id);
+    first.dispose();
+
+    const second = installMacros(session, container, () => undefined);
+    expect(second.kit.listSnippets()).toHaveLength(0);
+    second.dispose();
+  });
+
+  it('פעולה שאינה ניתנת להקלטה: שמירה רק אחרי אישור מפורש', async () => {
+    const { session, engine } = createFakeSession();
+    const container = document.createElement('div');
+    const statuses: string[] = [];
+    let consent = false;
+    const asked: string[] = [];
+    const handle = installMacros(session, container, (message) => statuses.push(message), {
+      confirmIncomplete: async (title) => {
+        asked.push(title);
+        return consent;
+      },
+    });
+
+    // "הכנסת תמונה": פקודה שה-payload שלה גדול מהתקרה.
+    handle.toggleRecording();
+    typeChar(container, 'א');
+    await engine.ui.commands.executeAsync('bold', { src: 'x'.repeat(20_000) });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    handle.toggleRecording(); // עצירה — המשתמש מסרב לשמירה חלקית
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(asked).toHaveLength(1);
+    expect(handle.kit.listRecordings()).toHaveLength(0);
+    expect(statuses).toContain(MACRO_STATUS.incompleteDiscarded);
+
+    // סבב שני — הפעם עם הסכמה.
+    consent = true;
+    handle.toggleRecording();
+    typeChar(container, 'ב');
+    await engine.ui.commands.executeAsync('bold', { src: 'x'.repeat(20_000) });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    handle.toggleRecording();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(handle.kit.listRecordings()).toHaveLength(1);
+    expect(handle.kit.listRecordings()[0]!.steps).toEqual([{ type: 'insert-text', text: 'ב' }]);
+    handle.dispose();
+  });
+
   it('dispose מחזיר את ה-controller לקדמותו וזורק הקלטה פתוחה', async () => {
     const { session, engine } = createFakeSession();
     const original = engine.ui.commands.executeAsync;

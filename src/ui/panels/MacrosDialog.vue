@@ -743,9 +743,12 @@ function onRunScript(): void {
 function onRemove(): void {
   const kit = props.handle?.kit;
   if (!kit || !selectedId.value) return;
-  if (section.value === 'recordings') kit.removeRecording(selectedId.value);
-  else if (section.value === 'snippets') kit.removeSnippet(selectedId.value);
-  else kit.removeScript(selectedId.value);
+  // guardedSave גם כאן: מחיקה היא commit לאחסון, והוא יכול לזרוק (quota).
+  guardedSave(() => {
+    if (section.value === 'recordings') kit.removeRecording(selectedId.value);
+    else if (section.value === 'snippets') kit.removeSnippet(selectedId.value);
+    else kit.removeScript(selectedId.value);
+  });
   refresh();
   clearForm();
 }
