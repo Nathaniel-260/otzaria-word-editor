@@ -262,9 +262,9 @@
           tooltip="כיוון פסקה מימין לשמאל"
           description="מסדר את הפסקה לקריאה בעברית: ההזחה והיישור בצד ימין"
           shortcut-id="direction-rtl"
-          :active="dirRtlCmd.active.value"
+          :active="dirRtlActive"
           :disabled="!dirRtlCmd.enabled.value"
-          @click="dirRtlCmd.run()"
+          @click="runDirectionRtl()"
         />
         <RibbonButton
           icon="dirLtr"
@@ -272,9 +272,9 @@
           tooltip="כיוון פסקה משמאל לימין"
           description="מסדר את הפסקה לקריאה בלטינית: ההזחה והיישור בצד שמאל"
           shortcut-id="direction-ltr"
-          :active="dirLtrCmd.active.value"
+          :active="dirLtrActive"
           :disabled="!dirLtrCmd.enabled.value"
-          @click="dirLtrCmd.run()"
+          @click="runDirectionLtr()"
         />
         <RibbonButton
           icon="pilcrow"
@@ -435,7 +435,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, inject, ref, shallowRef, watch, type Ref } from 'vue';
+import { computed, inject, onUnmounted, ref, shallowRef, watch, type Ref } from 'vue';
 import type { SuperDoc } from 'superdoc';
 import RibbonGroup from '../common/RibbonGroup.vue';
 import RibbonButton from '../common/RibbonButton.vue';
@@ -473,6 +473,7 @@ import {
   clearAllParagraphTabStops,
   emptyParagraphFormat,
   readParagraphFormat,
+  readParagraphIndents,
   removeParagraphTabStop,
   type TabStop,
 } from '../../../engine/paragraph-format';
@@ -768,6 +769,127 @@ const fallbackReporter: CommandReporter = (outcome, id) => {
 
 const superdoc = inject(ACTIVE_SUPERDOC, shallowRef<SuperDoc | null>(null));
 const report = inject(COMMAND_REPORTER, fallbackReporter);
+
+/* ------------------------------------------------------------------ */
+/* חיווי „פעיל” של RTL/LTR                                             */
+/* ------------------------------------------------------------------ */
+
+/**
+ * חיווי „פעיל” של RTL/LTR — לא מ-`dirRtlCmd.active`/`dirLtrCmd.active`.
+ *
+ * docs/button-audit.md (שורה ה', „קשה לתקן”) תיעד: „הכתיבה מצליחה; הפקודה
+ * אינה מדווחת active”. **נמדד מחדש מול superdoc@2.10.0 (Chrome headless,
+ * ה-dist הארוז) לפני שנגעו כאן — הבאג עדיין קיים.** לחיצה על „כיוון פסקה
+ * מימין לשמאל" כותבת `<w:bidi/>` תקין, אבל `ui.commands.get('direction-rtl')
+ * .getState()` המיידי שאחריה מחזיר `{supported:true, enabled:true,
+ * active:false}` — בדיוק כמו שהתיעוד טען (scripts/qa/home-paragraph-qa.mjs,
+ * מקטע „כיוון פסקה”).
+ *
+ * המעקף, כמו שהתיעוד המליץ: לקרוא `bidi` מה-`pPr` של הפסקה עצמה, ולא לסמוך
+ * על הפקודה. בניגוד ל-`pageBreakBefore` (engine/page-break.ts) — ששם
+ * `doc.get()` לא החזיר את התכונה בכלל וגרר מעקב מקומי — `bidi` **כן** חוזר
+ * מ-`doc.get()` (נמדד שם, בהערת הפתיחה של page-break.ts: „תכונות אותה פסקה
+ * בדיוק שחוזרות מ-doc.get() הן {bidi:true} בלבד"). כלומר אין צורך במעקב
+ * מקומי: `readParagraphIndents` (engine/paragraph-format.ts) כבר קוראת בדיוק
+ * את זה — היא אותה קריאה שהסרגל האופקי משתמש בה כדי לצייר את סמן ההזחה
+ * (engine/page-ruler.ts), וכאן היא משמשת לצורך אחר: מקור אמת ל-`:active`.
+ */
+const paragraphBidi = shallowRef<boolean | null>(null);
+
+/** מונה דורות: קריאה א-סינכרונית שמתאפסת לא תדרוס תשובה טרייה יותר. */
+let bidiGeneration = 0;
+
+async function refreshParagraphBidi(): Promise<void> {
+  const mine = ++bidiGeneration;
+  const reading = await readParagraphIndents(superdoc.value);
+  if (mine !== bidiGeneration) return;
+  paragraphBidi.value = reading ? reading.indents.bidi : null;
+}
+
+/**
+ * השהיית הקריאה אחרי תזוזת סמן — אותו ערך ואותה הנמקה כמו
+ * `RULER_SELECTION_DEBOUNCE_MS`/`PAGE_BREAK_SELECTION_DEBOUNCE_MS`
+ * (page-ruler.ts, InsertTab.vue): חיווי שמתעדכן חצי שנייה אחרי הסמן נראה
+ * תקוע.
+ */
+const BIDI_SELECTION_DEBOUNCE_MS = 150;
+let bidiSelectionTimer: ReturnType<typeof setTimeout> | undefined;
+
+function scheduleBidiRefresh(): void {
+  clearTimeout(bidiSelectionTimer);
+  bidiSelectionTimer = setTimeout(() => void refreshParagraphBidi(), BIDI_SELECTION_DEBOUNCE_MS);
+}
+
+/**
+ * מנוי על תזוזת סמן, כדי שהחיווי יתעדכן כשהסמן עובר לפסקה אחרת בלי לחיצה על
+ * הכפתור עצמו. אותו דפוס בדיוק כמו `pageBreakOn` ב-InsertTab.vue: `observe`
+ * מחובר ישירות מהלשונית (הצרכן היחיד), ומתחלף בכל החלפת מסמך.
+ *
+ * פער ידוע, מאותה משפחה כמו זה שתועד ב-page-break.ts „QA עצמאי” ל-Undo/Redo:
+ * Ctrl+Z שמבטל שינוי כיוון בלי להזיז את הסמן לא יריץ מחדש קריאה כאן, והחיווי
+ * יישאר על הערך הישן עד תזוזת סמן הבאה. בניגוד ל-`PageBreakTracker` — שהיה
+ * יכול להישאר שגוי **לצמיתות** כי הוא זיכרון מקומי — כאן זו קריאה חיה מהמסמך
+ * בכל פעם שהיא כן רצה, כך שהפער נסגר מעצמו בתזוזת הסמן הבאה, ולא רק בלחיצה
+ * נוספת על הכפתור.
+ */
+let unsubscribeBidiSelection: (() => void) | null = null;
+
+watch(
+  superdoc,
+  (host) => {
+    paragraphBidi.value = null;
+    unsubscribeBidiSelection?.();
+    unsubscribeBidiSelection = null;
+
+    const observeSelection = (host as SuperDoc | null | undefined)?.ui?.selection?.observe;
+    if (typeof observeSelection === 'function') {
+      try {
+        unsubscribeBidiSelection =
+          observeSelection.call((host as SuperDoc).ui.selection, scheduleBidiRefresh) ?? null;
+      } catch {
+        unsubscribeBidiSelection = null;
+      }
+    }
+    // נפילה בטוחה למנוע בלי `observe`, וגם קריאה ראשונה שאינה תלויה ב„ירה
+    // מיד" של המנוע.
+    scheduleBidiRefresh();
+  },
+  { immediate: true }
+);
+
+onUnmounted(() => {
+  unsubscribeBidiSelection?.();
+  clearTimeout(bidiSelectionTimer);
+});
+
+/**
+ * מה שהכפתורים מציגים בפועל. `paragraphBidi.value === null` פירושו „אין
+ * עדיין קריאה תקפה" (אין סמן, מסמך נטען) — ואז נופלים חזרה למה שהמנוע
+ * מדווח, כדי לא לייצר טענה שלא נמדדה. בפועל זה כמעט תמיד `false` (הבאג
+ * המתועד למעלה), אבל זו נפילה זהה לזו שהייתה קיימת לפני התיקון, לא גרועה
+ * ממנה.
+ */
+const dirRtlActive = computed(() =>
+  paragraphBidi.value !== null ? paragraphBidi.value === true : dirRtlCmd.active.value,
+);
+const dirLtrActive = computed(() =>
+  paragraphBidi.value !== null ? paragraphBidi.value === false : dirLtrCmd.active.value,
+);
+
+/**
+ * לחיצה על כפתורי הכיוון: מריצה את הפקודה (שכותבת `<w:bidi>` נכון — זה
+ * עצמו לא שבור, ראו התיעוד למעלה) ומרעננת מיד את החיווי, בלי לחכות
+ * ל-debounce של תזוזת סמן. הלחיצה עצמה לא מזיזה את הסמן, ולכן בלי הרענון
+ * המיידי הזה `ui.selection.observe` שמעל לא היה יורה כלל.
+ */
+async function runDirectionRtl(): Promise<void> {
+  await dirRtlCmd.run();
+  await refreshParagraphBidi();
+}
+async function runDirectionLtr(): Promise<void> {
+  await dirLtrCmd.run();
+  await refreshParagraphBidi();
+}
 
 const capabilities = shallowRef<DocCapabilityReport | null>(null);
 

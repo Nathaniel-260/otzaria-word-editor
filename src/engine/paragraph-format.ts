@@ -288,6 +288,12 @@ function nodeParagraphId(node: object): string | undefined {
  *
  * מיוצאת מפני שהסרגל (engine/page-ruler.ts) קורא את אותה פסקה בדיוק, ושני
  * מאתרים לאותו צומת היו נפרדים ביום שבו המודל ישנה צורה.
+ *
+ * פער ידוע, לא נסגר: הסריקה עוברת רק על `body` ברמה העליונה ולא נכנסת
+ * לתוך טבלה — פסקה בתוך תא טבלה לא תיפתר כאן, ותוחזר `undefined`. עבור
+ * חיווי הכיוון (RTL/LTR) ב-HomeTab.vue זה אומר `bidi` יחשב `false`
+ * כברירת מחדל, מה שעלול להדליק את כפתור LTR בטעות על תא RTL. לא אומת
+ * אמפירית אם זה קורה בפועל (אין תשתית QA לטבלאות עדיין) — נשאר לבדיקה.
  */
 export function findParagraphProps(document: unknown, blockId: string): RawParagraphProps | undefined {
   if (!document || typeof document !== 'object') return undefined;

@@ -489,7 +489,14 @@ await phase('שלב א — קבוצת „פיסקה"', async (app, ctx) => {
     else report.pass('הקטן הזחה בהזחה אפס', `לא נכתבה הזחה שלילית (pPr=${short(pPr, 90)})`);
   });
 
-  /* -------- כיווניות -------- */
+  /* -------- כיווניות --------
+   * docs/button-audit.md, שורה ה' (״קשה לתקן״): „הכתיבה מצליחה; הפקודה אינה
+   * מדווחת active”. המעקף (HomeTab.vue) קורא bidi ישירות מה-pPr דרך
+   * readParagraphIndents, ולא מ-cmd.active — ולכן שלושת הצעדים הבאים בודקים
+   * את חיווי ה-DOM (app.state(...).active, שקורא class="active" מהכפתור
+   * עצמו) ולא את cmd.active, שנשאר false גם אחרי התיקון (זו בדיוק העובדה
+   * שהמעקף עוקף).
+   */
   await step('כיוון פסקה מימין לשמאל', async () => {
     await caretAt(3);
     const base = pPrOf(await docx('rtl-b'), 'delta');
@@ -499,17 +506,18 @@ await phase('שלב א — קבוצת „פיסקה"', async (app, ctx) => {
     await app.sleep(700);
     const pPr = pPrOf(await docx('rtl-a'), 'delta') || '';
     const after = await app.state('כיוון פסקה מימין לשמאל');
+    const afterLtr = await app.state('כיוון פסקה משמאל לימין');
     const cmd = await app.cmd('direction-rtl');
     const c = await clean();
-    console.log('RTL: לפני=', short(base), '| אחרי=', short(pPr), '| active=', after.active, JSON.stringify(cmd), '|', c.detail);
+    console.log('RTL: לפני=', short(base), '| אחרי=', short(pPr), '| active(DOM)=', after.active, '| activeLtr(DOM)=', afterLtr.active, JSON.stringify(cmd), '|', c.detail);
     const hasBidi = /<w:bidi\s*\/>|<w:bidi w:val="(1|true|on)"\/>/.test(pPr);
-    const alreadyRtl = /<w:bidi\s*\/>/.test(base || '');
     if (!hasBidi) report.fail('כיוון פסקה מימין לשמאל', `אין <w:bidi/> אחרי הלחיצה: ${short(pPr)} | ${c.detail}`);
-    else if (!c.ok && alreadyRtl) report.partial('כיוון פסקה מימין לשמאל',
-      `הפסקה כבר הייתה RTL (ברירת המחדל של המסמך) — התוצאה נכונה, אבל הלחיצה מציגה למשתמש שגיאה במקום „אין מה לשנות": ${c.detail}. בנוסף החיווי הפעיל לעולם אינו נדלק (הפקודה אינה מדווחת active)`);
-    else if (!c.ok) report.fail('כיוון פסקה מימין לשמאל', `נכתב אך נותרה שגיאה — ${c.detail}`);
-    else if (!after.active) report.partial('כיוון פסקה מימין לשמאל', '<w:bidi/> נכתב אך החיווי לא נדלק');
-    else report.pass('כיוון פסקה מימין לשמאל', '<w:bidi/> נכתב, חיווי דלוק');
+    else if (!c.ok) report.fail('כיוון פסקה מימין לשמאל', `<w:bidi/> נכתב אך נותרה שגיאה — ${c.detail}`);
+    else if (!after.active) report.fail('כיוון פסקה מימין לשמאל',
+      `<w:bidi/> נכתב, אבל החיווי (class="active") לא נדלק — cmd.active=${cmd?.active} (הבאג המתועד), והמעקף שקורא bidi מה-pPr לא תפס`);
+    else if (afterLtr.active) report.fail('כיוון פסקה מימין לשמאל',
+      `„מימין לשמאל" דלוק אך „משמאל לימין" נשאר דלוק גם הוא — לא הדדי`);
+    else report.pass('כיוון פסקה מימין לשמאל', `<w:bidi/> נכתב, חיווי דלוק (נקרא מה-pPr; cmd.active=${cmd?.active} כמתועד)`);
   });
 
   await step('כיוון פסקה משמאל לימין', async () => {
@@ -522,14 +530,52 @@ await phase('שלב א — קבוצת „פיסקה"', async (app, ctx) => {
     const dom = JSON.parse(await js(`(() => { const e = document.querySelectorAll('.superdoc-line')[3];
       return e ? JSON.stringify({ dir: e.getAttribute('dir'), align: e.style.textAlign }) : 'null'; })()`));
     const c = await clean();
-    console.log('LTR: pPr=', short(pPr), '| activeLtr=', ltr.active, 'activeRtl=', rtl.active, '| DOM=', JSON.stringify(dom), '|', c.detail);
+    console.log('LTR: pPr=', short(pPr), '| activeLtr(DOM)=', ltr.active, 'activeRtl(DOM)=', rtl.active, '| DOM=', JSON.stringify(dom), '|', c.detail);
     const bidiOff = !/<w:bidi\s*\/>/.test(pPr);
     const bidiZero = /<w:bidi w:val="0"\/>/.test(pPr);
     if (!bidiOff) report.fail('כיוון פסקה משמאל לימין', `<w:bidi/> נשאר: ${short(pPr)} | ${c.detail}`);
     else if (!c.ok) report.fail('כיוון פסקה משמאל לימין', `נותרה שגיאה — ${c.detail}`);
-    else if (!ltr.active) report.partial('כיוון פסקה משמאל לימין',
-      `המסמך השתנה כראוי — ${bidiZero ? '<w:bidi w:val="0"/>' : 'ה-bidi הוסר'} וה-DOM ${JSON.stringify(dom)} — אבל החיווי הפעיל לא נדלק (הפקודה אינה מדווחת active)`);
+    else if (!ltr.active) report.fail('כיוון פסקה משמאל לימין',
+      `המסמך השתנה כראוי — ${bidiZero ? '<w:bidi w:val="0"/>' : 'ה-bidi הוסר'} וה-DOM ${JSON.stringify(dom)} — אבל החיווי (class="active") לא נדלק`);
+    else if (rtl.active) report.fail('כיוון פסקה משמאל לימין',
+      `„משמאל לימין" דלוק, אבל „מימין לשמאל" נשאר דלוק גם הוא — לא הדדי`);
     else report.pass('כיוון פסקה משמאל לימין', `${bidiZero ? '<w:bidi w:val="0"/>' : 'ה-bidi הוסר'}, DOM ${JSON.stringify(dom)}, חיווי דלוק`);
+  });
+
+  await step('כיוון פסקה — מעבר בין פסקאות מעדכן חי, בלי לחיצה נוספת', async () => {
+    // פסקה 3 (delta) הופכת ל-LTR בלחיצה; פסקה 1 (beta) נשארת RTL כברירת
+    // המחדל של המסמך. המעבר ביניהן דרך הסמן (לא דרך הכפתור) הוא בדיוק מה
+    // שההסבר בתיעוד תובע: „עם עדכון live כשהסמן זז”.
+    await caretAt(3);
+    await app.click('כיוון פסקה משמאל לימין');
+    await app.sleep(700);
+    const onDelta = { ltr: await app.state('כיוון פסקה משמאל לימין'), rtl: await app.state('כיוון פסקה מימין לשמאל') };
+
+    await caretAt(1); // beta — לא נגעו בה, נשארת bidi כברירת המחדל
+    await app.sleep(400); // > BIDI_SELECTION_DEBOUNCE_MS (150ms) שב-HomeTab.vue
+    const onBeta = { ltr: await app.state('כיוון פסקה משמאל לימין'), rtl: await app.state('כיוון פסקה מימין לשמאל') };
+
+    await caretAt(3); // חזרה ל-delta
+    await app.sleep(400);
+    const backOnDelta = { ltr: await app.state('כיוון פסקה משמאל לימין'), rtl: await app.state('כיוון פסקה מימין לשמאל') };
+
+    const c = await clean();
+    console.log('מעבר פסקאות: על delta=', JSON.stringify(onDelta), '| על beta=', JSON.stringify(onBeta), '| חזרה ל-delta=', JSON.stringify(backOnDelta), '|', c.detail);
+
+    if (!onDelta.ltr.active || onDelta.rtl.active) {
+      report.fail('כיוון פסקה — מעבר בין פסקאות', `מצב פתיחה שגוי על delta: ${JSON.stringify(onDelta)}`);
+    } else if (!onBeta.rtl.active || onBeta.ltr.active) {
+      report.fail('כיוון פסקה — מעבר בין פסקאות',
+        `מעבר לפסקת beta (RTL כברירת מחדל, בלי לחיצה) לא עדכן את החיווי: ${JSON.stringify(onBeta)}`);
+    } else if (!backOnDelta.ltr.active || backOnDelta.rtl.active) {
+      report.fail('כיוון פסקה — מעבר בין פסקאות',
+        `חזרה ל-delta (LTR) לא שחזרה את החיווי: ${JSON.stringify(backOnDelta)}`);
+    } else if (!c.ok) {
+      report.fail('כיוון פסקה — מעבר בין פסקאות', `שגיאה בשורת המצב — ${c.detail}`);
+    } else {
+      report.pass('כיוון פסקה — מעבר בין פסקאות',
+        'delta (LTR) → beta (RTL, בלי לחיצה) → חזרה ל-delta (LTR): שלושתם עדכנו נכון');
+    }
   });
 
   /* -------- סימני עיצוב -------- */
