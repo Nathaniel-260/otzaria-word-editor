@@ -100,6 +100,12 @@
         :viewport-source="rulerViewport"
         :reading="lineNumbering"
       />
+      <PilcrowOverlay
+        :host="rulerHost"
+        :viewport-source="rulerViewport"
+        :blocks="formattingMarksBlocks"
+        :visible="formattingMarksVisible"
+      />
     </div>
 
     <!-- תפריט הלחצן הימני. אחרי אזור המסמך ולפני הדיאלוגים, כמו ה-z-index שלו. -->
@@ -176,6 +182,7 @@ import DocumentRuler from './ui/shell/DocumentRuler.vue';
 import VerticalRuler from './ui/shell/VerticalRuler.vue';
 import PageBorderOverlay from './ui/shell/PageBorderOverlay.vue';
 import LineNumberOverlay from './ui/shell/LineNumberOverlay.vue';
+import PilcrowOverlay from './ui/shell/PilcrowOverlay.vue';
 import FindReplaceDialog from './ui/panels/FindReplaceDialog.vue';
 import AboutDialog from './ui/panels/AboutDialog.vue';
 import LinkDialog from './ui/panels/LinkDialog.vue';
@@ -257,6 +264,12 @@ import {
   type PageBorderModel,
   type PageBordersReading,
 } from './engine/page-setup';
+import {
+  createFormattingMarksModel,
+  readFormattingMarksBlocks,
+  type FormattingMarksModel,
+} from './engine/formatting-marks';
+import type { FormattingMarksBlock } from './engine/formatting-marks-layer';
 import { readParagraphIndents } from './engine/paragraph-format';
 import type { RulerUnit } from './engine/ruler-geometry';
 import {
@@ -474,6 +487,15 @@ const pageBorders = shallowRef<PageBordersReading | null>(null);
  * `null` כשאין `<w:lnNumType>` — השכבה מציירת אפס מספרים, לא מספור ריק.
  */
 const lineNumbering = shallowRef<LineNumberingReading | null>(null);
+/**
+ * בלוקי המסמך הנוכחיים ל-ui/shell/PilcrowOverlay.vue, או `null` כשסימני
+ * העיצוב כבויים (ברירת המחדל) או כשאין Document API. בשונה מ-`pageBorders`/
+ * `lineNumbering` (שמשקפים מה שקיים ב-docx), זה קלט לחישוב **גיאומטרי** —
+ * הציור בפועל תלוי גם ב-DOM (engine/formatting-marks-layer.ts).
+ */
+const formattingMarksBlocks = shallowRef<readonly FormattingMarksBlock[] | null>(null);
+/** מצב הפקד „הצג/הסתר סימני עיצוב", ל-`visible` של PilcrowOverlay.vue. */
+const formattingMarksVisible = ref(false);
 /** ההעדפה שנשמרת בין הפעלות. ראו host/settings.ts. */
 let rulerPreference = false;
 
@@ -497,6 +519,8 @@ let ruler: RulerModel | null = null;
 let pageBorderModel: PageBorderModel | null = null;
 /** קורא את מצב „מספרי שורות” של המסמך הפתוח. שייך ל-session, כמו גבולות עמוד. */
 let lineNumberModel: LineNumberingModel | null = null;
+/** קורא את בלוקי המסמך עבור „סימני עיצוב”. שייך ל-session, כמו שני אלה שמעל. */
+let formattingMarksModel: FormattingMarksModel | null = null;
 
 /** מרכוז העמוד בזום. יחיד למאגס — אינו מוחלף בין מסמכים. */
 let zoomCenter: ZoomCenter | null = null;
@@ -853,6 +877,47 @@ async function openDocument(file?: UserFile, options: OpenOptions = {}): Promise
       lineNumbering.value = null;
     }
   });
+
+  /**
+   * „סימני עיצוב” (¶) של ה-session: אותו רעיון כמו שני אלה שמעל, אבל המקור
+   * שונה — לא `sections.list()` אלא `doc.blocks.list()` (engine/formatting-marks.ts),
+   * ולכן `refreshNow()` **אינה** נקראת כאן: `setEnabled` למטה כבר קוראת
+   * כשהפקד דלוק, וקריאה נוספת כאן הייתה סורקת מסמך שלם בכל פתיחה גם כשסימני
+   * העיצוב כבויים (ברירת המחדל של הפקד).
+   */
+  const sessionFormattingMarks = createFormattingMarksModel({
+    read: () => readFormattingMarksBlocks(editor.superdoc),
+    onChange: (next) => {
+      formattingMarksBlocks.value = next;
+    },
+  });
+  formattingMarksModel = sessionFormattingMarks;
+  editor.onDispose(() => {
+    sessionFormattingMarks.dispose();
+    if (formattingMarksModel === sessionFormattingMarks) {
+      formattingMarksModel = null;
+      formattingMarksBlocks.value = null;
+    }
+  });
+
+  /**
+   * הצגה/הסתרה של סימני העיצוב מגיעה מהמנוע, בדיוק כמו הסרגל — אבל בלי
+   * העדפה נשמרת משלה (ברירת המחדל היא כבוי, בכל פתיחת מסמך, כמו ב-Word).
+   * בשונה מ„גבולות עמוד”/„מספרי שורות” (שהקריאה של section-level אינה
+   * מפעילה `onUpdate`, ולכן נזקקות לרענון מפורש ב-`reportCommand`), הפקודה
+   * `formatting-marks` **כן** מדווחת שינוי מצב תקין — נמדד (`docs/superdoc-2.10-review.md`):
+   * `active` מתהפך `false→true` על כל לחיצה — ולכן `adapter.observe` בלבד
+   * מספיק כאן.
+   */
+  editor.onDispose(
+    adapter.observe('formatting-marks', (state) => {
+      if (formattingMarksVisible.value === state.active) return;
+      formattingMarksVisible.value = state.active;
+      sessionFormattingMarks.setEnabled(state.active);
+    })
+  );
+  formattingMarksVisible.value = adapter.getState('formatting-marks').active;
+  sessionFormattingMarks.setEnabled(formattingMarksVisible.value);
 
   /**
    * מצב הסרגל מגיע מהמנוע ולא ממתג שלנו — ראו `isRulerVisible`. ההרשמה כאן
@@ -1867,6 +1932,10 @@ onMounted(async () => {
           pageBorderModel?.noteDocumentChanged();
           // וגם „מספרי שורות” — עריכת טקסט משנה את מספר השורות ואת מיקומן.
           lineNumberModel?.noteDocumentChanged();
+          // וגם „סימני עיצוב” — עריכת טקסט משנה את טקסט הבלוקים (ולכן את
+          // מיקום ה-¶); ה-`setEnabled`-guard הפנימי שלה דואג שזה לא יקרא
+          // כלום כשסימני העיצוב כבויים.
+          formattingMarksModel?.noteDocumentChanged();
           // וגם זוכר-ההפעלה: זה הרגע שבו נולדת עבודה שאינה בדיסק.
           keeper?.noteChange();
         },

@@ -15,6 +15,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   applyRulerIndents,
   createRulerModel,
+  directionFromText,
   measurePageRect,
   paintedHost,
   readRulerUnit,
@@ -57,6 +58,40 @@ afterEach(() => {
 });
 
 /* ------------------------------------------------------------------ */
+
+/**
+ * `directionFromText` — באג אמיתי שנתפס בצילום מסך אמיתי (לא בבדיקת יחידה):
+ * גרסה ראשונה קבעה כיוון לפי `getComputedStyle(container).direction` בלבד,
+ * וזה מיקם ¶ בקצה הלא-נכון על טקסט אנגלי בתוך פסקה RTL (ברירת המחדל של
+ * מסמך חדש כאן) — ה-¶ צויר **לפני** המילה הראשונה במקום **אחרי** האחרונה.
+ * התיקון: הכיוון נגזר מהתוכן עצמו (התו-החזק האחרון), ו-CSS הוא רק נפילה
+ * לאחור כשאין בתוכן אף תו חזק. ראו engine/formatting-marks-layer.ts
+ * ו-scripts/qa/pilcrow-overlay-qa.mjs.
+ */
+describe('directionFromText', () => {
+  it('טקסט אנגלי בלבד — ltr, גם אם יש בסופו פיסוק', () => {
+    expect(directionFromText('paragraph one is short')).toBe('ltr');
+    expect(directionFromText('hello.')).toBe('ltr');
+  });
+
+  it('טקסט עברי בלבד — rtl', () => {
+    expect(directionFromText('שלום עולם בעברית')).toBe('rtl');
+  });
+
+  it('התו-החזק **האחרון**, לא הראשון — קובע את הכיוון', () => {
+    // המקרה שנתפס בצילום המסך: פסקה אנגלית שגולשת, השורה האחרונה מסתיימת
+    // ב"page" — חייב rtl=false גם אם משהו אחר בתחילת הפסקה היה עברי.
+    expect(directionFromText('שלום world')).toBe('ltr');
+    expect(directionFromText('hello עולם')).toBe('rtl');
+  });
+
+  it('בלי אף תו חזק (ספרות/פיסוק/רווח בלבד, או placeholder של פסקה ריקה) — null, לא ניחוש', () => {
+    expect(directionFromText('123')).toBeNull();
+    expect(directionFromText('!? .,')).toBeNull();
+    expect(directionFromText(' ')).toBeNull();
+    expect(directionFromText('')).toBeNull();
+  });
+});
 
 describe('paintedHost', () => {
   it('מחזיר את ה-host של המנוע', () => {

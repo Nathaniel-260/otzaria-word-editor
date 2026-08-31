@@ -733,6 +733,282 @@ export function watchAllPageContentRects(options: AllPageContentRectsWatchOption
 }
 
 /* ------------------------------------------------------------------ */
+/* ריצות טקסט גולמיות בכל עמוד — לסימני עיצוב (¶)                     */
+/* ------------------------------------------------------------------ */
+
+/**
+ * ריצת טקסט אחת — כל Text node גלוי בעמוד, בסדר מסמך, כפי שהוא. קורא יחיד:
+ * engine/formatting-marks-layer.ts, שמיישר את הרצף הזה מול `doc.blocks.list()`
+ * כדי למקם ¶ בסוף כל פסקה — ראו ההנמקה המלאה שם, ואת המדידה שעומדת מאחוריה
+ * ב-docs/superdoc-2.10-review.md ("סימני עיצוב... נחקר לעומק"). זו הרחבה של
+ * אותה טכניקה בדיוק כמו `measurePageContentRects` למעלה — `TreeWalker`/`Range`
+ * תקניים על תוכן העמוד, לא selector אל מבנה פנימי של המנוע — רק ברזולוציה של
+ * צומת בודד במקום טווח-עמוד שלם, כי כאן צריך גם את הטקסט של כל צומת ולא רק
+ * את מלבנו.
+ */
+export interface PageTextRun {
+  /** `nodeValue` הגולמי של הצומת. */
+  text: string;
+  /** מלבן אחד לכל שורה חזותית שהצומת פרוס עליה (עטיפה), בסדר מסמך. */
+  rects: readonly RawTextRect[];
+  /**
+   * מאיזה צד "אחרי התו האחרון" של **הריצה הזאת עצמה** — ראו `directionFromText`
+   * למטה. לא כיוון הפסקה/המסמך: פסקה RTL עם ריצה שכולה אנגלית (למשל שם-פרטי
+   * או מספר) מצוירת מבפנים LTR למרות שהפסקה שלה RTL — נמדד (docs/superdoc-2.10-review.md):
+   * הסתמכות על `getComputedStyle(...).direction` בלבד מיקמה ¶ בקצה הלא-נכון
+   * בדיוק במקרה הזה (טקסט אנגלי בתוך פסקה RTL כברירת מחדל).
+   */
+  direction: 'ltr' | 'rtl';
+}
+
+/**
+ * תווים "חזקים" (bidi) בעברית/ערבית — קובעים RTL מעצם הסקריפט, בלי קשר
+ * ל-CSS. הטווחים (כתובים כ-\u כדי שיהיו ודאיים ולא תלויי-encoding של הקובץ
+ * עצמו): עברית (U+0590-U+05FF), ערבית ונגזרותיה (U+0600-U+06FF, U+0750-U+077F,
+ * U+08A0-U+08FF), וצורות-הצגה של שתיהן (U+FB1D-U+FDFF, U+FE70-U+FEFF).
+ */
+const RTL_STRONG_CHAR =
+  /[\u0590-\u05FF\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/;
+
+/**
+ * תווים "חזקים" בלטינית/יווני/קיריליות/CJK/הנגול — קובעים LTR מעצם הסקריפט.
+ * לא צריך להיות ממצה: כש-`directionFromText` לא מוצאת תו חזק כלל, הקורא
+ * נופל ל-CSS (`getComputedStyle`), לא ל-`ltr` קשיח.
+ */
+const LTR_STRONG_CHAR =
+  /[A-Za-z\u00C0-\u024F\u0370-\u03FF\u0400-\u04FF\u4E00-\u9FFF\uAC00-\uD7A3]/;
+
+/**
+ * כיוון הקריאה החזותי בפועל של **התוכן עצמו** — לא של הפסקה שהוא יושב בה.
+ * סורקת מהסוף להתחלה ומחזירה את הכיוון של התו-החזק האחרון (כך שסוגריים/
+ * פיסוק/רווח בסוף המחרוזת לא קובעים כיוון). `null` כשאין אף תו חזק (למשל
+ * רק ספרות/פיסוק, או ה-placeholder של פסקה ריקה) — הקורא נופל אז ל-CSS.
+ */
+export function directionFromText(text: string): 'ltr' | 'rtl' | null {
+  for (let i = text.length - 1; i >= 0; i--) {
+    const ch = text[i]!;
+    if (RTL_STRONG_CHAR.test(ch)) return 'rtl';
+    if (LTR_STRONG_CHAR.test(ch)) return 'ltr';
+  }
+  return null;
+}
+
+/** ריצות הטקסט הגולמיות של עמוד אחד, ביחס ל-`reference`. */
+export function measurePageTextRuns(pageEl: HTMLElement, reference: HTMLElement): readonly PageTextRun[] {
+  if (typeof document === 'undefined' || typeof document.createTreeWalker !== 'function') return [];
+
+  let walker: TreeWalker;
+  try {
+    walker = document.createTreeWalker(pageEl, NodeFilter.SHOW_TEXT);
+  } catch {
+    return [];
+  }
+
+  const referenceBox = reference.getBoundingClientRect();
+  const out: PageTextRun[] = [];
+
+  let node = walker.nextNode();
+  while (node) {
+    const value = node.nodeValue ?? '';
+    if (value.length === 0) {
+      node = walker.nextNode();
+      continue;
+    }
+
+    let range: Range;
+    try {
+      range = document.createRange();
+      range.selectNodeContents(node);
+    } catch {
+      node = walker.nextNode();
+      continue;
+    }
+
+    const rects: RawTextRect[] = [];
+    const list = range.getClientRects();
+    for (let i = 0; i < list.length; i++) {
+      const r = list[i]!;
+      if (!(r.width > 0) || !(r.height > 0)) continue;
+      rects.push({
+        leftPx: r.left - referenceBox.left,
+        topPx: r.top - referenceBox.top,
+        widthPx: r.width,
+        heightPx: r.height,
+      });
+    }
+
+    if (rects.length > 0) {
+      // קודם התוכן עצמו (ראו directionFromText) — ורק כשאין בו תו חזק כלל
+      // (ספרות/פיסוק בלבד, או ה-placeholder של פסקה ריקה) נופלים ל-CSS
+      // המחושב של האלמנט המכיל.
+      let direction = directionFromText(value);
+      if (direction === null) {
+        direction = 'ltr';
+        const container = node.parentElement;
+        if (container && typeof getComputedStyle === 'function') {
+          try {
+            direction = getComputedStyle(container).direction === 'rtl' ? 'rtl' : 'ltr';
+          } catch {
+            direction = 'ltr';
+          }
+        }
+      }
+      out.push({ text: value, rects, direction });
+    }
+
+    node = walker.nextNode();
+  }
+
+  return out;
+}
+
+/**
+ * ריצות הטקסט הגולמיות של **כל** העמודים, משורשרות לרשימה אחת בסדר מסמך —
+ * ולכן לפי `data-page-index` עולה, לא לפי סדר ה-DOM (וירטואליזציה יכולה
+ * לצייר עמודים שלא לפי סדר ההוספה). בלי המיון הזה יישור הרצף מול
+ * `blocks.list()` (שתמיד בסדר מסמך) היה נשבר במסמך רב-עמודי.
+ */
+export function measureAllPageTextRuns(
+  host: HTMLElement | null,
+  reference: HTMLElement | null,
+): readonly PageTextRun[] {
+  if (!host || !reference) return [];
+  const pages = host.querySelectorAll(`[${PAGE_INDEX_ATTRIBUTE}]`);
+  if (pages.length === 0) return [];
+
+  const ordered = Array.from(pages)
+    .filter((node): node is HTMLElement => node instanceof HTMLElement)
+    .map((el) => ({ el, pageIndex: Number(el.getAttribute(PAGE_INDEX_ATTRIBUTE)) }))
+    .filter((p) => Number.isInteger(p.pageIndex))
+    .sort((a, b) => a.pageIndex - b.pageIndex);
+
+  const out: PageTextRun[] = [];
+  for (const { el } of ordered) {
+    out.push(...measurePageTextRuns(el, reference));
+  }
+  return out;
+}
+
+/** כמו `sameContentRects`, על רשימת ריצות-טקסט שטוחה. */
+function sameTextRuns(a: readonly PageTextRun[], b: readonly PageTextRun[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i]!;
+    const y = b[i]!;
+    if (x.text !== y.text || x.direction !== y.direction || x.rects.length !== y.rects.length) return false;
+    for (let j = 0; j < x.rects.length; j++) {
+      const rx = x.rects[j]!;
+      const ry = y.rects[j]!;
+      if (
+        Math.abs(rx.leftPx - ry.leftPx) >= 0.5 ||
+        Math.abs(rx.topPx - ry.topPx) >= 0.5 ||
+        Math.abs(rx.widthPx - ry.widthPx) >= 0.5 ||
+        Math.abs(rx.heightPx - ry.heightPx) >= 0.5
+      ) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+export interface AllPageTextRunsWatchOptions {
+  /** מיכל הגלילה שהמנוע מצייר בתוכו. מגיע מ-`paintedHost`. */
+  host: HTMLElement | null;
+  /** האלמנט שביחס אליו נמדדות הריצות — שכבת הציור שלנו עצמה. */
+  reference: HTMLElement | null;
+  /** ה-controller, בשביל `viewport.observe`. */
+  ui?: ViewportSource | null;
+  onChange: (runs: readonly PageTextRun[]) => void;
+}
+
+/**
+ * כמו `watchAllPageContentRects`, על ריצות הטקסט הגולמיות של כל עמוד — אותה
+ * תשתית מעקב בדיוק (גלילה, שינוי גודל, `viewport.observe`, מדידות התיישבות
+ * ב-`SETTLE_DELAYS_MS`). כפילות מכוונת, מאותה סיבה שכבר הוסברה שם.
+ */
+export function watchAllPageTextRuns(options: AllPageTextRunsWatchOptions): PageRectWatch {
+  const { host, reference, ui, onChange } = options;
+  let last: readonly PageTextRun[] = [];
+  let frame: number | null = null;
+  let pending = false;
+  let disposed = false;
+
+  function measureNow(): void {
+    if (disposed) return;
+    const next = measureAllPageTextRuns(host, reference);
+    if (sameTextRuns(next, last)) return;
+    last = next;
+    onChange(next);
+  }
+
+  function schedule(): void {
+    if (disposed || pending) return;
+    if (typeof requestAnimationFrame !== 'function') {
+      measureNow();
+      return;
+    }
+    pending = true;
+    frame = requestAnimationFrame(() => {
+      pending = false;
+      frame = null;
+      measureNow();
+    });
+  }
+
+  host?.addEventListener('scroll', schedule, { passive: true });
+
+  let resize: ResizeObserver | null = null;
+  if (typeof ResizeObserver === 'function' && host) {
+    resize = new ResizeObserver(schedule);
+    resize.observe(host);
+    if (reference) resize.observe(reference);
+  }
+
+  let unobserve: (() => void) | null = null;
+  const observe = ui?.viewport?.observe;
+  if (typeof observe === 'function') {
+    try {
+      unobserve = observe.call(ui?.viewport, schedule) ?? null;
+    } catch {
+      unobserve = null;
+    }
+  }
+
+  const timers = new Set<ReturnType<typeof setTimeout>>();
+
+  function measure(): void {
+    schedule();
+    for (const delay of SETTLE_DELAYS_MS) {
+      const timer = setTimeout(() => {
+        timers.delete(timer);
+        schedule();
+      }, delay);
+      timers.add(timer);
+    }
+  }
+
+  measureNow();
+
+  return {
+    measure,
+    dispose() {
+      disposed = true;
+      host?.removeEventListener('scroll', schedule);
+      resize?.disconnect();
+      for (const timer of timers) clearTimeout(timer);
+      timers.clear();
+      if (frame !== null && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(frame);
+      try {
+        unobserve?.();
+      } catch {
+        /* ביטול מנוי שנכשל אינו סיבה להפיל פירוק */
+      }
+    },
+  };
+}
+
+/* ------------------------------------------------------------------ */
 /* יחידת המידה                                                         */
 /* ------------------------------------------------------------------ */
 
