@@ -760,7 +760,11 @@ const managesItems = computed(
 const recordings = shallowRef<readonly RecordedMacro[]>([]);
 const snippets = shallowRef<readonly Snippet[]>([]);
 const scripts = shallowRef<readonly SavedScript[]>([]);
-/** הכלים המובנים שהמעטפת רשמה על ה-kit (registerShulchanTools). לפני ההגדרה של TABS שקורא אותם. */
+/**
+ * הכלים המובנים שהמעטפת רשמה על ה-kit (registerShulchanTools). `TABS` קורא
+ * אותם אף שהוא מוגדר מעל: הוא `computed`, כלומר גופו רץ בקריאה הראשונה —
+ * הרבה אחרי שכל ההשמות של ה-setup הסתיימו.
+ */
 const tools = shallowRef<readonly BuiltinToolInfo[]>([]);
 
 /** הפריט הנבחר בלשונית הנוכחית, או `''`. */
