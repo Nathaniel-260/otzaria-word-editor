@@ -73,6 +73,7 @@ function harness(): Harness {
   };
 
   const deps: SessionKeeperDeps = {
+    id: 'test-doc',
     persist: async (snapshot) => {
       state.persisted.push(structuredClone(snapshot));
     },

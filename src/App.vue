@@ -854,6 +854,7 @@ function initSaveCoordinator(getSession: () => DocumentSession): SaveCoordinator
  */
 function initSessionKeeper(getSession: () => DocumentSession, id: DocumentSessionId): SessionKeeper {
   return createSessionKeeper({
+    id,
     persist: (state) => persistCombinedSession(getSession(), state),
     exportDocument: () => {
       const active = getSession().swap.current;
@@ -899,7 +900,11 @@ function initSessionKeeper(getSession: () => DocumentSession, id: DocumentSessio
 function persistCombinedSession(session: DocumentSession, state: SessionState): Promise<void> {
   const documents: SessionState['documents'] = [];
   for (const other of sessions.values()) {
-    const entry = (other === session ? state : other.keeper.state).documents[0];
+    // `activeEntry` ולא `.documents[0]`: זוכר שאימץ רשומה שמורה (`adopt`,
+    // session-keeper.ts) עשוי להחזיק כמה מסמכים מהפעלה קודמת מרובת-טאבים —
+    // האינדקס הראשון אינו בהכרח זה ששייך לטאב הזה. `activeEntry` מוצא לפי
+    // מזהה, בדיוק כמו `emptySessionWithId` שמבטיחה שהמזהה הזה קיים תמיד.
+    const entry = activeEntry(other === session ? state : other.keeper.state);
     if (entry) documents.push(entry);
   }
   const active = activeSession.value ?? session;

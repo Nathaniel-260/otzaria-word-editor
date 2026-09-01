@@ -136,7 +136,21 @@ export function emptyDocumentEntry(id: DocumentSessionId = createDocumentSession
  * ישנה אותה לכולם.
  */
 export function emptySession(): SessionState {
-  const entry = emptyDocumentEntry();
+  return emptySessionWithId(createDocumentSessionId());
+}
+
+/**
+ * כמו `emptySession`, אבל עם מזהה נתון ולא אחד שממציאה לעצמה.
+ *
+ * `SessionKeeper` (session-keeper.ts) חייב להשתמש בזה, ולא ב-`emptySession()`:
+ * הוא נבנה עם מזהה הטאב שלו (`initSessionKeeper`, App.vue) כדי שהטיוטה תיכתב
+ * לנתיב הנכון, אבל בלי הפונקציה הזאת ה-state הפנימי שלו היה פותח רשומה עם
+ * מזהה **אחר** לגמרי — ואז `activeId` שנכתב ל-storage לא היה מצביע על אף
+ * רשומה באוסף. שחזור בודד נסבל (`normalizeSession` נופל לרשומה הראשונה), אבל
+ * ברשומה עם כמה טאבים זה בדיוק ה„מי היה פעיל” שנשבר.
+ */
+export function emptySessionWithId(id: DocumentSessionId): SessionState {
+  const entry = emptyDocumentEntry(id);
   return { version: SESSION_VERSION, documents: [entry], activeId: entry.id, view: defaultView() };
 }
 

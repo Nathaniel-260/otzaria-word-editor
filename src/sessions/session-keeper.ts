@@ -54,8 +54,9 @@ import type { CaretAnchor } from '../engine/caret-anchor';
 import type { WorkspaceWrite } from '../host/workspace';
 import {
   activeEntry,
-  emptySession,
+  emptySessionWithId,
   withActiveEntry,
+  type DocumentSessionId,
   type SessionDocument,
   type SessionState,
   type SessionView,
@@ -78,6 +79,13 @@ export const DRAFT_DELAY_MS = 10_000;
 export const DRAFT_MAX_WAIT_MS = 60_000;
 
 export interface SessionKeeperDeps {
+  /**
+   * מזהה הטאב שהזוכר הזה שייך לו (`DocumentSession.id`, App.vue). זורע בו
+   * את ה-state הפנימי (`emptySessionWithId`) — לא `emptySession()` הסתמי —
+   * כדי ש-`activeId` שנכתב ל-storage תמיד יצביע על רשומה שבאמת קיימת
+   * באוסף שלו. ראו את ההנמקה המלאה ליד `emptySessionWithId`.
+   */
+  id: DocumentSessionId;
   /** כותבת את הרשומה. כשל אינו מדווח לממשק — הוא כבר בלוג. */
   persist: (state: SessionState) => Promise<void>;
   /** מייצא את המסמך הפעיל, לטיוטה. */
@@ -146,7 +154,7 @@ export interface SessionKeeper {
 }
 
 export function createSessionKeeper(deps: SessionKeeperDeps): SessionKeeper {
-  let state: SessionState = emptySession();
+  let state: SessionState = emptySessionWithId(deps.id);
   let disposed = false;
 
   let persistTimer: ReturnType<typeof setTimeout> | undefined;
@@ -335,7 +343,7 @@ export function createSessionKeeper(deps: SessionKeeperDeps): SessionKeeper {
     },
 
     adopt(loaded) {
-      state = loaded ?? emptySession();
+      state = loaded ?? emptySessionWithId(deps.id);
     },
 
     setDocument(document, options = {}) {
