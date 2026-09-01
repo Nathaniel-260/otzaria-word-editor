@@ -2774,6 +2774,15 @@ onMounted(async () => {
     const stored = await loadPreviousSession();
     const restoredId = activeEntry(stored)?.id ?? createDocumentSessionId();
 
+    // טיוטות של טאבים שלא שוחזרו (רק הפעיל משוחזר, ראו למעלה) לעולם לא
+    // ייקראו שוב — בלי המחיקה כאן הן נשארות במרחב הפרטי לצמיתות. Best-effort
+    // ואינו חוסם עלייה: כשל מחיקה משאיר קובץ יתום, לא נתון פגום.
+    if (stored) {
+      for (const entry of stored.documents) {
+        if (entry.id !== restoredId && entry.draft) void deleteWorkspaceEntry(entry.draft.path);
+      }
+    }
+
     const firstSession = createNewDocumentSession(restoredId);
     activateTab(firstSession);
 
