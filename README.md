@@ -26,13 +26,14 @@
 
 ## פיתוח
 
-נדרש Node 20–24, כמו ב‑CI; הגרסה רשומה ב‑`.nvmrc` (`nvm use`). מ‑Node 26 יש
+`engines` דורש Node ‏`>=20 <26`; ה‑CI רץ על מה שרשום ב‑`.nvmrc` — היום 20 (`nvm use`). מ‑Node 26 יש
 `localStorage` גלובלי שמאפיל על זה של jsdom, וחבילת הטסטים נופלת עליו.
 
 ```
 npm ci
 npm run dev       # שרת פיתוח, עם דמה של מאחז אוצריא
-npm run verify    # typecheck, טסטים, build, ושערי dist / boot / fonts / rtl / startup / readout / session / sdk
+npm run verify    # typecheck, טסטים, build, וארבעה־עשר שערים: dist / boot / fonts / icons /
+                  # rtl / ruler / startup / gutter / readout / tooltip / ribbon / session / menu / sdk
 ```
 
 `npm test` מריץ את חבילת ה‑vitest. הבדיקות אינן מרימות את מנוע ה‑DOCX — הוא דורש workers ו‑canvas אמיתיים — ולכן ריצה חיה נבדקת בשערי Windows המתועדים ב‑[docs/spike-windows.md](docs/spike-windows.md).
@@ -216,7 +217,7 @@ const resolved = resolution.status === "uniform" ? resolution.value : void 0;
 - `src/sessions/` — פתיחת מסמכים, החלפת עורך, רכז השמירה, וזוכר ההפעלה.
 - `src/ui/` — הרצועה, המעטפת, הדיאלוגים והאייקונים.
 
-`public/` הוא מה שנארז כמו שהוא, ובראשו ה‑manifest. `scripts/` הם שערי הבנייה — `check:dist` ואחיו — ש‑`npm run verify` וה‑CI מריצים. `tests/` מחולק ל‑unit, contract ו‑component. `docs/` מכיל את מסמכי ה‑spike ואת [word-plugin-brief.md](docs/word-plugin-brief.md), תמצית ההחלטות התשתיתיות והרישוי.
+`public/` הוא מה שנארז כמו שהוא, ובראשו ה‑manifest. `scripts/` הם שערי הבנייה — `check:dist` ואחיו — ש‑`npm run verify` וה‑CI מריצים. `tests/` מחולק ל‑unit, contract ו‑component, לצד `support/` (כפילים משותפים). ב‑`docs/` המסמך שנקרא ראשון הוא [engine-gaps.md](docs/engine-gaps.md) — כל פער שנמדד במנוע ומה לא נשלח בגללו, כדי שאיש לא יחקור שוב את מה שכבר נמדד; לצדו מסמכי ה‑spike, מסמכי התוכנית, ו‑[word-plugin-brief.md](docs/word-plugin-brief.md), תמצית ההחלטות התשתיתיות והרישוי.
 
 ## רישיון
 
@@ -224,7 +225,7 @@ const resolved = resolution.status === "uniform" ? resolution.value : void 0;
 
 הבחירה ב‑AGPL נובעת מהמנוע: [SuperDoc](https://www.superdoc.dev/) מופץ תחת AGPL‑3.0, ולכן גם התוסף חייב להיות AGPL.
 
-אייקוני הרצועה הם היוצא מן הכלל היחיד לכיוון השני: 72 מתוך 77 האייקונים
+אייקוני הרצועה הם היוצא מן הכלל היחיד לכיוון השני: 72 מתוך 78 האייקונים
 ב‑`src/ui/icons/icons.ts` הם ה‑path data המקורי של
 [Fluent System Icons](https://github.com/microsoft/fluentui-system-icons) של Microsoft,
 שמופצים תחת **MIT**. ה‑MIT מתיר שילוב ב‑AGPL, ומחייב שנוסח הרישיון והקרדיט יופצו עם כל
@@ -236,8 +237,9 @@ const resolved = resolution.status === "uniform" ? resolution.value : void 0;
 ומאמת שטבלת אייקון‑לפקד נוקבת בשם הנכון. השער נכשל גם על אייקון מצויר בבית שאינו
 ברשימת החריגים — כך נוסף בעבר אייקון בלי שנרשם בהצהרה — וגם על חריג שכבר יש לו
 מקבילה. אייקון אחד, `toc`, הוא נגזרת ולא העתק: הגליף כולו משוקף — דף, קיפול
-ותבליטים — כדי שייקרא עברית, ועליו השער מאמת ש‑`d` זהה למקור **ושיש transform**,
-כי בלי שיקוף זהו העתק ומקומו בטבלה.
+ותבליטים — כדי שייקרא עברית, ועליו השער מאמת ש‑`d` זהה למקור **ושה‑`transform` הוא
+בדיוק המחרוזת שנרשמה ב‑`DERIVED`**. „יש transform” לא הספיק: שיקוף שהשתנה היה עובר
+בשקט. השער נכשל גם על `transform` שיושב על אייקון שאינו רשום כנגזר.
 החריגים והנימוק לכל אחד, וטבלת אייקון‑לפקד המלאה,
 ב‑[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
