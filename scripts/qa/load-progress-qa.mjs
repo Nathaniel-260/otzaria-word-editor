@@ -14,6 +14,19 @@
  * הוא גם המסלול שבו הביטול נבדק במלואו: הוא חייב למנוע מהפתיחה להמשיך למנוע
  * בכלל, ולא רק לזרוק את התוצאה שלה.
  *
+ * ## „דלג” נמדד על הטאבים, לא על הכותרת הפעילה
+ *
+ * שלוש הטענות סביב „דלג” נכתבו כשלתוסף היה מסמך אחד, והן דרשו שהכותרת תישאר
+ * כשהייתה ושיהיה host יחיד. מאז „פתח קובץ” **מפעיל טאב חדש** לפני הפתיחה
+ * (App.vue, מיד לפני `openDocument`), ולכן שלושתן נכשלו על התנהגות תקינה:
+ * הכותרת הפעילה היא של הטאב החדש, ויש host לכל טאב.
+ *
+ * מה שנמדד עכשיו הוא מה שבאמת אסור לקרות: שהמסמך הקודם ייעלם (הוא חייב
+ * להישאר בטאב שלו), שיישאר host **עודף** מעבר למספר הטאבים (זה של הפתיחה
+ * שנזנחה), ושהפתיחה שבוטלה תתיישב באיחור (השם שנזנח אסור שיופיע בשום טאב).
+ * הטאב החדש עם „מסמך חדש” בתוכו אינו כשל — זה `onSkipLoad` שמוצא טאב בלי
+ * מסמך ופותח בו אחד ריק, בכוונה.
+ *
  *   node scripts/qa/load-progress-qa.mjs
  */
 import { openApp, createReport, sleep } from './harness.mjs';
@@ -76,6 +89,13 @@ async function armPicker(app, name) {
 const samples = (app) => app.js('JSON.stringify(window.__qaLoad)').then(JSON.parse);
 const titleNow = (app) => app.js("document.querySelector('.doc-title-input')?.value ?? null");
 const hostCount = (app) => app.js("document.querySelectorAll('.editor-stack__host').length");
+/** תוויות הטאבים. ה-`×` של כפתור הסגירה הוא חלק מה-textContent ולכן נחתך. */
+const tabTitles = (app) =>
+  app
+    .js(
+      'JSON.stringify(Array.from(document.querySelectorAll(".word-doctab")).map(function (n) { return (n.textContent || "").trim().replace(/\u00d7$/, ""); }))',
+    )
+    .then(JSON.parse);
 
 /** הדגימות שבהן המחוון היה על המסך. */
 const shown = (all) => all.filter((s) => s.on);
@@ -163,7 +183,8 @@ async function main() {
     /* ------------------------------------------------------------------ */
     await (async function stageSkip() {
       const before = await titleNow(app);
-      await armPicker(app, 'ננטש.docx');
+      const loadName = 'ננטש.docx';
+      await armPicker(app, loadName);
       await app.js('window.__qaSlow.ms = 6000; window.__qaLoadReset()');
 
       // הלחיצה נזרקת ואינה מומתנת: הפתיחה נמשכת ברקע, וזה בדיוק המצב שבו
@@ -193,27 +214,36 @@ async function main() {
       }
 
       const gone = !(await app.exists('.status-load'));
-      const kept = after === before && alive === 'yes' && hosts === 1;
+      const tabs = await tabTitles(app);
+      // „המסמך לא אבד” נמדד על הטאבים ולא על הכותרת הפעילה: „פתח קובץ” מפעיל
+      // טאב חדש (App.vue, לפני `openDocument`), ולכן המסמך הקודם ממשיך
+      // להתקיים — בטאב שלו — גם כשהכותרת הפעילה היא של הטאב החדש.
+      const kept = tabs.includes(before) && alive === 'yes';
       const said = typeof st?.text === 'string' && st.text.includes('הופסקה');
       const quiet = st?.isError !== true;
 
       if (gone && kept && said && quiet) {
         report.pass(
           '„דלג” מפסיק בלי לאבד את המסמך הפתוח',
-          `הפס ירד, „${after}” נשאר על המסך, ושורת המצב אמרה „${st.text}” בלי שגיאה`,
+          `הפס ירד, „${before}” עדיין בטאב שלו (${tabs.join(' | ')}), ושורת המצב אמרה „${st.text}” בלי שגיאה`,
         );
       } else {
         report.fail(
           '„דלג” מפסיק בלי לאבד את המסמך הפתוח',
-          `פס ירד=${gone} מסמך נשמר=${kept} הודעה=${JSON.stringify(st)}`,
+          `פס ירד=${gone} מסמך נשמר=${kept} טאבים=${JSON.stringify(tabs)} כותרת=${after} הודעה=${JSON.stringify(st)}`,
         );
       }
 
       // ה-host של המועמד שנזנח אינו נשאר על המסך, וגם לא מתחת למסמך הפעיל.
-      if (hosts === 1) {
-        report.pass('הפתיחה שנזנחה מפונה', 'נשאר host אחד — של המסמך הפעיל');
+      // מול מספר הטאבים ולא מול 1: כל טאב מחזיק host משלו, ומה שנמדד כאן הוא
+      // שאין host **עודף** — זה של הפתיחה שנזנחה.
+      if (hosts === tabs.length) {
+        report.pass('הפתיחה שנזנחה מפונה', `${hosts} hosts ל-${tabs.length} טאבים — אין host עודף`);
       } else {
-        report.fail('הפתיחה שנזנחה מפונה', `${hosts} hosts ב-editor-stack אחרי הביטול`);
+        report.fail(
+          'הפתיחה שנזנחה מפונה',
+          `${hosts} hosts ב-editor-stack מול ${tabs.length} טאבים אחרי הביטול`,
+        );
       }
 
       // ולא הגיע למנוע בכלל: המשתמש ביטל בזמן שהבייטים נקראו, ומי שממשיך
@@ -226,13 +256,22 @@ async function main() {
       const lateAlive = await app.js(
         "window.__otzariaEditor && window.__otzariaEditor.superdoc ? 'yes' : 'no'",
       );
-      if (late === before && lateAlive === 'yes') {
+      // מה שנמדד הוא שהמסמך שנזנח **אינו מופיע** — לא שהכותרת חזרה לקודמת:
+      // הטאב הפעיל הוא החדש, ובו „מסמך חדש”. טאב שיקבל את „ננטש” באיחור הוא
+      // בדיוק הכשל שהשורה הזאת שומרת מפניו.
+      const lateTabs = await tabTitles(app);
+      const abandoned = loadName.replace(/\.docx$/, '');
+      const settledLate = late === abandoned || lateTabs.includes(abandoned);
+      if (!settledLate && lateAlive === 'yes' && lateTabs.includes(before)) {
         report.pass(
           'הפתיחה שבוטלה אינה מתיישבת באיחור',
-          `גם אחרי שהקריאה הסתיימה, „${late}” הוא המסמך הפתוח`,
+          `גם אחרי שהקריאה הסתיימה „${abandoned}” אינו על המסך, ו-„${before}” עדיין בטאב שלו`,
         );
       } else {
-        report.fail('הפתיחה שבוטלה אינה מתיישבת באיחור', `כותרת=${late} (צפוי ${before})`);
+        report.fail(
+          'הפתיחה שבוטלה אינה מתיישבת באיחור',
+          `כותרת=${late} טאבים=${JSON.stringify(lateTabs)} (״${abandoned}״ לא אמור להופיע, ״${before}״ כן)`,
+        );
       }
     })();
 
