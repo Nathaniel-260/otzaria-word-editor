@@ -211,13 +211,19 @@ export async function openPage(fileUrl, { port = Number(process.env.CDP_PORT ?? 
      *
      * ## הכתובת המלאה, ולא שם הקובץ
      *
-     * ב-macOS ‏`/tmp` הוא קישור סמלי ל-`/private/tmp`, ו-Chrome מדווח את
-     * הכתובת המפורשת — ולכן ההשוואה היא אחרי `realpath` משני הצדדים.
      * שם הקובץ לבדו אינו מספיק: `/tmp/mainclean/dist/tooltip-tmp.html`
      * ו-`/tmp/pr16wt/dist/tooltip-tmp.html` הם אותו basename, וזו בדיוק
      * ההשוואה main-מול-ענף שמריצים כשבודקים ששער נופל על הקוד הישן.
+     *
+     * **שתי הצורות** של אותו נתיב, ולא רק זו שאחרי `realpath`: ‏Chrome אינו
+     * מבטיח לפתור קישורים סמליים בכתובת שהוא מדווח. ב-macOS ‏`$TMPDIR` הוא
+     * `/var/…` שהוא קישור ל-`/private/var/…`, ונמדד שהוא מדווח דווקא את
+     * הראשון — ההשוואה החד-צדדית הפילה את `check:ruler` על „דפדפן אחר”.
+     * זו עדיין השוואת נתיב מלא ומדויק: אותו קובץ באיות אחר, ולא היתר לדף זר.
      */
+    const asked = pathToFileURL(fileURLToPath(fileUrl)).href;
     const wanted = pathToFileURL(realpathSync(fileURLToPath(fileUrl))).href;
+    const accepted = new Set([asked, wanted]);
     let targets = null;
     let strangers = 0;
     for (let i = 0; i < 60 && !targets; i++) {
@@ -229,7 +235,7 @@ export async function openPage(fileUrl, { port = Number(process.env.CDP_PORT ?? 
           const response = await fetch(`http://${host}:${port}/json/list`);
           const list = await response.json();
           const pages = list.filter((t) => t.type === 'page' && t.url.startsWith('file://'));
-          const mine = pages.filter((t) => t.url === wanted);
+          const mine = pages.filter((t) => accepted.has(t.url));
           strangers = pages.length - mine.length;
           if (mine.length) {
             targets = mine;
@@ -244,7 +250,8 @@ export async function openPage(fileUrl, { port = Number(process.env.CDP_PORT ?? 
     if (!targets) {
       throw new Error(
         strangers > 0
-          ? `CDP: ביציאה ${port} יש דפדפן אחר עם ${strangers} דפים, ואין בו ${wanted}. ` +
+          ? `CDP: ביציאה ${port} יש דפדפן אחר עם ${strangers} דפים, ואין בו ` +
+            `${[...accepted].join(' / ')}. ` +
             'כנראה נשאר מריצה קודמת — `pkill -f otzaria-word-cdp`, או CDP_PORT אחר.'
           : 'CDP לא נפתח',
       );
