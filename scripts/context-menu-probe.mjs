@@ -236,6 +236,18 @@ const INSTALL = `(() => {
 
 const page = await openPage(`file:///${PROBE.split('\\').join('/')}`, { label: 'context-menu' });
 const { cdp, close } = page;
+
+/* חלון מפורש, כמו ב-ribbon-geometry-probe. ‏Chrome ב-headless נותן כאן
+   756x413 — נמדד — ואחרי הרצועה ורצועת הטאבים נשארות ארבע שורות טקסט
+   בתוך החלון, בזמן שהמדידה דורשת ארבע נקודות שנוחתות על טקסט. גבול כזה
+   נופל על שינוי גובה כלשהו בממשק ומדווח „המדידה לא רצה”, וזה בדיוק מה
+   שקרה. הגודל אינו נמדד כאן — הוא רק צריך להכיל את מה שנמדד. */
+await cdp.send('Emulation.setDeviceMetricsOverride', {
+  width: 1440,
+  height: 900,
+  deviceScaleFactor: 1,
+  mobile: false,
+});
 const errors = [];
 const notes = [];
 let setupFailure = null;
