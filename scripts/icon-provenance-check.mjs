@@ -71,8 +71,8 @@ const DERIVED = new Map([
     'toc',
     {
       from: 'document_bullet_list',
-      order: [1, 0],
-      why: 'התבליטים משוקפים סביב x=10 כדי שיישבו בימין, כמו ב-clipboard_bullet_list_rtl',
+      order: [0],
+      why: 'הגליף כולו משוקף סביב x=10 — דף, קיפול ותבליטים — כמו text_bullet_list_rtl',
     },
   ],
 ]);
@@ -223,9 +223,15 @@ if (!pkg.dir) {
     }
     console.log(`✓ ${exact} אייקונים תואמים byte-for-byte לגליף שהטבלה נוקבת בו`);
 
-    // הנגזרים: הטענה אינה „אותה מחרוזת” אלא „אותם קווים, מסודרים מחדש”.
-    // שרשור ה-`d` שלנו לפי `order` חייב להחזיר את ה-`d` של גליף המקור בדיוק.
-    // שינוי של תו אחד בקו — כלומר ציור מחדש — נופל כאן.
+    // הנגזרים: הטענה אינה „אותה מחרוזת” אלא „אותם קווים בדיוק, בסידור אחר”.
+    // שתי בדיקות, ושתיהן נדרשות:
+    //
+    // 1. שרשור ה-`d` שלנו לפי `order` מחזיר את ה-`d` של גליף המקור בדיוק.
+    //    שינוי של תו אחד בקו — כלומר ציור מחדש — נופל כאן, וזה ההבדל שקובע
+    //    אם ה-MIT מכסה את מה שנלקח.
+    // 2. יש `transform` ב-SVG. בלעדיו הנגזרת אינה נגזרת אלא **העתק**, ומקומה
+    //    בטבלת ההעתקים שבמסמך ולא ברשימה הזאת — רשימה שמרפה את ההשוואה
+    //    ה-byte-for-byte אסור לה לכסות אייקון שאינו זקוק להקלה.
     for (const [name, spec] of DERIVED) {
       const raw = icons.get(name);
       if (raw === undefined) continue;
@@ -237,6 +243,10 @@ if (!pkg.dir) {
       const parts = pathList(raw);
       if (parts.length !== spec.order.length) {
         problems.push(`${name}: ${parts.length} חלקי path, ו-order מתאר ${spec.order.length}`);
+        continue;
+      }
+      if (!/\stransform="/.test(raw)) {
+        problems.push(`${name}: מוצהר כנגזרת ואין בו transform — זהו העתק, ומקומו בטבלה`);
         continue;
       }
       const rebuilt = spec.order.map((i) => parts[i]).join('');
