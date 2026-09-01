@@ -366,8 +366,11 @@ describe('אבחון: למה המארח לא ענה', () => {
     warn.mockRestore();
   });
 
-  it('הרשאה מאושרת מפנה לגרסת המארח ולא להרשאות', async () => {
+  it('הרשאה מאושרת מפנה לגרסת המארח ולא להרשאות — ובנימה של דיווח, לא אזהרה', async () => {
+    // `info` ולא `warn`: כל עוד המתודה אינה קיימת באוצריא זה המצב של כל
+    // הפעלה, ואזהרה על מה שתמיד קורה היא מה שמאמן להתעלם מהקונסולה.
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const info = vi.spyOn(console, 'info').mockImplementation(() => {});
     await loadInstalledFonts({
       call: hostWithPermissions([FONTS_PERMISSION]),
       available: nothingInstalled,
@@ -375,9 +378,11 @@ describe('אבחון: למה המארח לא ענה', () => {
     });
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    const said = warn.mock.calls.map((call) => String(call[0])).join(' ');
+    const said = info.mock.calls.map((call) => String(call[0])).join(' ');
     expect(said).toContain('אינה מכירה את המתודה');
+    expect(warn).not.toHaveBeenCalled();
     warn.mockRestore();
+    info.mockRestore();
   });
 
   it('מארח שענה — אין אבחון ואין רעש', async () => {

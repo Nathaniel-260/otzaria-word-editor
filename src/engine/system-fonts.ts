@@ -225,6 +225,10 @@ export const FONTS_PERMISSION = 'app.info.read';
  * מה אושר, מפני ש-`tryCall` מחזיר `null` גם על סירוב הרשאה — ואם המתודה תיכנס
  * יום אחד תחת הרשאה שאינה בסיס, זה ההבדל בין „לשדרג את אוצריא” לבין „לאשר”.
  *
+ * `info` ולא `warn` על הסיבה הצפויה, ו-`warn` על מה שאינו צפוי: כל עוד המתודה
+ * אינה קיימת באוצריא זה המצב של **כל** הפעלה, ואזהרה על מה שתמיד קורה היא מה
+ * שמאמן אנשים להפסיק לקרוא את הקונסולה.
+ *
  * אינה חוסמת דבר ואינה מפילה דבר — היא רצה בלי `await` ובולעת כל כשל. אבחון
  * שיכול להפיל מנייה גרוע מהיעדר אבחון.
  */
@@ -234,13 +238,16 @@ async function explainHostGap(call: typeof tryCall): Promise<void> {
     const granted = Array.isArray(info?.permissions) ? (info.permissions as unknown[]) : null;
     const has = granted?.some((name) => name === FONTS_PERMISSION) ?? false;
 
+    const head = '[otzaria-word] fonts.listInstalled לא החזירה רשימה — הבורר נופל למדידה מקורבת.';
+    if (granted !== null && has) {
+      console.info(`${head} ההרשאה ${FONTS_PERMISSION} מאושרת, ולכן זו גרסת אוצריא שאינה מכירה את המתודה — הצפוי כרגע.`);
+      return;
+    }
     console.warn(
-      `[otzaria-word] fonts.listInstalled לא החזירה רשימה — הבורר נופל למדידה מקורבת. ` +
+      `${head} ` +
         (granted === null
           ? 'לא ניתן לקרוא את ההרשאות שאושרו.'
-          : has
-            ? `ההרשאה ${FONTS_PERMISSION} מאושרת, ולכן זו גרסת אוצריא שאינה מכירה את המתודה — הצפוי כרגע.`
-            : `ההרשאה ${FONTS_PERMISSION} אינה מאושרת. אושרו: ${granted.join(', ')}`),
+          : `ההרשאה ${FONTS_PERMISSION} אינה מאושרת. אושרו: ${granted.join(', ')}`),
     );
   } catch {
     /* אבחון שנכשל אינו סיבה לרעש נוסף */
