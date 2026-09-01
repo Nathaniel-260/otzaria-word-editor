@@ -295,15 +295,25 @@ try {
   failures.push(`ההפעלה הראשונה נכשלה: ${error.message}`);
 }
 
+/**
+ * רשומת המסמך הפעיל מתוך רשומה שמורה. הצורה (`version: 2`, session-state.ts)
+ * היא אוסף `documents` עם `activeId` — לא `document`/`caret` שטוחים כמו
+ * לפני ריבוי המסמכים. השער הזה בודק מסמך יחיד, ולכן הפעיל הוא תמיד היחיד.
+ */
+function activeDocumentEntry(record) {
+  return record.documents?.find((entry) => entry.id === record.activeId) ?? null;
+}
+
 if (saved) {
   const files = Object.keys(saved.files ?? {});
   if (files.length === 0) failures.push('לא נכתבה טיוטה כלל — אין מה לשחזר');
   if (!saved.storage?.session) failures.push('לא נכתבה רשומת הפעלה');
   else {
     const record = JSON.parse(saved.storage.session);
+    const entry = activeDocumentEntry(record);
     notes.push(
       `נשמר: טיוטה ${files.join(', ') || '—'}; זום ${record.view?.zoom}; ` +
-        `לשונית ${record.view?.ribbonTab}; סמן ${JSON.stringify(record.caret?.start ?? null)}`,
+        `לשונית ${record.view?.ribbonTab}; סמן ${JSON.stringify(entry?.caret?.start ?? null)}`,
     );
   }
 }
@@ -332,6 +342,7 @@ if (saved && failures.length === 0) {
 // ---------------------------------------------------------------------------
 if (restored) {
   const record = JSON.parse(saved.storage.session);
+  const entry = activeDocumentEntry(record);
 
   if (!restored.text.includes(TYPED)) {
     failures.push(
@@ -347,7 +358,7 @@ if (restored) {
     failures.push(`הלשונית לא חזרה: ציפינו ל-${TAB}, התקבלה ${JSON.stringify(restored.tab)}`);
   }
 
-  const savedCaret = record.caret?.start ?? null;
+  const savedCaret = entry?.caret?.start ?? null;
   if (!savedCaret) {
     failures.push('מקום הסמן לא נשמר בכלל');
   } else if (!restored.caret) {
