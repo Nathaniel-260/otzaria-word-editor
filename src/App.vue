@@ -28,6 +28,18 @@
       @update-title="onTitleUpdate"
     />
 
+    <!--
+      רצועת טאבים — מציגה כרגע טאב יחיד למסמך הפעיל בפועל (ריבוי מסמכים אמיתי
+      הוא חלק 3, open-flow). `close-tab`/`new-tab` הם TODO ל-open-flow.
+    -->
+    <DocumentTabsBar
+      :tabs="documentTabs"
+      :active-id="documentIdView"
+      @select-tab="onDocumentTabSelect"
+      @close-tab="onDocumentTabClose"
+      @new-tab="onDocumentTabNew"
+    />
+
     <!-- רצועת הכלים (Ribbon) -->
     <Ribbon
       v-model:active-tab="ribbonTab"
@@ -194,6 +206,7 @@
 <script setup lang="ts">
 import { ref, provide, onMounted, onUnmounted, computed, shallowRef, watch, watchEffect } from 'vue';
 import TitleBar from './ui/shell/TitleBar.vue';
+import DocumentTabsBar, { type DocumentTabItem } from './ui/shell/DocumentTabsBar.vue';
 import Ribbon from './ui/ribbon/Ribbon.vue';
 import StatusBar from './ui/shell/StatusBar.vue';
 import DocumentRuler from './ui/shell/DocumentRuler.vue';
@@ -660,6 +673,12 @@ let keeper: SessionKeeper | null = null;
  * נשאר קבוע לכל אורך ההפעלה, בדיוק כמו ש-`DRAFT_PATH` הקבוע היה קבוע קודם.
  */
 let documentId: DocumentSessionId = createDocumentSessionId();
+/**
+ * מראה עבור רצועת הטאבים בלבד: `documentId` הוא משתנה רגיל ואינו reactive,
+ * ומתעדכן בפועל פעם אחת ב-`onMounted` מרשומת ההפעלה — בלי המראה הזה הטאב
+ * הראשון היה מוצג עם המזהה הזמני שקדם לטעינה.
+ */
+const documentIdView = ref<DocumentSessionId>(documentId);
 /** מבטל את ההאזנה למעבר לרקע. */
 let hiddenListener: (() => void) | null = null;
 let contextMenuListener: (() => void) | null = null;
@@ -1621,6 +1640,24 @@ function onTitleUpdate(newTitle: string): void {
 }
 
 /**
+ * רצועת הטאבים — placeholder פונקציונלי: טאב יחיד שמייצג את המסמך היחיד
+ * שקיים היום בפועל. ריבוי מסמכים אמיתי (open-flow) הוא חלק 3.
+ */
+const documentTabs = computed<DocumentTabItem[]>(() => [
+  { id: documentIdView.value, title: title.value, isDirty: saveSnapshot.value.isDirty },
+]);
+
+/** מעבר טאב: אין מה לעשות עם טאב יחיד — כרגע הוא כבר הפעיל היחיד. */
+function onDocumentTabSelect(_id: DocumentSessionId): void {}
+
+// TODO(חלק 3): לחבר לסגירת מסמך אמיתית (open-flow) — כולל בדיקת שינויים לא
+// שמורים לפני סגירה.
+function onDocumentTabClose(_id: DocumentSessionId): void {}
+
+// TODO(חלק 3): לחבר לפתיחת מסמך נוסף (open-flow / fs.pickUserFile).
+function onDocumentTabNew(): void {}
+
+/**
  * המתג היה דקורטיבי: `autosaveEnabled` נכתב כאן ואיש לא קרא אותו, ו-
  * SaveCoordinator הריץ autosave על כל `markDirty` — כלומר כיבוי המתג לא כיבה
  * כלום. שתי השורות שנוספו הן מה שהופך אותו למתג: הבחירה מגיעה למי שמריץ את
@@ -2321,6 +2358,7 @@ onMounted(async () => {
     // חדש שאין לו קשר לטיוטה הקודמת של אותו מסמך.
     const session = await loadPreviousSession();
     documentId = activeEntry(session)?.id ?? documentId;
+    documentIdView.value = documentId;
 
     keeper = initSessionKeeper();
     keeper.adopt(session);
