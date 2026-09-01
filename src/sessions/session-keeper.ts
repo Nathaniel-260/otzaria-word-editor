@@ -53,7 +53,9 @@
 import type { CaretAnchor } from '../engine/caret-anchor';
 import type { WorkspaceWrite } from '../host/workspace';
 import {
+  activeEntry,
   emptySession,
+  withActiveEntry,
   type SessionDocument,
   type SessionState,
   type SessionView,
@@ -205,14 +207,14 @@ export function createSessionKeeper(deps: SessionKeeperDeps): SessionKeeper {
     persistTimer = clearTimer(persistTimer);
 
     const mine = epoch;
-    const caret = await deps.readCaret(state.caret);
+    const caret = await deps.readCaret(activeEntry(state)?.caret ?? null);
     // הסמן נקרא אסינכרונית; אם בינתיים הוחלף המסמך, הוא שייך למסמך שכבר אינו
     // פתוח ואסור לו להיכנס לרשומה של החדש.
     if (disposed || mine !== epoch) return;
 
     // `caret` שהוא `null` אינו מוחק את מה שידענו: הבחירה עשויה להיות מחוץ
     // למסמך ברגע הזה (מיקוד בשדה בדיאלוג), וזו אינה סיבה לשכוח איפה היה.
-    if (caret) state = { ...state, caret };
+    if (caret) state = withActiveEntry(state, { caret });
     await deps.persist(state);
   }
 
@@ -295,15 +297,14 @@ export function createSessionKeeper(deps: SessionKeeperDeps): SessionKeeper {
     }
 
     draftedRevision = writing;
-    state = {
-      ...state,
+    state = withActiveEntry(state, {
       draft: {
         path: deps.draftPath,
         savedAt: Date.now(),
-        documentToken: state.document?.token ?? null,
+        documentToken: activeEntry(state)?.document?.token ?? null,
         sourceSize,
       },
-    };
+    });
     await persistNow();
   }
 
@@ -358,7 +359,8 @@ export function createSessionKeeper(deps: SessionKeeperDeps): SessionKeeper {
        * א' ברשומה שכבר מזוהה כמסמך ב', ואז הוא היה מוחל עליו: קפיצה שרירותית
        * לאמצע מסמך אחר.
        */
-      const sameDocument = (state.document?.token ?? null) === (document?.token ?? null);
+      const previousEntry = activeEntry(state);
+      const sameDocument = (previousEntry?.document?.token ?? null) === (document?.token ?? null);
 
       /**
        * טיוטה שנשמרת עוברת לבעלות המסמך שנפתח ממנה.
@@ -372,17 +374,17 @@ export function createSessionKeeper(deps: SessionKeeperDeps): SessionKeeper {
        * (`decideDraftRecovery`) ואינה זקוקה לניקוי מונע. איפוס כאן היה מנתק
        * את הרשומה מקובץ שעדיין מחזיק עבודה.
        */
+      const previousDraft = previousEntry?.draft ?? null;
       const draft =
-        keepDraft && state.draft
-          ? { ...state.draft, documentToken: document?.token ?? null, sourceSize: size }
-          : state.draft;
+        keepDraft && previousDraft
+          ? { ...previousDraft, documentToken: document?.token ?? null, sourceSize: size }
+          : previousDraft;
 
-      state = {
-        ...state,
+      state = withActiveEntry(state, {
         document,
-        caret: sameDocument ? state.caret : null,
+        caret: sameDocument ? (previousEntry?.caret ?? null) : null,
         draft,
-      };
+      });
       schedule(async () => {
         await deps.persist(state);
       });
@@ -398,8 +400,8 @@ export function createSessionKeeper(deps: SessionKeeperDeps): SessionKeeper {
      * „למחוק”, ובקובץ הזה מוחקים רק כשנאמר.
      */
     async discardDraft() {
-      const hadDraft = state.draft !== null;
-      state = { ...state, draft: null };
+      const hadDraft = activeEntry(state)?.draft !== null;
+      state = withActiveEntry(state, { draft: null });
       await run(async () => {
         if (hadDraft) await deps.removeDraft();
         await deps.persist(state);
@@ -432,11 +434,11 @@ export function createSessionKeeper(deps: SessionKeeperDeps): SessionKeeper {
       // הרגע שבו השמירה הסתיימה, בעוד המחיקה עצמה רצה אחרי סבב טיוטה שכבר
       // המתין — כלומר הרשומה הצביעה לקובץ שנמחק אחריה.
       await run(async () => {
-        if (state.draft === null) {
+        if (activeEntry(state)?.draft === null) {
           await persistNow();
           return;
         }
-        state = { ...state, draft: null };
+        state = withActiveEntry(state, { draft: null });
         await deps.removeDraft();
         await persistNow();
       });

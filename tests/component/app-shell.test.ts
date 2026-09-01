@@ -540,15 +540,30 @@ describe('ההעדפה של סרגל המידות', () => {
 describe('חזרה למה שהיה', () => {
   const REMEMBERED = { token: 'tok', name: 'חידושים.docx', writable: true };
 
-  /** רשומת הפעלה מלאה, עם מה שהבדיקה רוצה לשנות בה. */
-  function storedSession(patch: Record<string, unknown> = {}): unknown {
-    return {
-      version: 1,
+  /**
+   * רשומת הפעלה מלאה (v2 — `documents` + `activeId`), עם מה שהבדיקה רוצה
+   * לשנות בה. `view` הוא ברמת הרשומה כולה; שאר המפתחות שייכים לרשומת
+   * המסמך היחיד שבאוסף.
+   */
+  function storedSession(patch: {
+    document?: unknown;
+    caret?: unknown;
+    draft?: unknown;
+    view?: unknown;
+  } = {}): unknown {
+    const { view, ...entryPatch } = patch;
+    const entry = {
+      id: 'doc-1',
       document: REMEMBERED,
-      view: { zoom: null, focusMode: false, ribbonTab: null, ribbonCollapsed: false },
       caret: null,
       draft: null,
-      ...patch,
+      ...entryPatch,
+    };
+    return {
+      version: 2,
+      documents: [entry],
+      activeId: entry.id,
+      view: view ?? { zoom: null, focusMode: false, ribbonTab: null, ribbonCollapsed: false },
     };
   }
 
@@ -700,9 +715,9 @@ describe('חזרה למה שהיה', () => {
 
     expect(stub.persistedSessions.length, 'שום דבר לא נשמר להפעלה הבאה').toBeGreaterThan(0);
     const record = stub.persistedSessions[stub.persistedSessions.length - 1] as {
-      document?: { token?: string };
+      documents?: Array<{ document?: { token?: string } }>;
     };
-    expect(record.document?.token).toBe('tok');
+    expect(record.documents?.[0]?.document?.token).toBe('tok');
   });
 
   it('פתיחה שנכשלה אינה מוחקת את הטיוטה ואינה שוכחת את המסמך', async () => {
@@ -722,9 +737,9 @@ describe('חזרה למה שהיה', () => {
     // המסמך הריק שנפתח כגיבוי אינו נרשם. כל רשומה שנכתבה בכל זאת חייבת
     // עדיין לנקוב במסמך האחרון — אחרת ההפעלה הבאה לא תדע במה לנסות שוב,
     // וגם לא לְמי הטיוטה שייכת.
-    const forgotten = (stub.persistedSessions as Array<{ document?: unknown } | null>).filter(
-      (record) => record?.document == null,
-    );
+    const forgotten = (
+      stub.persistedSessions as Array<{ documents?: Array<{ document?: unknown }> } | null>
+    ).filter((record) => (record?.documents?.[0]?.document ?? null) == null);
     expect(forgotten, 'רשומה ששכחה את המסמך האחרון').toEqual([]);
   });
 

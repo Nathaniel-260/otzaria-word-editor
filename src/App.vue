@@ -348,12 +348,15 @@ import {
   saveSessionRecord,
 } from './host/settings';
 import {
-  DRAFT_PATH,
+  activeEntry,
+  createDocumentSessionId,
   decideDraftRecovery,
   documentViewFor,
   draftAgeLabel,
+  draftPathFor,
   normalizeSession,
   sessionFromLastDocument,
+  type DocumentSessionId,
   type SessionState,
 } from './sessions/session-state';
 import { createSessionKeeper, type SessionKeeper } from './sessions/session-keeper';
@@ -650,6 +653,13 @@ let zoomCenter: ZoomCenter | null = null;
  * שעוברת מהפעלה להפעלה. ההנמקה המלאה ב-sessions/session-keeper.ts.
  */
 let keeper: SessionKeeper | null = null;
+/**
+ * מזהה „המסמך הפתוח” — היום תמיד יחיד, כמו כל שאר ה-state כאן. משמש לנתיב
+ * הטיוטה (`draftPathFor`, sessions/session-state.ts): נקבע פעם אחת ב-onMounted,
+ * לפני `initSessionKeeper` — מרשומת ההפעלה שנטענה אם יש כזאת, אחרת מזהה חדש.
+ * נשאר קבוע לכל אורך ההפעלה, בדיוק כמו ש-`DRAFT_PATH` הקבוע היה קבוע קודם.
+ */
+let documentId: DocumentSessionId = createDocumentSessionId();
 /** מבטל את ההאזנה למעבר לרקע. */
 let hiddenListener: (() => void) | null = null;
 let contextMenuListener: (() => void) | null = null;
@@ -740,7 +750,7 @@ function initSaveCoordinator(): SaveCoordinator {
     onSaved: (info) => {
       // „שמור בשם” מחליף את הקובץ שמאחורי המסמך; „שמור” רגיל אינו. רק
       // הראשון הוא זהות חדשה, ורק אז נכון לשכוח את מקום הסמן.
-      if (keeper && keeper.state.document?.token !== info.token) {
+      if (keeper && activeEntry(keeper.state)?.document?.token !== info.token) {
         keeper.setDocument({ token: info.token, name: info.name, writable: true });
       }
       // הגודל הוא של מה שנכתב עכשיו, ולכן הוא הבסיס להשוואה הבאה מול
@@ -766,9 +776,9 @@ function initSessionKeeper(): SessionKeeper {
     // ההמרה מ-`Blob` כאן ולא ב-host/workspace.ts: כאן יושב מי שמחזיק את
     // המנוע, ושם יושב מי שמדבר עם הגשר.
     writeDraft: async (content) =>
-      writeWorkspaceBytes(DRAFT_PATH, new Uint8Array(await content.arrayBuffer())),
-    removeDraft: () => deleteWorkspaceEntry(DRAFT_PATH),
-    draftPath: DRAFT_PATH,
+      writeWorkspaceBytes(draftPathFor(documentId), new Uint8Array(await content.arrayBuffer())),
+    removeDraft: () => deleteWorkspaceEntry(draftPathFor(documentId)),
+    draftPath: draftPathFor(documentId),
     readCaret: (previous) => {
       const active = swap?.current;
       if (!active) return Promise.resolve(null);
@@ -2296,7 +2306,6 @@ onMounted(async () => {
     zoomCenter = createZoomCenter(editorStackRef.value);
 
     save = initSaveCoordinator();
-    keeper = initSessionKeeper();
 
     // הבחירה נטענת לפני שנפתח מסמך: העריכה הראשונה עלולה להתחיל סבב autosave,
     // ואם ההעדפה עוד לא הגיעה הוא היה רץ לפי ברירת המחדל ולא לפי מה שהמשתמש
@@ -2307,9 +2316,13 @@ onMounted(async () => {
     // גם ההעדפה של הסרגל, ומאותו טעם: היא חלה על המסמך שנפתח מיד אחרי כאן.
     rulerPreference = await loadRulerVisible();
 
-    // ורשומת ההפעלה, מאותו טעם בדיוק: הפתיחה עצמה כותבת עליה (`setDocument`),
-    // וקריאה אחריה הייתה קוראת את מה שהרגע דרסנו.
+    // ורשומת ההפעלה, לפני `initSessionKeeper`: נתיב הטיוטה של הזוכר תלוי
+    // ב-`documentId`, וזה חייב להיות מזהה המסמך **שנטען עכשיו** — לא מזהה
+    // חדש שאין לו קשר לטיוטה הקודמת של אותו מסמך.
     const session = await loadPreviousSession();
+    documentId = activeEntry(session)?.id ?? documentId;
+
+    keeper = initSessionKeeper();
     keeper.adopt(session);
     applyShellPreferences(session);
 
@@ -2391,6 +2404,14 @@ onUnmounted(() => {
 });
 
 /**
+ * הנתיב השטוח שבו ישבה טיוטה יחידה לפני ריבוי המסמכים (`SESSION_VERSION` 1).
+ * רשומת v1 נזרקת כולה ב-`normalizeSession` (גרסה לא תואמת), ואיתה נעלם כל
+ * זכר לנתיב הזה — אבל הקובץ עצמו נשאר בדיסק. בלי ניקוי מפורש הוא יתום
+ * לצמיתות: אין עוד קוד שכותב או קורא את השם הזה כדי לדרוס אותו.
+ */
+const LEGACY_DRAFT_PATH = 'session-draft.docx';
+
+/**
  * הרשומה של ההפעלה הקודמת, כולל המסלול ממשתמש שמעדכן מגרסה שלא הייתה בה
  * רשומה בכלל.
  *
@@ -2400,6 +2421,11 @@ onUnmounted(() => {
 async function loadPreviousSession(): Promise<SessionState | null> {
   const stored = normalizeSession(await loadSessionRecord());
   if (stored) return stored;
+
+  // הרשומה שמצאנו אינה v2 (חסרה, פגומה, או v1 ישנה) — ניקוי חד-פעמי,
+  // best-effort, של טיוטת ה-v1 השטוחה שאין עוד מי שיזכור אותה. ראו
+  // `LEGACY_DRAFT_PATH`.
+  void deleteWorkspaceEntry(LEGACY_DRAFT_PATH);
 
   const migrated = sessionFromLastDocument(await loadLastDocument());
   if (migrated) void forgetLastDocument();
@@ -2438,7 +2464,8 @@ function applyShellPreferences(session: SessionState | null): void {
  * שבו אין שום דבר אחר לחזור אליו.
  */
 async function reopenPreviousSession(session: SessionState | null): Promise<void> {
-  const remembered = session?.document ?? null;
+  const entry = activeEntry(session);
+  const remembered = entry?.document ?? null;
   const file = remembered ? await resolveRememberedFile(remembered) : null;
 
   if (remembered && !file) {
@@ -2446,8 +2473,8 @@ async function reopenPreviousSession(session: SessionState | null): Promise<void
     // אינה תלויה בו: אין לה יעד כתיבה בכל מקרה („שמור” יפתח „שמור בשם”),
     // ולכן פתיחתה כמסמך חדש אינה יכולה לדרוס דבר — והיא הדרך היחידה שלא
     // לאבד אותה. הטיוטה עוברת לבעלות המסמך שנפתח ממנה (ראו `setDocument`).
-    const orphan = session?.draft?.documentToken === remembered.token
-      ? await readDraftBytes(session.draft.path)
+    const orphan = entry?.draft?.documentToken === remembered.token
+      ? await readDraftBytes(entry.draft.path)
       : null;
 
     await openDocument(undefined, { draft: orphan ?? undefined });
@@ -2485,7 +2512,8 @@ async function reopenPreviousSession(session: SessionState | null): Promise<void
  */
 function restoredDraftMessage(session: SessionState | null): string {
   const base = 'שוחזרו שינויים שלא נשמרו מההפעלה הקודמת';
-  const age = session?.draft ? draftAgeLabel(session.draft.savedAt, Date.now()) : null;
+  const draft = activeEntry(session)?.draft;
+  const age = draft ? draftAgeLabel(draft.savedAt, Date.now()) : null;
   return age ? `${base} (נשמרו ${age})` : base;
 }
 
@@ -2516,8 +2544,9 @@ async function recoverDraft(
   session: SessionState | null,
   file: UserFile | null,
 ): Promise<Blob | null> {
+  const entry = activeEntry(session);
   const decision = decideDraftRecovery({
-    draft: session?.draft ?? null,
+    draft: entry?.draft ?? null,
     openingToken: file?.token ?? null,
     diskSize: file?.size ?? null,
   });
@@ -2540,7 +2569,7 @@ async function recoverDraft(
     return null;
   }
 
-  return readDraftBytes(session?.draft?.path ?? DRAFT_PATH);
+  return readDraftBytes(entry?.draft?.path ?? draftPathFor(documentId));
 }
 
 /** בייטי הטיוטה כ-Blob שאפשר למסור למנוע, או `null` כשאין. */
