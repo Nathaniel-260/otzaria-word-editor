@@ -201,12 +201,18 @@ const resolved = resolution.status === "uniform" ? resolution.value : void 0;
 
 הבחירה ב‑AGPL נובעת מהמנוע: [SuperDoc](https://www.superdoc.dev/) מופץ תחת AGPL‑3.0, ולכן גם התוסף חייב להיות AGPL.
 
-אייקוני הרצועה הם היוצא מן הכלל היחיד לכיוון השני: 65 מתוך 76 האייקונים
+אייקוני הרצועה הם היוצא מן הכלל היחיד לכיוון השני: 72 מתוך 77 האייקונים
 ב‑`src/ui/icons/icons.ts` הם ה‑path data המקורי של
 [Fluent System Icons](https://github.com/microsoft/fluentui-system-icons) של Microsoft,
 שמופצים תחת **MIT**. ה‑MIT מתיר שילוב ב‑AGPL, ומחייב שנוסח הרישיון והקרדיט יופצו עם כל
 עותק — ולכן הם באנר `@license` בראש `icons.ts`, ו‑`npm run check:dist` מאמת שהבאנר שרד
-את המינימיזציה. לא נוספה תלות: הועתק path data בלבד. הפירוט, כולל טבלת אייקון‑לפקד,
+את המינימיזציה. לא נוספה תלות: הועתק path data בלבד.
+
+„מקורי” כאן נמדד ולא מונח: `npm run check:icons` מוריד את
+`@fluentui/svg-icons@1.1.338` מ‑npm, משווה כל `d=` מול הגליף המקורי byte‑for‑byte,
+ומאמת שטבלת אייקון‑לפקד נוקבת בשם הנכון. השער נכשל גם על אייקון מצויר בבית שאינו
+ברשימת החריגים — כך נוסף בעבר אייקון בלי שנרשם בהצהרה — וגם על חריג שכבר יש לו
+מקבילה. חמשת החריגים והנימוק לכל אחד, וטבלת אייקון‑לפקד המלאה,
 ב‑[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 הערה חשובה: מנוע ה‑DOCX של SuperDoc (`@superdoc/docx-engine`) הוא **רכיב קנייני בנפרד**

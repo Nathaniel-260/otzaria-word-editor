@@ -13,16 +13,43 @@
  * שלו, ולכן הם נשמרים כאן ותמיד עומדים בראש — משתמש שפותח מסמך עברי צריך
  * למצוא את Frank Ruhl בשורה הראשונה, לא אחרי Verdana.
  *
+ * ומה ששניהם אינם יכולים לדעת: מה **מותקן במכונה**. הרשימה הזאת שונה אצל כל
+ * משתמש, והיא מגיעה מ-`system-fonts.ts` — אסינכרונית, ולכן היא פרמטר ולא
+ * קריאה מכאן. ראו שם למה אין דרך אחרת להשיג אותה.
+ *
+ * ## למה יש כאן `group`
+ *
+ * מנייה אמיתית מחזירה מאות משפחות — 294 נמדדו ב-Windows — ורשימה שטוחה בגודל
+ * כזה אינה שמישה. הקיבוץ נקבע כאן ולא בקומפוננטה מפני שכאן יודעים **מאיזה
+ * מקור** כל אפשרות הגיעה; אחרי המיזוג המידע הזה אבוד. שלוש קבוצות, בסדר הזה:
+ *
+ * | קבוצה | מה בה |
+ * |---|---|
+ * | `''` (בראש, בלי כותרת) | הגופנים שלנו, גופני המסמך מהמנוע, וזנב הלטינית |
+ * | „עברית” | מה שמותקן במכונה ומכסה עברית |
+ * | „כל הגופנים” | כל השאר שמותקן |
+ *
  * הצורה של `ui` מוגדרת כאן מבנית ולא מיובאת: הבדיקה מעבירה כפיל, ומימוש של
  * `FontsHandle` המלא בכפיל היה מחייב גם את שלושת מסלולי ה-subscription שאין
  * להם קשר לאפשרויות.
  */
 import type { FontFamilyOption, FontSizeOption } from 'superdoc/ui';
+import { emptyInstalledFonts, type InstalledFontsSnapshot } from './system-fonts';
 import { WORD_FONT_SIZES } from './payloads';
+
+/** כותרות הקבוצות בבורר. `''` הוא „בראש, בלי כותרת”. */
+export const FONT_GROUP_TOP = '';
+export const FONT_GROUP_HEBREW = 'עברית';
+export const FONT_GROUP_ALL = 'כל הגופנים';
+
+/** אפשרות גופן אחת, עם הקבוצה שהיא שייכת לה. */
+export interface FontFamilyChoice extends FontFamilyOption {
+  group: string;
+}
 
 /** מה שהבוררים ב-Ribbon מציגים. */
 export interface FontOptions {
-  families: readonly FontFamilyOption[];
+  families: readonly FontFamilyChoice[];
   sizes: readonly FontSizeOption[];
 }
 
@@ -79,30 +106,76 @@ function familyKey(value: string): string {
 }
 
 /**
- * מיזוג בסדר קבוע: שלנו, של המנוע, ואז זנב הלטינית. כפילויות נופלות לפי הערך
- * ולא לפי התווית, כי המנוע והרשימה שלנו נותנים לאותו גופן תוויות שונות
- * (`TaameyDavidCLM` מול „David”), ורק הערך הוא מה שנשלח לפקודה.
+ * מיזוג בסדר קבוע: שלנו, של המנוע, זנב הלטינית, ואז מה שמותקן במכונה —
+ * העבריים ואחריהם השאר. כפילויות נופלות לפי הערך ולא לפי התווית, כי המנוע
+ * והרשימה שלנו נותנים לאותו גופן תוויות שונות (`TaameyDavidCLM` מול „David”),
+ * ורק הערך הוא מה שנשלח לפקודה.
+ *
+ * הכפילות היא גם מה שקובע את הקבוצה: גופן שכבר הופיע בראש נשאר בראש ואינו
+ * חוזר תחת „כל הגופנים”. לכן Arial יופיע פעם אחת בלבד, למעלה, גם כשהמכונה
+ * מדווחת עליו.
  */
 export function mergeFontFamilies(
   engineOptions: readonly FontFamilyOption[] | undefined,
-): readonly FontFamilyOption[] {
-  const merged: FontFamilyOption[] = [];
+  installed: InstalledFontsSnapshot = emptyInstalledFonts(),
+): readonly FontFamilyChoice[] {
+  const isHebrew = (option: FontFamilyOption): boolean =>
+    typeof option?.value === 'string' && installed.hebrew.has(familyKey(option.value));
+
+  const sources: readonly (readonly [readonly FontFamilyOption[], string])[] = [
+    [OTZARIA_FONT_FAMILIES, FONT_GROUP_TOP],
+    [engineOptions ?? [], FONT_GROUP_TOP],
+    [LATIN_FONT_FAMILIES, FONT_GROUP_TOP],
+    [installed.families.filter(isHebrew), FONT_GROUP_HEBREW],
+    [installed.families.filter((option) => !isHebrew(option)), FONT_GROUP_ALL],
+  ];
+
+  const merged: FontFamilyChoice[] = [];
   const seen = new Set<string>();
 
-  for (const option of [...OTZARIA_FONT_FAMILIES, ...(engineOptions ?? []), ...LATIN_FONT_FAMILIES]) {
-    const value = typeof option?.value === 'string' ? option.value.trim() : '';
-    if (value === '') continue;
-    const key = familyKey(value);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    merged.push({
-      value,
-      label: typeof option.label === 'string' && option.label.trim() !== '' ? option.label : value,
-      previewFamily: option.previewFamily ?? value,
-    });
+  for (const [options, group] of sources) {
+    for (const option of options) {
+      const value = typeof option?.value === 'string' ? option.value.trim() : '';
+      if (value === '') continue;
+      const key = familyKey(value);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      merged.push({
+        value,
+        label: typeof option.label === 'string' && option.label.trim() !== '' ? option.label : value,
+        previewFamily: option.previewFamily ?? value,
+        group,
+      });
+    }
   }
 
-  return merged;
+  return disambiguate(merged);
+}
+
+/**
+ * שתי אפשרויות שונות עם אותה תווית — ומה עושים.
+ *
+ * נצפה ברגע שהמארח התחיל למנות: הבורר הציג „David” פעמיים. אחת היא
+ * `TaameyDavidCLM` שהתווית שלה אצלנו היא „David”, והשנייה היא `David` של
+ * Windows. שתיהן לגיטימיות ושונות זו מזו, אבל למשתמש הן נראו כתקלה — ובחירה
+ * ביניהן הייתה הגרלה.
+ *
+ * מי שמקבל את ההבהרה הוא מי שהתווית שלו **אינה** הערך: אצלו יש מה להוסיף
+ * („David (TaameyDavidCLM)”), ואילו אצל `David` התוספת הייתה „David (David)”.
+ * לכן ההבהרה חד-צדדית, וגם השם המערכתי נשאר נקי.
+ */
+function disambiguate(options: readonly FontFamilyChoice[]): readonly FontFamilyChoice[] {
+  const seen = new Map<string, number>();
+  for (const option of options) {
+    const key = option.label.toLowerCase();
+    seen.set(key, (seen.get(key) ?? 0) + 1);
+  }
+
+  return options.map((option) => {
+    const collides = (seen.get(option.label.toLowerCase()) ?? 0) > 1;
+    if (!collides || option.label === option.value) return option;
+    return { ...option, label: `${option.label} (${option.value})` };
+  });
 }
 
 /**
@@ -126,12 +199,27 @@ export function mergeFontSizes(
   return [...byValue.entries()].sort((a, b) => a[0] - b[0]).map(([, option]) => option);
 }
 
-/** מה שמוצג לפני שיש מסמך פתוח, וגם אם `ui.fonts` אינו זמין בכלל. */
-export function fallbackFontOptions(): FontOptions {
-  return { families: mergeFontFamilies(undefined), sizes: mergeFontSizes(undefined) };
+/**
+ * המיזוג כולו, משני המקורות שמגיעים בזמנים שונים: המנוע מדווח בכל פתיחת מסמך,
+ * והמנייה נוחתת פעם אחת אחרי האתחול. פונקציה טהורה בכוונה — מי שמחזיק את שני
+ * המקורות (App.vue) מרכיב מחדש כשאחד מהם משתנה.
+ */
+export function composeFontOptions(
+  slice: FontsSliceLike | null | undefined,
+  installed: InstalledFontsSnapshot = emptyInstalledFonts(),
+): FontOptions {
+  return {
+    families: mergeFontFamilies(slice?.options, installed),
+    sizes: mergeFontSizes(slice?.sizeOptions),
+  };
 }
 
-/** קריאה בהגנה: גרסת מנוע בלי `fonts` מחזירה את הרשימה שלנו, לא חריגה. */
+/** מה שמוצג לפני שיש מסמך פתוח, וגם אם `ui.fonts` אינו זמין בכלל. */
+export function fallbackFontOptions(): FontOptions {
+  return composeFontOptions(null);
+}
+
+/** קריאה בהגנה: גרסת מנוע בלי `fonts` מחזירה `undefined`, לא חריגה. */
 function safeRead<T>(read: (() => T) | undefined): T | undefined {
   if (typeof read !== 'function') return undefined;
   try {
@@ -142,44 +230,94 @@ function safeRead<T>(read: (() => T) | undefined): T | undefined {
   }
 }
 
-/** האפשרויות ברגע זה, ממוזגות. */
-export function readFontOptions(ui: FontOptionsSource | null | undefined): FontOptions {
+/**
+ * מה שהמנוע מדווח ברגע זה, **בלי** מיזוג.
+ *
+ * גולמי ולא ממוזג מפני שהמיזוג צריך גם את המנייה, והיא אינה שייכת לכאן: מי
+ * שמחזיק את שני המקורות הוא זה שמרכיב.
+ */
+export function readFontSlice(ui: FontOptionsSource | null | undefined): FontsSliceLike {
   const fonts = ui?.fonts;
   return {
-    families: mergeFontFamilies(safeRead(fonts?.getFamilyOptions?.bind(fonts))),
-    sizes: mergeFontSizes(safeRead(fonts?.getSizeOptions?.bind(fonts))),
+    options: safeRead(fonts?.getFamilyOptions?.bind(fonts)),
+    sizeOptions: safeRead(fonts?.getSizeOptions?.bind(fonts)),
   };
 }
 
 /**
- * מאזינה לאפשרויות. `observe` של המנוע יורה מיד עם ה-snapshot הנוכחי ואז על
- * כל שינוי, ולכן אין צורך בקריאה נפרדת לפניה. בלי האזנה הבורר היה קופא על
- * האפשרויות של הרגע שבו המסמך נפתח — והמנוע פותר את גופני המסמך אחרי זה.
+ * מאזינה למה שהמנוע מדווח. `observe` של המנוע יורה מיד עם ה-snapshot הנוכחי
+ * ואז על כל שינוי, ולכן אין צורך בקריאה נפרדת לפניה. בלי האזנה הבורר היה קופא
+ * על האפשרויות של הרגע שבו המסמך נפתח — והמנוע פותר את גופני המסמך אחרי זה.
  *
  * מחזירה disposer גם כשאין `observe`, כדי שאתר הקריאה לא יצטרך להבחין.
  */
-export function observeFontOptions(
+export function observeFontSlice(
   ui: FontOptionsSource | null | undefined,
-  listener: (options: FontOptions) => void,
+  listener: (slice: FontsSliceLike) => void,
 ): () => void {
   const fonts = ui?.fonts;
   const observe = fonts?.observe;
 
   if (typeof observe !== 'function') {
-    listener(readFontOptions(ui));
+    listener(readFontSlice(ui));
     return () => {};
   }
 
+  const gate = changeGate(listener);
+
   try {
-    return observe.call(fonts, (slice) => {
-      listener({
-        families: mergeFontFamilies(slice?.options),
-        sizes: mergeFontSizes(slice?.sizeOptions),
-      });
-    });
+    return observe.call(fonts, (slice) => gate(slice ?? {}));
   } catch (error) {
     console.warn('[otzaria-word] האזנה לאפשרויות הגופן נכשלה', error);
-    listener(readFontOptions(ui));
+    listener(readFontSlice(ui));
     return () => {};
   }
+}
+
+/**
+ * שער שמעביר רק דיווח ש**באמת** שונה מקודמו.
+ *
+ * למה זה נדרש, ולמה זה לא אופטימיזציה מוקדמת: המנוע מרכיב את ה-slice מחדש
+ * ב-`computeState`, ומדלל אותו מול הקודם בהשוואה רדודה — כלומר לפי **זהות
+ * המערך**. המערך נבנה מחדש בכל `recompute`, וביניהם `recompute("host-selection")`
+ * שיורה על כל תזוזת סמן. התוצאה: הבורר נבנה מחדש בכל הקלדה, בזמן שהרשימה
+ * זהה לחלוטין.
+ *
+ * עם 14 שמות זה היה בזבוז שאפשר לחיות איתו. מרגע שהמנייה מחזירה מאות משפחות
+ * (system-fonts.ts) זה מיזוג מלא ובנייה מחדש של כל הרשימה — פר הקשה.
+ *
+ * ההשוואה לפי **ערכים** ולא לפי זהות אובייקט: המנוע מנרמל ובונה אובייקט חדש
+ * לכל שורה בכל סבב, ולכן השוואת זהות לא הייתה מסננת דבר.
+ */
+function changeGate(listener: (slice: FontsSliceLike) => void): (slice: FontsSliceLike) => void {
+  let previous: string | null = null;
+
+  return (slice) => {
+    const signature = sliceSignature(slice);
+    if (signature === previous) return;
+    previous = signature;
+    listener(slice);
+  };
+}
+
+/**
+ * טביעת האצבע של slice: כל מה שמגיע לבורר, בסדר שהמנוע דיווח.
+ *
+ * גם `label` ו-`previewFamily` ולא הערך בלבד: המנוע פותר את תוויות המסמך אחרי
+ * הפתיחה, ודיווח שמשנה רק תווית הוא שינוי שהבורר אמור להראות. חתימה על הערך
+ * לבדו הייתה בולעת אותו.
+ *
+ * `JSON.stringify` ולא צירוף עם מפריד: שם גופן יכול להכיל כמעט כל תו,
+ * ומפריד שמופיע בתוך שם היה מייצר שתי רשימות שונות עם אותה חתימה.
+ */
+function sliceSignature(slice: FontsSliceLike): string {
+  const rows = (
+    options: readonly { value?: unknown; label?: unknown; previewFamily?: unknown }[] | undefined,
+  ): string[][] =>
+    (options ?? []).map((option) => [
+      String(option?.value ?? ''),
+      String(option?.label ?? ''),
+      String(option?.previewFamily ?? ''),
+    ]);
+  return JSON.stringify([rows(slice.options), rows(slice.sizeOptions)]);
 }

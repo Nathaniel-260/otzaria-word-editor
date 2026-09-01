@@ -196,8 +196,17 @@ function makeApi(cdp) {
     selection: () => js('JSON.stringify(window.__qa.selection())').then(JSON.parse),
     screenText: () => js('window.__qa.screenText()'),
     lineCount: () => js('window.__qa.lineCount()'),
-    selectValue: (name, value) => js(`window.__qa.selectValue(${JSON.stringify(name)}, ${JSON.stringify(value)})`),
-    options: (name) => js(`JSON.stringify(window.__qa.options(${JSON.stringify(name)}))`).then(JSON.parse),
+    /*
+      `Promise.resolve(...)` עוטף את שתי אלה מפני שבורר החיפוש (RibbonCombo)
+      אינו יכול לענות סינכרונית: הרשימה שלו קיימת ב-DOM רק כשהוא פתוח, ו-Vue
+      מרנדר במיקרו-משימה. `Runtime.evaluate` נשלח עם `awaitPromise`, ולכן
+      הביטוי רשאי להחזיר Promise — ובורר `<select>` נייטיב, שכן עונה מיד,
+      עובר דרך אותה עטיפה בלי שינוי בהתנהגות.
+    */
+    selectValue: (name, value) =>
+      js(`Promise.resolve(window.__qa.selectValue(${JSON.stringify(name)}, ${JSON.stringify(value)}))`),
+    options: (name) =>
+      js(`Promise.resolve(window.__qa.options(${JSON.stringify(name)})).then(function (r) { return JSON.stringify(r); })`).then(JSON.parse),
 
 
     /* -------- תפריטים, פופאוברים ודיאלוגים -------- */

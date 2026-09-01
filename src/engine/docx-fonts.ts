@@ -239,6 +239,18 @@ export function isFamilyAvailable(name: string): boolean {
   );
 }
 
+/**
+ * האם יש כאן במה למדוד בכלל.
+ *
+ * `isFamilyAvailable` מחזירה „זמין” כשאין canvas, וזו ההכרעה הנכונה **שם**:
+ * להחליף גופן על סמך ניחוש גרוע מלא לגעת. למי שבונה **רשימה** ההכרעה הפוכה
+ * בדיוק — בלי מדידה עדיף בורר קצר ואמיתי מאשר עשרות שמות שאיש אינו יודע אם
+ * קיימים. לכן השאלה „אפשר למדוד?” נחשפת בנפרד מהתשובה „זמין?”.
+ */
+export function canMeasureFonts(): boolean {
+  return measurementContext() !== null;
+}
+
 let probeContext: CanvasRenderingContext2D | null | undefined;
 
 /** `null` בסביבה בלי canvas — jsdom, למשל. נבנה פעם אחת. */

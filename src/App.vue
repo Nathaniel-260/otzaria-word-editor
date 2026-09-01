@@ -141,8 +141,10 @@
       :zoom-level="zoom.value"
       :zoom-min="zoom.min"
       :zoom-max="zoom.max"
+      :load="loadSnapshot"
       @update:zoom-level="onZoomChange"
       @toggle-focus="toggleFocusMode"
+      @skip-load="onSkipLoad"
     />
 
     <!-- דיאלוגים ופאנלים -->
@@ -190,7 +192,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, provide, onMounted, onUnmounted, computed, shallowRef, watch } from 'vue';
+import { ref, provide, onMounted, onUnmounted, computed, shallowRef, watch, watchEffect } from 'vue';
 import TitleBar from './ui/shell/TitleBar.vue';
 import Ribbon from './ui/ribbon/Ribbon.vue';
 import StatusBar from './ui/shell/StatusBar.vue';
@@ -230,7 +232,18 @@ import {
   observeStyleGallery,
   type StyleGalleryState,
 } from './engine/style-gallery';
-import { fallbackFontOptions, observeFontOptions, type FontOptions } from './engine/font-options';
+import {
+  composeFontOptions,
+  fallbackFontOptions,
+  observeFontSlice,
+  type FontOptions,
+  type FontsSliceLike,
+} from './engine/font-options';
+import {
+  emptyInstalledFonts,
+  loadInstalledFonts,
+  type InstalledFontsSnapshot,
+} from './engine/system-fonts';
 import {
   UNSETTLED_SELECTION,
   observeReadoutSelection,
@@ -247,6 +260,14 @@ import {
   type SearchState,
 } from './engine/search';
 import { createEditorSwap, type EditorSwap } from './sessions/editor-swap';
+import {
+  createDocumentLoad,
+  idleLoadSnapshot,
+  LOAD_STAGES,
+  type DocumentLoad,
+  type LoadAttempt,
+  type LoadSnapshot,
+} from './sessions/document-load';
 import { createSaveCoordinator, type SaveCoordinator, type SaveSnapshot } from './sessions/save-coordinator';
 import { createEditor, type EditorSession } from './engine/create-editor';
 import { ACTIVE_MACROS, installMacros, type MacrosHandle } from './engine/macros';
@@ -380,6 +401,20 @@ const fontOptions = shallowRef<FontOptions>(fallbackFontOptions());
 provide(FONT_OPTIONS, fontOptions);
 
 /**
+ * שני המקורות שמרכיבים את הבורר, ולמה הם נפרדים.
+ *
+ * המנוע מדווח על גופני **המסמך** בכל פתיחה; המנייה מדווחת על מה שמותקן
+ * **במכונה**, פעם אחת, ונוחתת מתי שנוחתת. דחיפה ישירה משניהם ל-`fontOptions`
+ * הייתה גורמת למי שנחת שני למחוק את מה שהראשון הביא — ולכן שניהם refs,
+ * וההרכבה אחת. ראו engine/system-fonts.ts.
+ */
+const engineFontSlice = shallowRef<FontsSliceLike | null>(null);
+const installedFonts = shallowRef<InstalledFontsSnapshot>(emptyInstalledFonts());
+watchEffect(() => {
+  fontOptions.value = composeFontOptions(engineFontSlice.value, installedFonts.value);
+});
+
+/**
  * גלריית הסגנונות של המסמך הפתוח. מאותו טעם כמו אפשרויות הגופן, וביתר שאת:
  * `ui.styles` פותר את הקטלוג **אסינכרונית** אחרי הפתיחה, ולכן קריאה חד-פעמית
  * מחזירה רשימה ריקה — רק מי שמנהל את ה-session יודע מתי להירשם.
@@ -462,6 +497,21 @@ const hasDocument = computed(() => activeSuperdoc.value !== null);
 
 const title = ref('מסמך חדש');
 const isOpening = ref(false);
+/**
+ * מחוון הטעינה של שורת המצב. ההכרעות — התחנות, הזחילה, ומה „דלג” מבטל — ב-
+ * sessions/document-load.ts; כאן נשארת ההרכבה בלבד.
+ *
+ * הפתיחה הראשונה אינה נראית כאן אלא במסך הטעינה שפרוש מעל הממשק כולו
+ * (index.html), וזה בסדר: אין לו שורת מצב להציג בה, ואין בו מסמך פתוח שאפשר
+ * לחזור אליו. המחוון הזה הוא של כל פתיחה שאחריה — קובץ שנבחר, מסמך חדש,
+ * ומסמך שנפתח מהרשומה.
+ */
+const loadSnapshot = ref<LoadSnapshot>(idleLoadSnapshot());
+const documentLoad: DocumentLoad = createDocumentLoad({
+  onChange: (snapshot) => {
+    loadSnapshot.value = snapshot;
+  },
+});
 const autosaveEnabled = ref(true);
 const statusText = ref('');
 const isStatusError = ref(false);
@@ -791,33 +841,78 @@ interface OpenOptions {
   remember?: boolean;
 }
 
+/**
+ * פתיחת מסמך, עם המחוון שמלווה אותה.
+ *
+ * העטיפה קיימת בשביל ה-`finally`, והוא אינו הידור: הפתיחה ממשיכה לכתוב למצב
+ * המעטפת גם אחרי שהמנוע הצליח — מודדים, סרגל, שחזור התצוגה — וחריגה באחד מהם
+ * הייתה מדלגת על `finish()` ומשאירה פס תקוע על 96% לכל אורך ההפעלה. `fail`
+ * הוא no-op על פתיחה שכבר הוכרעה, ולכן הוא רק סוגר את המסלול הזה.
+ *
+ * שם המסמך הנטען הוא ההודעה, והוא נכנס למחוון ולא לשורת המצב: שניהם יושבים
+ * באותה שורה של 24 פיקסלים, ואין טעם שיאמרו את אותו דבר פעמיים.
+ */
 async function openDocument(file?: UserFile, options: OpenOptions = {}): Promise<boolean> {
+  if (!swap) return false;
+  const attempt = documentLoad.begin(
+    file ? file.name : 'מסמך חדש',
+    file ? 'קורא את הקובץ…' : 'מכין מסמך ריק…',
+  );
+  try {
+    return await openDocumentInto(attempt, file, options);
+  } finally {
+    attempt.fail();
+    // וגם המצב שמשתק את הרצועה: פתיחה שזרקה השאירה אותה מנוטרלת לתמיד. הערך
+    // נקרא מה-swap ולא נקבע ל-false, כדי שפתיחה חדשה יותר שכבר בדרך לא
+    // תיראה כמי שהסתיימה.
+    isOpening.value = swap?.isOpening ?? false;
+  }
+}
+
+async function openDocumentInto(
+  attempt: LoadAttempt,
+  file?: UserFile,
+  options: OpenOptions = {},
+): Promise<boolean> {
   if (!swap) return false;
   isOpening.value = true;
   const startedAt = performance.now();
-  setStatus(file ? `פותח את ${file.name}…` : 'פותח מסמך ריק…');
+  setStatus('');
 
   // לפני המנוע ולא אחריו: ערך אחד ב-`word/settings.xml` שולח אותו ללולאה על
   // החוט הראשי, ומשם אין חזרה — גם `OPEN_TIMEOUT_MS` אינו יכול לירות. ראו
   // engine/docx-preflight.ts. השלב הזה אינו יכול להיכשל: הוא מחזיר את המקור
   // כמות שהוא בכל מקרה שאינו „מצאתי בדיוק את הערך הזה”.
   const { source, fontTable } = await preflightSource(options.draft ?? file?.url);
+  // „דלג” בזמן שהבייטים נקראו. הבדיקה כאן ולא רק לפני המנוע: שאר הפונקציה
+  // כותבת למצב של המעטפת — כותרת, יעד שמירה, רשומת ההפעלה — ופתיחה שהמשתמש
+  // נטש אינה אמורה לכתוב שם דבר.
+  if (attempt.cancelled) return false;
+  attempt.stage(LOAD_STAGES.fonts, 'מכין את הגופנים…');
 
   // לפני שהמנוע מודד, ולא אחרי: `lineRule="auto"` גוזר את גובה השורה ממדדי
   // הגופן שנבחר בפועל, ולכן גופן חסר משנה את פריסת כל המסמך — לא רק את מראהו.
   // ראו engine/docx-fonts.ts. אינו יכול להיכשל, ואינו מעכב כשאין מה להחליף.
   await installDocumentFontAliases(fontTable);
+  if (attempt.cancelled) return false;
+  attempt.stage(LOAD_STAGES.engine, 'בונה את המסמך…');
 
   const outcome = await swap.open(source);
   isOpening.value = swap.isOpening;
 
+  // ה-swap מדווח `superseded` גם על פתיחה שבוטלה — הביטול מקדם שם את הדור
+  // לפני שהוא מרים את האיתות (ראו EditorSwap.cancel). המחוון כבר סולק
+  // על ידי מי שביטל, ולכן אין כאן מה לסגור.
   if (outcome.status === 'superseded') return false;
 
   if (outcome.status === 'failed') {
+    attempt.fail();
     const kept = swap.current ? ` ${title.value} נשאר פתוח.` : '';
     setStatus(`פתיחת המסמך נכשלה: ${outcome.error.message}.${kept}`, true);
     return false;
   }
+
+  attempt.stage(LOAD_STAGES.arranging, 'מסדר את התצוגה…');
 
   const editor = outcome.session;
   const adapter = createCommandAdapter(editor.ui);
@@ -845,8 +940,8 @@ async function openDocument(file?: UserFile, options: OpenOptions = {}): Promise
   // `observe` יורה מיד עם ה-snapshot ואז על כל שינוי: המנוע פותר את גופני
   // המסמך אחרי שהוא נפתח, ובלי האזנה הבורר היה קופא על הרשימה של הרגע הראשון.
   editor.onDispose(
-    observeFontOptions(editor.ui, (options) => {
-      fontOptions.value = options;
+    observeFontSlice(editor.ui, (slice) => {
+      engineFontSlice.value = slice;
     })
   );
 
@@ -1196,7 +1291,44 @@ async function openDocument(file?: UserFile, options: OpenOptions = {}): Promise
   // יושב.
   await restoreDocumentView(editor, options.restore);
 
+  // אחרון, ולא ליד `outcome.status === 'opened'`: מרגע ש-100% על המסך „דלג”
+  // נעלם, ואילו שחזור התצוגה הוא עוד המתנה שהמשתמש רואה.
+  attempt.finish();
   return true;
+}
+
+/**
+ * „דלג” בשורת המצב.
+ *
+ * שני הקוראים חייבים להיקרא, וכל אחד מהם לבד אינו מספיק: `documentLoad.cancel`
+ * מסלק את המחוון ומסמן את הפתיחה כנטושה — כלומר `openDocument` לא תכתוב יותר
+ * למצב המעטפת — ו-`swap.cancel` הוא זה שמפרק את המנוע החצי-בנוי ומשחרר את
+ * ה-workers שלו. בלי השני „דלג” היה מסתיר את הפס בזמן שהמכונה ממשיכה לבנות
+ * מסמך שאיש לא יראה.
+ *
+ * מה שאין לו כאן כפתור: חוט ראשי שנתקע בלולאה של המנוע. שם גם הלחיצה עצמה
+ * אינה מגיעה, וההגנה היחידה היא לפני שהמנוע רואה את הבייטים
+ * (engine/docx-preflight.ts).
+ */
+async function onSkipLoad(): Promise<void> {
+  const name = loadSnapshot.value.name;
+  // התנאי הוא של המודל ולא של המעטפת: הוא זה שיודע אם יש פתיחה שאפשר לנטוש,
+  // וכפתור שנלחץ פעמיים אינו אמור לפתוח מסמך ריק שני.
+  if (!documentLoad.cancel()) return;
+  swap?.cancel();
+  isOpening.value = false;
+
+  if (hasDocument.value) {
+    setStatus(`פתיחת ${name} הופסקה — ${title.value} נשאר פתוח`);
+    return;
+  }
+
+  // אין לְמה לחזור. מסמך ריק עדיף על מסך ריק — אותה הכרעה בדיוק כמו בכשל
+  // פתיחה ב-`reopenPreviousSession`, ומאותו טעם: המשתמש נשאר עם עורך שאפשר
+  // לעבוד בו. `remember: false` הוא העיקר כאן — הרשומה ממשיכה להצביע על
+  // המסמך שנטש, וההפעלה הבאה תנסה אותו שוב.
+  await openDocument(undefined, { remember: false });
+  setStatus(`פתיחת ${name} הופסקה — נפתח מסמך חדש`);
 }
 
 /**
@@ -2062,6 +2194,17 @@ let directionShortcut: { dispose: () => void } | null = null;
 let undoRedoWatcher: UndoRedoWatcher | null = null;
 
 onMounted(async () => {
+  /**
+   * המנייה של גופני המכונה — ראשונה, ובלי `await`.
+   *
+   * בלי `await` מפני שהיא אינה תנאי לשום דבר: עד שהיא נוחתת הבורר מציג את
+   * הרשימה הקבועה, וברגע שהיא נוחתת `watchEffect` מרכיב מחדש והבורר מתמלא.
+   * פתיחת המסמך הראשון אינה אמורה להמתין למנייה של מאות משפחות.
+   */
+  void loadInstalledFonts().then((snapshot) => {
+    installedFonts.value = snapshot;
+  });
+
   shortcuts = createShortcutDispatcher({
     runCommand: (id, payload) => void runShortcutCommand(id, payload),
     runAction: runShellAction,
@@ -2117,10 +2260,13 @@ onMounted(async () => {
     // וההנמקה — ב-host/lifecycle.ts.
     hiddenListener = onPluginHidden(() => void keeper?.flush());
 
-    swap = createEditorSwap(editorStackRef.value, (host, source) =>
+    swap = createEditorSwap(editorStackRef.value, (host, source, signal) =>
       createEditor({
         container: host,
         source,
+        // „דלג” בשורת המצב. ה-swap הוא שמרים אותו, וזה מה שמפרק את המנוע
+        // החצי-בנוי במקום להשאיר אותו בונה מסמך שנזנח. ראו onSkipLoad.
+        signal,
         onError: (err) => console.error('[otzaria-word] שגיאת מנוע:', err),
         onUpdate: () => {
           save?.markDirty();
@@ -2178,6 +2324,8 @@ onUnmounted(() => {
   hiddenListener = null;
   keeper?.dispose();
   keeper = null;
+  // ה-interval של הזחילה הוא הדבר היחיד כאן שממשיך לרוץ בלי בעלים.
+  documentLoad.dispose();
 });
 
 /**
