@@ -235,6 +235,7 @@ describe('לשונית „קובץ” נשענת על מצב המעטפת', () =
     'שמור בשם...',
     'ייצוא ל-Word',
     'ייצוא ל-PDF',
+    'ייצוא לאוצריא',
     'הדפסה',
     'יציאה',
     'אודות',
@@ -253,7 +254,7 @@ describe('לשונית „קובץ” נשענת על מצב המעטפת', () =
     return byLabel;
   }
 
-  it('עשרה פקדים, וכל התוויות נמצאו — אחרת הבדיקות למטה מודדות אוויר', async () => {
+  it('אחד-עשר פקדים, וכל התוויות נמצאו — אחרת הבדיקות למטה מודדות אוויר', async () => {
     const byLabel = await states({ hasDocument: true });
 
     expect(Object.keys(byLabel)).toHaveLength(LABELS.length);
@@ -266,6 +267,7 @@ describe('לשונית „קובץ” נשענת על מצב המעטפת', () =
     expect(byLabel['שמור']).toBe(true);
     expect(byLabel['שמור בשם...']).toBe(true);
     expect(byLabel['ייצוא ל-Word']).toBe(true);
+    expect(byLabel['ייצוא לאוצריא']).toBe(true);
     expect(byLabel['הדפסה']).toBe(true);
     // „מסמך חדש” ו„פתח קובץ” הם בדיוק מה שעושים כשאין מסמך.
     expect(byLabel['מסמך חדש']).toBe(false);

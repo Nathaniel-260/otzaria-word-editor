@@ -130,9 +130,10 @@ describe('פקדי לשונית „קובץ”', () => {
    */
   const UNCONDITIONAL = ['אודות', 'קיצורים'];
 
-  it('נמצאו עשרה פקדים', () => {
-    // עשרה מאז ש„ייצוא ל-PDF" נוסף (ui.exportPdf, אוצריא 0.9.97).
-    expect(controls(FILE_TAB)).toHaveLength(10);
+  it('נמצאו אחד-עשר פקדים', () => {
+    // אחד-עשר מאז ש„ייצוא לאוצריא” נוסף (engine/otzaria-book.ts), אחרי
+    // ש„ייצוא ל-PDF" (ui.exportPdf, אוצריא 0.9.97) הביא אותם לעשרה.
+    expect(controls(FILE_TAB)).toHaveLength(11);
   });
 
   it('לכל פקד יש חיווט של disabled — חוץ מ„אודות” ומ„קיצורים”', () => {

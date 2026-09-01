@@ -53,6 +53,7 @@
       @export-doc="onExportDocx"
       @print-doc="onPrint"
       @export-pdf="onExportPdf"
+      @export-otzaria="onExportOtzaria"
       @about="isAboutOpen = true"
       @shortcuts-help="isShortcutsHelpOpen = true"
       @exit-app="onExit"
@@ -367,6 +368,7 @@ import {
 } from './engine/export';
 import { NO_VBA, type DocumentVba } from './engine/vba-import';
 import { exportPdfDocument, pdfSuggestedName, printDocument } from './engine/print';
+import { buildOtzariaBook, otzariaBookFileName } from './engine/otzaria-book';
 import { downloadBlob } from './host/download';
 import {
   beginBinaryWrite,
@@ -376,9 +378,10 @@ import {
   pickDocxFile,
   resolveFileUrl,
   type UserFile,
+  type WriteTicket,
 } from './host/files';
 import { decideDocumentSwitch } from './sessions/open-flow';
-import { call, confirm, isAvailable, notifyError, on } from './host/otzaria-client';
+import { call, confirm, isAvailable, notifyError, on, tryCall } from './host/otzaria-client';
 import { supportsPdfExport } from './host/host-capabilities';
 import { splashDone } from './host/splash';
 import {
@@ -2170,6 +2173,69 @@ async function onExportPdf(): Promise<void> {
     return;
   }
   setStatus(outcome.warning ? `${outcome.name} נשמר — ${outcome.warning}` : `${outcome.name} נשמר`);
+}
+
+/**
+ * ייצוא לפורמט ספר של אוצריא — טקסט עם רמות כותרות. הבנייה ב-
+ * engine/otzaria-book.ts; כאן רק מסלול השמירה והדיווח.
+ *
+ * המסלול הוא מסלול השמירה הבינארית הרגיל (begin ← PUT ← commit עם דיאלוג
+ * „שמור בשם”), עם סיומת `txt` — לא `downloadBlob`: הורדה לתיקיית ההורדות
+ * הייתה מפספסת את הנקודה, שהיא לשים את הקובץ בתיקייה אישית של אוצריא.
+ *
+ * אחרי שמירה מוצלחת נקרא `library.refreshUserBooks`: אם המשתמש שמר
+ * לתיקייה אישית רשומה, הספר נקלט מיד; אחרת הסריקה פשוט לא תמצא דבר,
+ * וההודעה אומרת מה אפשר לעשות. הרענון הוא best-effort (`tryCall`) —
+ * היעדר ההרשאה או Host ישן אינם כשל של הייצוא, שכבר הצליח.
+ */
+async function onExportOtzaria(): Promise<void> {
+  if (!swap?.current) {
+    setStatus('אין מסמך פתוח לייצוא', true);
+    return;
+  }
+
+  const built = await buildOtzariaBook(activeSuperdoc.value, title.value);
+  if (!built.ok) {
+    setStatus(built.message, true);
+    return;
+  }
+
+  let ticket: WriteTicket | null = null;
+  try {
+    const blob = new Blob([built.text], { type: 'text/plain' });
+    ticket = await beginBinaryWrite(blob.size);
+    await uploadBytes(ticket.uploadUrl, blob);
+    const result = await commitUserFileWrite({
+      writeToken: ticket.writeToken,
+      suggestedName: otzariaBookFileName(title.value),
+      title: 'ייצוא לספר אוצריא',
+      extension: 'txt',
+    });
+    // ה-commit צרך את ההעלאה — מכאן אין מה לבטל, גם אם הדיווח ייכשל.
+    ticket = null;
+    if (result.cancelled) {
+      setStatus('הייצוא בוטל');
+      return;
+    }
+
+    const name = result.name ?? 'הספר';
+    const refreshed = await tryCall<{ addedBooks?: number; updatedBooks?: number }>(
+      'library.refreshUserBooks',
+      {},
+    );
+    const landed = (refreshed?.addedBooks ?? 0) + (refreshed?.updatedBooks ?? 0) > 0;
+    setStatus(
+      landed
+        ? `${name} נשמר ונקלט בספריית אוצריא`
+        : `${name} נשמר — כדי שיופיע בספרייה, שמרו לתיקייה אישית הרשומה בהגדרות אוצריא`,
+    );
+  } catch (error) {
+    if (ticket) void abortBinaryWrite(ticket.writeToken);
+    setStatus(
+      `הייצוא לספר אוצריא נכשל: ${error instanceof Error ? error.message : String(error)}`,
+      true,
+    );
+  }
 }
 
 /**

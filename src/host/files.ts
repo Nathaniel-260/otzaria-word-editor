@@ -251,8 +251,11 @@ export interface CommitOptions {
    * `ספר.docm.docx` — ועוד סינן את הדיאלוג ל-`docx`. כלומר בדיוק החבילה
    * עם `vbaProject` שנושאת שם `.docx` שאותה יש להימנע ממנה.
    * ראו `resolveSaveExtension` ב-engine/export.ts.
+   *
+   * `txt` — ייצוא לפורמט ספר של אוצריא (engine/otzaria-book.ts), שעובר
+   * באותו מסלול שמירה בדיוק.
    */
-  extension?: WordExtension;
+  extension?: WordExtension | 'txt';
 }
 
 /** כותבת את ההעלאה לקובץ. `cancelled` פירושו שהמשתמש סגר את „שמור בשם”. */

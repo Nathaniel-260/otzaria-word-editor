@@ -71,6 +71,7 @@
         @export-doc="$emit('export-doc')"
         @print-doc="$emit('print-doc')"
         @export-pdf="$emit('export-pdf')"
+        @export-otzaria="$emit('export-otzaria')"
         @about="$emit('about')"
         @shortcuts-help="$emit('shortcuts-help')"
         @exit-app="$emit('exit-app')"
@@ -204,6 +205,7 @@ defineEmits<{
   (e: 'export-doc'): void;
   (e: 'print-doc'): void;
   (e: 'export-pdf'): void;
+  (e: 'export-otzaria'): void;
   (e: 'about'): void;
   (e: 'shortcuts-help'): void;
   (e: 'exit-app'): void;
