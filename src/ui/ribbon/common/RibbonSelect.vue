@@ -11,38 +11,14 @@
       :aria-label="menuString(title)"
       @change="$emit('update:modelValue', ($event.target as HTMLSelectElement).value)"
     >
-      <template
-        v-for="group in groups"
-        :key="group.label"
+      <option
+        v-for="opt in options"
+        :key="opt.value"
+        :value="opt.value"
+        :style="opt.preview ? { fontFamily: opt.preview } : undefined"
       >
-        <!--
-          קבוצה בלי כותרת נשארת אפשרויות חשופות ולא `<optgroup label="">`:
-          האחרון מצייר שורה ריקה בראש הרשימה בכל דפדפן.
-        -->
-        <optgroup
-          v-if="group.label"
-          :label="menuString(group.label)"
-        >
-          <option
-            v-for="opt in group.options"
-            :key="opt.value"
-            :value="opt.value"
-            :style="opt.preview ? { fontFamily: opt.preview } : undefined"
-          >
-            {{ menuString(opt.label) }}
-          </option>
-        </optgroup>
-        <template v-else>
-          <option
-            v-for="opt in group.options"
-            :key="opt.value"
-            :value="opt.value"
-            :style="opt.preview ? { fontFamily: opt.preview } : undefined"
-          >
-            {{ menuString(opt.label) }}
-          </option>
-        </template>
-      </template>
+        {{ menuString(opt.label) }}
+      </option>
     </select>
     <SvgIcon
       name="chevronDown"
@@ -53,7 +29,6 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
 import SvgIcon from '../../icons/SvgIcon.vue';
 import { menuString } from '../i18n';
 
@@ -66,16 +41,9 @@ export interface SelectOption {
    * לפני שהמשתמש בוחר בו.
    */
   preview?: string;
-  /**
-   * כותרת ה-`<optgroup>` שהאפשרות שייכת לו. חסר או ריק = אפשרות חשופה בראש
-   * הרשימה. קיים בשביל בורר הגופן, שמציג מאות משפחות מרגע שהמכונה נמנתה
-   * (engine/system-fonts.ts) — רשימה שטוחה בגודל כזה אינה שמישה. בורר בלי
-   * קבוצות כלל, כמו בורר הגודל, נשאר בדיוק כפי שהיה.
-   */
-  group?: string;
 }
 
-const props = withDefaults(
+withDefaults(
   defineProps<{
     modelValue?: string;
     /** `readonly` — האפשרויות מגיעות מהמנוע, ואין לפקד רשות לשנות אותן. */
@@ -95,22 +63,6 @@ const props = withDefaults(
 defineEmits<{
   (e: 'update:modelValue', val: string): void;
 }>();
-
-/**
- * האפשרויות מקובצות לפי `group`, **בסדר ההופעה** ולא בסדר האלפבית: מי שבנה
- * את הרשימה כבר הכריע מה בראש, וקיבוץ שממיין מחדש היה הופך את ההכרעה הזאת.
- * קבוצה שחוזרת אחרי אפשרויות של קבוצה אחרת מתמזגת עם המופע הראשון שלה.
- */
-const groups = computed(() => {
-  const byLabel = new Map<string, { label: string; options: SelectOption[] }>();
-  for (const option of props.options) {
-    const label = option.group ?? '';
-    const existing = byLabel.get(label);
-    if (existing) existing.options.push(option);
-    else byLabel.set(label, { label, options: [option] });
-  }
-  return [...byLabel.values()];
-});
 </script>
 
 <style scoped>

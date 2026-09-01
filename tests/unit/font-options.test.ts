@@ -308,4 +308,26 @@ describe('observeFontSlice — דיווח חוזר וזהה', () => {
     captured.emit?.({ options: [{ value: 'Cambria', label: 'Cambria' }], sizeOptions: [] });
     expect(reports).toBe(2);
   });
+
+  it('שינוי בתווית בלבד עובר — המנוע פותר את תוויות המסמך אחרי הפתיחה', () => {
+    // חתימה על הערך לבדו הייתה בולעת אותו, והבורר היה נשאר על התווית הגולמית.
+    const captured: { emit: ((slice: FontsSliceLike) => void) | null } = { emit: null };
+    const ui: FontOptionsSource = {
+      fonts: {
+        observe: (listener) => {
+          captured.emit = listener;
+          return () => {};
+        },
+      },
+    };
+
+    let reports = 0;
+    observeFontSlice(ui, () => { reports += 1; });
+
+    captured.emit?.({ options: [{ value: 'TaameyDavidCLM', label: 'TaameyDavidCLM' }] });
+    expect(reports).toBe(1);
+
+    captured.emit?.({ options: [{ value: 'TaameyDavidCLM', label: 'David' }] });
+    expect(reports).toBe(2);
+  });
 });

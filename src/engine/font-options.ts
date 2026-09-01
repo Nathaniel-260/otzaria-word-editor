@@ -301,13 +301,23 @@ function changeGate(listener: (slice: FontsSliceLike) => void): (slice: FontsSli
 }
 
 /**
- * טביעת האצבע של slice: הערכים בלבד, בסדר שהמנוע דיווח.
+ * טביעת האצבע של slice: כל מה שמגיע לבורר, בסדר שהמנוע דיווח.
+ *
+ * גם `label` ו-`previewFamily` ולא הערך בלבד: המנוע פותר את תוויות המסמך אחרי
+ * הפתיחה, ודיווח שמשנה רק תווית הוא שינוי שהבורר אמור להראות. חתימה על הערך
+ * לבדו הייתה בולעת אותו.
  *
  * `JSON.stringify` ולא צירוף עם מפריד: שם גופן יכול להכיל כמעט כל תו,
  * ומפריד שמופיע בתוך שם היה מייצר שתי רשימות שונות עם אותה חתימה.
  */
 function sliceSignature(slice: FontsSliceLike): string {
-  const values = (options: readonly { value?: unknown }[] | undefined): string[] =>
-    (options ?? []).map((option) => String(option?.value ?? ''));
-  return JSON.stringify([values(slice.options), values(slice.sizeOptions)]);
+  const rows = (
+    options: readonly { value?: unknown; label?: unknown; previewFamily?: unknown }[] | undefined,
+  ): string[][] =>
+    (options ?? []).map((option) => [
+      String(option?.value ?? ''),
+      String(option?.label ?? ''),
+      String(option?.previewFamily ?? ''),
+    ]);
+  return JSON.stringify([rows(slice.options), rows(slice.sizeOptions)]);
 }

@@ -165,10 +165,33 @@ describe('נגישות', () => {
     );
   });
 
-  it('התיבה נושאת `title` — לפי זה שערי ה-QA מאתרים אותה', () => {
-    // `scripts/qa/qa-api.js` מאתר פקדים לפי `nameOf`, שקורא `title`. פקד בלי
-    // `title` הוא פקד שאף שער לא יוכל ללחוץ עליו — כשל שקט לגמרי.
-    expect(combo.find('input').attributes('title')).toBe('גופן');
+  it('כפתור החץ נפתח גם בהפעלה שאינה מעכבר', async () => {
+    // `mousedown` לבדו נראה נכון עד שמפעילים אחרת: `click()` תכנותי, והפעלה
+    // במקלדת, אינם מייצרים `mousedown` כלל — כלומר כפתור מת. `detail === 0`
+    // הוא מה שמפריד ביניהם ללחיצת עכבר, שכבר טופלה.
+    // `element.click()` ולא `trigger`: זו בדיוק ההפעלה שאינה מעכבר — היא
+    // מייצרת `detail === 0`, ו-`trigger` אינו יכול לקבוע את השדה הזה.
+    (combo.find('.ribbon-combo-arrow').element as HTMLElement).click();
+    await nextTick();
+    expect(combo.find('[role="listbox"]').exists()).toBe(true);
+  });
+
+  it('לחיצת עכבר על החץ אינה נסגרת מיד אחרי שנפתחה', async () => {
+    // הרצף האמיתי הוא `mousedown` ואז `click`. בלי ההבחנה השני היה מבטל את
+    // הראשון, והרשימה הייתה מהבהבת במקום להיפתח.
+    const arrow = combo.find('.ribbon-combo-arrow').element;
+    await combo.find('.ribbon-combo-arrow').trigger('mousedown');
+    arrow.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
+    await nextTick();
+    expect(combo.find('[role="listbox"]').exists()).toBe(true);
+  });
+
+  it('התיבה נושאת `data-tip-title` — טולטיפ הרצועה, ולפיו גם שערי ה-QA מאתרים אותה', () => {
+    // `data-tip-title` ולא `title` נייטיב: זו המערכת שכל שאר פקדי הרצועה
+    // משתמשים בה (ui/tooltip), ו-`nameOf` ב-`scripts/qa/qa-api.js` קורא אותה
+    // ראשונה. פקד בלי אף אחד מהם הוא פקד שאף שער לא יוכל ללחוץ עליו.
+    expect(combo.find('input').attributes('data-tip-title')).toBe('גופן');
+    expect(combo.find('input').attributes('aria-label')).toBe('גופן');
   });
 
   it('`aria-activedescendant` מצביע על השורה המסומנת', async () => {

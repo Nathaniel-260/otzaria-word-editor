@@ -72,7 +72,8 @@
           v-if="load.cancellable"
           type="button"
           class="status-load__skip"
-          title="הפסקת הפתיחה. המסמך שפתוח עכשיו יישאר פתוח"
+          data-tip-title="דלג"
+          data-tip-desc="הפסקת הפתיחה. המסמך שפתוח עכשיו יישאר פתוח"
           @pointerdown.prevent
           @click="$emit('skip-load')"
         >
@@ -206,7 +207,6 @@ const emit = defineEmits<{
 
 const pageText = computed(() => pageLabel(props.currentPage, props.totalPages));
 const wordText = computed(() => wordCountLabel(props.wordCount));
-
 
 function emitZoom(value: number): void {
   emit('update:zoomLevel', clampZoom(value, props.zoomMin, props.zoomMax));

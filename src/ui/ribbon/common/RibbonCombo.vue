@@ -13,7 +13,8 @@
       spellcheck="false"
       :value="shown"
       :disabled="disabled"
-      :title="menuString(title)"
+      :data-tip-title="menuString(title)"
+      :aria-label="menuString(title)"
       :aria-expanded="open"
       :aria-controls="listId"
       :aria-activedescendant="open && activeIndex >= 0 ? optionId(activeIndex) : undefined"
@@ -28,6 +29,7 @@
     <!--
       `mousedown.prevent` ולא `click`: בלי מניעת ברירת המחדל הלחיצה מוציאה את
       הפוקוס מהשדה, `blur` סוגר את הרשימה, והפתיחה מיד אחריה נראתה כהבהוב.
+      `click` נוסף עליו בשביל הפעלה שאינה מעכבר — ראו `onArrowClick`.
     -->
     <button
       type="button"
@@ -36,6 +38,7 @@
       :disabled="disabled"
       :aria-label="menuString('פתח את הרשימה')"
       @mousedown.prevent="toggle"
+      @click="onArrowClick"
     >
       <SvgIcon
         name="chevronDown"
@@ -214,6 +217,18 @@ function toggle(): void {
   inputRef.value?.focus();
 }
 
+/**
+ * הפעלת החץ שאינה מעכבר: מקלדת, או `click()` תכנותי.
+ *
+ * `detail === 0` הוא מה שמפריד ביניהן ללחיצת עכבר אמיתית, וההבחנה נדרשת מפני
+ * ש-`mousedown` כבר טיפל בזו: בלעדיה לחיצת עכבר הייתה פותחת ב-`mousedown`
+ * וסוגרת מיד ב-`click` שאחריו.
+ */
+function onArrowClick(event: MouseEvent): void {
+  if (event.detail !== 0) return;
+  toggle();
+}
+
 function choose(value: string): void {
   closeList();
   if (value !== props.modelValue) emit('update:modelValue', value);
@@ -280,7 +295,9 @@ watch(activeIndex, async (index) => {
   // `getElementById` ולא בורר CSS: המזהה נבנה כאן מאותיות, ספרות ומקפים
   // (`optionId`), ולכן אין מה לברוח ממנו — ו-`CSS.escape` אינו קיים ב-jsdom,
   // כלומר בורר עם בריחה היה מפיל את בדיקות הקומפוננטה בלי לשפר דבר.
-  document.getElementById(optionId(index))?.scrollIntoView({ block: 'nearest' });
+  // `?.scrollIntoView?.` — jsdom אינו מממש אותה כלל, וגלילה שאינה זמינה אינה
+  // סיבה להפיל את הפקד.
+  document.getElementById(optionId(index))?.scrollIntoView?.({ block: 'nearest' });
 });
 </script>
 

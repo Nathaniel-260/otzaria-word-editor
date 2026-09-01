@@ -16,14 +16,27 @@
  */
 import { describe, expect, it } from 'vitest';
 import HomeTab from '../../src/ui/ribbon/tabs/HomeTab.vue';
-import { autoUnmount, buttonByTip, createCommandDouble, mountUi, settle } from './harness';
+import {
+  autoUnmount,
+  buttonByTip,
+  createCommandDouble,
+  mountUi,
+  pickerValue,
+  setPicker,
+  settle,
+} from './harness';
 
 autoUnmount();
 
-/** מה שהבורר מציג בפועל ב-DOM. */
+/**
+ * מה שהבורר מציג בפועל ב-DOM.
+ *
+ * דרך `pickerValue` ולא דרך `<select>` ישירות: בורר הגופן הוא בורר חיפוש
+ * (`input[role="combobox"]`) ושני האחרים נשארו `<select>` — וההבחנה הזאת
+ * אינה מה שהבדיקות כאן מודדות.
+ */
 function shown(harness: ReturnType<typeof mountUi>, title: string): string {
-  const select = harness.wrapper.find(`select[data-tip-title="${title}"]`);
-  return (select.element as HTMLSelectElement).value;
+  return pickerValue(harness.wrapper, title);
 }
 
 const READONLY = {
@@ -38,7 +51,7 @@ describe('מסמך שדוחה את הפקודה', () => {
     await settle();
     expect(shown(harness, 'גופן')).toBe('Assistant');
 
-    await harness.wrapper.find('select[data-tip-title="גופן"]').setValue('TaameyDavidCLM');
+    await setPicker(harness.wrapper, 'גופן', 'TaameyDavidCLM');
     await settle();
 
     // הכשל דווח למשתמש (זה עבד), אבל התיבה הציגה גופן שלא הוחל על כלום.
@@ -54,7 +67,7 @@ describe('מסמך שדוחה את הפקודה', () => {
     await settle();
     expect(shown(harness, 'גודל גופן')).toBe('20');
 
-    await harness.wrapper.find('select[data-tip-title="גודל גופן"]').setValue('36');
+    await setPicker(harness.wrapper, 'גודל גופן', '36');
     await settle();
 
     expect(shown(harness, 'גודל גופן')).toBe('20');
@@ -65,7 +78,7 @@ describe('מסמך שדוחה את הפקודה', () => {
     await settle();
     const before = shown(harness, 'מרווח בין שורות');
 
-    await harness.wrapper.find('select[data-tip-title="מרווח בין שורות"]').setValue('3.0');
+    await setPicker(harness.wrapper, 'מרווח בין שורות', '3.0');
     await settle();
 
     expect(shown(harness, 'מרווח בין שורות')).toBe(before);
@@ -110,7 +123,7 @@ describe('מסמך שמקבל את הפקודה', () => {
     const harness = mountUi(HomeTab);
     await settle();
 
-    await harness.wrapper.find('select[data-tip-title="גופן"]').setValue('Rubik');
+    await setPicker(harness.wrapper, 'גופן', 'Rubik');
     await settle();
 
     expect(harness.adapter.payloads('font-family')).toEqual(['Rubik']);
@@ -138,7 +151,7 @@ describe('מה שהמנוע מדווח', () => {
     const harness = mountUi(HomeTab, { adapter });
     await settle();
 
-    await harness.wrapper.find('select[data-tip-title="גופן"]').setValue('Rubik');
+    await setPicker(harness.wrapper, 'גופן', 'Rubik');
     await settle();
 
     // הסמן זז לטקסט אחר, והמנוע דיווח גופן אחר.
@@ -186,12 +199,11 @@ describe('בחירה שנייה בזמן שהראשונה באוויר', () => {
     const harness = mountUi(HomeTab, { adapter });
     await settle();
 
-    const select = harness.wrapper.find('select[data-tip-title="גופן"]');
-    await select.setValue('Rubik');
+    await setPicker(harness.wrapper, 'גופן', 'Rubik');
     await settle();
     expect(shown(harness, 'גופן')).toBe('Rubik');
 
-    await select.setValue('Shofar');
+    await setPicker(harness.wrapper, 'גופן', 'Shofar');
     await settle();
     expect(shown(harness, 'גופן')).toBe('Shofar');
 

@@ -86,13 +86,12 @@ export function createEditorSwap(container: HTMLElement, openEditor: OpenEditor)
   /** ראו `EditorSwap.documentGeneration`. עולה רק כש-`current` באמת מוחלף. */
   let documentGeneration = 0;
   let pending = 0;
-  /** hosts של פתיחות שעוד לא הסתיימו, כדי ש-destroy יוכל לנקות גם אותם. */
-  const openingHosts = new Set<HTMLElement>();
   /**
-   * ה-controllers של הפתיחות שבדרך. מפתח: אותו host, שהוא הזהות היחידה של
-   * ניסיון פתיחה שיש כאן משני הצדדים.
+   * הפתיחות שעוד לא הסתיימו: ה-host שלהן — כדי שנטישה תוכל לנקות אותו — וה-
+   * controller שמרים את האיתות. המפתח הוא ה-host, שהוא הזהות היחידה של ניסיון
+   * פתיחה שיש כאן משני הצדדים.
    */
-  const openingAborts = new Map<HTMLElement, AbortController>();
+  const opening = new Map<HTMLElement, AbortController>();
 
   /**
    * נוטש את כל מה שבדרך: מקדם את הדור, מסיר את ה-hosts, ומרים את האיתות.
@@ -103,10 +102,11 @@ export function createEditorSwap(container: HTMLElement, openEditor: OpenEditor)
    */
   function abandonPending(): void {
     generation += 1;
-    for (const host of openingHosts) host.remove();
-    openingHosts.clear();
-    for (const controller of openingAborts.values()) controller.abort();
-    openingAborts.clear();
+    for (const [host, controller] of opening) {
+      host.remove();
+      controller.abort();
+    }
+    opening.clear();
   }
 
   function createHost(): HTMLElement {
@@ -144,17 +144,15 @@ export function createEditorSwap(container: HTMLElement, openEditor: OpenEditor)
     async open(source) {
       const mine = ++generation;
       const host = createHost();
-      openingHosts.add(host);
       const aborts = new AbortController();
-      openingAborts.set(host, aborts);
+      opening.set(host, aborts);
       pending += 1;
 
       let session: EditorSession;
       try {
         session = await openEditor(host, source, aborts.signal);
       } catch (error) {
-        openingHosts.delete(host);
-        openingAborts.delete(host);
+        opening.delete(host);
         host.remove();
         pending -= 1;
         if (mine !== generation) return { status: 'superseded' };
@@ -163,8 +161,7 @@ export function createEditorSwap(container: HTMLElement, openEditor: OpenEditor)
           error: error instanceof Error ? error : new Error(String(error)),
         };
       }
-      openingHosts.delete(host);
-      openingAborts.delete(host);
+      opening.delete(host);
       pending -= 1;
 
       // בקשה חדשה יותר כבר בדרך, או שכבר הוחלף: המועמד הזה מפרק את עצמו ואינו

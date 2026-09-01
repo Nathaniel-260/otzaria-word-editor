@@ -95,8 +95,8 @@
         active: el.classList.contains('active'),
         pressed: el.getAttribute('aria-pressed'),
         // גם בורר החיפוש מדווח ערך: הוא `<input>`, וה-`value` שלו הוא הגופן
-      // הנוכחי כל עוד לא מקלידים בו (ראו RibbonCombo).
-      value: el.tagName === 'SELECT' || el.getAttribute('role') === 'combobox' ? el.value : undefined,
+        // הנוכחי כל עוד לא מקלידים בו (ראו RibbonCombo).
+        value: el.tagName === 'SELECT' || el.getAttribute('role') === 'combobox' ? el.value : undefined,
         cls: el.className,
       };
     });

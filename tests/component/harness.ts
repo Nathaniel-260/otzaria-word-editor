@@ -1374,6 +1374,49 @@ export function tipStartsSelector(prefix: string, tag = 'button'): string {
   return `${tag}[data-tip-title^="${prefix}"],${tag}[data-tip-desc^="${prefix}"]`;
 }
 
+/**
+ * הבוררים ברצועה, בלי לדעת מאיזה סוג הם.
+ *
+ * שני מימושים חיים זה לצד זה: `<select>` נייטיב (גודל גופן, מרווח שורות),
+ * ובורר חיפוש שהוא `<input role="combobox">` (גופן — ראו RibbonCombo.vue).
+ * לבדיקה שמודדת „מה הבורר מציג” ו„מה קורה כשבוחרים” ההבדל בין השניים אינו
+ * העניין, ובלי העטיפה הזאת כל מעבר בין המימושים היה מפיל אותה מחדש.
+ */
+function pickerOf(wrapper: VueWrapper, tip: string): DOMWrapper<Element> {
+  const picker = wrapper.find(
+    `select[data-tip-title="${tip}"],input[role="combobox"][data-tip-title="${tip}"]`,
+  );
+  if (!picker.exists()) throw new Error(`אין בורר עם הטולטיפ „${tip}”`);
+  return picker;
+}
+
+/** מה שהבורר מציג בפועל ב-DOM. */
+export function pickerValue(wrapper: VueWrapper, tip: string): string {
+  return (pickerOf(wrapper, tip).element as HTMLSelectElement | HTMLInputElement).value;
+}
+
+/**
+ * בחירה בבורר, בדרך שהמשתמש עובר בה.
+ *
+ * ב-`<select>` זו השמה ואירוע `change`. בבורר החיפוש אין רשימה קבועה לבחור
+ * ממנה: מקלידים ומאשרים ב-Enter — וזה גם מה שמפעיל את הדירוג, כלומר את אותו
+ * מסלול שהמשתמש עובר בו ולא קיצור סביבו.
+ */
+export async function setPicker(
+  wrapper: VueWrapper,
+  tip: string,
+  value: string,
+): Promise<void> {
+  const picker = pickerOf(wrapper, tip);
+  if (picker.element.tagName === 'SELECT') {
+    await picker.setValue(value);
+    return;
+  }
+  await picker.trigger('focus');
+  await picker.setValue(value);
+  await picker.trigger('keydown', { key: 'Enter' });
+}
+
 const NO_TIP: TipContent = { title: '', shortcut: '', description: '' };
 
 /**

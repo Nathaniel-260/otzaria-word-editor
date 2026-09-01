@@ -19,7 +19,15 @@ import InsertTab from '../../src/ui/ribbon/tabs/InsertTab.vue';
 import ReviewTab from '../../src/ui/ribbon/tabs/ReviewTab.vue';
 import ViewTab from '../../src/ui/ribbon/tabs/ViewTab.vue';
 import ColorPickerPopover from '../../src/ui/ribbon/common/ColorPickerPopover.vue';
-import { autoUnmount, buttonByTip, createCommandDouble, mountUi, settle, tipSelector } from './harness';
+import {
+  autoUnmount,
+  buttonByTip,
+  createCommandDouble,
+  mountUi,
+  setPicker,
+  settle,
+  tipSelector,
+} from './harness';
 
 autoUnmount();
 
@@ -28,7 +36,7 @@ describe('גופן', () => {
     const harness = mountUi(HomeTab);
     await settle();
 
-    await harness.wrapper.find('select[data-tip-title="גופן"]').setValue('TaameyDavidCLM');
+    await setPicker(harness.wrapper, 'גופן', 'TaameyDavidCLM');
     await settle();
 
     expect(harness.adapter.payloads('font-family')).toEqual(['TaameyDavidCLM']);
@@ -39,7 +47,7 @@ describe('גופן', () => {
     const harness = mountUi(HomeTab);
     await settle();
 
-    await harness.wrapper.find('select[data-tip-title="גודל גופן"]').setValue('16');
+    await setPicker(harness.wrapper, 'גודל גופן', '16');
     await settle();
 
     expect(harness.adapter.payloads('font-size')).toEqual([16]);
@@ -135,7 +143,7 @@ describe('פסקה', () => {
     const harness = mountUi(HomeTab);
     await settle();
 
-    await harness.wrapper.find('select[data-tip-title="מרווח בין שורות"]').setValue('1.5');
+    await setPicker(harness.wrapper, 'מרווח בין שורות', '1.5');
     await settle();
 
     expect(harness.adapter.payloads('line-height')).toEqual([{ lineHeight: 1.5 }]);
