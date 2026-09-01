@@ -261,6 +261,34 @@ export interface ExportPdfReply {
   name?: string | null;
 }
 
+/**
+ * ארגומנטי העימוד של `ui.exportPdf` (אוצריא 0.9.97, spec.json).
+ *
+ * `pageSize` כמפה במ"מ ולא כשם קבוע: המסמך קובע את מידותיו, והשמות הקבועים
+ * (a4/a5/letter/legal) אינם מכסים DOCX עם גודל דף מותאם אישית. אין שער גרסה
+ * נפרד למפה — היא נכנסה לאוצריא לפני ש-0.9.97 שוחררה, ולכן כל Host שמכיר
+ * את `ui.exportPdf` מכיר גם אותה.
+ *
+ * `orientation` מושמט בכוונה: הרוחב והגובה כבר נושאים את הכיוון, ודגל נוסף
+ * מסתכן במנוע שמסובב את המידות פעם שנייה.
+ */
+export interface ExportPdfLayoutInput {
+  pageSize?: { widthMm: number; heightMm: number };
+  marginMm?: number;
+  printBackgrounds?: boolean;
+}
+
+const MM_PER_INCH = 25.4;
+
+/**
+ * ההמרה לממ"ים של `ui.exportPdf`. העיגול כלפי מעלה לשתי ספרות — אותו כיוון
+ * ואותה סיבה כמו `ceilTo3`: נייר שקטן מתיבת העמוד בשבריר שובר כל עמוד לשניים.
+ */
+export function pdfPageSizeMm(size: PrintPageSize): { widthMm: number; heightMm: number } {
+  const ceil2 = (value: number): number => Math.ceil(value * 100) / 100;
+  return { widthMm: ceil2(size.widthIn * MM_PER_INCH), heightMm: ceil2(size.heightIn * MM_PER_INCH) };
+}
+
 export interface ExportPdfOptions {
   /** ברירת המחדל: המסמך של הדפדפן. מוחלף בבדיקות. */
   root?: Document;
@@ -292,6 +320,19 @@ export type ExportPdfOutcome =
  * עם מידות הדף של המסמך. בלי ההכנה הזאת ה-PDF היה מכיל את הרצועה ואת שורת
  * המצב, ועמוד A4 היה נשבר לשני גיליונות — אותן שלוש הבעיות שתועדו בראש הקובץ.
  *
+ * ## שתי שכבות לאותו גודל דף — בכוונה
+ *
+ * מידות הדף נמסרות **גם** כארגומנטים לאוצריא (`pageSize`/`marginMm`, ראו
+ * ExportPdfLayoutInput) וגם כ-`@page` מוזרק. הארגומנטים הם המחייבים — הם
+ * מגיעים ל-`PrintJobSettings` של ה-WebView, שאינו מחויב לכבד `@page` של הדף.
+ * ההזרקה נשארת כי היא מה שמשרת את `window.print()` (מסלול ההדפסה), ושתי
+ * השכבות מחושבות מאותה קריאה אחת ל-`readPrintPageSize` — אין להן דרך לסתור.
+ *
+ * `marginMm: 0` ו-`printBackgrounds: true` נמסרים תמיד, גם כשהגודל לא נקרא:
+ * השוליים כבר מצוירים בתוך תיבת העמוד מה-DOCX (שוליים של המנוע היו נוספים
+ * עליהם — שוליים כפולים), והרקעים הם חלק מהמסמך (הצללת תאים, הדגשות) שמנועי
+ * הדפסה משמיטים כברירת מחדל.
+ *
  * ## ההזרקה, ולמה היא כאן
  *
  * `exportPdf` מוזרק ואינו נקרא מכאן: שכבת ה-engine אינה נוגעת ב-Host (אף
@@ -311,7 +352,9 @@ export type ExportPdfOutcome =
  */
 export async function exportPdfDocument(
   host: PrintTarget,
-  exportPdf: (input: { fileName?: string; title?: string }) => Promise<ExportPdfReply>,
+  exportPdf: (
+    input: { fileName?: string; title?: string } & ExportPdfLayoutInput,
+  ) => Promise<ExportPdfReply>,
   options: ExportPdfOptions = {},
 ): Promise<ExportPdfOutcome> {
   const root = options.root ?? document;
@@ -324,6 +367,9 @@ export async function exportPdfDocument(
     reply = await exportPdf({
       ...(options.fileName ? { fileName: options.fileName } : {}),
       ...(options.title ? { title: options.title } : {}),
+      ...(size ? { pageSize: pdfPageSizeMm(size) } : {}),
+      marginMm: 0,
+      printBackgrounds: true,
     });
   } catch (error) {
     const code = (error as { code?: unknown } | null)?.code;

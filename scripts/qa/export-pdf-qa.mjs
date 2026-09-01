@@ -39,6 +39,11 @@ try {
     ? report.pass('נשלחה קריאה אחת', JSON.stringify(calls[0]))
     : report.fail('קריאות', JSON.stringify(calls));
 
+  const layout = calls[0] ?? {};
+  layout.pageSize?.widthMm > 0 && layout.pageSize?.heightMm > 0 && layout.marginMm === 0
+    ? report.pass('מידות הדף במ"מ ושוליים 0 נמסרו לאוצריא', JSON.stringify(layout.pageSize))
+    : report.fail('עימוד', JSON.stringify(layout));
+
   const pageStyle = await app.js(
     `(function(){ var e = document.getElementById('otzaria-print-page'); return e ? e.textContent : null; })()`,
   );

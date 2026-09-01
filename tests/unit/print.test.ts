@@ -309,14 +309,42 @@ describe('exportPdfDocument', () => {
       withBoth.push(input);
       return { saved: true, name: 'a.pdf' };
     }, { root: fakeRoot(), fileName: 'ספר', title: 'ייצוא' });
-    expect(withBoth[0]).toEqual({ fileName: 'ספר', title: 'ייצוא' });
+    expect(withBoth[0]).toMatchObject({ fileName: 'ספר', title: 'ייצוא' });
 
     const bare: unknown[] = [];
     await exportPdfDocument(fakeHost(), async (input) => {
       bare.push(input);
       return { saved: true, name: 'a.pdf' };
     }, { root: fakeRoot() });
-    expect(bare[0]).toEqual({});
+    expect(bare[0]).not.toHaveProperty('fileName');
+    expect(bare[0]).not.toHaveProperty('title');
+  });
+
+  it('מוסרת לאוצריא את מידות הדף במ"מ, שוליים 0 ורקעים', async () => {
+    const inputs: unknown[] = [];
+    await exportPdfDocument(fakeHost(), async (input) => {
+      inputs.push(input);
+      return { saved: true, name: 'a.pdf' };
+    }, { root: fakeRoot() });
+
+    // fakeHost מחזיר 8.269×11.694 אינץ' (A4 אחרי ceilTo3); ההמרה מעוגלת
+    // כלפי מעלה לשתי ספרות — אותו כיוון כמו האינצ'ים, מאותה סיבה.
+    expect(inputs[0]).toMatchObject({
+      pageSize: { widthMm: 210.04, heightMm: 297.03 },
+      marginMm: 0,
+      printBackgrounds: true,
+    });
+  });
+
+  it('גודל שלא נקרא — בלי pageSize, אבל שוליים ורקעים עדיין נמסרים', async () => {
+    const inputs: unknown[] = [];
+    await exportPdfDocument(fakeHost({ omitList: true }), async (input) => {
+      inputs.push(input);
+      return { saved: true, name: 'a.pdf' };
+    }, { root: fakeRoot() });
+
+    expect(inputs[0]).not.toHaveProperty('pageSize');
+    expect(inputs[0]).toMatchObject({ marginMm: 0, printBackgrounds: true });
   });
 
   it('ביטול אינו כישלון — ואינו נושא שם', async () => {

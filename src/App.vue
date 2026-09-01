@@ -2109,7 +2109,7 @@ async function onExportPdf(): Promise<void> {
 
   const outcome = await exportPdfDocument(
     activeSuperdoc.value,
-    (input) => call('ui.exportPdf', input),
+    (input) => call('ui.exportPdf', { ...input }),
     { fileName: pdfSuggestedName(title.value), title: 'ייצוא ל-PDF' },
   );
 
