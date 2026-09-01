@@ -1,7 +1,12 @@
 /**
- * תיקון ערכים שמקפיאים את המנוע, לפני שהוא רואה אותם.
+ * תיקון מה שהמנוע אינו קורא נכון, לפני שהוא רואה אותו.
  *
- * ## למה זה קיים, ולמה דווקא כאן
+ * שני תיקונים יושבים כאן, ומשני טעמים שונים: הראשון מפני שאין שום מקום אחר
+ * שיכול לתפוס אותו (קיפאון על החוט הראשי), והשני מפני שאין שום מקום אחר שבו
+ * הוא נכון (הדגשה שצריכה להיכנס לחישוב הפריסה). מה שמשותף לשניהם, וזה מה
+ * שמצדיק שכן אחד: שניהם חייבים לקרות **לפני** שהבייטים נמסרים.
+ *
+ * ## התיקון הראשון: ערך שמקפיא את המנוע
  *
  * `<w:defaultTabStop w:val="0"/>` ב-`word/settings.xml` שולח את בונה עצירות
  * הטאב של המנוע ללולאה שאינה נגמרת: הוא מקדם מיקום בצעדים של הערך הזה, וצעד
@@ -13,6 +18,37 @@
  * צריך בדיוק את החוט שחסום. אין שום שעון-שמירה שיכול לתפוס את זה מבחוץ. הדרך
  * היחידה היא לא למסור למנוע את הערך מלכתחילה — כלומר כאן, לפני הפתיחה.
  *
+ * ## התיקון השני: הדגשה של כתב מורכב שאינה מגיעה למסך
+ *
+ * `<w:bCs/>` היא „מודגש לכתב מורכב”, וזה מה ש-Word העברי כותב כשמדגישים בחירה
+ * שכולה עברית: `w:bCs` לבדה, בלי `w:b`. Word מרנדר הדגשה של ריצה עברית מ-
+ * `bCs`; המנוע מרנדר אותה מ-`w:b` בלבד. התוצאה היא מסמך שכותרותיו מודגשות
+ * ב-Word ומגיעות אלינו דקות.
+ *
+ * נמדד ב-superdoc 2.10.0 (engine 0.9.0), על הקובץ שדווח, ב-Chrome אמיתי:
+ * עשר הכותרות נצבעו `font-weight: 400`; אותו קובץ בדיוק עם `<w:b/>` שהושלם
+ * לצד כל `<w:bCs/>` — כולן 700. ראו scripts/qa/bold-cs-qa.mjs.
+ *
+ * ### למה כאן, ולא בגיליון סגנונות
+ *
+ * קיפאון אין לתפוס אחר כך; הדגשה, לכאורה, כן. אלא שאין במה: ה-DOM שהמנוע
+ * מצייר אינו נושא שום סימן ל-`bCs` — `.superdoc-text-run` מקבל `styleid` ו-
+ * `style` מחושב עם `font-weight` סופי, ולא את מאפייני הריצה — ולכן אין למה
+ * להיתלות בסלקטור. וגם אילו היה: המשקל נכנס לחישוב שבירת השורות ולעימוד,
+ * והדגשה שנצבעת אחרי הפריסה מזיזה טקסט מתחת לפריסה שכבר חושבה. המנוע חייב
+ * לדעת, ולכן זה נכתב לתוך ה-XML.
+ *
+ * ### מה זה עושה למסמך, במפורש
+ *
+ * `w:b` נכתב לצד `w:bCs`, וממילא גם ייוצא. על ריצה עברית אין לזה משמעות
+ * ב-Word — הוא קורא `bCs` בכל מקרה — אבל על טקסט **לטיני שיושב באותו `rPr`**
+ * זה שינוי אמיתי: הוא יוצג מודגש גם ב-Word, ולא היה. זה המחיר, והוא נבחר
+ * ביודעין: מסמך עברי שכותרותיו אינן מודגשות הוא באג שהמשתמש רואה בכל עמוד,
+ * ואנגלית בתוך כותרת של מסמך עברי היא מקרה קצה.
+ *
+ * `<w:b w:val="0"/>` **אינו** נהפך. היעדר `w:b` הוא מה ש-Word השאיר מאחור;
+ * `w:b` מכובה הוא אמירה מפורשת של מי שכתב את הקובץ, ואין לנו רשות להפוך אותה.
+ *
  * ## הכלל: לתקן, ולא לחסום
  *
  * כל כשל בדרך — zip שלא נקרא, חלק חסר, דחיסה שלא נתמכת — מחזיר את המקור כמות
@@ -21,10 +57,16 @@
  *
  * ## למה zip מלא ולא חיפוש-והחלפה על הבייטים
  *
- * `settings.xml` דחוס בתוך הארכיון, ולכן אי אפשר לגעת בו בלי לפרוס אותו. מה
- * שכן נחסך: **אין כאן דוחס**. החלק המתוקן נכתב כרשומה לא-דחוסה (`STORED`),
- * וכל שאר החלקים מועתקים בייט-בבייט בדיוק כפי שהיו. כך הקובץ שנמסר למנוע זהה
- * למקור בכל מה שאינו המאפיין הבודד שתוקן, והמחיר הוא כמה קילובייטים.
+ * החלקים דחוסים בתוך הארכיון, ולכן אי אפשר לגעת בהם בלי לפרוס אותם. מה שכן
+ * נחסך: **אין כאן דוחס**. חלק שתוקן נכתב כרשומה לא-דחוסה (`STORED`), וכל שאר
+ * החלקים מועתקים בייט-בבייט בדיוק כפי שהיו. כך הקובץ שנמסר למנוע זהה למקור
+ * בכל מה שאינו התיקון עצמו.
+ *
+ * המחיר גדל מאז שהתיקון השני נכנס: `document.xml` הוא החלק הגדול במסמך, ומסמך
+ * שיש בו `bCs` נמסר עם החלק הזה לא-דחוס. הגבול הוא גודל הטקסט של המסמך עצמו,
+ * הוא נשלם פעם אחת בפתיחה, ורק על מסמכים שיש בהם מה לתקן — מסמך שאין בו
+ * `bCs` אינו נכתב מחדש בכלל. `STORED` הוא רשומת ZIP חוקית לגמרי, ו-Word פותח
+ * קובץ כזה כרגיל.
  *
  * `CompressionStream` היה חוסך את הקילובייטים האלה, אבל דוחס שמתנהג אחרת
  * מהצפוי הוא באג שקט במסמך של המשתמש; רשומה לא-דחוסה אינה יכולה להשתבש.
@@ -120,6 +162,151 @@ export function repairSettings(xml: string): string | null {
   );
 }
 
+/**
+ * החלקים שבהם יושבות תכונות ריצה, וכולם באותה סכימה של WordprocessingML.
+ *
+ * `styles.xml` הוא הרוב המעשי — כותרת מודגשת היא כמעט תמיד סגנון ולא עיצוב
+ * ישיר — אבל עיצוב ישיר קיים, וכך גם כותרת עליונה, הערת שוליים ומספור רשימה.
+ * כולם עוברים באותו כלל אחד, מפני שזה **אותו** כלל: `rPr` היא `rPr`.
+ *
+ * מה שאינו כאן ובכוונה: `word/glossary/*` (בלוקים לשימוש חוזר; אינם מרונדרים)
+ * ו-`word/settings.xml`, שיש לו תיקון משלו.
+ */
+export const CONTENT_PARTS =
+  /^word\/(document|styles|numbering|footnotes|endnotes|comments|header\d+|footer\d+)\.xml$/;
+
+/**
+ * ערכי `ST_OnOff` שמשמעותם „כבוי”. כל ערך אחר — ובכלל זה היעדר `w:val` — דולק,
+ * וזה מה שהתקן אומר: `<w:bCs/>` בלי מאפיין היא הדגשה פעילה.
+ */
+const OFF_VALUES = new Set(['0', 'false', 'off']);
+
+/** האם דגל `ST_OnOff` דולק, לפי מאפייני התג. */
+function isOn(attributes: string): boolean {
+  const value = /\bw:val\s*=\s*"([^"]*)"/.exec(attributes);
+  return !value || !OFF_VALUES.has(value[1].trim().toLowerCase());
+}
+
+/**
+ * סורק תגים בסדר הופעתם. `[^>]*?` על המאפיינים מסתמך על כך ש-Word מקודד `>`
+ * בתוך ערך מאפיין כ-`&gt;` — וכשמדובר בכלי שאינו עושה כך, התג פשוט אינו נתפס
+ * והתיקון מדלג עליו. זה בדיוק מה שאמור לקרות: „לתקן, ולא לחסום”.
+ */
+const TAG = /<(\/?)w:([A-Za-z0-9._-]+)([^>]*?)(\/?)>/g;
+
+/** מה שנאסף על `rPr` אחת בזמן הסריקה. */
+interface RunPropsScope {
+  /** האם `w:b` מופיע בה — בכל צורה, גם מכובה. */
+  hasBold: boolean;
+  /** מקום התג `w:bCs`, או `null` כשאינו שם. */
+  boldCsAt: number | null;
+  /** האם ה-`bCs` שנמצא דולק. */
+  boldCsOn: boolean;
+}
+
+/**
+ * משלימה `<w:b/>` לצד כל `<w:bCs/>` דולקת שאין לצדה `w:b`. `null` = אין מה
+ * לתקן.
+ *
+ * ## למה סורק ולא רגקס על `<w:rPr>…</w:rPr>`
+ *
+ * מפני ש-`rPr` **מקננת**: `<w:rPr>…<w:rPrChange><w:rPr>…</w:rPr></w:rPrChange>
+ * </w:rPr>`. רגקס לא-להוט היה קושר את הפתיחה החיצונית לסגירה הפנימית, כלומר
+ * מודד את התכונות של השינוי המסומן במקום של הריצה — ובדיוק במסמכים שיש בהם
+ * מעקב שינויים, שהם המסמכים שאין רשות לשבור.
+ *
+ * ולכן גם: כל מה שבתוך `w:rPrChange` **מדולג**. זה העיצוב שהיה *לפני* השינוי,
+ * היסטוריה שהמנוע אינו מרנדר, ולכתוב בה זה לשקר על מה שהיה.
+ *
+ * ## סדר האלמנטים
+ *
+ * `<w:b/>` נכתב **מיד לפני** `<w:bCs/>`, וזה אינו נוי: `CT_RPr` היא רצף
+ * (`xsd:sequence`) שבו `b` בא לפני `bCs`, ומאפיין שנכתב מחוץ לסדר הופך את
+ * החלק לפסול בעיני הסכימה של Word.
+ */
+export function repairComplexScriptBold(xml: string): string | null {
+  // חיפוש מחרוזת אחד לפני הסריקה. `document.xml` של ספר הוא מגה-בייטים, ורובם
+  // המכריע של המסמכים אינם נוגעים לזה בכלל.
+  if (!xml.includes('bCs')) return null;
+
+  const stack: RunPropsScope[] = [];
+  const inserts: number[] = [];
+  /** עומק בתוך `w:rPrChange` — כל מה שבתוכו מדולג. */
+  let history = 0;
+
+  TAG.lastIndex = 0;
+  for (let match = TAG.exec(xml); match; match = TAG.exec(xml)) {
+    const [, closing, name, attributes, selfClosing] = match;
+
+    if (name === 'rPrChange') {
+      if (!selfClosing) history += closing ? -1 : 1;
+      continue;
+    }
+    if (history > 0) continue;
+
+    if (name === 'rPr') {
+      if (selfClosing) continue;
+      if (closing) {
+        const scope = stack.pop();
+        if (scope && scope.boldCsOn && scope.boldCsAt !== null && !scope.hasBold) {
+          inserts.push(scope.boldCsAt);
+        }
+      } else {
+        stack.push({ hasBold: false, boldCsAt: null, boldCsOn: false });
+      }
+      continue;
+    }
+
+    const scope = stack[stack.length - 1];
+    if (!scope || closing) continue;
+    if (name === 'b') scope.hasBold = true;
+    else if (name === 'bCs') {
+      scope.boldCsAt = match.index;
+      scope.boldCsOn = isOn(attributes);
+    }
+  }
+
+  if (inserts.length === 0) return null;
+
+  // הסריקה קדימה ו-`rPr` שאינה מקננת נותנות סדר עולה ממילא; המיון הוא כדי שמי
+  // שקורא לא יידרש להוכיח את זה שוב.
+  inserts.sort((a, b) => a - b);
+
+  let out = '';
+  let at = 0;
+  for (const index of inserts) {
+    out += xml.slice(at, index) + '<w:b/>';
+    at = index;
+  }
+  return out + xml.slice(at);
+}
+
+/** תיקון אחד: על אילו חלקים הוא חל, מה הוא עושה, ומה נרשם ביומן כשעשה. */
+interface PartRepair {
+  matches(name: string): boolean;
+  /** `null` = אין מה לתקן בחלק הזה. */
+  repair(xml: string): string | null;
+  note(name: string): string;
+}
+
+/**
+ * התיקונים, בסדר שבו הם מוחלים. שניים כרגע; הרשימה קיימת כדי שהשלישי לא
+ * יידרש להוסיף עוד מקרה פרטי ל-`preflightDocx`.
+ */
+const REPAIRS: PartRepair[] = [
+  {
+    matches: (name) => name === SETTINGS_PART,
+    repair: repairSettings,
+    note: () =>
+      `${SETTINGS_PART}: defaultTabStop מתוקן ל-${DEFAULT_TAB_STOP_TWIPS} — הערך שהיה מקפיא את המנוע`,
+  },
+  {
+    matches: (name) => CONTENT_PARTS.test(name),
+    repair: repairComplexScriptBold,
+    note: (name) => `${name}: <w:b/> הושלם לצד <w:bCs/> — בלעדיו הדגשת עברית אינה מגיעה למסך`,
+  },
+];
+
 /** מה שהשלב המקדים מוציא: המסמך שיימסר למנוע, ומה שנקרא עליו בדרך. */
 export interface PreflightResult {
   /** המקור שיש למסור למנוע. זהה למקור שנכנס כשלא נגענו בו. */
@@ -164,16 +351,16 @@ export async function preflightSource(
   }
 
   const fontTable = await readDocxPart(bytes, FONT_TABLE_PART);
-  // על בייטי המקור ולא על המתוקנים: התיקון נוגע ל-`settings.xml` בלבד, ואין
-  // טעם לקרוא את המאקרו מעותק שנכתב מחדש.
+  // על בייטי המקור ולא על המתוקנים: התיקונים נוגעים לחלקי ה-XML של הגוף
+  // והסגנונות, ואין טעם לקרוא את המאקרו מעותק שנכתב מחדש.
   const vba = await readDocumentVba(bytes);
   const repaired = await preflightDocx(bytes);
   if (!repaired) return { source, fontTable, vba };
 
-  console.warn(
-    `[otzaria-word] ${SETTINGS_PART}: defaultTabStop מתוקן ל-${DEFAULT_TAB_STOP_TWIPS} — הערך שהיה מקפיא את המנוע`,
-  );
-  return { source: new Blob([repaired], { type: DOCX_MIME }), fontTable, vba };
+  // כל תיקון נרשם בנפרד: מי שיקרא את היומן על מסמך שהתנהג במפתיע צריך לדעת
+  // **מה** שונה בו, ולא רק שנגענו.
+  for (const note of repaired.notes) console.warn(`[otzaria-word] ${note}`);
+  return { source: new Blob([repaired.bytes], { type: DOCX_MIME }), fontTable, vba };
 }
 
 /**
@@ -185,39 +372,62 @@ export async function readDocxPart(bytes: Bytes, name: string): Promise<string |
   return entry ? readEntryText(entry) : null;
 }
 
+/** מסמך שתוקן: הבייטים שיימסרו למנוע, ומה שנעשה בהם. */
+export interface DocxRepair {
+  bytes: Bytes;
+  /** שורה לכל תיקון שהוחל, לפי הסדר. ריק אינו אפשרי — בלי תיקון אין תוצאה. */
+  notes: string[];
+}
+
 /**
  * בייטי DOCX מתוקנים, או `null` כשאין מה לתקן ואין מה לדווח.
  *
  * מיוצאת בנפרד מ-`preflightSource` כדי שאפשר יהיה לבדוק אותה בלי רשת ובלי
  * `Blob` — היא כל הלוגיקה שיש כאן.
+ *
+ * חלק שאינו נקרא (דחיסה שאינה נתמכת, נתונים שאינם נפרסים) מדולג ואינו מפיל את
+ * שאר התיקונים: אין קשר בין החלקים, ומסמך שאחד מהם אינו נקרא אינו סיבה למסור
+ * את השני שבור.
  */
-export async function preflightDocx(bytes: Bytes): Promise<Bytes | null> {
+export async function preflightDocx(bytes: Bytes): Promise<DocxRepair | null> {
   const entries = readZip(bytes);
   if (!entries) return null;
 
-  const settings = entries.find((entry) => entry.name === SETTINGS_PART);
-  if (!settings) return null;
+  const notes: string[] = [];
+  const patched = new Map<ZipEntry, Bytes>();
 
-  const xml = await readEntryText(settings);
-  if (xml === null) return null;
+  for (const entry of entries) {
+    const repairs = REPAIRS.filter((candidate) => candidate.matches(entry.name));
+    if (repairs.length === 0) continue;
 
-  const repaired = repairSettings(xml);
-  if (repaired === null) return null;
+    const original = await readEntryText(entry);
+    if (original === null) continue;
 
-  const content = new TextEncoder().encode(repaired);
-  const patched = entries.map((entry) =>
-    entry === settings
-      ? {
-          ...entry,
-          flags: entry.flags & ~ZIP_FLAG_DATA_DESCRIPTOR,
-          method: METHOD_STORED,
-          crc: crc32(content),
-          data: content,
-          uncompressedSize: content.byteLength,
-        }
-      : entry,
-  );
-  return writeZip(patched);
+    let xml = original;
+    for (const repair of repairs) {
+      const next = repair.repair(xml);
+      if (next === null) continue;
+      xml = next;
+      notes.push(repair.note(entry.name));
+    }
+    if (xml !== original) patched.set(entry, new TextEncoder().encode(xml));
+  }
+
+  if (patched.size === 0) return null;
+
+  const rewritten = entries.map((entry) => {
+    const content = patched.get(entry);
+    if (!content) return entry;
+    return {
+      ...entry,
+      flags: entry.flags & ~ZIP_FLAG_DATA_DESCRIPTOR,
+      method: METHOD_STORED,
+      crc: crc32(content),
+      data: content,
+      uncompressedSize: content.byteLength,
+    };
+  });
+  return { bytes: writeZip(rewritten), notes };
 }
 
 /** תוכן החלק כטקסט, או `null` כשאי אפשר לפרוס אותו. */

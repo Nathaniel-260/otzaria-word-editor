@@ -11,13 +11,22 @@
  *
  * ה-zip נבנה כאן ביד, עם `deflateRawSync` אמיתי, מפני שהקורא שנבדק קורא
  * מהספרייה המרכזית ומכותרות מקומיות — ומבנה מזויף היה בודק את עצמו.
+ *
+ * מאז שהתיקון השני נכנס — `<w:b/>` שמושלם לצד `<w:bCs/>`, כדי שהדגשה של כתב
+ * מורכב תגיע למסך — יש כאן חובה שלישית, והיא זו שקשה: **מה שאין לגעת בו**.
+ * `w:bCs` מופיע גם בתוך `w:rPrChange`, שהוא העיצוב שהיה *לפני* שינוי מסומן;
+ * כתיבה שם משנה היסטוריה, ומסמך עם מעקב שינויים הוא בדיוק המסמך שאין רשות
+ * לשבור. לכן הבדיקות כאן מודדות גם קינון, גם `w:val` מכובה, וגם מסמך שאין בו
+ * מה לתקן ולכן אינו נכתב מחדש בכלל.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { deflateRawSync } from 'node:zlib';
 import {
+  CONTENT_PARTS,
   DEFAULT_TAB_STOP_TWIPS,
   preflightDocx,
   preflightSource,
+  repairComplexScriptBold,
   repairSettings,
   SETTINGS_PART,
 } from '../../src/engine/docx-preflight';
@@ -180,6 +189,121 @@ describe('repairSettings', () => {
   });
 });
 
+/** `rPr` שלמה, כדי שהבדיקות יקראו כמו ה-XML האמיתי ולא כמו קטעים. */
+const runProps = (inner: string) => `<w:r><w:rPr>${inner}</w:rPr><w:t>שלום</w:t></w:r>`;
+
+describe('repairComplexScriptBold', () => {
+  it('משלימה `w:b` לצד `bCs` בודדת', () => {
+    const repaired = repairComplexScriptBold(runProps('<w:bCs/>'));
+    // מיד לפני `bCs`, מפני ש-CT_RPr היא רצף ו-`b` בא לפניה.
+    expect(repaired).toContain('<w:rPr><w:b/><w:bCs/></w:rPr>');
+  });
+
+  it('שומרת על סדר האלמנטים גם כשיש שכנים לפני ואחרי', () => {
+    const repaired = repairComplexScriptBold(
+      runProps('<w:rFonts w:cs="David"/><w:bCs/><w:i/><w:szCs w:val="28"/>'),
+    );
+    expect(repaired).toContain('<w:rFonts w:cs="David"/><w:b/><w:bCs/><w:i/>');
+  });
+
+  it('מתקנת כל ה-rPr במסמך, ולא רק את הראשונה', () => {
+    const repaired = repairComplexScriptBold(
+      runProps('<w:bCs/>') + runProps('<w:iCs/>') + runProps('<w:bCs/>'),
+    );
+    expect(repaired!.match(/<w:b\/>/g)).toHaveLength(2);
+  });
+
+  it('אינה נוגעת ב-rPr שיש בה כבר `w:b`', () => {
+    expect(repairComplexScriptBold(runProps('<w:b/><w:bCs/>'))).toBeNull();
+    expect(repairComplexScriptBold(runProps('<w:b w:val="1"/><w:bCs/>'))).toBeNull();
+  });
+
+  it('אינה הופכת `w:b` שכובה במפורש', () => {
+    // אמירה מפורשת של מי שכתב את הקובץ: „לא מודגש בלטינית, מודגש בעברית”.
+    // אנחנו משלימים מה שנעדר, לא מבטלים מה שנכתב.
+    expect(repairComplexScriptBold(runProps('<w:b w:val="0"/><w:bCs/>'))).toBeNull();
+  });
+
+  it('אינה נוגעת ב-`bCs` שכובה', () => {
+    for (const off of ['0', 'false', 'off', 'FALSE']) {
+      expect(repairComplexScriptBold(runProps(`<w:bCs w:val="${off}"/>`))).toBeNull();
+    }
+  });
+
+  it('מתקנת `bCs` שדולקת במפורש', () => {
+    for (const on of ['1', 'true', 'on']) {
+      expect(repairComplexScriptBold(runProps(`<w:bCs w:val="${on}"/>`))).toContain('<w:b/>');
+    }
+  });
+
+  it('אינה כותבת בתוך `w:rPrChange` — זו היסטוריה של שינוי מסומן', () => {
+    const tracked = `<w:r><w:rPr><w:rPrChange w:id="1" w:author="x"><w:rPr><w:bCs/></w:rPr></w:rPrChange></w:rPr></w:r>`;
+    expect(repairComplexScriptBold(tracked)).toBeNull();
+  });
+
+  it('מתקנת את הריצה עצמה גם כשיש לצדה `rPrChange`', () => {
+    // המקרה שרגקס לא-להוט על `<w:rPr>…</w:rPr>` היה טועה בו: הוא היה קושר את
+    // הפתיחה החיצונית לסגירה הפנימית, ומודד את ההיסטוריה במקום את הריצה.
+    const tracked =
+      `<w:r><w:rPr><w:bCs/>` +
+      `<w:rPrChange w:id="1" w:author="x"><w:rPr><w:i/></w:rPr></w:rPrChange>` +
+      `</w:rPr><w:t>שלום</w:t></w:r>`;
+    const repaired = repairComplexScriptBold(tracked);
+    expect(repaired).toContain('<w:rPr><w:b/><w:bCs/>');
+    // וההיסטוריה נשארה כפי שהייתה.
+    expect(repaired).toContain('<w:rPrChange w:id="1" w:author="x"><w:rPr><w:i/></w:rPr>');
+  });
+
+  it('מתקנת סגנון, שזה המקרה שדווח', () => {
+    // בדיוק מה שיש בקובץ שדווח: „כותרת 2” עם `bCs` ובלי `b`.
+    const styles =
+      '<w:styles xmlns:w="ns"><w:style w:type="paragraph" w:styleId="2"><w:name w:val="heading 2"/>' +
+      '<w:rPr><w:rFonts w:cs="FrankRuehl DP"/><w:bCs/><w:szCs w:val="28"/></w:rPr></w:style></w:styles>';
+    expect(repairComplexScriptBold(styles)).toContain('<w:b/><w:bCs/>');
+  });
+
+  it('אינה נוגעת במסמך שאין בו `bCs` בכלל', () => {
+    expect(repairComplexScriptBold(runProps('<w:b/><w:i/>'))).toBeNull();
+    expect(repairComplexScriptBold(DOCUMENT_XML)).toBeNull();
+  });
+
+  it('אינה מתקנת `rPr` ריקה או סוגרת-עצמה', () => {
+    expect(repairComplexScriptBold('<w:r><w:rPr/><w:t>שלום</w:t></w:r>')).toBeNull();
+  });
+});
+
+describe('CONTENT_PARTS', () => {
+  it('תופס את החלקים שיש בהם תכונות ריצה', () => {
+    for (const name of [
+      'word/document.xml',
+      'word/styles.xml',
+      'word/numbering.xml',
+      'word/footnotes.xml',
+      'word/endnotes.xml',
+      'word/comments.xml',
+      'word/header1.xml',
+      'word/footer3.xml',
+    ]) {
+      expect(CONTENT_PARTS.test(name)).toBe(true);
+    }
+  });
+
+  it('אינו תופס חלקים שאין להם מה לתרום', () => {
+    // `settings.xml` יש לו תיקון משלו; `glossary` אינו מרונדר; `styles` שאינו
+    // תחת `word/` אינו החלק שלנו.
+    for (const name of [
+      SETTINGS_PART,
+      'word/fontTable.xml',
+      'word/glossary/document.xml',
+      'word/theme/theme1.xml',
+      'customXml/item1.xml',
+      'styles.xml',
+    ]) {
+      expect(CONTENT_PARTS.test(name)).toBe(false);
+    }
+  });
+});
+
 describe('preflightDocx', () => {
   it('מתקנת את ההגדרות ומשאירה את שאר החלקים כפי שהיו', async () => {
     const original = buildZip([
@@ -192,12 +316,15 @@ describe('preflightDocx', () => {
     expect(repaired).not.toBeNull();
 
     // ההגדרות נכתבות כרשומה לא-דחוסה, ולכן הערך המתוקן נמצא בקובץ כטקסט גלוי.
-    expect(contains(repaired!, bytesOf(`<w:defaultTabStop w:val="${DEFAULT_TAB_STOP_TWIPS}"/>`))).toBe(true);
-    expect(contains(repaired!, bytesOf('<w:defaultTabStop w:val="0"/>'))).toBe(false);
+    expect(contains(repaired!.bytes, bytesOf(`<w:defaultTabStop w:val="${DEFAULT_TAB_STOP_TWIPS}"/>`))).toBe(true);
+    expect(contains(repaired!.bytes, bytesOf('<w:defaultTabStop w:val="0"/>'))).toBe(false);
 
     // החלקים האחרים עברו בייט-בבייט: גם הדחוס וגם זה שלא.
-    expect(contains(repaired!, new Uint8Array(deflateRawSync(bytesOf('<Types/>'))))).toBe(true);
-    expect(contains(repaired!, bytesOf(DOCUMENT_XML))).toBe(true);
+    expect(contains(repaired!.bytes, new Uint8Array(deflateRawSync(bytesOf('<Types/>'))))).toBe(true);
+    expect(contains(repaired!.bytes, bytesOf(DOCUMENT_XML))).toBe(true);
+
+    // היומן מדווח מה שונה, ולא רק שנגענו.
+    expect(repaired!.notes).toEqual([expect.stringContaining('defaultTabStop')]);
   });
 
   it('הארכיון שנכתב נקרא בחזרה, ואין בו יותר מה לתקן', async () => {
@@ -209,7 +336,43 @@ describe('preflightDocx', () => {
     );
     expect(repaired).not.toBeNull();
     // אותה קריאה בדיוק על התוצאה: מוכיחה גם שהמבנה תקין וגם שהתיקון הושלם.
-    await expect(preflightDocx(repaired!)).resolves.toBeNull();
+    await expect(preflightDocx(repaired!.bytes)).resolves.toBeNull();
+  });
+
+  it('מתקנת גם סגנונות, ומדווחת על שני התיקונים בנפרד', async () => {
+    const styles =
+      '<w:styles xmlns:w="ns"><w:style w:styleId="2"><w:rPr><w:bCs/></w:rPr></w:style></w:styles>';
+    const repaired = await preflightDocx(
+      buildZip([
+        { name: SETTINGS_PART, content: SETTINGS_WITH_ZERO },
+        { name: 'word/styles.xml', content: styles },
+        { name: 'word/document.xml', content: DOCUMENT_XML },
+      ]),
+    );
+
+    expect(repaired).not.toBeNull();
+    expect(contains(repaired!.bytes, bytesOf('<w:rPr><w:b/><w:bCs/></w:rPr>'))).toBe(true);
+    expect(repaired!.notes).toHaveLength(2);
+    expect(repaired!.notes[1]).toContain('word/styles.xml');
+    // ושוב על התוצאה: אין יותר מה לתקן, לא בהגדרות ולא בסגנונות.
+    await expect(preflightDocx(repaired!.bytes)).resolves.toBeNull();
+  });
+
+  it('חלק שאין בו `bCs` אינו נכתב מחדש בכלל', async () => {
+    // חשוב לא פחות מהתיקון: מסמך עברי רגיל אינו משלם על התיקון הזה כלום. הגוף
+    // עובר בייט-בבייט, כלומר גם דחוס כפי שהיה.
+    const body =
+      '<w:document xmlns:w="ns"><w:body><w:p><w:r><w:rPr><w:b/></w:rPr>' +
+      '<w:t>מודגש</w:t></w:r></w:p></w:body></w:document>';
+    const repaired = await preflightDocx(
+      buildZip([
+        { name: SETTINGS_PART, content: SETTINGS_WITH_ZERO },
+        { name: 'word/document.xml', content: body },
+      ]),
+    );
+
+    expect(repaired!.notes).toEqual([expect.stringContaining('defaultTabStop')]);
+    expect(contains(repaired!.bytes, new Uint8Array(deflateRawSync(bytesOf(body))))).toBe(true);
   });
 
   it('אינה נוגעת במסמך תקין', async () => {
