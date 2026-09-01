@@ -86,9 +86,9 @@
               class="color-swatch"
               :class="{ selected: modelValue?.toLowerCase() === hex.toLowerCase() }"
               :style="{ backgroundColor: hex }"
-              :data-tip-title="menuString(shadeName(col.family, rowIndex))"
+              :data-tip-title="shadeName(col.family, rowIndex)"
               :data-tip-desc="hex"
-              :aria-label="menuString(shadeName(col.family, rowIndex))"
+              :aria-label="shadeName(col.family, rowIndex)"
               @pointerdown.prevent
               @click="selectColor(hex)"
             />
@@ -181,9 +181,16 @@ const STANDARD_COLORS = [
   { hex: '#7030a0', name: 'סגול' },
 ];
 
-/** „כחול, גוון 3”. הבסיס הוא הראשון בעמודה, ולכן הוא בשם המשפחה בלבד. */
+/**
+ * „כחול, גוון 3”. הבסיס הוא הראשון בעמודה, ולכן הוא בשם המשפחה בלבד.
+ *
+ * התרגום כאן ולא בקורא: השם מורכב משם המשפחה ומהמילה „גוון”, ומחרוזת מורכבת
+ * לא הייתה מתאימה לשום מפתח במילון. `menuString` נקראת מתוך ה-render של
+ * התבנית, ולכן הקריאה כאן עדיין מגיבה לשינוי שפה.
+ */
 function shadeName(family: string, index: number): string {
-  return index === 0 ? family : `${family}, גוון ${index + 1}`;
+  const name = menuString(family);
+  return index === 0 ? name : `${name}, ${menuString('גוון')} ${index + 1}`;
 }
 
 const props = withDefaults(

@@ -19,6 +19,9 @@
  *
  * 2. **מילון מהעברית לאנגלית, עם נפילה חזרה למקור.** מחרוזת שאינה במילון
  *    מוצגת בעברית — תרגום חסר אינו יכול לשבור כלום.
+ *
+ * הגבול: הרצועה בלבד. שורת הכותרת, שורת המצב, הסרגלים, תפריט ההקשר, רשימת
+ * הקיצורים והדיאלוגים אינם עוברים כאן — הם עברית בכל שפה.
  */
 
 import { ref } from 'vue';
@@ -90,6 +93,10 @@ const EN: Readonly<Record<string, string>> = {
   'הורדת קובץ .docx תואם Microsoft Word': 'Download a Microsoft Word-compatible .docx file',
   'הדפסה': 'Print',
   'הדפסת המסמך': 'Print the document',
+  'ייצוא ל-PDF': 'Export to PDF',
+  'שמירת המסמך כקובץ PDF': 'Save the document as a PDF file',
+  'ייצוא ל-PDF דורש גרסה עדכנית יותר של אוצריא':
+    'Export to PDF requires a newer version of Otzaria',
   'יציאה': 'Exit',
   'חזרה למסך הספרייה של אוצריא; המסמך יישאר פתוח':
     'Return to the Otzaria library screen; the document stays open',
@@ -121,39 +128,79 @@ const EN: Readonly<Record<string, string>> = {
   'פתח את הרשימה': 'Open the list',
   'גודל גופן': 'Font Size',
   'הגדל גופן': 'Increase Font Size',
+  'מגדיל את הטקסט המסומן בדרגה אחת בכל לחיצה':
+    'Grows the selected text by one step per click',
   'הקטן גופן': 'Decrease Font Size',
+  'מקטין את הטקסט המסומן בדרגה אחת בכל לחיצה':
+    'Shrinks the selected text by one step per click',
   'נקה את כל העיצוב': 'Clear All Formatting',
+  'מחזיר את הטקסט המסומן לעיצוב הרגיל, והתוכן נשאר':
+    'Returns the selected text to plain formatting; the content stays',
   'מתקדם': 'Advanced',
-  'גופן מתקדם: ריווח תווים, מיקום, אפקטים וגופן מורכב':
-    'Advanced font: character spacing, position, effects and complex-script font',
+  'ריווח תווים, מיקום ביחס לשורה, אפקטים וגופן מורכב':
+    'Character spacing, position relative to the line, effects and complex-script font',
   'מודגש': 'Bold',
+  'מעבה את הטקסט המסומן': 'Makes the selected text bold',
   'נטוי': 'Italic',
+  'מטה את הטקסט המסומן': 'Slants the selected text',
   'קו תחתון': 'Underline',
+  'מוסיף קו מתחת לטקסט המסומן': 'Adds a line under the selected text',
   'קו חוצה': 'Strikethrough',
+  'מעביר קו באמצע הטקסט המסומן': 'Draws a line through the middle of the selected text',
   'צבע סימון טקסט': 'Text Highlight Color',
   'צבע גופן': 'Font Color',
+  'כתב עליון': 'Superscript',
+  'כתב תחתי': 'Subscript',
   'פיסקה': 'Paragraph',
   'תבליטים': 'Bullets',
+  'הופך את הפסקאות המסומנות לרשימה מסומנת בנקודות':
+    'Turns the selected paragraphs into a bulleted list',
+  'פעולות תבליטים': 'Bullet actions',
+  'הפוך רשימה ממוספרת לתבליטים': 'Convert a numbered list to bullets',
+  'החלפת רשימה ממוספרת לתבליטים, והמרה לטקסט':
+    'Switch a numbered list to bullets, and convert to text',
   'מספור': 'Numbering',
+  'הופך את הפסקאות המסומנות לרשימה ממוספרת':
+    'Turns the selected paragraphs into a numbered list',
+  'פעולות מספור': 'Numbering actions',
+  'סגנון מספור (כולל עברי), התחלה מחדש והמרה לטקסט':
+    'Numbering style (including Hebrew), restart, and convert to text',
+  // תוויות סגנון המספור (engine/lists.ts). דוגמאות האותיות הן הפלט עצמו
+  // ונשארות עבריות; רק שם השיטה מתורגם.
+  'א, ב, ג … יא, יב (גימטריה)': 'א, ב, ג … יא, יב (Gematria)',
+  'א, ב, ג … כ, ל (אלף־בית)': 'א, ב, ג … כ, ל (alphabetical)',
   'הקטן הזחה': 'Decrease Indent',
+  'מקרב את הפסקה לשולי הדף': 'Moves the paragraph closer to the page margin',
   'הגדל הזחה': 'Increase Indent',
+  'מרחיק את הפסקה משולי הדף': 'Moves the paragraph away from the page margin',
   'רשימה': 'List',
   'התחל מחדש מ-1': 'Restart at 1',
   'המשך מספור קודם': 'Continue previous numbering',
   'המר לטקסט…': 'Convert to text…',
   'לחץ שוב לאישור — הפעולה בלתי-הפיכה':
     'Click again to confirm — this action cannot be undone',
-  'פעולות רשימה: סגנון מספור (כולל עברי), התחלה מחדש והמרה לטקסט':
-    'List actions: numbering style (including Hebrew), restart, and convert to text',
   'כיוון פסקה מימין לשמאל': 'Paragraph direction right-to-left',
+  'מסדר את הפסקה לקריאה בעברית: ההזחה והיישור בצד ימין':
+    'Sets the paragraph up for Hebrew reading: indent and alignment on the right',
   'כיוון פסקה משמאל לימין': 'Paragraph direction left-to-right',
+  'מסדר את הפסקה לקריאה בלטינית: ההזחה והיישור בצד שמאל':
+    'Sets the paragraph up for Latin reading: indent and alignment on the left',
   'הצג/הסתר סימני עיצוב': 'Show/Hide formatting marks',
+  'מציג סימני פסקה, טאבים ורווחים על המסך. הם אינם מודפסים':
+    'Shows paragraph marks, tabs and spaces on screen. They are not printed',
   'יישור לימין': 'Align Right',
+  'מיישר את הפסקה לשוליים הימניים': 'Aligns the paragraph to the right margin',
   'מרכז': 'Center',
+  'ממרכז את הפסקה בין שני השוליים': 'Centers the paragraph between both margins',
   'יישור לשמאל': 'Align Left',
+  'מיישר את הפסקה לשוליים השמאליים': 'Aligns the paragraph to the left margin',
   'יישור לשני הצדדים': 'Justify',
+  'מותח את השורות עד שני השוליים, מלבד השורה האחרונה':
+    'Stretches the lines to both margins, except the last line',
   'מרווח בין שורות': 'Line Spacing',
-  'תפריט פסקה: כניסות, ריווח ועצירות טאב': 'Paragraph dialog: indents, spacing and tab stops',
+  'תפריט פסקה': 'Paragraph dialog',
+  'כניסות, ריווח בין פסקאות, מרווח שורות ועצירות טאב':
+    'Indents, paragraph spacing, line spacing and tab stops',
   'סגנונות': 'Styles',
   'עריכה': 'Editing',
   'חפש': 'Find',
@@ -179,6 +226,7 @@ const EN: Readonly<Record<string, string>> = {
   'שורות': 'rows',
   'על': 'by',
   'איורים': 'Illustrations',
+  'תמונות': 'Pictures',
   'הוספת תמונה מקובץ (PNG או JPEG)': 'Insert a picture from a file (PNG or JPEG)',
   'התמונה נוספת למסמך…': 'Picture added to the document…',
   'בחירת התמונה נכשלה': 'Picture selection failed',
@@ -227,29 +275,76 @@ const EN: Readonly<Record<string, string>> = {
   'התחל בעמוד חדש': 'Page Break',
   'הפסקה שבה הסמן תתחיל בראש עמוד חדש':
     'The paragraph where the cursor will start at the top of a new page',
+  'הפסקה הזאת כבר מתחילה בעמוד חדש. לחיצה תבטל זאת':
+    'This paragraph already starts on a new page. Clicking undoes that',
 
   // ── לשונית „פריסה” ─────────────────────────────────────────────────
   'הגדרת עמוד': 'Page Setup',
   'שוליים': 'Margins',
   'הגדרת שולי הדף (רגיל, צר, רחב)': 'Set the page margins (normal, narrow, wide)',
+  // פריטי התפריטים עצמם (engine/page-setup.ts): תווית ורמז לכל ברירה.
+  'צר': 'Narrow',
+  'רחב': 'Wide',
+  '2.54 ס"מ מכל צד': '2.54 cm on every side',
+  '1.27 ס"מ מכל צד': '1.27 cm on every side',
+  '2.54 ס"מ למעלה ולמטה, 5.08 בצדדים': '2.54 cm top and bottom, 5.08 at the sides',
   'כיוון': 'Orientation',
   'כיוון הדף: לאורך או לרוחב': 'Page orientation: portrait or landscape',
+  'לאורך': 'Portrait',
+  'הדף גבוה מרוחבו': 'The page is taller than it is wide',
+  'לרוחב': 'Landscape',
+  'הדף רחב מגובהו': 'The page is wider than it is tall',
   'גודל': 'Size',
   'בחירת גודל נייר (A4, Letter)': 'Choose paper size (A4, Letter)',
+  '21 × 29.7 ס"מ': '21 × 29.7 cm',
+  '21.6 × 27.9 ס"מ': '21.6 × 27.9 cm',
   'פיצול הטקסט לשתי עמודות או יותר': 'Split the text into two or more columns',
+  'אחת': 'One',
+  'שתיים': 'Two',
+  'שתי עמודות שוות': 'Two equal columns',
+  'שלוש': 'Three',
+  'שלוש עמודות שוות': 'Three equal columns',
   'מקטע': 'Section',
+  'קשר לקודם': 'Link to Previous',
   'אין במסמך מקטע נוסף — הקישור נוגע רק במקטעים שאחרי הראשון':
     'There is no additional section — linking only affects sections after the first',
   'הכותרות של המקטעים הבאים יהיו זהות לאלה של המקטע שלפניהם':
     'The headers of the following sections will match those of the section before them',
   'גבולות עמוד': 'Page Borders',
   'מסגרת סביב העמוד': 'A border around the page',
+  'ללא גבול': 'No border',
+  'הסרת הגבול מהעמוד': 'Remove the border from the page',
+  'קו יחיד': 'Single line',
+  'חצי נקודה': 'Half a point',
+  'קו עבה': 'Thick line',
+  'שלוש נקודות': 'Three points',
+  'קו כפול': 'Double line',
+  'שני קווים דקים': 'Two thin lines',
+  'מקווקו': 'Dashed',
+  'קו מקווקו דק': 'A thin dashed line',
+  'מנוקד': 'Dotted',
+  'קו מנוקד דק': 'A thin dotted line',
   'מספרי שורות': 'Line Numbers',
   'מספור השורות בשולי הדף': 'Number the lines in the page margin',
+  'ללא': 'None',
+  'בלי מספרי שורות': 'No line numbers',
+  'רציף': 'Continuous',
+  'המספור נמשך לאורך כל המסמך': 'The numbering runs through the whole document',
+  'התחל מחדש בכל עמוד': 'Restart on every page',
+  'כל עמוד מתחיל מ-1': 'Every page starts at 1',
+  'התחל מחדש בכל מקטע': 'Restart in every section',
+  'כל מקטע מתחיל מ-1': 'Every section starts at 1',
   'מספור עמודים': 'Page Numbering',
   'תבנית מספרי העמודים ומספר ההתחלה': 'The page number format and starting number',
   'יישור אנכי': 'Vertical Alignment',
   'מיקום הטקסט בגובה העמוד': 'Positioning of the text along the page height',
+  'למעלה': 'Top',
+  'הטקסט מתחיל בראש העמוד': 'The text starts at the top of the page',
+  'הטקסט ממורכז בין הכותרות': 'The text is centered between the headers',
+  'מיושר': 'Justified',
+  'הפסקאות נפרשות על גובה העמוד': 'The paragraphs spread over the page height',
+  'למטה': 'Bottom',
+  'הטקסט צמוד לתחתית העמוד': 'The text sits at the bottom of the page',
   'ברירות מחדל': 'Defaults',
   'גופן וגודל ברירת המחדל של המסמך כולו': 'Default font and size for the whole document',
   'עמודים': 'Pages',
@@ -369,11 +464,14 @@ const EN: Readonly<Record<string, string>> = {
     'Click again to confirm: the document will be locked to read-only (can be undone here)',
   'ביטול ההגבלה — המסמך יחזור לעריכה מלאה':
     'Remove restriction — the document returns to full editing',
+  'ביטול ההגבלה — המסמך יחזור למצב מעקב אחר שינויים':
+    'Remove restriction — the document returns to track-changes mode',
   'הצג את המסמך במצב „קריאה בלבד". ניתן לבטל מכאן בכל עת.':
     'View the document in “read-only” mode. Can be undone here at any time.',
 
   // ── לשונית „תצוגה” ─────────────────────────────────────────────────
   'תצוגות': 'Views',
+  'הצג': 'Show',
   'מצב מיקוד': 'Focus Mode',
   'מצב קריאה ומיקוד ללא הסחות דעת': 'Reading and focus mode without distractions',
   'סרגל': 'Ruler',
@@ -396,6 +494,21 @@ const EN: Readonly<Record<string, string>> = {
     'Search the selected text in all Otzaria libraries',
   'יש לפתוח מסמך ולסמן בו את הטקסט לחיפוש':
     'Open a document and select the text to search',
+  'השלמה מהספר': 'Complete from Book',
+  'בזמן הקלדה, אם הטקסט תואם את הספר הפתוח בקורא — Tab משלים 5 מילים מהמקור':
+    'While typing, if the text matches the book open in the reader — Tab completes five words from the source',
+  'מאקרו': 'Macros',
+  'ניהול מאקרו': 'Manage Macros',
+  'רשימת המאקרו, קטעי הטקסט והסקריפטים — הרצה, עריכה ושיתוף':
+    'The list of macros, text snippets and scripts — run, edit and share',
+  'הקלט מאקרו': 'Record Macro',
+  'עצור הקלטה': 'Stop Recording',
+  'מקליט את הפעולות במסמך — הקלדה, עיצוב, רשימות — לניגון חוזר':
+    'Records the actions in the document — typing, formatting, lists — for replay',
+  'נגן אחרון': 'Play Last',
+  'מריץ את המאקרו האחרון שהוקלט, מהמקום שבו הסמן עומד':
+    'Runs the last recorded macro from wherever the cursor stands',
+  'יש לפתוח מסמך תחילה': 'Open a document first',
   'סגנון תורני': 'Torah Style',
   'חידוש': 'Chiddush',
   'קושיא': 'Kushya',
@@ -409,6 +522,24 @@ const EN: Readonly<Record<string, string>> = {
   'צבעי ערכת נושא': 'Theme Colors',
   'צבעים רגילים': 'Standard Colors',
   'צבעים נוספים...': 'More colors...',
+  // „כחול, גוון 3”: `shadeName` מרכיב את השם משם המשפחה ומהמילה „גוון”, וכל
+  // חלק מתורגם בנפרד — מחרוזת מורכבת לא הייתה מתאימה לשום מפתח.
+  'גוון': 'Shade',
+  'לבן ואפור בהיר': 'White and light gray',
+  'שחור ואפור כהה': 'Black and dark gray',
+  'חום בהיר': 'Light brown',
+  'כחול כהה': 'Dark blue',
+  'כחול': 'Blue',
+  'אדום': 'Red',
+  'ירוק זית': 'Olive green',
+  'סגול': 'Purple',
+  'טורקיז': 'Turquoise',
+  'כתום': 'Orange',
+  'אדום כהה': 'Dark red',
+  'צהוב': 'Yellow',
+  'ירוק בהיר': 'Light green',
+  'ירוק': 'Green',
+  'תכלת': 'Light blue',
 
   // ── גלריית הסגנונות (StyleGallery / engine/style-gallery) ─────────
   'רגיל': 'Normal',
