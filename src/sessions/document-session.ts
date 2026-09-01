@@ -1,32 +1,89 @@
 /**
- * אשכול ה-state של מסמך בודד — כל מה שיצטרך להיות נפרד לכל טאב כשיהיה אפשר
- * לפתוח כמה מסמכים בבת אחת: `EditorSwap` (המנוע), `SaveCoordinator` (שמירה),
- * `SessionKeeper` (רשומה + טיוטה), והמודלים שקוראים את המסמך הפתוח (מדידה,
- * סרגל, גבולות עמוד, מספרי שורות, סימני עיצוב).
+ * אשכול ה-state של מסמך בודד — טאב אחד ברצועת הטאבים.
  *
- * ## למה זה קיים בלי צרכן
+ * ## שני סוגי שדות, ולמה הם חיים באותו אובייקט
  *
- * זהו חלק 1 מתוך שלושה: שכבת ה-state בלבד. `App.vue` ממשיך להחזיק את כל אלה
- * כ-singletons ברמת המודול, בדיוק כמו קודם — הקובץ הזה רק חושף את הצורה
- * וההרכבה/הפירוק, כדי שחלקים 2-3 (הרצועה, TitleBar, ניהול הטאבים) יוכלו
- * להשתמש בהם בלי לתכנן טיפוסים מחדש.
+ * - **המנועים** (`swap`/`save`/`keeper`/`metrics`/`ruler`/... /`searchAdapter`) —
+ *   עצמאיים לחלוטין: הם עובדים גם כשהטאב ברקע (autosave, כתיבת טיוטה, מדידה).
+ *   `App.vue` יוצר אותם דרך `initSaveCoordinator`/`initSessionKeeper` שלו, שכן
+ *   התלויות שלהם הן סגירות (closures) ספציפיות שם.
+ * - **`ui`** — תמונת מצב של מה שהמעטפת מציגה (כותרת, מטריקות, זום...). כשהטאב
+ *   הזה פעיל, `App.vue` מחזיק את הערכים האלה ב-refs ברמת המודול (בדיוק כמו
+ *   לפני ריבוי המסמכים); כשעוברים לטאב אחר, `activateTab` ב-App.vue שומר את
+ *   ה-refs האלה לתוך `ui`, וטוען את `ui` של הטאב הבא. כך אין צורך לשכתב את כל
+ *   הפונקציות שקוראות/כותבות ל-refs האלה — הן ממשיכות לפעול על „הטאב הפעיל”.
  *
- * `metrics`/`ruler`/`pageBorders`/`lineNumbers`/`formattingMarks` הם `null`
- * עד שהמסמך נפתח בפועל — בדיוק כמו ב-App.vue היום, שם הם נוצרים רק אחרי
- * `swap.open()` הראשון ומוחלפים בכל פתיחה נוספת.
+ * `pane` הוא ה-container הייעודי של הטאב הזה בתוך `.editor-stack` — כל טאב
+ * מקבל `<div>` משלו, ורק של הטאב הפעיל גלוי (ראו App.vue, `.document-pane`).
+ * `swap` נוצר עליו ישירות ואינו מוחלף — זה מה שמאפשר למנוע להמשיך לרוץ ברקע
+ * בלי הרס/יצירה מחדש בכל מעבר טאב.
  */
 import type { DocumentSessionId } from './session-state';
 import { createDocumentSessionId } from './session-state';
 import type { EditorSwap } from './editor-swap';
-import type { SaveCoordinator } from './save-coordinator';
+import type { SaveCoordinator, SaveSnapshot } from './save-coordinator';
 import type { SessionKeeper } from './session-keeper';
-import type { DocMetricsAdapter } from '../engine/doc-metrics';
-import type { RulerModel } from '../engine/page-ruler';
-import type { LineNumberingModel, PageBorderModel } from '../engine/page-setup';
+import type { DocMetricsAdapter, DocMetrics } from '../engine/doc-metrics';
+import { emptyDocMetrics } from '../engine/doc-metrics';
+import type { RulerModel, RulerReading, ViewportSource } from '../engine/page-ruler';
+import type {
+  LineNumberingModel,
+  PageBorderModel,
+  LineNumberingReading,
+  PageBordersReading,
+} from '../engine/page-setup';
 import type { FormattingMarksModel } from '../engine/formatting-marks';
+import type { FormattingMarksBlock } from '../engine/formatting-marks-layer';
+import type { CommandAdapter } from '../engine/command-adapter';
+import type { SearchAdapter, SearchState } from '../engine/search';
+import { idleSearchState } from '../engine/search';
+import type { MacrosHandle } from '../engine/macros';
+import type { FontsSliceLike } from '../engine/font-options';
+import type { StyleGalleryState } from '../engine/style-gallery';
+import { fallbackStyleGallery } from '../engine/style-gallery';
+import type { ReadoutSelection } from '../engine/readout-hold';
+import { UNSETTLED_SELECTION } from '../engine/readout-hold';
+import type { ZoomState } from '../engine/zoom';
+import { FALLBACK_ZOOM } from '../engine/zoom';
+import type { RulerUnit } from '../engine/ruler-geometry';
+import type { SuperDoc } from 'superdoc';
+
+/**
+ * תמונת המצב המוצגת של הטאב, כשהוא אינו פעיל. ראו ההסבר בראש הקובץ — אלה
+ * בדיוק הערכים ש-App.vue מחזיק ב-refs ברמת המודול כש-הטאב הזה כן פעיל.
+ */
+export interface DocumentUiSnapshot {
+  title: string;
+  commandAdapter: CommandAdapter | null;
+  activeSuperdoc: SuperDoc | null;
+  activeEditorContainer: HTMLElement | null;
+  documentGeneration: number;
+  activeMacros: MacrosHandle | null;
+  docMetrics: DocMetrics;
+  zoom: ZoomState;
+  canUndo: boolean;
+  canRedo: boolean;
+  rulerReading: RulerReading | null;
+  rulerHost: HTMLElement | null;
+  rulerViewport: ViewportSource | null;
+  rulerUnit: RulerUnit;
+  isDocumentEditable: boolean;
+  isRulerVisible: boolean;
+  pageBorders: PageBordersReading | null;
+  lineNumbering: LineNumberingReading | null;
+  formattingMarksBlocks: readonly FormattingMarksBlock[] | null;
+  formattingMarksVisible: boolean;
+  saveSnapshot: SaveSnapshot;
+  searchState: SearchState;
+  styleGallery: StyleGalleryState;
+  engineFontSlice: FontsSliceLike | null;
+  readoutSelection: ReadoutSelection;
+}
 
 export interface DocumentSession {
   readonly id: DocumentSessionId;
+  /** ה-container הייעודי של הטאב הזה. ראו „פאנל” בראש הקובץ. */
+  readonly pane: HTMLElement;
   readonly swap: EditorSwap;
   readonly save: SaveCoordinator;
   readonly keeper: SessionKeeper;
@@ -35,8 +92,11 @@ export interface DocumentSession {
   pageBorders: PageBorderModel | null;
   lineNumbers: LineNumberingModel | null;
   formattingMarks: FormattingMarksModel | null;
+  searchAdapter: SearchAdapter | null;
+  /** תמונת המצב המוצגת, מעודכנת ב-`activateTab` (App.vue) בכל יציאה מהטאב. */
+  ui: DocumentUiSnapshot;
   /**
-   * מפרקת את כל מה שבאשכול — המנוע, השמירה, זוכר ההפעלה.
+   * מפרקת את כל מה שבאשכול — המנוע, השמירה, זוכר ההפעלה, ואת ה-`pane` עצמו.
    *
    * `removeDraft: true` הוא מסלול הסגירה-הסופית (טאב שנסגר בלי שמירה): טיוטת
    * המסמך הזה נמצאת בנתיב ייחודי לו (`draftPathFor`, ב-session-state.ts),
@@ -50,9 +110,48 @@ export interface DocumentSession {
 export interface DocumentSessionParts {
   /** ברירת המחדל: מזהה חדש. מוגדר בפירוש כשמאמצים רשומה קיימת מה-storage. */
   id?: DocumentSessionId;
+  pane: HTMLElement;
   swap: EditorSwap;
   save: SaveCoordinator;
   keeper: SessionKeeper;
+}
+
+/** תמונת מצב ריקה — ברירת המחדל של טאב שעוד לא נפתח בו דבר. */
+export function emptyUiSnapshot(): DocumentUiSnapshot {
+  return {
+    title: 'מסמך חדש',
+    commandAdapter: null,
+    activeSuperdoc: null,
+    activeEditorContainer: null,
+    documentGeneration: 0,
+    activeMacros: null,
+    docMetrics: emptyDocMetrics(),
+    zoom: { ...FALLBACK_ZOOM },
+    canUndo: false,
+    canRedo: false,
+    rulerReading: null,
+    rulerHost: null,
+    rulerViewport: null,
+    rulerUnit: 'cm',
+    isDocumentEditable: true,
+    isRulerVisible: false,
+    pageBorders: null,
+    lineNumbering: null,
+    formattingMarksBlocks: null,
+    formattingMarksVisible: false,
+    saveSnapshot: {
+      state: 'idle',
+      isDirty: false,
+      isSaving: false,
+      targetToken: null,
+      name: null,
+      lastError: null,
+    },
+    searchState: idleSearchState(),
+    styleGallery: fallbackStyleGallery(),
+    engineFontSlice: null,
+    readoutSelection: UNSETTLED_SELECTION,
+  };
 }
 
 /** מרכיבה אשכול ממה שכבר נבנה. אינה יודעת לבנות swap/save/keeper בעצמה —
@@ -61,6 +160,7 @@ export interface DocumentSessionParts {
 export function createDocumentSession(parts: DocumentSessionParts): DocumentSession {
   const session: DocumentSession = {
     id: parts.id ?? createDocumentSessionId(),
+    pane: parts.pane,
     swap: parts.swap,
     save: parts.save,
     keeper: parts.keeper,
@@ -69,11 +169,14 @@ export function createDocumentSession(parts: DocumentSessionParts): DocumentSess
     pageBorders: null,
     lineNumbers: null,
     formattingMarks: null,
+    searchAdapter: null,
+    ui: emptyUiSnapshot(),
     async destroy(options = {}) {
       session.swap.destroy();
       session.save.dispose();
       if (options.removeDraft) await session.keeper.discardDraft();
       session.keeper.dispose();
+      session.pane.remove();
     },
   };
   return session;

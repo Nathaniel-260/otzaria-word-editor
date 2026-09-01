@@ -15,13 +15,13 @@ export type SwitchDecision =
   | { action: 'cancel'; reason: 'user' | 'saving' };
 
 /**
- * לשם מה נשאלת השאלה. שני המקרים חולקים את כל ההחלטה ונבדלים בנוסח בלבד,
- * ולכן הם פרמטר ולא פונקציה שנייה: זהו הקוד שקובע אם עבודה של המשתמש נמחקת,
- * ועותק שני שלו הוא עותק שני שיכול להתפצל בשקט.
+ * לשם מה נשאלת השאלה. שלושת המקרים חולקים את כל ההחלטה ונבדלים בנוסח בלבד,
+ * ולכן הם פרמטר ולא פונקציה נוספת: זהו הקוד שקובע אם עבודה של המשתמש נמחקת,
+ * ועותק נוסף שלו הוא עותק שיכול להתפצל בשקט.
  */
-export type SwitchIntent = 'open-other' | 'exit';
+export type SwitchIntent = 'open-other' | 'exit' | 'close-tab';
 
-/** הנוסח לכל כוונה. שאלת המחיקה זהה בשתיהן, ולכן היא אינה כאן. */
+/** הנוסח לכל כוונה. שאלת המחיקה זהה בכולן, ולכן היא אינה כאן. */
 const WORDING: Record<SwitchIntent, { savePrompt: (name: string) => string; discardTitle: string }> =
   {
     'open-other': {
@@ -31,6 +31,10 @@ const WORDING: Record<SwitchIntent, { savePrompt: (name: string) => string; disc
     exit: {
       savePrompt: (name) => `לשמור את ${name} לפני יציאה?`,
       discardTitle: 'לצאת בלי לשמור?',
+    },
+    'close-tab': {
+      savePrompt: (name) => `לשמור את ${name} לפני סגירת הטאב?`,
+      discardTitle: 'לסגור בלי לשמור?',
     },
   };
 
