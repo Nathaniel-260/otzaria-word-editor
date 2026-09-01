@@ -206,11 +206,12 @@ src/composables/use-context-menu.ts  האזנה, תצלום, פתיחה וסגי
 ## 9. סדר העבודה
 
 - **גל 0 — מדידה.** בוצע. `scripts/context-menu-probe.mjs`, תשעה שערים.
-- **גל 1 — השלד.** התפריט, שתי שורות האייקונים, שבעת פריטי הטקסט, ההקשרים
-  1–4, מיקום, מקלדת, `Shift+F10`, וכלל המקומות מ־3.1.
-- **גל 2 — הקשרי עצמים.** טבלה, קישור, הערת שוליים.
-- **גל 3 — ליטוש.** צבע גופן והדגשה עם פופאובר, תת־תפריטי סגנונות ויישור,
-  שער `check:contextmenu` ב־`npm run verify`.
+- **גל 1 — השלד.** בוצע — `src/ui/menu/ContextMenu.vue`,
+  `context-menu-model.ts`, `menu-placement.ts`, ושלוש חבילות בדיקה
+  (`context-menu-model`, `context-menu-placement`, `context-menu`).
+- **גל 2 — הקשרי עצמים.** בוצע. טבלה, קישור, הערת שוליים.
+- **גל 3 — ליטוש.** צבע גופן והדגשה עם פופאובר, תת־תפריטי סגנונות ויישור.
+  השער כבר ב־`npm run verify`, ושמו `check:menu` (לא `check:contextmenu`).
 
 ## 10. בדיקות
 
