@@ -1,9 +1,10 @@
 /**
  * סמן-הטקסט של העכבר — ה-I-beam של Word על כל עמודת הטקסט.
  *
- * שתי המשפחות שנבדקות: הגיאומטריה הטהורה (נקודה מול פס הטקסט של כל עמוד,
- * כולל השוליים האפקטיביים), וההחלה על ה-host — שהסמן נדלק רק בתוך הפס,
- * כבה בשוליים וביציאה, ואינו נשאר דלוק אחרי פירוק.
+ * שתי המשפחות שנבדקות: הגיאומטריה הטהורה (נקודה מול פס הטקסט של כל עמוד —
+ * בין השוליים הצדדיים, על כל גובה העמוד כולל אזורי הכותרות), וההחלה על
+ * ה-host — שהסמן נדלק רק בתוך הפס, כבה בשוליים הצדדיים וביציאה, ואינו
+ * נשאר דלוק אחרי פירוק.
  */
 import { describe, it, expect, vi } from 'vitest';
 import {
@@ -14,14 +15,11 @@ import {
 import type { IndexedPageRect } from '../../src/engine/page-ruler';
 import type { PageMarginsState } from '../../src/engine/page-setup';
 
-/** עמוד 500×1000 פיקסלים, שוליים של 10% מכל צד. */
+/** עמוד 500×1000 פיקסלים, שוליים צדדיים של 10%. */
 const geometry: TextBandGeometry = {
   pageWidthTwips: 1000,
-  pageHeightTwips: 1000,
   leftTwips: 100,
   rightTwips: 100,
-  effectiveTopTwips: 100,
-  effectiveBottomTwips: 100,
 };
 
 const page: IndexedPageRect = { pageIndex: 0, leftPx: 0, topPx: 0, widthPx: 500, heightPx: 1000 };
@@ -31,18 +29,16 @@ describe('pointInTextArea', () => {
     expect(pointInTextArea(250, 500, [page], geometry)).toBe(true);
   });
 
-  it('השוליים אינם פס טקסט — כל ארבעת הצדדים', () => {
+  it('השוליים הצדדיים אינם פס טקסט', () => {
     expect(pointInTextArea(25, 500, [page], geometry), 'שוליים שמאליים').toBe(false);
     expect(pointInTextArea(475, 500, [page], geometry), 'שוליים ימניים').toBe(false);
-    expect(pointInTextArea(250, 50, [page], geometry), 'שוליים עליונים').toBe(false);
-    expect(pointInTextArea(250, 950, [page], geometry), 'שוליים תחתונים').toBe(false);
   });
 
-  it('השוליים האנכיים הם האפקטיביים — כותרת עליונה דוחקת את הפס', () => {
-    // כמו הסרגל ומספרי השורות: מה שהמנוע צייר בפועל, לא מה שכתוב במסמך.
-    const withHeader = { ...geometry, effectiveTopTwips: 300 };
-    expect(pointInTextArea(250, 250, [page], withHeader)).toBe(false);
-    expect(pointInTextArea(250, 350, [page], withHeader)).toBe(true);
+  it('השוליים האנכיים כן — הם אזור הכותרת העליונה/תחתונה', () => {
+    // לחיצה כפולה שם נכנסת לעריכת הכותרת, ובזמן שהיא פתוחה מקלידים שם ממש.
+    // Word מציג I-beam על כל גובה העמוד — ראו הערת הפתיחה של המודול.
+    expect(pointInTextArea(250, 50, [page], geometry), 'אזור כותרת עליונה').toBe(true);
+    expect(pointInTextArea(250, 950, [page], geometry), 'אזור כותרת תחתונה').toBe(true);
   });
 
   it('הרווח שבין עמודים אינו פס טקסט, והעמוד השני כן', () => {

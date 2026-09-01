@@ -13,8 +13,17 @@
  * שני מקורות שכבר קיימים ומותרים: מלבני העמודים (`watchAllPageRects`,
  * engine/page-ruler.ts — העיגון המדוד היחיד) והשוליים מהמסמך
  * (`readPageMargins`, engine/page-setup.ts). מהם נגזר „פס הטקסט" של כל עמוד:
- * אופקית בין השוליים, אנכית בין השוליים ה**אפקטיביים** — מה שכותרת עליונה
- * כבר דוחקת — אותה הכרעה בדיוק כמו הסרגל ומספרי השורות.
+ * אופקית בין השוליים; אנכית — **כל גובה העמוד**.
+ *
+ * ## למה השוליים האנכיים כן בפנים, והצדדיים לא
+ *
+ * השוליים העליונים והתחתונים הם אזור הכותרת העליונה/תחתונה: לחיצה כפולה שם
+ * נכנסת לעריכת הכותרת (כך המנוע עובד — ראו engine/header-footer.ts), ובזמן
+ * שהיא פתוחה מקלידים שם ממש. Word מציג I-beam על כל גובה העמוד מאותה סיבה.
+ * גרסה ראשונה של המודול הזה חסמה אותם לפי השוליים האפקטיביים — והתוצאה
+ * הייתה חץ מעל כותרת שעורכים בה ברגע זה. השוליים הצדדיים, לעומתם, אינם
+ * אזור הקלדה בשום מצב — שם נשאר חץ, וכך גם ברווח שבין עמודים (שאינו חלק
+ * ממלבן של אף עמוד).
  *
  * ההחלה: `mousemove` על ה-host (ה-div שלנו — `paintedHost` „נמדד כמחזיר את
  * ה-div שלנו עצמו", ראו page-ruler.ts), והשוואת המצביע לפסים כותבת
@@ -38,15 +47,7 @@ import {
 import type { PageMarginsState } from './page-setup';
 
 /** מה שנצרך מ-`PageMarginsState` לחישוב הפסים — טוויפס בלבד, בלי DOM. */
-export type TextBandGeometry = Pick<
-  PageMarginsState,
-  | 'pageWidthTwips'
-  | 'pageHeightTwips'
-  | 'leftTwips'
-  | 'rightTwips'
-  | 'effectiveTopTwips'
-  | 'effectiveBottomTwips'
->;
+export type TextBandGeometry = Pick<PageMarginsState, 'pageWidthTwips' | 'leftTwips' | 'rightTwips'>;
 
 /**
  * האם הנקודה (ביחס לאותו ייחוס שהמלבנים נמדדו בו) בתוך פס הטקסט של אחד
@@ -61,20 +62,17 @@ export function pointInTextArea(
   pages: readonly IndexedPageRect[],
   geometry: TextBandGeometry,
 ): boolean {
-  if (!(geometry.pageWidthTwips > 0) || !(geometry.pageHeightTwips > 0)) return false;
+  if (!(geometry.pageWidthTwips > 0)) return false;
 
   for (const page of pages) {
     const leftPx = page.leftPx + (geometry.leftTwips / geometry.pageWidthTwips) * page.widthPx;
     const rightPx =
       page.leftPx + page.widthPx - (geometry.rightTwips / geometry.pageWidthTwips) * page.widthPx;
-    const topPx =
-      page.topPx + (geometry.effectiveTopTwips / geometry.pageHeightTwips) * page.heightPx;
-    const bottomPx =
-      page.topPx +
-      page.heightPx -
-      (geometry.effectiveBottomTwips / geometry.pageHeightTwips) * page.heightPx;
 
-    if (xPx >= leftPx && xPx <= rightPx && yPx >= topPx && yPx <= bottomPx) return true;
+    // אנכית — כל גובה העמוד: השוליים העליונים/תחתונים הם אזור הכותרות.
+    if (xPx >= leftPx && xPx <= rightPx && yPx >= page.topPx && yPx <= page.topPx + page.heightPx) {
+      return true;
+    }
   }
   return false;
 }
