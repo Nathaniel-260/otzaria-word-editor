@@ -590,6 +590,42 @@ const EN: Readonly<Record<string, string>> = {
   'אחידות מסמך': 'Document Consistency',
   'גודל עמוד ושוליים': 'Page Size & Margins',
   'רוחב טורים': 'Column Widths',
+  'תיקון שגיאות הקלדה נפוצות בכל המסמך — רווחים כפולים, פיסוק, סוגריים':
+    'Fix common typing errors throughout the document — double spaces, punctuation, brackets',
+  'סריקת המסמך אחר סוגריים עגולים ומרובעים שאינם מאוזנים':
+    'Scan the document for unbalanced round and square brackets',
+  'הדגשת דיבור-המתחיל בפסקאות המסומנות — מתחילת הפסקה עד תו הסיום, ובין תו ההתחלה לתו הסיום':
+    'Bold the opening phrase in the selected paragraphs — from the start of the paragraph to the end character, and between the start and end characters',
+  'כל קטע בסוגריים בפסקאות המסומנות הופך להערת שוליים במקומו':
+    'Each bracketed passage in the selected paragraphs becomes a footnote in its place',
+  'תוכן כל הערות השוליים חוזר לגוף הטקסט בסוגריים, במקום ההפניה':
+    'The content of every footnote returns to the body in brackets, where the reference stood',
+  'סוג הסוגריים להמרה':
+    'Bracket type to convert',
+  'הגדלה והדגשה של המילה הראשונה בכל פסקה מסומנת, פרופורציונלית לגוף הפסקה':
+    'Enlarge and bold the first word of each selected paragraph, in proportion to the paragraph body',
+  'קיבוע מרווח „בדיוק” בגובה שורה של גופן הגוף — שהמילה המוגדלת לא תמתח את השורה הראשונה. מומלץ להריץ לפני עיצוב המילה הראשונה':
+    'Fix line spacing to "exact" at the body font line height, so an enlarged first word does not stretch the first line. Best run before First Word',
+  'החזרת מרווח „בדיוק” למרווח „מרובה” שקול בפסקאות המסומנות':
+    'Convert "exact" line spacing back to an equivalent "multiple" in the selected paragraphs',
+  'איתור מקטעים שסטו מגודל העמוד או מהשוליים של שאר המסמך, והשוואתם לפרופיל אחד':
+    'Find sections that deviate from the page size or margins of the rest of the document, and apply a single profile',
+  'איתור מקטעים מרובי-טורים שרוחב הטורים או המרווח ביניהם שונה, והשוואתם':
+    'Find multi-column sections whose column width or gap differs, and make them uniform',
+  'אחידות גודל עמוד ושוליים':
+    'Page Size & Margin Consistency',
+  'אחידות רוחב טורים':
+    'Column Width Consistency',
+  'נמצאו במסמך כמה פרופילים של גודל עמוד ושוליים. יש לבחור את הנכון — והוא יוחל על כל המקטעים:':
+    'Several page size and margin profiles were found in the document. Choose the correct one — it will be applied to all sections:',
+  'נמצאו במסמך כמה פרופילים של טורים. יש לבחור את הנכון — והוא יוחל על כל המקטעים מרובי-הטורים:':
+    'Several column profiles were found in the document. Choose the correct one — it will be applied to all multi-column sections:',
+  'גודל העמוד והשוליים הוחלו על כל המקטעים':
+    'Page size and margins applied to all sections',
+  'רוחב הטורים הוחל על כל המקטעים מרובי-הטורים':
+    'Column widths applied to all multi-column sections',
+  'הפעולה נכשלה':
+    'The action failed',
 };
 
 /**
