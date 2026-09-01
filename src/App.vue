@@ -855,6 +855,10 @@ function initSaveCoordinator(getSession: () => DocumentSession): SaveCoordinator
         suggestedName:
           input.suggestedName ??
           documentFileName(sessionDisplayTitle(getSession()), sessionSaveExtension(getSession())),
+        // הסיומת שהמאחז מצמיד לשם בדיאלוג „שמור בשם”, ושלפיה הוא מסנן בו.
+        // בלי השדה הזה היא `docx` קבוע (ראו `CommitOptions` ב-host/files.ts),
+        // ומסמך מאקרו היה מוצע לשמירה בשם `ספר.docm.docx`.
+        extension: sessionSaveExtension(getSession()),
         title: 'שמירת המסמך',
       }),
     onStateChange: (snapshot) => {
@@ -1849,7 +1853,7 @@ async function onPickAndOpen(): Promise<void> {
       }
 
       if (decision.action === 'save-first') {
-        const outcome = await save.saveNow({ suggestedName: title.value });
+        const outcome = await save.saveNow({ suggestedName: documentFileName(title.value, saveExtension.value) });
         if (outcome.status !== 'saved') {
           if (outcome.status === 'failed') setStatus(outcome.message, true);
           else setStatus('הפתיחה נעצרה — המסמך לא נשמר');
@@ -1881,7 +1885,7 @@ async function onNewDocument(): Promise<void> {
     if (decision.action === 'switch') await keeper?.discardDraft();
     if (decision.action === 'cancel') return;
     if (decision.action === 'save-first') {
-      const outcome = await save.saveNow({ suggestedName: title.value });
+      const outcome = await save.saveNow({ suggestedName: documentFileName(title.value, saveExtension.value) });
       if (outcome.status !== 'saved') return;
     }
   }
@@ -1922,7 +1926,7 @@ async function onExit(): Promise<void> {
       return;
     }
     if (decision.action === 'save-first') {
-      const outcome = await save.saveNow({ suggestedName: title.value });
+      const outcome = await save.saveNow({ suggestedName: documentFileName(title.value, saveExtension.value) });
       // שמירה שנכשלה או שבוטלה עוצרת את היציאה: המשתמש ביקש לשמור, וללכת
       // בכל זאת היה מתעלם ממה שביקש.
       if (outcome.status !== 'saved') {
@@ -2117,7 +2121,9 @@ async function onDocumentTabClose(id: DocumentSessionId): Promise<void> {
   }
 
   if (decision.action === 'save-first') {
-    const outcome = await session.save.saveNow({ suggestedName: sessionDisplayTitle(session) });
+    const outcome = await session.save.saveNow({
+      suggestedName: documentFileName(sessionDisplayTitle(session), sessionSaveExtension(session)),
+    });
     if (outcome.status !== 'saved') {
       if (outcome.status === 'failed') setStatus(outcome.message, true);
       else setStatus('סגירת הטאב בוטלה — המסמך לא נשמר');
