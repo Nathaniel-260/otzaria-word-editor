@@ -112,12 +112,15 @@ export async function applyExactLineSpacing(
   let updated = 0;
 
   for (const block of scoped.result.blocks) {
-    const wordLength = firstWordLength(block.text);
-    if (wordLength === 0) continue;
     const spacing = readSpacing(body, block.blockId);
     if (spacing.rule === 'exact') continue;
 
-    const reference = resolvedFontAt(body, block.blockId, wordLength + 1);
+    /* גופן הייחוס הוא של גוף הפסקה, ולכן נקרא מהמילה השנייה — היא זו שלא
+       הוגדלה. פסקה שכולה מילה אחת אינה יוצאת מהכלל אלא נמדדת מתחילתה:
+       דילוג עליה היה משאיר בדיוק את הפסקאות שהכלי בא ליישר, ומשאיר את
+       ההסרה (שכן מטפלת בהן) לא סימטרית להחלה. */
+    const wordLength = firstWordLength(block.text);
+    const reference = resolvedFontAt(body, block.blockId, wordLength > 0 ? wordLength + 1 : 0);
     const bodyPt = reference.fontSizeCs ?? reference.fontSize ?? FALLBACK_BODY_PT;
     const linePt = measure(reference.fontFamily, bodyPt);
     if (linePt === null || linePt <= 0) {

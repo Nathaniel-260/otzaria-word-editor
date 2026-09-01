@@ -49,4 +49,16 @@ describe('shulchan/tools-registration', () => {
     const failed = await tools2.find((tool) => tool.id === 'shulchan.typos')!.run();
     expect(failed.ok).toBe(false);
   });
+
+  /* `registerTool` זורק על id כפול או שם פסול, והרישום יושב על מסלול פתיחת
+     המסמך: חריגה שם הייתה מפילה פתיחה של מסמך בגלל לשונית כלים. */
+  it('kit שדוחה רישום אינו מפיל את הקריאה', () => {
+    const kit = {
+      registerTool: () => {
+        throw new Error('tool already registered');
+      },
+    } as unknown as MacroKit;
+
+    expect(() => registerShulchanTools(kit, () => null, () => undefined)).not.toThrow();
+  });
 });

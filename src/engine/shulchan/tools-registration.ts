@@ -40,7 +40,19 @@ export function registerShulchanTools(
   host: () => ShulchanTarget,
   onSummary: (text: string) => void,
 ): void {
-  kit.registerTool({
+  /* `kit.registerTool` זורק על id כפול או שם פסול, והקריאה לכאן יושבת על
+     מסלול פתיחת המסמך: חריגה כאן הייתה מפילה פתיחה של מסמך בגלל לשונית
+     כלים. הכלים הם תוספת, לא תנאי — מי שלא נרשם פשוט אינו מופיע בדיאלוג,
+     והלשונית ברצועה עובדת בלעדיו. */
+  const register: MacroKit['registerTool'] = (tool) => {
+    try {
+      kit.registerTool(tool);
+    } catch (error) {
+      console.warn(`[otzaria-word] רישום הכלי ${tool.id} נכשל`, error);
+    }
+  };
+
+  register({
     id: 'shulchan.typos',
     name: 'שולחן העורך: שגיאות מצויות',
     description: 'תיקון שגיאות הקלדה נפוצות בכל המסמך, בברירות המחדל',
@@ -50,7 +62,7 @@ export function registerShulchanTools(
     },
   });
 
-  kit.registerTool({
+  register({
     id: 'shulchan.text-alternating',
     name: 'שולחן העורך: טקסט מתחלף',
     description: 'הדגשת דיבור-המתחיל בפסקאות המסומנות (: עד .)',
@@ -60,7 +72,7 @@ export function registerShulchanTools(
     },
   });
 
-  kit.registerTool({
+  register({
     id: 'shulchan.brackets-to-notes',
     name: 'שולחן העורך: סוגריים ⟵ הערות',
     description: 'כל קטע בסוגריים עגולים בפסקאות המסומנות הופך להערת שוליים',
@@ -70,7 +82,7 @@ export function registerShulchanTools(
     },
   });
 
-  kit.registerTool({
+  register({
     id: 'shulchan.notes-to-brackets',
     name: 'שולחן העורך: הערות ⟵ סוגריים',
     description: 'תוכן כל הערות השוליים חוזר לגוף בסוגריים עגולים',
@@ -80,7 +92,7 @@ export function registerShulchanTools(
     },
   });
 
-  kit.registerTool({
+  register({
     id: 'shulchan.first-word',
     name: 'שולחן העורך: עיצוב מילה ראשונה',
     description: 'הגדלה והדגשה של המילה הראשונה בפסקאות המסומנות, בברירות המחדל',
@@ -90,7 +102,7 @@ export function registerShulchanTools(
     },
   });
 
-  kit.registerTool({
+  register({
     id: 'shulchan.first-word-remove',
     name: 'שולחן העורך: הסרת עיצוב מילה ראשונה',
     description: 'ניקוי העיצוב הישיר של המילה הראשונה בפסקאות המסומנות',
@@ -100,7 +112,7 @@ export function registerShulchanTools(
     },
   });
 
-  kit.registerTool({
+  register({
     id: 'shulchan.line-spacing',
     name: 'שולחן העורך: מרווח שורות אחיד',
     description: 'קיבוע מרווח „בדיוק” בגובה שורה של גופן הגוף, בפסקאות המסומנות',
@@ -110,7 +122,7 @@ export function registerShulchanTools(
     },
   });
 
-  kit.registerTool({
+  register({
     id: 'shulchan.line-spacing-remove',
     name: 'שולחן העורך: ביטול מרווח אחיד',
     description: 'החזרת מרווח „בדיוק” למרווח „מרובה” שקול, בפסקאות המסומנות',
