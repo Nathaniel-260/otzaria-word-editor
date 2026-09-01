@@ -7,7 +7,8 @@
       :value="modelValue"
       class="ribbon-select"
       :disabled="disabled"
-      :title="menuString(title)"
+      :data-tip-title="menuString(title)"
+      :aria-label="menuString(title)"
       @change="$emit('update:modelValue', ($event.target as HTMLSelectElement).value)"
     >
       <option
@@ -81,7 +82,7 @@ defineEmits<{
   color: var(--color-on-surface);
   font-family: var(--font-main);
   font-size: 11px;
-  height: 22px;
+  height: var(--ribbon-row-h);
   padding-inline-start: 6px;
   padding-inline-end: 18px;
   width: 100%;

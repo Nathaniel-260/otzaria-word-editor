@@ -19,7 +19,8 @@
         <button
           type="button"
           class="shortcuts-close-btn"
-          title="סגור (Esc)"
+          data-tip-title="סגור"
+          data-tip-shortcut="Esc"
           aria-label="סגור את רשימת הקיצורים"
           @click="$emit('close')"
         >

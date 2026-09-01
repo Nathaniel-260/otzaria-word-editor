@@ -21,6 +21,7 @@
       />
     </RibbonGroup>
 
+    <!-- „שמור” הוא הפעולה, ו„שמור בשם” הווריאנט שלה — לא שני שווים. -->
     <RibbonGroup title="שמירה">
       <RibbonButton
         icon="save"
@@ -31,17 +32,23 @@
         :disabled="isSaveBlocked"
         @click="$emit('save-doc')"
       />
-      <RibbonButton
-        icon="saveAs"
-        label="שמור בשם..."
-        variant="large"
-        :tooltip="saveTooltip('שמירת המסמך כקובץ חדש')"
-        shortcut-id="save-as"
-        :disabled="isSaveBlocked"
-        @click="$emit('save-as-doc')"
-      />
+      <RibbonStack>
+        <RibbonButton
+          icon="saveAs"
+          label="שמור בשם..."
+          variant="small"
+          :tooltip="saveTooltip('שמירת המסמך כקובץ חדש')"
+          shortcut-id="save-as"
+          :disabled="isSaveBlocked"
+          @click="$emit('save-as-doc')"
+        />
+      </RibbonStack>
     </RibbonGroup>
 
+    <!--
+      „ייצוא ל-Word” נשאר הגדול, ולא „הדפסה”: זו הדרך שבה העבודה **יוצאת**
+      מהתוסף, וזה גם הסדר שכותרת הקבוצה עצמה מכריזה עליו.
+    -->
     <RibbonGroup title="ייצוא והדפסה">
       <RibbonButton
         icon="export"
@@ -51,23 +58,25 @@
         :disabled="!hasDocument"
         @click="$emit('export-doc')"
       />
-      <RibbonButton
-        icon="exportPdf"
-        label="ייצוא ל-PDF"
-        variant="large"
-        :tooltip="pdfExportTooltip"
-        :disabled="!hasDocument || !hasPdfExport"
-        @click="$emit('export-pdf')"
-      />
-      <RibbonButton
-        icon="print"
-        label="הדפסה"
-        variant="large"
-        :tooltip="documentTooltip('הדפסת המסמך')"
-        shortcut-id="print"
-        :disabled="!hasDocument"
-        @click="$emit('print-doc')"
-      />
+      <RibbonStack>
+        <RibbonButton
+          icon="exportPdf"
+          label="ייצוא ל-PDF"
+          variant="small"
+          :tooltip="pdfExportTooltip"
+          :disabled="!hasDocument || !hasPdfExport"
+          @click="$emit('export-pdf')"
+        />
+        <RibbonButton
+          icon="print"
+          label="הדפסה"
+          variant="small"
+          :tooltip="documentTooltip('הדפסת המסמך')"
+          shortcut-id="print"
+          :disabled="!hasDocument"
+          @click="$emit('print-doc')"
+        />
+      </RibbonStack>
     </RibbonGroup>
 
     <RibbonGroup title="יציאה">
@@ -81,7 +90,19 @@
       />
     </RibbonGroup>
 
-    <RibbonGroup title="מידע">
+    <!--
+      „מידע” נצמדת לקצה השמאלי של הרצועה, כמו „עזרה” ב-Word: היא אינה שלב
+      בזרימת העבודה של הקובץ, ומקומה בקצה קבוע ולא בתור אחרי „יציאה”.
+
+      שני הפקדים נשארים **גדולים** ואינם יורדים למחסנית, בניגוד לשאר הקבוצות
+      בלשונית. הסיבה כתובה כמה שורות מכאן: „קיצורים” הוא הרשימה שמי שאינו
+      יודע את הקיצורים מחפש, והקטנתו הייתה מרחיקה בדיוק את מה שההערה ההיא
+      ביקשה לקרב. קבוצה בת שני פקדים גם אינה צפופה, ואין מה לחסוך בה.
+    -->
+    <RibbonGroup
+      title="מידע"
+      end
+    >
       <!-- הפקד היחיד בלשונית בלי `:disabled`, ובכוונה: הדיאלוג הוא של התוסף,
            הוא אינו נוגע במסמך ואינו נוגע במנוע, ואין מצב שבו הוא אינו זמין.
            `:disabled="false"` קבוע היה חיווט מדומה — הוא נראה כמו תנאי ואינו
@@ -149,6 +170,7 @@
  */
 import { computed } from 'vue';
 import RibbonGroup from '../common/RibbonGroup.vue';
+import RibbonStack from '../common/RibbonStack.vue';
 import RibbonButton from '../common/RibbonButton.vue';
 
 const props = withDefaults(
@@ -243,10 +265,14 @@ const exitTooltip = computed(() =>
 </script>
 
 <style scoped>
+/* `width: 100%` אינו קישוט: בלעדיו הפאנל מתכווץ לרוחב תוכנו, אין מרווח פנוי,
+   ו-`margin-inline-start: auto` של קבוצת „מידע” אינו בולע דבר — ההצמדה לקצה
+   פשוט אינה קורית. ראו `.word-ribbon-group--end` ב-ribbon.css. */
 .ribbon-tab-pane {
   display: flex;
   align-items: stretch;
   gap: 0;
   height: 100%;
+  width: 100%;
 }
 </style>

@@ -36,7 +36,7 @@
       <button
         type="button"
         class="word-ribbon-toggle"
-        :title="isCollapsed ? menuString('הצג את הרצועה') : menuString('כווץ את הרצועה')"
+        :data-tip-title="isCollapsed ? menuString('הצג את הרצועה') : menuString('כווץ את הרצועה')"
         :aria-label="isCollapsed ? menuString('הצג את הרצועה') : menuString('כווץ את הרצועה')"
         :aria-expanded="!isCollapsed"
         :aria-controls="RIBBON_PANEL_ID"

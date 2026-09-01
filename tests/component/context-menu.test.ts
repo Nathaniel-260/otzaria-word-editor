@@ -187,12 +187,15 @@ describe('ContextMenu', () => {
 
   /**
    * שורה שכתוב בה „קישור…” ולצדה „Ctrl+K” אינה צריכה כרטיס טולטיפ שאומר
-   * „קישור…”. `TooltipLayer` מרים כרטיס לכל פקד עם `title`, ולכן ההימנעות היא
-   * מה-`title` עצמו ולא מהשכבה.
+   * „קישור…”, ולכן היא אינה מצהירה על `data-tip-*` כלל — מה שהופך פקד לעוגן.
+   * `title` אינו נבדק כאן כי הוא אינו קיים באף אלמנט בתוכנה
+   * (tests/unit/native-title.test.ts).
    */
-  it('לשורת כתיבה אין title — התווית כבר על המסך', () => {
-    expect(buttonById(harness, 'link').attributes('title')).toBeUndefined();
-    expect(buttonById(harness, 'bold').attributes('title')).toBe('מודגש (Ctrl+B)');
+  it('לשורת כתיבה אין טולטיפ — התווית כבר על המסך', () => {
+    expect(buttonById(harness, 'link').attributes('data-tip-title')).toBeUndefined();
+    expect(buttonById(harness, 'bold').attributes('data-tip-title')).toBe('מודגש');
+    expect(buttonById(harness, 'bold').attributes('data-tip-shortcut')).toBe('Ctrl+B');
+    expect(buttonById(harness, 'bold').attributes('aria-label')).toBe('מודגש (Ctrl+B)');
   });
 
   it('תווית הקיצור מוצגת ב-LTR', () => {

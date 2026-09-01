@@ -17,6 +17,8 @@ import {
   createCommandDouble,
   createSuperdocDouble,
   settle,
+  tipMessage,
+  tipOf,
   type CommandDouble,
   type SuperdocDouble,
 } from './harness';
@@ -242,7 +244,7 @@ describe('דיאלוג הקיצורים', () => {
     await settle();
     const about = wrapper
       .findAll('button')
-      .find((node) => node.attributes('title')?.startsWith('אודות'));
+      .find((node) => tipOf(node).title.startsWith('אודות'));
     await about!.trigger('click');
     await settle();
     expect(wrapper.find('.about-dialog').exists(), '„אודות” פתוח').toBe(true);
@@ -272,7 +274,7 @@ describe('דיאלוג הקיצורים', () => {
     await settle();
     return wrapper
       .findAll('button')
-      .find((node) => node.attributes('title')?.startsWith('רשימת קיצורי המקלדת'));
+      .find((node) => tipMessage(node).startsWith('רשימת קיצורי המקלדת'));
   }
 
   it('יש כפתור ברצועה שפותח את הרשימה', async () => {
@@ -294,7 +296,7 @@ describe('דיאלוג הקיצורים', () => {
 
     const button = await shortcutsButton(wrapper);
 
-    expect(button!.attributes('title')).toContain('Ctrl+/');
+    expect(tipOf(button!).shortcut).toBe('Ctrl+/');
   });
 
   it('Ctrl+/ בפריסה עברית פותח גם הוא', async () => {

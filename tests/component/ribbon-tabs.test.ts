@@ -37,6 +37,7 @@ import {
   installSystemClipboard,
   mountUi,
   settle,
+  tipMessage,
 } from './harness';
 
 autoUnmount();
@@ -71,7 +72,9 @@ const TABS: ReadonlyArray<{
 /** מה שמזהה כפתור בהודעת כשל — כדי שאפשר יהיה למצוא אותו בקובץ. */
 function nameOf(button: DOMWrapper<Element>): string {
   return (
-    button.attributes('title') ||
+    // ההסבר ולא הכותרת, כשיש: בפקד מנוטרל הוא נושא את *הסיבה*, וזה מה
+    // שהבדיקות כאן מזהות לפיו („סגנונות תורניים יתווספו בשלב הבא”).
+    tipMessage(button) ||
     button.attributes('aria-label') ||
     button.text().trim() ||
     button.html().slice(0, 70)
@@ -300,7 +303,7 @@ describe('לשונית „קובץ” נשענת על מצב המעטפת', () =
     await settle();
 
     const save = harness.wrapper.findAll('button').find((b) => b.text().trim() === 'שמור');
-    expect(save?.attributes('title')).toContain('אין מסמך פתוח');
+    expect(tipMessage(save!)).toContain('אין מסמך פתוח');
   });
 
   it('„יציאה” פולט exit-app, וההודעה עוברת דרך הרצועה', async () => {
@@ -336,7 +339,7 @@ describe('לשונית „קובץ” נשענת על מצב המעטפת', () =
     const exitButton = harness.wrapper
       .findAll('button')
       .find((button) => button.text().trim() === 'יציאה');
-    expect(exitButton?.attributes('title')).toContain('המסמך יישאר פתוח');
+    expect(tipMessage(exitButton!)).toContain('המסמך יישאר פתוח');
   });
 
   it('הרצועה מעבירה את שלושת המצבים — אחרת ה-props כאן הם קוד מת', async () => {

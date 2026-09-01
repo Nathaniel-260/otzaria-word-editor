@@ -680,12 +680,15 @@ describe('אתרי הקריאה לאייקונים', () => {
     // מגדלת, „מסמך חדש” הציג את לוגו האפליקציה, ו„שמור בשם” ו„ייצוא ל-Word”
     // הציגו את אותו אייקון בדיוק.
     // הנרמול אינו מתקן כשל: במאגר עצמו כל הקבצים LF, ובלעדיו הבדיקה עוברת.
-    // הוא הגנה על מי שיעבוד ב-Windows עם `core.autocrlf=true` — שם הקובץ
-    // נבדק ב-CRLF, וההשוואה למטה מצפה למפריד שורה יחיד בין המאפיינים.
+    // הוא הגנה על מי שיעבוד ב-Windows עם `core.autocrlf=true`.
     const fileTab = readFileSync(join(SRC, 'ui/ribbon/tabs/FileTab.vue'), 'utf8').replace(
       /\r\n/g,
       '\n'
     );
+    // הזיווג נמדד ב-`\s+` ולא ברווחי הזחה ספורים. הטענה כאן היא **איזה אייקון
+    // מוצמד לאיזו תווית**, וההזחה אינה חלק ממנה: פקד שיורד למחסנית
+    // (`RibbonStack`) מוזח רמה פנימה, וההשוואה שהייתה כאן נפלה על שתי רמות
+    // הזחה ולא על אייקון שגוי. שער שנשבר מסידור מחדש מלמד להתעלם ממנו.
     for (const [icon, label] of [
       ['newDoc', 'מסמך חדש'],
       ['folder', 'פתח קובץ'],
@@ -694,7 +697,8 @@ describe('אתרי הקריאה לאייקונים', () => {
       ['export', 'ייצוא ל-Word'],
       ['exportPdf', 'ייצוא ל-PDF'],
     ] as const) {
-      expect(fileTab, label).toContain(`icon="${icon}"\n        label="${label}"`);
+      const quoted = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      expect(fileTab, label).toMatch(new RegExp(`icon="${icon}"\\s+label="${quoted}"`));
     }
     const icons = [...fileTab.matchAll(/icon="([A-Za-z]+)"/g)].map((m) => m[1]!);
     expect(new Set(icons).size, 'אין אייקון כפול בלשונית קובץ').toBe(icons.length);

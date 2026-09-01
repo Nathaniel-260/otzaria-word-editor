@@ -525,10 +525,12 @@ try {
 
   // ── ש13: אין טולטיפ של מערכת ההפעלה על האייקונים ─────────────────────────
   //
-  // לאייקונים אין תווית גלויה, ולכן יש להם `title` — וזה בדיוק מה שמערכת
-  // ההפעלה מציירת בעצמה, במלבן צהבהב בגופן שאינו של הממשק. `TooltipLayer`
-  // מסיר את התכונה כשהוא פותח כרטיס משלו; מה שנמדד כאן הוא שזה אכן קורה
-  // **בתוך התפריט**, שהוא DOM חדש שהשכבה לא נבנתה מולו.
+  // לאייקונים אין תווית גלויה, ולכן יש להם טולטיפ — ומה שאין להם הוא `title`,
+  // שהוא מה שמערכת ההפעלה מציירת בעצמה במלבן אפור מעל הכרטיס. השכבה אינה
+  // מכבה אותו יותר אלא הוא אינו קיים (`data-tip-*` בלבד, ראו
+  // tests/unit/native-title.test.ts); מה שנמדד כאן הוא ששני חצאי החוזה
+  // מתקיימים **בתוך התפריט**, שהוא DOM חדש שהשכבה לא נבנתה מולו: אין title,
+  // ובכל זאת נפתח כרטיס.
   await click(points.near.x, points.near.y, 'right');
   await sleep(900);
 
@@ -540,9 +542,20 @@ try {
       const icon = document.querySelector('[data-context-menu] [data-entry-id="bold"]');
       if (!icon) return null;
       const box = icon.getBoundingClientRect();
-      return { x: Math.round(box.left + box.width / 2), y: Math.round(box.top + box.height / 2), title: icon.getAttribute('title') };
+      return {
+        x: Math.round(box.left + box.width / 2),
+        y: Math.round(box.top + box.height / 2),
+        title: icon.getAttribute('title'),
+        tipTitle: icon.getAttribute('data-tip-title'),
+      };
     })()`);
-    notes.push(`ש13 — ה-title על האייקון לפני ריחוף: ${iconAt?.title ?? '«אין אייקון»'}`);
+    notes.push(
+      `ש13 — title על האייקון לפני ריחוף: ${iconAt ? (iconAt.title ?? '«אין, וכך צריך»') : '«אין אייקון»'}`,
+    );
+
+    if (iconAt && !iconAt.tipTitle) {
+      errors.push('לאייקון בתפריט אין `data-tip-title` — הוא אינו עוגן, ולכן לא יקבל שום טולטיפ');
+    }
 
     if (iconAt) {
       await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: iconAt.x, y: iconAt.y, buttons: 0 });

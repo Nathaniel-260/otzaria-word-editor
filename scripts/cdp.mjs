@@ -10,8 +10,9 @@
  * בדיקה שמביא איתו עץ תלויות הוא כלי שיירקב.
  */
 import { spawn } from 'node:child_process';
-import { existsSync, rmSync } from 'node:fs';
+import { existsSync, realpathSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { tmpdir } from 'node:os';
 
 export const CHROME =
@@ -80,9 +81,52 @@ async function connect(url) {
  * פותחת דפדפן על `fileUrl` ומחזירה חיבור CDP + `close` שסוגר הכול.
  * פרופיל נפרד לכל קריאה: דפדפן שנהרג ממשיך לכתוב לתיקייה שלו לרגע.
  */
+/**
+ * האם מישהו כבר מחזיק את היציאה.
+ *
+ * שני המארחים, ומאותה סיבה שהלולאה למטה בודקת את שניהם: ‏Chrome קושר
+ * ל-IPv4 או ל-IPv6 לפי המערכת, ודפדפן זר שמחזיק רק את אחד מהם עדיין יכול
+ * להיענות לבקשות שלנו.
+ */
+async function portHolder(port) {
+  for (const host of ['127.0.0.1', '[::1]']) {
+    try {
+      const response = await fetch(`http://${host}:${port}/json/version`, {
+        signal: AbortSignal.timeout(1500),
+      });
+      if (response.ok) return host;
+    } catch {
+      /* אין שם דבר, וזה המצב התקין */
+    }
+  }
+  return null;
+}
+
 export async function openPage(fileUrl, { port = Number(process.env.CDP_PORT ?? 9333), label = '0' } = {}) {
   const profile = join(tmpdir(), `otzaria-word-cdp-${label}`);
   discard(profile);
+
+  /*
+   * היציאה חייבת להיות פנויה **לפני** שמריצים, וזה לא הידור.
+   *
+   * דפדפן שנשאר מריצה קודמת — Ctrl+C באמצע שער, סקריפט שמת לפני `close()` —
+   * ממשיך להחזיק אותה; ה-Chrome החדש אינו מצליח לקשור אותה, ו-`/json/list`
+   * מחזיר את הדפים של הישן. אם הדף הישן נושא את אותה כתובת (וזה בדיוק מה
+   * שקורה כשמפילים את **אותו** שער ומריצים אותו שוב), כל סינון לפי כתובת
+   * נצמד אליו — והשער מודד dist ישן ומדווח ירוק על באג קיים. נמדד, פעמיים.
+   *
+   * ההמתנה הקצרה היא לדפדפן שנסגר ברגע זה ועדיין לא שחרר את השקע.
+   */
+  for (let i = 0; i < 12; i++) {
+    if (!(await portHolder(port))) break;
+    if (i === 11) {
+      throw new Error(
+        `CDP: יציאה ${port} תפוסה בידי דפדפן אחר — כנראה נשאר מריצה קודמת. ` +
+          'הריצו `pkill -f otzaria-word-cdp`, או הגדירו CDP_PORT אחר.',
+      );
+    }
+    await sleep(250);
+  }
 
   const chrome = spawn(
     CHROME,
@@ -150,7 +194,32 @@ export async function openPage(fileUrl, { port = Number(process.env.CDP_PORT ?? 
   };
 
   try {
+    /*
+     * הדף שנפתח כאן, ולא „דף כלשהו ב-`file://`”.
+     *
+     * ## הכשל שזה סוגר, ולמה הוא מהגרועים
+     *
+     * היציאה קבועה (9333). דפדפן שנשאר מריצה קודמת — שער שנקטע, סקריפט שמת
+     * לפני `close()` — ממשיך להחזיק אותה, ה-Chrome החדש **אינו מצליח לקשור
+     * אותה**, ו-`/json/list` מחזיר את הדפים של הדפדפן **הישן**. הסינון שהיה
+     * כאן קיבל כל דף `file://`, ולכן השער נצמד לדף של הריצה הקודמת: קוד ישן,
+     * dist ישן — ומדד אותו בשקט.
+     *
+     * זה קרה בפועל, ובכיוון הכי מסוכן: הפרה אמיתית שהוזרקה למקור ונבנתה
+     * נמדדה כ„0 title בדף”, כלומר **שער ירוק על באג קיים**. אין תסמין: אין
+     * שגיאה, אין אזהרה, והמספרים נראים סבירים.
+     *
+     * ## הכתובת המלאה, ולא שם הקובץ
+     *
+     * ב-macOS ‏`/tmp` הוא קישור סמלי ל-`/private/tmp`, ו-Chrome מדווח את
+     * הכתובת המפורשת — ולכן ההשוואה היא אחרי `realpath` משני הצדדים.
+     * שם הקובץ לבדו אינו מספיק: `/tmp/mainclean/dist/tooltip-tmp.html`
+     * ו-`/tmp/pr16wt/dist/tooltip-tmp.html` הם אותו basename, וזו בדיוק
+     * ההשוואה main-מול-ענף שמריצים כשבודקים ששער נופל על הקוד הישן.
+     */
+    const wanted = pathToFileURL(realpathSync(fileURLToPath(fileUrl))).href;
     let targets = null;
+    let strangers = 0;
     for (let i = 0; i < 60 && !targets; i++) {
       // שני המארחים ולא רק `127.0.0.1`: ב-Windows Chrome קושר את יציאת ה-CDP
       // ל-`::1` בלבד, ופנייה ל-IPv4 נכשלת בסירוב חיבור — הבדיקה נראתה כאילו
@@ -160,8 +229,10 @@ export async function openPage(fileUrl, { port = Number(process.env.CDP_PORT ?? 
           const response = await fetch(`http://${host}:${port}/json/list`);
           const list = await response.json();
           const pages = list.filter((t) => t.type === 'page' && t.url.startsWith('file://'));
-          if (pages.length) {
-            targets = pages;
+          const mine = pages.filter((t) => t.url === wanted);
+          strangers = pages.length - mine.length;
+          if (mine.length) {
+            targets = mine;
             break;
           }
         } catch {
@@ -170,9 +241,47 @@ export async function openPage(fileUrl, { port = Number(process.env.CDP_PORT ?? 
       }
       if (!targets) await sleep(250);
     }
-    if (!targets) throw new Error('CDP לא נפתח');
+    if (!targets) {
+      throw new Error(
+        strangers > 0
+          ? `CDP: ביציאה ${port} יש דפדפן אחר עם ${strangers} דפים, ואין בו ${wanted}. ` +
+            'כנראה נשאר מריצה קודמת — `pkill -f otzaria-word-cdp`, או CDP_PORT אחר.'
+          : 'CDP לא נפתח',
+      );
+    }
 
     const cdp = await connect(targets[0].webSocketDebuggerUrl);
+
+    /*
+     * הדף קיים — אבל הוא עדיין לא נקרא.
+     *
+     * הלולאה שלמעלה מחכה שיופיע **יעד** מסוג `page` בכתובת `file://`, וזה קורה
+     * ברגע ש-Chrome פותח לשונית — לפני שהוא פרס שורה אחת של ה-HTML. מי שקורא
+     * ל-`evaluate` מיד מקבל `document.body` ריק, וכל `querySelector` מחזיר
+     * `null`.
+     *
+     * זה לא היה תיאורטי: `scripts/ruler-check.mjs` מדד מיד, קיבל `null` על
+     * `.doc-ruler`, ונפל ב-`Cannot read properties of null`. נמדד — באותו דף
+     * בדיוק, מיד: גוף ריק; אחרי 1.5 שניות: 20 מספרים ו-8,390 תווי CSS. זו
+     * תחרות, ולכן היא גם מנצחת במכונה אחת ומפסידה באחרת — הצורה הגרועה ביותר
+     * של כשל.
+     *
+     * ההמתנה כאן ולא בכל קורא: ארבעה סקריפטים (ruler-check, zoom-center-probe,
+     * zoom-qa, zoom-stale-qa) מייבאים `openPage` בלי `sleep` בכלל, כלומר אף
+     * אחד מהם אינו מוגן. השאר „פתרו” את זה בהמתנה קבועה משלהם, שהיא ניחוש.
+     *
+     * `complete` ולא `interactive`: הוא כולל את תת-המשאבים, ושער הסרגל תלוי
+     * בגופן הארוז — רוחב הספרה הוא חלק ממה שהוא מודד.
+     *
+     * ויוצאים בשקט כשנגמר התקציב, ולא בשגיאה: הבטחה של „הדף מוכן” שנשברת
+     * צריכה להיכשל אצל מי שמודד, עם מה שהוא מודד, ולא כאן — דף שאינו מגיע
+     * ל-`complete` הוא עדיין דף שאפשר לשאול אותו שאלות.
+     */
+    for (let waited = 0; waited < 15_000; waited += 100) {
+      if ((await cdp.evaluate('document.readyState')) === 'complete') break;
+      await sleep(100);
+    }
+
     return {
       cdp,
       close() {

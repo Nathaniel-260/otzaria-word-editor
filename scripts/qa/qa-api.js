@@ -35,7 +35,13 @@
     return document.querySelector('.word-ribbon-container');
   };
 
-  /** שם הפקד כפי שהשער מזהה אותו: הכותרת של הטולטיפ, ובהיעדרה ה-title. */
+  /**
+   * שם הפקד כפי שהשער מזהה אותו.
+   *
+   * `data-tip-title` הוא המקור: תכונת `title` הוסרה מכל התוסף, כדי שמערכת
+   * ההפעלה לא תצייר טולטיפ שני מעל הכרטיס המעוצב. הנפילה אליה נשארת כאן כדי
+   * שהשער יוכל לרוץ גם על dist ארוז ישן.
+   */
   function nameOf(el) {
     var tip = el.getAttribute('data-tip-title');
     if (tip) return tip;
@@ -218,7 +224,7 @@
     return Array.prototype.map.call(
       document.querySelectorAll('.color-palette-popover button'),
       function (b) {
-        return { title: b.getAttribute('title') || b.textContent.trim(), cls: b.className };
+        return { title: nameOf(b), cls: b.className };
       },
     );
   };
@@ -229,7 +235,7 @@
   Q.paletteRectByTitle = function (title) {
     var found = null;
     Array.prototype.forEach.call(document.querySelectorAll('.color-palette-popover button'), function (b) {
-      if (!found && (b.getAttribute('title') || '') === title) found = b;
+      if (!found && nameOf(b) === title) found = b;
     });
     return found ? Q.rectOf(found) : null;
   };
@@ -237,13 +243,13 @@
   /** גלריית הסגנונות. */
   Q.galleryItems = function () {
     return Array.prototype.map.call(document.querySelectorAll('.style-card'), function (b) {
-      return { label: b.getAttribute('title') || b.textContent.trim(), active: b.classList.contains('active'), disabled: !!b.disabled };
+      return { label: nameOf(b), active: b.classList.contains('active'), disabled: !!b.disabled };
     });
   };
   Q.galleryRect = function (label) {
     var found = null;
     Array.prototype.forEach.call(document.querySelectorAll('.style-card'), function (b) {
-      if (!found && (b.getAttribute('title') || '') === label) found = b;
+      if (!found && nameOf(b) === label) found = b;
     });
     return found ? Q.rectOf(found) : null;
   };

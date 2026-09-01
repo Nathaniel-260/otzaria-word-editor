@@ -51,7 +51,7 @@
         :disabled="!macrosAvailable"
         @click="$emit('manage-macros')"
       />
-      <div class="column-items">
+      <RibbonStack>
         <RibbonButton
           :label="isRecording ? 'עצור הקלטה' : 'הקלט מאקרו'"
           shortcut-id="macro-record"
@@ -69,12 +69,12 @@
           :disabled="!macrosAvailable"
           @click="$emit('macro-play')"
         />
-      </div>
+      </RibbonStack>
     </RibbonGroup>
 
     <!-- תבניות תורניות. ראו ההסבר ב-script: אין למנוע דרך ציבורית ליצור סגנון. -->
     <RibbonGroup title="סגנון תורני">
-      <div class="column-items">
+      <RibbonStack>
         <RibbonButton
           label="חידוש"
           variant="small"
@@ -93,7 +93,7 @@
           :tooltip="TORAH_STYLE_UNAVAILABLE"
           :disabled="true"
         />
-      </div>
+      </RibbonStack>
     </RibbonGroup>
   </div>
 </template>
@@ -112,6 +112,7 @@
 import { computed, inject, shallowRef, watch } from 'vue';
 import type { SuperDoc } from 'superdoc';
 import RibbonGroup from '../common/RibbonGroup.vue';
+import RibbonStack from '../common/RibbonStack.vue';
 import RibbonButton from '../common/RibbonButton.vue';
 import { ACTIVE_SUPERDOC } from '../../../engine/document-api';
 import { ACTIVE_MACROS, type MacrosHandle } from '../../../engine/macros';
@@ -245,13 +246,5 @@ const bookCompletionTooltip = computed(() => {
   align-items: stretch;
   gap: 0;
   height: 100%;
-}
-
-.column-items {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  justify-content: center;
-  flex-shrink: 0;
 }
 </style>
