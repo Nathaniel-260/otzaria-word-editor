@@ -4,7 +4,7 @@
 שנארזים לתוך ה־`.otzplugin` ואת חובות הרישוי שלהם. העתקים של נוסחי הרישיון
 נארזים תחת `third-party/` בתוך החבילה עצמה, לא רק במאגר.
 
-## superdoc 2.8.0 — AGPL-3.0
+## superdoc 2.11.0 — AGPL-3.0
 
 - מקור: <https://github.com/superdoc/docx-editor>
 - רישיון: AGPL-3.0 (`third-party/SUPERDOC-LICENSE.txt`)
@@ -13,7 +13,7 @@
 זו הסיבה שהתוסף כולו AGPL-3.0, שהמקור מפורסם, ושהמקור המפורסם זהה לבינארי
 המופץ.
 
-## @superdoc/docx-engine 0.7.0 — קנייני
+## @superdoc/docx-engine 0.10.0 — קנייני
 
 מנוע ה־DOCX אינו קוד פתוח. הוא נמשך כתלות של `superdoc` ונארז לתוך החבילה
 (כולל קוד ה־Workers שמוטמע ב־`assets/engine-workers.js`).
