@@ -399,7 +399,7 @@ import {
   writeWorkspaceBytes,
 } from './host/workspace';
 import { onPluginHidden } from './host/lifecycle';
-import { revealZone, type RevealZone } from './composables/focus-mode';
+import { revealZone, type RevealBounds, type RevealZone } from './composables/focus-mode';
 import { selectWholeDocument } from './engine/clipboard';
 import {
   DEFAULT_FONT_SIZE_PT,
@@ -2185,13 +2185,56 @@ watch([activeEditorContainer, activeSuperdoc, bookCompletionEnabled, documentGen
 });
 
 /**
+ * הפסים שנחשפים בקצה העליון, לפי הסלקטורים שה-CSS של מצב המיקוד מסתיר.
+ *
+ * הסרגל האנכי (`.doc-vruler`) חסר מהרשימה בכוונה, למרות שהוא נחשף יחד איתם:
+ * הוא נמתח לכל גובה המסמך, וגובל שנגזר ממנו היה הופך את „קרוב לקצה העליון”
+ * לכל המסך.
+ */
+const TOP_BAR_SELECTORS = ['.word-titlebar', '.word-ribbon-container', '.doc-ruler', '.ruler-corner'];
+
+/**
+ * עד איפה מגיעים הפסים בפועל.
+ *
+ * נמדד ולא קבוע: הגובה תלוי במה שמוצג — רצועה מכונסת, סרגל מידות כבוי, שורת
+ * מצב בגופן אחר. ההסתרה במצב מיקוד היא `opacity` ולא `display`, ולכן הפסים
+ * תופסים את מקומם גם כשאינם נראים והמדידה תקפה בשני המצבים.
+ */
+function measureRevealBounds(): RevealBounds | null {
+  const shell = shellRef.value;
+  if (!shell) return null;
+
+  let top = 0;
+  for (const selector of TOP_BAR_SELECTORS) {
+    for (const element of shell.querySelectorAll(selector)) {
+      const rect = element.getBoundingClientRect();
+      // פס שאינו מצויר כרגע אינו מרחיב את האזור.
+      if (rect.height > 0) top = Math.max(top, rect.bottom);
+    }
+  }
+
+  const statusbar = shell.querySelector('.word-statusbar');
+  const statusRect = statusbar?.getBoundingClientRect();
+  const bottom = statusRect && statusRect.height > 0 ? statusRect.top : window.innerHeight;
+
+  return { top, bottom };
+}
+
+/**
  * במצב מיקוד הפסים מוסתרים, ומתגלים כשהמצביע מתקרב לקצה. הקצה ולא כל המעטפת:
  * `:hover` על השורש החזיר את כולם בכל תנועה בחלון, כלומר המצב לא הסתיר כלום.
  * ההחלטה עצמה ב-composables/focus-mode.ts, כדי שתהיה נבדקת.
+ *
+ * המדידה נעשית רק כשמשהו כבר חשוף — כלומר רק כשהמצביע נמצא באזור הפסים.
+ * בזמן הקלדה, כשהמצביע בגוף המסמך, אין כאן שום קריאת גאומטריה.
  */
 function onPointerMove(event: PointerEvent): void {
   if (!isFocusMode.value) return;
-  revealed.value = revealZone(event.clientY, window.innerHeight);
+  const current = revealed.value;
+  revealed.value = revealZone(event.clientY, window.innerHeight, {
+    current,
+    bounds: current ? measureRevealBounds() : null,
+  });
 }
 
 /**
