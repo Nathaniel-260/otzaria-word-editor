@@ -225,6 +225,10 @@ import {
   normalizeSelectedText,
   openLibrary,
   openSearchTab,
+  registerSendToDocumentItem,
+  handleSendToDocument,
+  takePendingContextMenuClicks,
+  type SendToDocumentEvent,
   type ReaderResult,
 } from './host/otzaria-reader';
 import {
@@ -330,7 +334,7 @@ import {
   type UserFile,
 } from './host/files';
 import { decideDocumentSwitch } from './sessions/open-flow';
-import { call, confirm, notifyError } from './host/otzaria-client';
+import { call, confirm, isAvailable, notifyError, on } from './host/otzaria-client';
 import { supportsPdfExport } from './host/host-capabilities';
 import { splashDone } from './host/splash';
 import {
@@ -648,6 +652,7 @@ let zoomCenter: ZoomCenter | null = null;
 let keeper: SessionKeeper | null = null;
 /** מבטל את ההאזנה למעבר לרקע. */
 let hiddenListener: (() => void) | null = null;
+let contextMenuListener: (() => void) | null = null;
 
 const saveStateMessage = computed(() => {
   const state = saveSnapshot.value.state;
@@ -2193,6 +2198,52 @@ let shortcuts: ShortcutDispatcher | null = null;
 let directionShortcut: { dispose: () => void } | null = null;
 let undoRedoWatcher: UndoRedoWatcher | null = null;
 
+/** לחיצה אחת על „שלח למסמך” — מה-latch או מהמאזין החי, אותו מסלול בדיוק. */
+function runSendToDocument(event: SendToDocumentEvent): void {
+  void handleSendToDocument(event, {
+    host: activeSuperdoc.value,
+    resolveHost: () => activeSuperdoc.value,
+  }).then((outcome) => {
+    if (outcome.ok) {
+      setStatus(outcome.value === 'at-cursor' ? 'הקטע נוסף במקום הסמן' : 'הקטע נוסף בסוף המסמך');
+    } else if (outcome.message) {
+      setStatus(outcome.message);
+    }
+  });
+}
+
+/**
+ * „שלח למסמך” בתפריט ההקשר של הקורא.
+ *
+ * נקראת מוקדם בעלייה, לפני פתיחת המסמך: `openPlugin: true` מוסר את אירוע
+ * הלחיצה מיד אחרי ה-boot, והמאזין צריך להיות שם קודם. מה שקרה לפני שהוא
+ * הגיע נאסף ב-latch שב-`index.html` — ולכן הסדר כאן: קודם המאזין החי, ורק
+ * אחריו `takePendingContextMenuClicks`, שמעביר את ה-latch למצב חי. שניהם
+ * באותה משימה סינכרונית, ואין חלון שבו אירוע נופל בין השניים.
+ *
+ * ההמתנה למסמך היא בצד השני, ב-`handleSendToDocument`: כאן עוד אין מסמך.
+ *
+ * עטופה ב-try: `on` פונה ל-SDK דרך `bridge()`, שזורק כשאין `window.Otzaria`.
+ * פריט בתפריט ההקשר אינו תנאי לעליית העורך, ולכן כשל כאן נרשם וזהו —
+ * „ציטוט מהקורא” ברצועה עושה את אותו דבר מתוך העורך.
+ */
+function registerSendToDocument(): void {
+  if (!isAvailable()) return;
+
+  try {
+    // הפריט עצמו מוצהר ב-`contributes.startup` שבמניפסט, ואוצריא רושמת אותו
+    // בעלייה בלי JS; הרישום כאן הוא הגיבוי למי שביטל את ההרשאה להצהרה.
+    void registerSendToDocumentItem().then((outcome) => {
+      if (!outcome.ok) console.warn('[otzaria-word]', outcome.message);
+    });
+
+    contextMenuListener = on('contextMenu.itemClicked', (event) => runSendToDocument(event));
+    for (const pending of takePendingContextMenuClicks()) runSendToDocument(pending);
+  } catch (error) {
+    console.warn('[otzaria-word] רישום „שלח למסמך” נכשל', error);
+  }
+}
+
 onMounted(async () => {
   /**
    * המנייה של גופני המכונה — ראשונה, ובלי `await`.
@@ -2204,6 +2255,12 @@ onMounted(async () => {
   void loadInstalledFonts().then((snapshot) => {
     installedFonts.value = snapshot;
   });
+
+  // „שלח למסמך” — לפני כל `await` שבהמשך. אוצריא מוסרת את אירוע הלחיצה מיד
+  // אחרי ה-boot, וכל שלב שנכשל לפני הרישום היה מפיל אותו לבור: ה-latch היה
+  // ממשיך לצבור ואיש לא היה מרוקן אותו. אינו תלוי בכלום כאן — קיומו של מסמך
+  // נבדק בזמן הלחיצה, לא עכשיו.
+  registerSendToDocument();
 
   shortcuts = createShortcutDispatcher({
     runCommand: (id, payload) => void runShortcutCommand(id, payload),
@@ -2322,6 +2379,11 @@ onUnmounted(() => {
   searchAdapter?.dispose();
   hiddenListener?.();
   hiddenListener = null;
+  contextMenuListener?.();
+  contextMenuListener = null;
+  // הפריט עצמו אינו מוסר כאן: אוצריא מסירה את רישומי המופע בעצמה בפירוק,
+  // וההסרה הידנית רק מסתכנת במחיקת העותק ההצהרתי — הפריט שאמור להישאר
+  // בתפריט גם כשהתוסף סגור. ההנמקה המלאה ב-host/otzaria-reader.ts.
   keeper?.dispose();
   keeper = null;
   // ה-interval של הזחילה הוא הדבר היחיד כאן שממשיך לרוץ בלי בעלים.

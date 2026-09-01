@@ -30,6 +30,31 @@
       })();
     </script>
 
+    <script>
+      /* ה-latch של לחיצה על „שלח למסמך”, מאותו טעם בדיוק ובאותו מקום.
+
+         `openPlugin: true` מוסר את אירוע הלחיצה מיד אחרי ה-boot, והמאזין
+         שלנו נרשם רק אחרי שהבאנדל נטען — כלומר שניות אחריו. אירוע window
+         שאין לו מאזין אובד, ואוצריא אינה משחזרת אותו: בלי ה-latch הזה
+         לחיצה שפתחה את לשונית התוסף לא הייתה עושה דבר.
+
+         תור ולא ערך יחיד: המשתמש יכול ללחוץ שוב לפני שהעורך עלה.
+         `live` הוא מה שמונע טיפול כפול — משהוא נדלק ב-`takePending`,
+         ה-latch מפסיק לצבור ומאזין ה-App.vue הוא היחיד שרואה אירועים.
+
+         השם __otzariaContextMenuClicks משותף עם src/host/otzaria-reader.ts,
+         ו-tests/unit/otzaria-reader.test.ts מקבע את הזהות הזאת. */
+      (function () {
+        var latch = { queue: [], live: false };
+        window.__otzariaContextMenuClicks = latch;
+        window.addEventListener('contextMenu.itemClicked', function (event) {
+          if (latch.live) return;
+          if (latch.queue.length >= 8) latch.queue.shift();
+          latch.queue.push(event.detail);
+        });
+      })();
+    </script>
+
     <!-- מסך הטעינה. ה-CSS כאן ולא בגיליון חיצוני, ובכוונה: הוא חייב להיות
          מצויר לפני שנטענת ולו שורה אחת מקוד התוסף, וכל בקשה נוספת היא עוד
          סיבוב שבו המסך לבן. מאותה סיבה אין כאן הגופן הארוז — הוא מותקן
