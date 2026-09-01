@@ -29,8 +29,9 @@
 
 ## פיתוח
 
-`engines` דורש Node ‏`>=20 <26`; ה‑CI רץ על מה שרשום ב‑`.nvmrc` — היום 20 (`nvm use`). מ‑Node 26 יש
-`localStorage` גלובלי שמאפיל על זה של jsdom, וחבילת הטסטים נופלת עליו.
+`engines` דורש Node ‏`>=20`; ה‑CI רץ על מה שרשום ב‑`.nvmrc` — היום 20 (`nvm use`), וכדאי
+להריץ אותה כדי לשחזר כשלים שנראים שם. מ‑Node 22 יש ל‑Node `localStorage` משלו שמאפיל על
+זה של jsdom — ראו `tests/support/jsdom-webstorage.ts`, שמסיר אותו לפני שסביבת הבדיקות עולה.
 
 ```
 npm ci

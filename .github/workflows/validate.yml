@@ -35,8 +35,8 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          # מ-.nvmrc, כדי ש-CI והמפתחים ירוצו על אותה גרסה. מ-Node 26 יש
-          # localStorage גלובלי שמאפיל על זה של jsdom ומפיל את חבילת הטסטים.
+          # מ-.nvmrc, כדי ש-CI והמפתחים ירוצו על אותה גרסה. ה-webstorage של
+          # Node 22+ מטופל בסביבת הבדיקות ואינו הסיבה לנעילה כאן.
           node-version-file: .nvmrc
           cache: npm
           cache-dependency-path: package-lock.json

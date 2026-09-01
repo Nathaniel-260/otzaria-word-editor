@@ -14,7 +14,8 @@ import vue from '@vitejs/plugin-vue';
 export default defineConfig({
   plugins: [vue()],
   test: {
-    environment: 'jsdom',
+    // jsdom, עם תיקון ל-webstorage של Node 22+. ראו את הקובץ.
+    environment: './tests/support/jsdom-webstorage.ts',
     include: ['tests/**/*.test.ts'],
   },
 });
