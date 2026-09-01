@@ -575,6 +575,21 @@ const EN: Readonly<Record<string, string>> = {
   'היפר-קישור': 'Hyperlink',
   'הסגנונות הקודמים': 'Previous styles',
   'הסגנונות הבאים': 'Next styles',
+
+  /* לשונית „שולחן העורך” */
+  'שולחן העורך': "Editor's Desk",
+  'שגיאות מצויות': 'Common Mistakes',
+  'סוגריים לא סגורים': 'Unclosed Brackets',
+  'טקסט מתחלף': 'Alternating Text',
+  'סוגריים ⟵ הערות': 'Brackets → Footnotes',
+  'הערות ⟵ סוגריים': 'Footnotes → Brackets',
+  'עיצוב פסקה': 'Paragraph Design',
+  'מילה ראשונה': 'First Word',
+  'מרווח שורות אחיד': 'Uniform Line Spacing',
+  'בטל מרווח אחיד': 'Undo Uniform Spacing',
+  'אחידות מסמך': 'Document Consistency',
+  'גודל עמוד ושוליים': 'Page Size & Margins',
+  'רוחב טורים': 'Column Widths',
 };
 
 /**

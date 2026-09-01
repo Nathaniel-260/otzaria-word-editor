@@ -1,0 +1,122 @@
+/**
+ * רישום כלי „שולחן העורך” כ**כלים מובנים** של ערכת המאקרו (superdoc-macros
+ * 0.9.0, `registerTool`): הם מופיעים בדיאלוג ניהול המאקרו לצד ההקלטות
+ * והסקריפטים, רצים תחת אותו שומר ריצה-אחת, וניתן להצמיד להם קיצור מקלדת
+ * שנשמר בין הפעלות.
+ *
+ * הכלים כאן רצים עם **ברירות המחדל** — קיצור מקלדת אינו פותח דיאלוג. מי
+ * שרוצה לכוונן (אחוז הגדלה, סוג סוגריים, אילו תיקונים) עובר דרך לשונית
+ * „שולחן העורך” ברצועה, ששם הדיאלוגים.
+ */
+import type { MacroKit, MacroOutcome } from 'superdoc-macros';
+import type { ShulchanTarget } from './shulchan-doc';
+import { defaultTyposOptions, runTypos, typosSummaryText } from './typos';
+import { defaultAlternatingOptions, runTextAlternating, alternatingSummaryText } from './text-alternating';
+import { convertBracketsToFootnotes, convertFootnotesToBrackets, conversionSummaryText } from './brackets-notes';
+import { applyFirstWordDesign, defaultFirstWordOptions, firstWordSummaryText, removeFirstWordDesign } from './first-word';
+import { applyExactLineSpacing, lineSpacingSummaryText, removeExactLineSpacing } from './line-spacing';
+
+/**
+ * ממפה תוצאת כלי ל-MacroOutcome של הערכה. סיכום ההצלחה נמסר החוצה דרך
+ * `onSummary` — ל-outcome תקין אין שדה הודעה, ושורת המצב עדיין צריכה לומר
+ * מה קרה.
+ */
+function toOutcome(
+  result: { ok: boolean; message?: string },
+  summary: string,
+  onSummary: (text: string) => void,
+): MacroOutcome {
+  if (!result.ok) return { ok: false, message: result.message ?? 'הפעולה נכשלה' };
+  onSummary(summary);
+  return { ok: true };
+}
+
+/**
+ * רושמת את הכלים על ה-kit של המסמך הפתוח. נקראת פעם אחת לכל התקנה —
+ * ה-kit נבנה מחדש בכל פתיחת מסמך, ולכן אין צורך בביטול רישום.
+ */
+export function registerShulchanTools(
+  kit: MacroKit,
+  host: () => ShulchanTarget,
+  onSummary: (text: string) => void,
+): void {
+  kit.registerTool({
+    id: 'shulchan.typos',
+    name: 'שולחן העורך: שגיאות מצויות',
+    description: 'תיקון שגיאות הקלדה נפוצות בכל המסמך, בברירות המחדל',
+    run: async () => {
+      const result = await runTypos(host(), defaultTyposOptions());
+      return toOutcome(result, typosSummaryText(result), onSummary);
+    },
+  });
+
+  kit.registerTool({
+    id: 'shulchan.text-alternating',
+    name: 'שולחן העורך: טקסט מתחלף',
+    description: 'הדגשת דיבור-המתחיל בפסקאות המסומנות (: עד .)',
+    run: async () => {
+      const result = await runTextAlternating(host(), defaultAlternatingOptions());
+      return toOutcome(result, alternatingSummaryText(result), onSummary);
+    },
+  });
+
+  kit.registerTool({
+    id: 'shulchan.brackets-to-notes',
+    name: 'שולחן העורך: סוגריים ⟵ הערות',
+    description: 'כל קטע בסוגריים עגולים בפסקאות המסומנות הופך להערת שוליים',
+    run: async () => {
+      const result = await convertBracketsToFootnotes(host(), 'round');
+      return toOutcome(result, conversionSummaryText(result, 'to-notes'), onSummary);
+    },
+  });
+
+  kit.registerTool({
+    id: 'shulchan.notes-to-brackets',
+    name: 'שולחן העורך: הערות ⟵ סוגריים',
+    description: 'תוכן כל הערות השוליים חוזר לגוף בסוגריים עגולים',
+    run: async () => {
+      const result = await convertFootnotesToBrackets(host(), 'round');
+      return toOutcome(result, conversionSummaryText(result, 'to-brackets'), onSummary);
+    },
+  });
+
+  kit.registerTool({
+    id: 'shulchan.first-word',
+    name: 'שולחן העורך: עיצוב מילה ראשונה',
+    description: 'הגדלה והדגשה של המילה הראשונה בפסקאות המסומנות, בברירות המחדל',
+    run: async () => {
+      const result = await applyFirstWordDesign(host(), defaultFirstWordOptions());
+      return toOutcome(result, firstWordSummaryText(result, false), onSummary);
+    },
+  });
+
+  kit.registerTool({
+    id: 'shulchan.first-word-remove',
+    name: 'שולחן העורך: הסרת עיצוב מילה ראשונה',
+    description: 'ניקוי העיצוב הישיר של המילה הראשונה בפסקאות המסומנות',
+    run: async () => {
+      const result = await removeFirstWordDesign(host());
+      return toOutcome(result, firstWordSummaryText(result, true), onSummary);
+    },
+  });
+
+  kit.registerTool({
+    id: 'shulchan.line-spacing',
+    name: 'שולחן העורך: מרווח שורות אחיד',
+    description: 'קיבוע מרווח „בדיוק” בגובה שורה של גופן הגוף, בפסקאות המסומנות',
+    run: async () => {
+      const result = await applyExactLineSpacing(host());
+      return toOutcome(result, lineSpacingSummaryText(result, false), onSummary);
+    },
+  });
+
+  kit.registerTool({
+    id: 'shulchan.line-spacing-remove',
+    name: 'שולחן העורך: ביטול מרווח אחיד',
+    description: 'החזרת מרווח „בדיוק” למרווח „מרובה” שקול, בפסקאות המסומנות',
+    run: async () => {
+      const result = await removeExactLineSpacing(host());
+      return toOutcome(result, lineSpacingSummaryText(result, true), onSummary);
+    },
+  });
+}

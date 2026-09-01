@@ -404,6 +404,72 @@
           </p>
         </div>
 
+        <!-- ═══ כלים מובנים ═══ -->
+        <div
+          v-else-if="section === 'tools'"
+          class="md-body"
+        >
+          <div
+            v-if="tools.length > 0"
+            class="md-list"
+            role="listbox"
+            aria-label="הכלים המובנים"
+          >
+            <button
+              v-for="item in tools"
+              :key="item.id"
+              type="button"
+              class="md-list-item"
+              :class="{ 'md-list-item--selected': item.id === selectedId }"
+              role="option"
+              :aria-selected="item.id === selectedId"
+              @pointerdown.prevent
+              @click="selectTool(item.id)"
+            >
+              <span class="md-item-name">{{ item.name }}</span>
+              <span class="md-item-meta">{{ item.shortcut ?? '' }}</span>
+            </button>
+          </div>
+          <p
+            v-else
+            class="md-note"
+            role="note"
+          >
+            אין כלים מובנים במסמך הזה.
+          </p>
+
+          <template v-if="selectedId && section === 'tools'">
+            <p
+              v-if="selectedToolDescription"
+              class="md-note"
+              role="note"
+            >
+              {{ selectedToolDescription }}
+            </p>
+            <div class="md-input-row">
+              <label
+                for="md-tool-shortcut"
+                class="md-label"
+              >קיצור מקלדת:</label>
+              <input
+                id="md-tool-shortcut"
+                v-model="itemShortcut"
+                type="text"
+                class="md-input"
+                placeholder="למשל: Ctrl+Alt+3 (רשות)"
+                :aria-invalid="shortcutInvalid"
+              >
+            </div>
+            <p
+              v-if="shortcutInvalid"
+              class="md-error"
+              role="alert"
+            >
+              {{ shortcutError }}
+            </p>
+          </template>
+        </div>
+
         <!-- ═══ ייבוא/ייצוא ═══ -->
         <div
           v-else
@@ -503,6 +569,27 @@
             הייבוא/ייצוא של „ייבוא וייצוא”, כלומר כפתור „ייבא” על לשונית
             שכל עניינה הוא שהקוד הזה אינו נכנס לשום מקום.
           -->
+          <template v-else-if="section === 'tools'">
+            <button
+              type="button"
+              class="md-btn md-btn-primary"
+              :disabled="!selectedId"
+              @pointerdown.prevent
+              @click="onRunTool"
+            >
+              הרץ
+            </button>
+            <button
+              type="button"
+              class="md-btn"
+              :disabled="!selectedId || shortcutInvalid"
+              @pointerdown.prevent
+              @click="onSaveToolShortcut"
+            >
+              שמור קיצור
+            </button>
+          </template>
+
           <template v-else-if="section === 'vba'" />
 
           <template v-else>
@@ -584,7 +671,7 @@
  * לא יופעל (הלקח של BookmarkDialog מול `normalizeBookmarkName`).
  */
 import { computed, ref, shallowRef, watch } from 'vue';
-import type { RecordedMacro, SavedScript, Snippet, VbaModule } from 'superdoc-macros';
+import type { BuiltinToolInfo, RecordedMacro, SavedScript, Snippet, VbaModule } from 'superdoc-macros';
 import type { MacrosHandle } from '../../engine/macros';
 import { MODULE_KIND_LABEL, NO_VBA, type DocumentVba } from '../../engine/vba-import';
 
@@ -612,7 +699,7 @@ const DIALOG_TITLE = 'ניהול מאקרו';
 const SNIPPET_TEXT_PLACEHOLDER = 'הטקסט שיוכנס. אפשר לשלב {{date}}, {{time}}, {{selection}}';
 const SCRIPT_PLACEHOLDER = `await api.insertText('...');`;
 
-type Section = 'recordings' | 'snippets' | 'scripts' | 'vba' | 'transfer';
+type Section = 'recordings' | 'snippets' | 'scripts' | 'tools' | 'vba' | 'transfer';
 
 /**
  * לשונית הסקריפטים מוצגת רק כשהדגל דלוק (ראו SCRIPTS_FLAG_KEY ב-engine/macros.ts):
@@ -625,6 +712,8 @@ const TABS = computed<ReadonlyArray<{ id: Section; title: string }>>(() => [
   { id: 'recordings', title: 'הקלטות' },
   { id: 'snippets', title: 'קטעי טקסט' },
   ...(props.handle?.scriptsEnabled ? [{ id: 'scripts' as const, title: 'סקריפטים' }] : []),
+  // „כלים” מוצגת רק כשהמעטפת רשמה כלים מובנים — kit בלי כלים הוא לשונית ריקה.
+  ...(tools.value.length > 0 ? [{ id: 'tools' as const, title: 'כלים' }] : []),
   ...(props.documentVba.hasMacroPart ? [{ id: 'vba' as const, title: 'VBA במסמך' }] : []),
   { id: 'transfer', title: 'ייבוא וייצוא' },
 ]);
@@ -671,6 +760,8 @@ const managesItems = computed(
 const recordings = shallowRef<readonly RecordedMacro[]>([]);
 const snippets = shallowRef<readonly Snippet[]>([]);
 const scripts = shallowRef<readonly SavedScript[]>([]);
+/** הכלים המובנים שהמעטפת רשמה על ה-kit (registerShulchanTools). לפני ההגדרה של TABS שקורא אותם. */
+const tools = shallowRef<readonly BuiltinToolInfo[]>([]);
 
 /** הפריט הנבחר בלשונית הנוכחית, או `''`. */
 const selectedId = ref('');
@@ -691,6 +782,7 @@ function refresh(): void {
   recordings.value = kit ? [...kit.listRecordings()] : [];
   snippets.value = kit ? [...kit.listSnippets()] : [];
   scripts.value = kit ? [...kit.listScripts()] : [];
+  tools.value = kit && typeof kit.listTools === 'function' ? [...kit.listTools()] : [];
 }
 
 watch(
@@ -764,6 +856,18 @@ function selectSnippet(id: string): void {
   snippetText.value = item.text;
   snippetTrigger.value = item.trigger ?? '';
 }
+
+function selectTool(id: string): void {
+  const item = tools.value.find((entry) => entry.id === id);
+  if (!item) return;
+  selectedId.value = id;
+  itemName.value = item.name;
+  itemShortcut.value = item.shortcut ?? '';
+}
+
+const selectedToolDescription = computed(
+  () => tools.value.find((entry) => entry.id === selectedId.value)?.description ?? ''
+);
 
 function selectScript(id: string): void {
   const item = scripts.value.find((entry) => entry.id === id);
@@ -879,6 +983,24 @@ function onRunScript(): void {
     scriptResultIsError.value = !result.ok;
     scriptResult.value = result.ok ? 'המאקרו הסתיים בהצלחה' : result.message;
   });
+}
+
+function onRunTool(): void {
+  const kit = props.handle?.kit;
+  if (!kit || !selectedId.value) return;
+  void kit.runTool(selectedId.value).then((outcome) => {
+    // סיכום הצלחה מגיע לשורת המצב מהכלי עצמו (onSummary ברישום); כאן רק כשל.
+    if (!outcome.ok) emit('status', outcome.message, true);
+  });
+}
+
+function onSaveToolShortcut(): void {
+  const kit = props.handle?.kit;
+  if (!kit || !selectedId.value || shortcutInvalid.value) return;
+  guardedSave(() => {
+    kit.setToolShortcut(selectedId.value, itemShortcut.value.trim() || undefined);
+  });
+  refresh();
 }
 
 function onRemove(): void {

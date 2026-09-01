@@ -133,6 +133,50 @@ describe('MacrosDialog', () => {
     expect(handle.kit.listSnippets()).toHaveLength(0);
   });
 
+  it('כלים מובנים: הלשונית מופיעה רק כשנרשמו, הרצה וקיצור עובדים מול ה-kit', async () => {
+    const { handle } = createHandle();
+    let ran = 0;
+    handle.kit.registerTool({
+      id: 'shulchan.demo',
+      name: 'כלי הדגמה',
+      description: 'תיאור הכלי',
+      run: () => {
+        ran += 1;
+        return { ok: true };
+      },
+    });
+    mountUi(MacrosDialog, { props: { isOpen: true, handle } });
+    await settle();
+    await switchTab('כלים');
+
+    const item = dialog()
+      .findAll('.md-list-item')
+      .find((candidate) => candidate.text().includes('כלי הדגמה'));
+    expect(item).toBeDefined();
+    await item!.trigger('click');
+    await settle();
+    expect(dialog().text()).toContain('תיאור הכלי');
+
+    await buttonByText('הרץ').trigger('click');
+    await settle();
+    expect(ran).toBe(1);
+
+    await dialog().find('#md-tool-shortcut').setValue('Ctrl+Alt+5');
+    await buttonByText('שמור קיצור').trigger('click');
+    await settle();
+    expect(handle.kit.listTools()[0]?.shortcut).toBe('Ctrl+Alt+5');
+  });
+
+  it('בלי כלים רשומים — אין לשונית „כלים”', async () => {
+    const { handle } = createHandle();
+    mountUi(MacrosDialog, { props: { isOpen: true, handle } });
+    await settle();
+    const titles = dialog()
+      .findAll('[role="tab"]')
+      .map((tab) => tab.text());
+    expect(titles).not.toContain('כלים');
+  });
+
   it('לשונית הסקריפטים מוסתרת כשהדגל כבוי', async () => {
     const { handle } = createHandle({ scriptsEnabled: false });
     mountUi(MacrosDialog, { props: { isOpen: true, handle } });

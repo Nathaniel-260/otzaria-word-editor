@@ -232,6 +232,7 @@ import type { CommandId } from './engine/capabilities';
 import {
   COMMAND_ADAPTER,
   COMMAND_REPORTER,
+  STATUS_NOTIFIER,
   DOCUMENT_GENERATION,
   FONT_OPTIONS,
   READOUT_SELECTION,
@@ -297,6 +298,7 @@ import {
 import { createSaveCoordinator, type SaveCoordinator, type SaveSnapshot } from './sessions/save-coordinator';
 import { createEditor, type EditorSession } from './engine/create-editor';
 import { ACTIVE_MACROS, installMacros, type MacrosHandle } from './engine/macros';
+import { registerShulchanTools } from './engine/shulchan/tools-registration';
 import MacrosDialog from './ui/panels/MacrosDialog.vue';
 import { installBookCompletion } from './engine/book-completion-overlay';
 import { preflightSource } from './engine/docx-preflight';
@@ -812,6 +814,8 @@ function reportCommand(outcome: CommandOutcome, commandId: string): void {
 }
 
 provide(COMMAND_REPORTER, reportCommand);
+// הודעות-מידע של כלי הלשוניות („בוצעו 3 תיקונים”) — ראו composables/keys.ts.
+provide(STATUS_NOTIFIER, (text: string) => setStatus(text));
 
 /**
  * קואורדינטור השמירה של טאב אחד. `session` הוא ה-`DocumentSession` שהוא
@@ -1331,6 +1335,10 @@ async function openDocumentInto(
         // וההקלטה מבוטלת — שמירה חלקית לא קורית בלי הסכמה.
         confirmIncomplete: (title, content) => confirm({ title, content }),
       });
+      // כלי „שולחן העורך” נרשמים על ה-kit של המסמך הזה: מופיעים בדיאלוג
+      // ניהול המאקרו וניתנים לקיצור מקלדת. הרישום פר-התקנה — ה-kit נבנה
+      // מחדש בכל פתיחה, ואין צורך בביטול.
+      registerShulchanTools(macros.kit, () => editor.superdoc, (text) => setStatus(text));
       activeMacros.value = macros;
       editor.onDispose(() => {
         if (activeMacros.value === macros) activeMacros.value = null;

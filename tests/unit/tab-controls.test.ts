@@ -27,6 +27,7 @@ import { join } from 'node:path';
 const TABS = join(process.cwd(), 'src/ui/ribbon/tabs');
 
 const FILES = [
+  'ShulchanTab.vue',
   'LayoutTab.vue',
   'ReferencesTab.vue',
   'ReviewTab.vue',
