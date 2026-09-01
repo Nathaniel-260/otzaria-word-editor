@@ -350,6 +350,11 @@
             if (typeof next !== 'number' || next < target) return;
             target = Math.min(next, 99);
             if (text) stage.textContent = text;
+            // התקדמות אחרי כשל מבטלת אותו: חריגה שהעלייה שרדה אינה כשל.
+            if (root.getAttribute('data-failed') === '1') {
+              root.removeAttribute('data-failed');
+              note.setAttribute('data-shown', '0');
+            }
             start();
           },
 
@@ -360,13 +365,19 @@
             note.setAttribute('data-shown', text ? '1' : '0');
           },
 
-          /** כשל סופי. המסך נשאר, כי הוא כל מה שנשאר להראות. */
-          fail: function (text) {
+          /**
+           * כשל סופי. המסך נשאר, כי הוא כל מה שנשאר להראות.
+           *
+           * `detail` יורד ל-note ולא ל-stage: רק ל-note יש max-width, ושורת
+           * שגיאה של מנוע ה-DOCX ארוכה מרוחב המסך.
+           */
+          fail: function (text, detail) {
             if (closed) return;
             stop();
             root.setAttribute('data-failed', '1');
             stage.textContent = text || 'הטעינה נכשלה';
-            note.textContent = 'אפשר לסגור את הלשונית ולפתוח אותה מחדש.';
+            note.textContent =
+              'אפשר לסגור את הלשונית ולפתוח אותה מחדש.' + (detail ? ' ' + detail : '');
             note.setAttribute('data-shown', '1');
           },
 
@@ -389,10 +400,39 @@
         window.__otzariaSplash = api;
         api.set(8, 'מתחיל');
 
+        /* חריגה שאיש אינו תופס, בזמן שהמסך הזה עדיין למעלה.
+
+           הטוען שב-vite.config.ts מכסה תגית שלא **נטענה**; מה שאינו מכוסה
+           הוא קוד שנטען ונכשל בהרצה — ייבוא שאינו נפתר אחרי שדרוג תלות,
+           חריגה בעליית המנוע — ואז `load` נורה כרגיל, איש אינו קורא fail(),
+           ומסך הטעינה נשאר על „מתחיל” לנצח בלי מילה. זה נמדד: ייבוא של סמל
+           שאינו קיים ב-`superdoc-macros` השאיר בדיוק את המסך הזה.
+
+           מה שאינם מכסים, ואינם יכולים: חוט ראשי שנתקע בלי לזרוק (ראו
+           docs/engine-gaps.md) — שם אין חריגה לשמוע. */
+        function fatal(detail) {
+          if (closed || root.getAttribute('data-failed') === '1') return;
+          var text = String(detail || '');
+          // ב-file:// — כלומר בתוסף הארוז — Chrome משתיק את החריגה ומוסר
+          // „Script error.” בלבד. הפירוט נשאר בקונסולה; נמדד.
+          if (text === 'Script error.') text = 'הדפדפן לא מסר את פרטי השגיאה; הם בקונסולת הדף.';
+          api.fail('הטעינה נכשלה', text.slice(0, 300));
+        }
+        window.addEventListener('error', function (event) {
+          // ErrorEvent בלבד: כשל טעינה של משאב נורה על האלמנט ואינו מבעבע לכאן.
+          fatal(event.message);
+        });
+        window.addEventListener('unhandledrejection', function (event) {
+          var reason = event.reason;
+          fatal((reason && (reason.message || reason)) || 'דחייה שלא טופלה');
+        });
+
         /* שעון-שומר. אם שום שלב לא דיווח זמן רב, המסך אומר את זה במקום
            להציג פס שנע לנצח בלי הסבר. */
         setTimeout(function () {
-          if (!closed) api.note('הטעינה לוקחת יותר מהרגיל. המנוע נטען פעם אחת בכל פתיחה.');
+          // לא מעל כשל: „לוקח יותר מהרגיל” היה מוחק את שורת השגיאה עצמה.
+          if (closed || root.getAttribute('data-failed') === '1') return;
+          api.note('הטעינה לוקחת יותר מהרגיל. המנוע נטען פעם אחת בכל פתיחה.');
         }, 12000);
       })();
     </script>

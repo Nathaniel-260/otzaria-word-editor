@@ -26,6 +26,31 @@ function cssVar(text: string, name: string): string | undefined {
   return match?.[1].trim();
 }
 
+/**
+ * מרים את מסך הטעינה האמיתי ב-jsdom: הסימון והסקריפט נלקחים מ-`index.html`
+ * עצמו, ולא משוכפלים לכאן — בדיקה שמריצה עותק אינה בודקת את מה שנשלח.
+ */
+function runSplash(): {
+  root: HTMLElement;
+  note: HTMLElement;
+  api: { set(next: number, text?: string): void; fail(text?: string, detail?: string): void; done(): void };
+} {
+  const markup = html.slice(html.indexOf('<div id="otzaria-splash"'), html.indexOf('<div id="app">'));
+  const open = html.indexOf('<script>', html.indexOf('<div id="app">'));
+  const script = html.slice(html.indexOf('>', open) + 1, html.indexOf('</script>', open));
+
+  document.body.innerHTML = markup;
+  new Function(script)();
+
+  const api = (window as unknown as { __otzariaSplash: ReturnType<typeof runSplash>['api'] })
+    .__otzariaSplash;
+  return {
+    root: document.getElementById('otzaria-splash') as HTMLElement,
+    note: document.getElementById('otzaria-splash-note') as HTMLElement,
+    api,
+  };
+}
+
 describe('מסך הטעינה', () => {
   it('מצויר לפני כל סקריפט של התוסף', () => {
     const head = html.slice(0, html.indexOf('</head>'));
@@ -111,6 +136,47 @@ describe('מסך הטעינה', () => {
     expect(Math.max(...loaderStages)).toBeLessThan(Math.min(...moduleStages));
     // ובתוך הטוען עצמו: הסדר הוא סדר ההרצה של שני הקבצים.
     expect(loaderStages).toEqual([...loaderStages].sort((a, b) => a - b));
+  });
+
+  it('חריגה שאיש אינו תופס הופכת לכשל על המסך', () => {
+    // הבאג שהיה כאן: הטוען שב-vite.config.ts מכסה תגית שלא **נטענה**, ולא
+    // קוד שנטען ונכשל בהרצה. ייבוא של סמל שאינו קיים ב-superdoc-macros
+    // — נמדד — השאיר את המסך על „מתחיל" לנצח, בלי שום מילה למשתמש.
+    const { root, note, api } = runSplash();
+    expect(api).toBeTruthy();
+
+    window.dispatchEvent(new ErrorEvent('error', { message: 'SyntaxError: boom' }));
+
+    expect(root.getAttribute('data-failed')).toBe('1');
+    expect(note.textContent).toContain('SyntaxError: boom');
+  });
+
+  it('„Script error.” המושתק אינו מוצג כפירוט', () => {
+    // ב-file:// — התוסף הארוז — Chrome משתיק את החריגה ומוסר את המחרוזת
+    // הזאת בלבד, בלי error/filename/lineno. נמדד. הצגתה היא מחרוזת אנגלית
+    // גלויה למשתמש שגם אינה אומרת דבר.
+    const { root, note, api } = runSplash();
+    expect(api).toBeTruthy();
+
+    window.dispatchEvent(new ErrorEvent('error', { message: 'Script error.' }));
+
+    expect(root.getAttribute('data-failed')).toBe('1');
+    expect(note.textContent).not.toContain('Script error.');
+    expect(note.textContent).toContain('קונסולת הדף');
+  });
+
+  it('התקדמות אחרי חריגה מבטלת את הכשל', () => {
+    // חריגה בעלייה אינה בהכרח קטלנית. מסך שנצבע אדום ונשאר אדום בזמן
+    // שהתוסף כן עלה גרוע מהשתיקה שהוא בא להחליף.
+    const { root, api } = runSplash();
+    window.dispatchEvent(new ErrorEvent('error', { message: 'רעש' }));
+    expect(root.getAttribute('data-failed')).toBe('1');
+
+    api.set(68, 'מכין את סביבת העריכה…');
+    expect(root.getAttribute('data-failed')).toBeNull();
+
+    api.done();
+    expect(root.getAttribute('data-done')).toBe('1');
   });
 
   it('התחנות עולות מונוטונית ואינן מגיעות ל-100', () => {

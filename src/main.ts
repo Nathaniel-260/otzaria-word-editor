@@ -75,5 +75,5 @@ async function main(): Promise<void> {
 // עצמו הוא מה שלא עלה. מסך הטעינה הוא המשטח היחיד שנשאר, ולכן הוא מדווח.
 void main().catch((error: unknown) => {
   console.error('[otzaria-word] כשל בעליית התוסף:', error);
-  splashFail('התוסף לא הצליח לעלות');
+  splashFail('התוסף לא הצליח לעלות', error instanceof Error ? error.message : String(error));
 });
