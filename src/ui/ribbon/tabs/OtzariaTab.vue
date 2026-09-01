@@ -29,6 +29,16 @@
         :disabled="!sdkAvailable"
         @click="$emit('open-library')"
       />
+      <!-- הייצוא יושב כאן ולא ב„קובץ”: הוא פעולה מול אוצריא — הקובץ נכתב
+           בפורמט הספרים שלה ונקלט לספרייה — ומי שמחפש אותו מחפש „אוצריא”. -->
+      <RibbonButton
+        icon="export"
+        label="ייצוא לאוצריא"
+        variant="large"
+        :tooltip="exportBookTooltip"
+        :disabled="!hasDocument"
+        @click="$emit('export-otzaria')"
+      />
       <RibbonButton
         icon="highlight"
         label="השלמה מהספר"
@@ -130,6 +140,7 @@ defineEmits<{
   (e: 'insert-citation'): void;
   (e: 'search-otzaria'): void;
   (e: 'open-library'): void;
+  (e: 'export-otzaria'): void;
   (e: 'manage-macros'): void;
   (e: 'macro-record'): void;
   (e: 'macro-play'): void;
@@ -223,6 +234,18 @@ const citationTooltip = computed(() => {
   if (!canInsertCitation.value) return 'יש לפתוח מסמך שאפשר לכתוב בו';
   return 'הכנסת הקטע המסומן בקורא של אוצריא, עם המקור, במיקום הסמן';
 });
+
+/**
+ * הייצוא אינו דורש את ה-SDK: מחוץ לאוצריא (`host/dev-stub.ts`) מסלול השמירה
+ * ממומש בכפיל, וכך הוא נבדק בדפדפן. מה שהוא כן דורש הוא מסמך פתוח.
+ */
+const hasDocument = computed(() => superdoc.value !== null);
+
+const exportBookTooltip = computed(() =>
+  hasDocument.value
+    ? 'שמירת המסמך כספר בפורמט של אוצריא (טקסט עם רמות כותרות), לקליטה בספרייה'
+    : 'יש לפתוח מסמך תחילה',
+);
 
 const searchTooltip = computed(() => {
   if (!sdkAvailable) return OUTSIDE_OTZARIA;

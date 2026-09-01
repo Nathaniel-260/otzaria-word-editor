@@ -68,14 +68,6 @@
           @click="$emit('export-pdf')"
         />
         <RibbonButton
-          icon="otzaria"
-          label="ייצוא לאוצריא"
-          variant="small"
-          :tooltip="documentTooltip('שמירת המסמך כספר בפורמט של אוצריא (טקסט עם רמות כותרות)')"
-          :disabled="!hasDocument"
-          @click="$emit('export-otzaria')"
-        />
-        <RibbonButton
           icon="print"
           label="הדפסה"
           variant="small"
@@ -217,7 +209,6 @@ defineEmits<{
   (e: 'export-doc'): void;
   (e: 'print-doc'): void;
   (e: 'export-pdf'): void;
-  (e: 'export-otzaria'): void;
   (e: 'about'): void;
   (e: 'shortcuts-help'): void;
   (e: 'exit-app'): void;

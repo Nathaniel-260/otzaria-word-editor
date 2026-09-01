@@ -98,8 +98,8 @@ const EN: Readonly<Record<string, string>> = {
   'ייצוא ל-PDF': 'Export to PDF',
   'שמירת המסמך כקובץ PDF': 'Save the document as a PDF file',
   'ייצוא לאוצריא': 'Export to Otzaria',
-  'שמירת המסמך כספר בפורמט של אוצריא (טקסט עם רמות כותרות)':
-    'Save the document as a book in Otzaria format (text with heading levels)',
+  'שמירת המסמך כספר בפורמט של אוצריא (טקסט עם רמות כותרות), לקליטה בספרייה':
+    'Save the document as a book in Otzaria format (text with heading levels), ready for the library',
   'ייצוא ל-PDF דורש גרסה עדכנית יותר של אוצריא':
     'Export to PDF requires a newer version of Otzaria',
   'יציאה': 'Exit',

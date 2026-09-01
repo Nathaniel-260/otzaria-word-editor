@@ -287,6 +287,11 @@ export default defineConfig({
   // החרגה מה-optimizer משאירה את המנוע במקומו, ואת ה-URL נפתר.
   optimizeDeps: { exclude: ['@superdoc/docx-engine'] },
 
+  // PORT מכובד כשהוא מוגדר: כלי תצוגה (וכל סביבת עבודה עם כמה שרתי פיתוח
+  // במקביל) מקצים פורט דרך משתנה הסביבה, ו-Vite מעצמו קורא רק --port.
+  // בלי זה שרת שני נופל ל-5174 בעוד הכלי מצביע על הפורט שהקצה — דף ריק.
+  server: process.env.PORT ? { port: Number(process.env.PORT), strictPort: true } : undefined,
+
   build: {
     target: 'es2020',
     assetsDir: 'assets',
