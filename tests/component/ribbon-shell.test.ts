@@ -18,7 +18,7 @@ import { autoUnmount, buttonByTip, findButtonByTip, mountUi, settle } from './ha
 
 autoUnmount();
 
-const TAB_LABELS = ['קובץ', 'בית', 'הוספה', 'פריסה', 'הפניות', 'סקירה', 'תצוגה', '✦ אוצריא'];
+const TAB_LABELS = ['קובץ', 'בית', 'הוספה', 'פריסה', 'הפניות', 'סקירה', 'תצוגה', 'שולחן העורך', '✦ אוצריא'];
 
 /**
  * `hasDocument: true` כברירת מחדל: פקדי „קובץ” הם פעולות מעטפת, וברירת המחדל

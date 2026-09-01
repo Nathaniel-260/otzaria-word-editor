@@ -264,12 +264,17 @@ describe('הכפתור מחובר למסלול הזה', () => {
   });
 
   it('אין קובץ אחר שמדפיס בעצמו', () => {
-    const engine = readdirSync(join(process.cwd(), 'src/engine'));
-    for (const file of engine) {
-      if (file === 'print.ts') continue;
+    // רקורסיבי: src/engine מכיל גם תת-תיקיות (shulchan/), וקריאת תיקייה
+    // כקובץ זורקת EISDIR — כלומר הסריקה חייבת לרדת פנימה, לא לדלג.
+    const engine = readdirSync(join(process.cwd(), 'src/engine'), {
+      recursive: true,
+      withFileTypes: true,
+    });
+    for (const entry of engine) {
+      if (!entry.isFile() || entry.name === 'print.ts') continue;
       expect(
-        readFileSync(join(process.cwd(), 'src/engine', file), 'utf8').includes('window.print'),
-        file,
+        readFileSync(join(entry.parentPath, entry.name), 'utf8').includes('window.print'),
+        entry.name,
       ).toBe(false);
     }
   });

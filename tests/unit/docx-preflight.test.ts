@@ -21,6 +21,7 @@ import {
   repairSettings,
   SETTINGS_PART,
 } from '../../src/engine/docx-preflight';
+import { NO_VBA } from '../../src/engine/vba-import';
 
 const SETTINGS_WITH_ZERO =
   '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
@@ -234,7 +235,36 @@ describe('preflightSource', () => {
     await expect(preflightSource(undefined)).resolves.toEqual({
       source: undefined,
       fontTable: null,
+      vba: NO_VBA,
     });
+  });
+
+  it('מסמך בלי מאקרו מדווח שאין בו מאקרו', async () => {
+    const clean = buildZip([{ name: SETTINGS_PART, content: SETTINGS_WITH_ZERO.replace('"0"', '"720"') }]);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(clean)),
+    );
+
+    const { vba } = await preflightSource('http://127.0.0.1:1/doc.docx');
+    // `hasMacroPart` הוא מה שקובע את סיומת השמירה, ולכן חשוב שהוא יהיה שקר
+    // כאן: מסמך רגיל אינו אמור להיות נשמר כ-`.docm`.
+    expect(vba.hasMacroPart).toBe(false);
+    expect(vba.status).toBeNull();
+  });
+
+  it('קריאה שנכשלה אינה מדווחת על מאקרו שלא נבדקו', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new Error('אין רשת');
+      }),
+    );
+
+    // „לא יודעים” אינו „יש מאקרו”: דיווח חיובי כאן היה משנה סיומת של מסמך
+    // שכלל לא נקרא.
+    const { vba } = await preflightSource('http://127.0.0.1:1/doc.docx');
+    expect(vba).toEqual(NO_VBA);
   });
 
   it('URL שאין בו מה לתקן נשאר URL', async () => {

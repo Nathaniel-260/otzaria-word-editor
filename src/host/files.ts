@@ -9,7 +9,7 @@
  */
 import { call, tryCall, isPermissionDenied } from './otzaria-client';
 import { bytesToBase64 } from './base64';
-import { DOCX_MIME } from '../engine/export';
+import { DOCX_MIME, type WordExtension } from '../engine/export';
 import { EMBEDDABLE_IMAGE_EXTENSIONS, imageMimeForFileName } from '../engine/payloads';
 
 export interface UserFile {
@@ -40,7 +40,12 @@ export async function pickDocxFile(
 
   const request = async (mode: 'read' | 'readwrite'): Promise<UserFile | null> => {
     const res = await call<PickResponse>('fs.pickUserFile', {
-      extensions: ['docx'],
+      // `docm` ולא רק `docx`: מסמך עם מאקרו הוא אותה חבילת OOXML בדיוק, והוא
+      // נפתח ונערך כאן כמו כל מסמך אחר — המאקרו עצמם אינם מורצים (אין מנוע
+      // VBA בדפדפן) אבל נשמרים כמות שהם, ואפשר לראות את הקוד שלהם ב-Alt+F8.
+      // בלי הסיומת הזאת הקובץ פשוט לא הופיע בבורר, ולמשתמש לא הייתה שום דרך
+      // לפתוח את המסמך שהוא עובד עליו שנים.
+      extensions: ['docx', 'docm'],
       access: mode,
       ...(title ? { title } : {}),
     });
@@ -238,17 +243,27 @@ export interface CommitOptions {
   targetToken?: string;
   suggestedName?: string;
   title?: string;
+  /**
+   * הסיומת שהמאחז מצמיד לשם בדיאלוג „שמור בשם”, ושלפיה הוא מסנן בו.
+   *
+   * לא קבוע `docx`: המאחז מצמיד את הסיומת לשם **אלא אם** הוא כבר מסתיים בה,
+   * ולכן `docx` קבוע על מסמך מאקרו הציע לשמור את `ספר.docm` בשם
+   * `ספר.docm.docx` — ועוד סינן את הדיאלוג ל-`docx`. כלומר בדיוק החבילה
+   * עם `vbaProject` שנושאת שם `.docx` שאותה יש להימנע ממנה.
+   * ראו `resolveSaveExtension` ב-engine/export.ts.
+   */
+  extension?: WordExtension;
 }
 
 /** כותבת את ההעלאה לקובץ. `cancelled` פירושו שהמשתמש סגר את „שמור בשם”. */
 export async function commitUserFileWrite(options: CommitOptions): Promise<CommitResult> {
-  const { writeToken, targetToken, suggestedName, title } = options;
+  const { writeToken, targetToken, suggestedName, title, extension } = options;
   const res = await call<CommitResult>('fs.commitUserFileWrite', {
     writeToken,
     ...(targetToken ? { targetToken } : {}),
     ...(suggestedName ? { suggestedName } : {}),
     ...(title ? { title } : {}),
-    extension: 'docx',
+    extension: extension ?? 'docx',
   });
   if (!res) throw new Error('השמירה לא הושלמה');
   if (res.cancelled) return { cancelled: true };

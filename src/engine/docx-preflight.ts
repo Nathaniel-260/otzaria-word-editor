@@ -30,6 +30,7 @@
  * מהצפוי הוא באג שקט במסמך של המשתמש; רשומה לא-דחוסה אינה יכולה להשתבש.
  */
 import { DOCX_MIME } from './export';
+import { NO_VBA, readDocumentVba, type DocumentVba } from './vba-import';
 
 /** החלק שבו יושבות הגדרות המסמך. */
 export const SETTINGS_PART = 'word/settings.xml';
@@ -125,6 +126,14 @@ export interface PreflightResult {
   source: string | File | Blob | undefined;
   /** תוכן `FONT_TABLE_PART`, או `null` כשאין או שלא נקרא. */
   fontTable: string | null;
+  /**
+   * המאקרו שבמסמך — לקריאה בלבד (engine/vba-import.ts).
+   *
+   * כאן מאותו טעם כמו טבלת הגופנים: הבייטים כבר נקראו והארכיון כבר נפתח, וזה
+   * גם **הרגע** הנכון — הידיעה שבמסמך יש מאקרו שWord מריץ בפתיחה שייכת לזמן
+   * הפתיחה, לא לזמן שבו המשתמש יחשוב לחפש אותה.
+   */
+  vba: DocumentVba;
 }
 
 /**
@@ -141,7 +150,7 @@ export interface PreflightResult {
 export async function preflightSource(
   source: string | File | Blob | undefined,
 ): Promise<PreflightResult> {
-  if (source === undefined) return { source, fontTable: null };
+  if (source === undefined) return { source, fontTable: null, vba: NO_VBA };
 
   let bytes: Bytes;
   try {
@@ -151,17 +160,20 @@ export async function preflightSource(
         : new Uint8Array(await source.arrayBuffer());
   } catch (error) {
     console.warn('[otzaria-word] הבדיקה המקדימה לא קראה את המסמך', error);
-    return { source, fontTable: null };
+    return { source, fontTable: null, vba: NO_VBA };
   }
 
   const fontTable = await readDocxPart(bytes, FONT_TABLE_PART);
+  // על בייטי המקור ולא על המתוקנים: התיקון נוגע ל-`settings.xml` בלבד, ואין
+  // טעם לקרוא את המאקרו מעותק שנכתב מחדש.
+  const vba = await readDocumentVba(bytes);
   const repaired = await preflightDocx(bytes);
-  if (!repaired) return { source, fontTable };
+  if (!repaired) return { source, fontTable, vba };
 
   console.warn(
     `[otzaria-word] ${SETTINGS_PART}: defaultTabStop מתוקן ל-${DEFAULT_TAB_STOP_TWIPS} — הערך שהיה מקפיא את המנוע`,
   );
-  return { source: new Blob([repaired], { type: DOCX_MIME }), fontTable };
+  return { source: new Blob([repaired], { type: DOCX_MIME }), fontTable, vba };
 }
 
 /**

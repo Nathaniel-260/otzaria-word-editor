@@ -46,6 +46,8 @@ import { UNSETTLED_SELECTION } from '../engine/readout-hold';
 import type { ZoomState } from '../engine/zoom';
 import { FALLBACK_ZOOM } from '../engine/zoom';
 import type { RulerUnit } from '../engine/ruler-geometry';
+import { NO_VBA, type DocumentVba } from '../engine/vba-import';
+import type { WordExtension } from '../engine/export';
 import type { SuperDoc } from 'superdoc';
 
 /**
@@ -78,6 +80,13 @@ export interface DocumentUiSnapshot {
   styleGallery: StyleGalleryState;
   engineFontSlice: FontsSliceLike | null;
   readoutSelection: ReadoutSelection;
+  /** המאקרו של Word שבמסמך של הטאב הזה — לקריאה בלבד (engine/vba-import.ts). */
+  documentVba: DocumentVba;
+  /**
+   * הסיומת שתחתיה הטאב הזה נשמר. פר-טאב ולא ברמת המעטפת: שמירה אוטומטית של
+   * טאב ברקע חייבת לכתוב `.docm` אם **הוא** מסמך מאקרו, גם כשהמוצג אינו.
+   */
+  saveExtension: WordExtension;
 }
 
 export interface DocumentSession {
@@ -151,6 +160,8 @@ export function emptyUiSnapshot(): DocumentUiSnapshot {
     styleGallery: fallbackStyleGallery(),
     engineFontSlice: null,
     readoutSelection: UNSETTLED_SELECTION,
+    documentVba: NO_VBA,
+    saveExtension: 'docx',
   };
 }
 

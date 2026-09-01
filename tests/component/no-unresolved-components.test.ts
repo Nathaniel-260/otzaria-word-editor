@@ -22,6 +22,7 @@ import OtzariaTab from '../../src/ui/ribbon/tabs/OtzariaTab.vue';
 import ReferencesTab from '../../src/ui/ribbon/tabs/ReferencesTab.vue';
 import ReviewTab from '../../src/ui/ribbon/tabs/ReviewTab.vue';
 import ViewTab from '../../src/ui/ribbon/tabs/ViewTab.vue';
+import ShulchanTab from '../../src/ui/ribbon/tabs/ShulchanTab.vue';
 import Ribbon from '../../src/ui/ribbon/Ribbon.vue';
 import { autoUnmount, createSuperdocDouble, mountUi, settle } from './harness';
 
@@ -38,6 +39,7 @@ const TABS: ReadonlyArray<{ name: string; component: Component; props?: Record<s
   { name: 'הפניות', component: ReferencesTab },
   { name: 'סקירה', component: ReviewTab },
   { name: 'תצוגה', component: ViewTab },
+  { name: 'שולחן העורך', component: ShulchanTab },
   { name: 'אוצריא', component: OtzariaTab },
   { name: 'הרצועה עצמה', component: Ribbon, props: { hasDocument: true } },
 ];

@@ -26,6 +26,14 @@ export const COMMAND_REPORTER: InjectionKey<CommandReporter> = Symbol('commandRe
 export type CommandReporter = (outcome: CommandOutcome, commandId: string) => void;
 
 /**
+ * הודעת-מידע לשורת המצב — „בוצעו 3 תיקונים”, „הומרו 2 הערות”. ערוץ נפרד
+ * מ-`COMMAND_REPORTER` בכוונה: המדווח מקבל תוצאות פקודה, והצלחה שם רק
+ * מנקה שגיאה קודמת. כלי שמסכם כמה עשה צריך להגיד את זה בקול, בלי
+ * לזייף outcome כושל.
+ */
+export const STATUS_NOTIFIER: InjectionKey<(text: string) => void> = Symbol('statusNotifier');
+
+/**
  * אפשרויות הגופן של המסמך הפתוח (`ui.fonts` דרך engine/font-options.ts).
  *
  * מפתח **צר** בכוונה, ולא ה-`ui` הגולמי: התכנית (§4) קובעת שכל מה שקומפוננטה

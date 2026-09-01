@@ -6,6 +6,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
   MAX_IMAGE_BYTES,
+  commitUserFileWrite,
   pickDocxFile,
   pickImageFile,
   readImageAsDataUrl,
@@ -43,8 +44,11 @@ describe('pickDocxFile', () => {
       access: 'readwrite',
     });
     // ברירת המחדל היא readwrite, אחרת „שמור” יצטרך דיאלוג בכל פעם.
+    // `docm` ברשימה: מסמך עם מאקרו הוא אותה חבילת OOXML בדיוק, ובלי הסיומת
+    // הזאת הוא לא הופיע בבורר כלל — למשתמש לא הייתה שום דרך לפתוח את המסמך
+    // שהוא עובד עליו שנים.
     expect(call).toHaveBeenCalledWith('fs.pickUserFile', {
-      extensions: ['docx'],
+      extensions: ['docx', 'docm'],
       access: 'readwrite',
     });
   });
@@ -55,10 +59,25 @@ describe('pickDocxFile', () => {
     await pickDocxFile({ title: 'בחר מסמך' });
 
     expect(call).toHaveBeenCalledWith('fs.pickUserFile', {
-      extensions: ['docx'],
+      extensions: ['docx', 'docm'],
       access: 'readwrite',
       title: 'בחר מסמך',
     });
+  });
+
+  it('מחזירה מסמך עם מאקרו כמו כל מסמך אחר', async () => {
+    hostReturns({
+      cancelled: false,
+      token: 'tok',
+      url: 'http://127.0.0.1:1/f',
+      name: 'מאקרו.docm',
+      size: 99,
+      access: 'readwrite',
+    });
+
+    // הבורר אינו מבחין בין השניים, וגם אינו אמור: מה שמבחין הוא סיומת השמירה
+    // (engine/export.ts) וקריאת המאקרו (engine/vba-import.ts).
+    await expect(pickDocxFile()).resolves.toMatchObject({ name: 'מאקרו.docm' });
   });
 
   it('בלי הרשאת כתיבה נופלת לקריאה בלבד ולא מפילה את הפתיחה', async () => {
@@ -374,5 +393,37 @@ describe('readImageAsDataUrl', () => {
 
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.dataUrl.startsWith('data:image/png;base64,QUFB')).toBe(true);
+  });
+});
+
+/**
+ * הסיומת שנשלחת ל-`fs.commitUserFileWrite` היא מה שהמאחז מצמיד לשם בדיאלוג
+ * „שמור בשם”, ומה שהוא מסנן לפיו. `docx` קבוע היה מציע לשמור את `ספר.docm`
+ * בשם `ספר.docm.docx` — המאחז מצמיד את הסיומת אלא אם השם כבר מסתיים בה —
+ * כלומר בדיוק חבילה עם `vbaProject` שנושאת שם `.docx`, מה שהעורך אמור
+ * למנוע. ראו `resolveSaveExtension` ב-engine/export.ts.
+ */
+describe('commitUserFileWrite — הסיומת', () => {
+  it('מעבירה את הסיומת המבוקשת למאחז', async () => {
+    const call = hostReturns({ cancelled: false, token: 'tok', name: 'ספר.docm', size: 10 });
+
+    await commitUserFileWrite({ writeToken: 'w1', suggestedName: 'ספר.docm', extension: 'docm' });
+
+    expect(call).toHaveBeenCalledWith('fs.commitUserFileWrite', {
+      writeToken: 'w1',
+      suggestedName: 'ספר.docm',
+      extension: 'docm',
+    });
+  });
+
+  it('בלי סיומת מפורשת נשארת docx — התנהגות המסלול הרגיל', async () => {
+    const call = hostReturns({ cancelled: false, token: 'tok', name: 'ספר.docx', size: 10 });
+
+    await commitUserFileWrite({ writeToken: 'w1', suggestedName: 'ספר.docx' });
+
+    expect(call).toHaveBeenCalledWith(
+      'fs.commitUserFileWrite',
+      expect.objectContaining({ extension: 'docx' }),
+    );
   });
 });

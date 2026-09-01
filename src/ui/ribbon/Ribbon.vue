@@ -91,6 +91,7 @@
         v-else-if="currentTabId === 'view'"
         @toggle-focus-mode="$emit('toggle-focus-mode')"
       />
+      <ShulchanTab v-else-if="currentTabId === 'shulchan'" />
       <OtzariaTab
         v-else-if="currentTabId === 'otzaria'"
         :book-completion-enabled="bookCompletionEnabled"
@@ -118,6 +119,7 @@ import LayoutTab from './tabs/LayoutTab.vue';
 import ReferencesTab from './tabs/ReferencesTab.vue';
 import ReviewTab from './tabs/ReviewTab.vue';
 import ViewTab from './tabs/ViewTab.vue';
+import ShulchanTab from './tabs/ShulchanTab.vue';
 import OtzariaTab from './tabs/OtzariaTab.vue';
 
 interface TabDefinition {
@@ -134,6 +136,7 @@ const TABS: TabDefinition[] = [
   { id: 'references', label: 'הפניות' },
   { id: 'review', label: 'סקירה' },
   { id: 'view', label: 'תצוגה' },
+  { id: 'shulchan', label: 'שולחן העורך' },
   { id: 'otzaria', label: '✦ אוצריא', className: 'otzaria-tab' },
 ];
 

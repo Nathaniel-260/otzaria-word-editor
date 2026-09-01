@@ -183,6 +183,7 @@
     <MacrosDialog
       :is-open="isMacrosOpen"
       :handle="activeMacros"
+      :document-vba="documentVba"
       @close="isMacrosOpen = false"
       @status="setStatus"
     />
@@ -231,6 +232,7 @@ import type { CommandId } from './engine/capabilities';
 import {
   COMMAND_ADAPTER,
   COMMAND_REPORTER,
+  STATUS_NOTIFIER,
   DOCUMENT_GENERATION,
   FONT_OPTIONS,
   READOUT_SELECTION,
@@ -296,6 +298,7 @@ import {
 import { createSaveCoordinator, type SaveCoordinator, type SaveSnapshot } from './sessions/save-coordinator';
 import { createEditor, type EditorSession } from './engine/create-editor';
 import { ACTIVE_MACROS, installMacros, type MacrosHandle } from './engine/macros';
+import { registerShulchanTools } from './engine/shulchan/tools-registration';
 import MacrosDialog from './ui/panels/MacrosDialog.vue';
 import { installBookCompletion } from './engine/book-completion-overlay';
 import { preflightSource } from './engine/docx-preflight';
@@ -342,7 +345,16 @@ import {
   applyHebrewPaperSize,
 } from './engine/document-defaults';
 import type { SuperDoc } from 'superdoc';
-import { DOCX_MIME, exportDocx, docxFileName } from './engine/export';
+import {
+  DOCX_MIME,
+  documentFileName,
+  exportDocx,
+  resolveSaveExtension,
+  retypeBlob,
+  stripWordExtension,
+  type WordExtension,
+} from './engine/export';
+import { NO_VBA, type DocumentVba } from './engine/vba-import';
 import { exportPdfDocument, pdfSuggestedName, printDocument } from './engine/print';
 import { downloadBlob } from './host/download';
 import {
@@ -389,7 +401,7 @@ import {
   writeWorkspaceBytes,
 } from './host/workspace';
 import { onPluginHidden } from './host/lifecycle';
-import { revealZone, type RevealZone } from './composables/focus-mode';
+import { revealZone, type RevealBounds, type RevealZone } from './composables/focus-mode';
 import { selectWholeDocument } from './engine/clipboard';
 import {
   DEFAULT_FONT_SIZE_PT,
@@ -494,6 +506,24 @@ provide(ACTIVE_MACROS, activeMacros);
 
 /** דיאלוג ניהול המאקרו (Alt+F8). */
 const isMacrosOpen = ref(false);
+
+/**
+ * המאקרו של Word שכבר במסמך — לקריאה בלבד (engine/vba-import.ts).
+ *
+ * נקרא בשלב המקדים, שם הבייטים כבר בזיכרון, ומתאפס בכל פתיחה: זו תכונה של
+ * **המסמך**, לא של ה-session של המאקרו, ולכן היא אינה יושבת ב-`activeMacros`
+ * — שם מגיעים רק דברים שאפשר להריץ.
+ */
+const documentVba = shallowRef<DocumentVba>(NO_VBA);
+
+/**
+ * הסיומת שתחתה המסמך יישמר.
+ *
+ * נגזרת מסיומת המקור ומקיומו של חלק מאקרו בחבילה, ולא קבועה `docx`: קובץ עם
+ * `vbaProject` שנשמר כ-`docx` הוא קובץ ש-Word מתלונן עליו. ראו
+ * `resolveSaveExtension` ב-engine/export.ts.
+ */
+const saveExtension = shallowRef<WordExtension>('docx');
 
 /**
  * שני המטפלים מחזירים „האם טופל”, בשביל מסלול הקיצורים: בלי מסמך פתוח אין
@@ -784,6 +814,8 @@ function reportCommand(outcome: CommandOutcome, commandId: string): void {
 }
 
 provide(COMMAND_REPORTER, reportCommand);
+// הודעות-מידע של כלי הלשוניות („בוצעו 3 תיקונים”) — ראו composables/keys.ts.
+provide(STATUS_NOTIFIER, (text: string) => setStatus(text));
 
 /**
  * קואורדינטור השמירה של טאב אחד. `session` הוא ה-`DocumentSession` שהוא
@@ -801,10 +833,15 @@ provide(COMMAND_REPORTER, reportCommand);
  */
 function initSaveCoordinator(getSession: () => DocumentSession): SaveCoordinator {
   return createSaveCoordinator({
-    exportDocument: () => {
-      const active = getSession().swap.current;
+    exportDocument: async () => {
+      const session = getSession();
+      const active = session.swap.current;
       if (!active) throw new Error('אין מסמך פתוח');
-      return exportDocx(active.superdoc);
+      // ה-MIME הוא מה שנשלח כ-`Content-Type` בכתיבה, ו-`superdoc.export`
+      // מסמן תמיד `docx`. מסמך עם מאקרו היה מוצהר לא נכון למי שקורא את
+      // ההצהרה — ראו `retypeBlob`. הסיומת נקראת מהטאב הזה ולא מה-ref המוצג:
+      // שמירה אוטומטית של טאב ברקע רצה כאן, על המסמך שלו.
+      return retypeBlob(await exportDocx(active.superdoc), sessionSaveExtension(session));
     },
     beginWrite: (size) => beginBinaryWrite(size),
     upload: uploadBytes,
@@ -813,7 +850,15 @@ function initSaveCoordinator(getSession: () => DocumentSession): SaveCoordinator
       commitUserFileWrite({
         writeToken: input.writeToken,
         targetToken: input.targetToken,
-        suggestedName: input.suggestedName ?? getSession().ui.title,
+        // הנפילה-לאחור נושאת סיומת גם היא: מסלול שלא העביר `suggestedName`
+        // (שמירה אוטומטית) אינו אמור להציע לכתוב מסמך מאקרו בשם בלי סיומת.
+        suggestedName:
+          input.suggestedName ??
+          documentFileName(sessionDisplayTitle(getSession()), sessionSaveExtension(getSession())),
+        // הסיומת שהמאחז מצמיד לשם בדיאלוג „שמור בשם”, ושלפיה הוא מסנן בו.
+        // בלי השדה הזה היא `docx` קבוע (ראו `CommitOptions` ב-host/files.ts),
+        // ומסמך מאקרו היה מוצע לשמירה בשם `ספר.docm.docx`.
+        extension: sessionSaveExtension(getSession()),
         title: 'שמירת המסמך',
       }),
     onStateChange: (snapshot) => {
@@ -1008,6 +1053,8 @@ function stashActiveInto(session: DocumentSession): void {
     styleGallery: styleGallery.value,
     engineFontSlice: engineFontSlice.value,
     readoutSelection: readoutSelection.value,
+    documentVba: documentVba.value,
+    saveExtension: saveExtension.value,
   };
   swap = null;
   save = null;
@@ -1051,6 +1098,8 @@ function restoreFromSession(session: DocumentSession): void {
   styleGallery.value = ui.styleGallery;
   engineFontSlice.value = ui.engineFontSlice;
   readoutSelection.value = ui.readoutSelection;
+  documentVba.value = ui.documentVba;
+  saveExtension.value = ui.saveExtension;
 
   swap = session.swap;
   save = session.save;
@@ -1191,7 +1240,7 @@ async function openDocumentInto(
   // החוט הראשי, ומשם אין חזרה — גם `OPEN_TIMEOUT_MS` אינו יכול לירות. ראו
   // engine/docx-preflight.ts. השלב הזה אינו יכול להיכשל: הוא מחזיר את המקור
   // כמות שהוא בכל מקרה שאינו „מצאתי בדיוק את הערך הזה”.
-  const { source, fontTable } = await preflightSource(options.draft ?? file?.url);
+  const { source, fontTable, vba } = await preflightSource(options.draft ?? file?.url);
   // „דלג” בזמן שהבייטים נקראו. הבדיקה כאן ולא רק לפני המנוע: שאר הפונקציה
   // כותבת למצב של המעטפת — כותרת, יעד שמירה, רשומת ההפעלה — ופתיחה שהמשתמש
   // נטש אינה אמורה לכתוב שם דבר.
@@ -1290,6 +1339,10 @@ async function openDocumentInto(
         // וההקלטה מבוטלת — שמירה חלקית לא קורית בלי הסכמה.
         confirmIncomplete: (title, content) => confirm({ title, content }),
       });
+      // כלי „שולחן העורך” נרשמים על ה-kit של המסמך הזה: מופיעים בדיאלוג
+      // ניהול המאקרו וניתנים לקיצור מקלדת. הרישום פר-התקנה — ה-kit נבנה
+      // מחדש בכל פתיחה, ואין צורך בביטול.
+      registerShulchanTools(macros.kit, () => editor.superdoc, (text) => setStatus(text));
       activeMacros.value = macros;
       editor.onDispose(() => {
         if (activeMacros.value === macros) activeMacros.value = null;
@@ -1574,7 +1627,12 @@ async function openDocumentInto(
     }
   });
 
-  title.value = file ? file.name.replace(/\.docx$/i, '') : 'מסמך חדש';
+  title.value = file ? stripWordExtension(file.name) : 'מסמך חדש';
+  // שני הדברים שהמסמך הזה מביא איתו, יחד: מה יש בו, ותחת איזו סיומת הוא
+  // נשמר. הסיומת נגזרת מהשם **ומהחבילה** — מסמך `.docx` שנושא חלק מאקרו
+  // (קורה) יישמר כ-`.docm`, אחרת Word יתלונן עליו.
+  documentVba.value = vba;
+  saveExtension.value = resolveSaveExtension(file?.name, vba.hasMacroPart);
   // זמן הטעינה הוא מדידת פיתוח ולא הודעה למשתמש: „נטען ב-473 מילישניות” תפס
   // את שורת המצב עד ההודעה הבאה. הוא נשמר — הוא מה שמסביר פתיחה איטית —
   // בלוג של אוצריא, במקום שבו מסתכלים על מדידות.
@@ -1583,9 +1641,18 @@ async function openDocumentInto(
   );
   setStatus('');
 
-  if (file && file.access !== 'readwrite') {
-    setStatus(`${title.value} — פתוח לקריאה; „שמור” יבקש מקום חדש`);
-  }
+  /* שורת המצב מציגה הודעה אחת, ולכן יש סדר עדיפות בין השתיים שיכולות להיאמר
+     כאן. „יש במסמך מאקרו שWord מריץ בפתיחה” קודמת ל„פתוח לקריאה”: הראשונה היא
+     מה שהמשתמש צריך לדעת על הקובץ שהוא פתח, והשנייה תתגלה לו בעצמה ברגע
+     שילחץ „שמור”. ספירת מודולים בלבד — הפחות דחוף — נאמרת רק כשאין השתקה
+     אחרת. */
+  const readOnlyNotice =
+    file && file.access !== 'readwrite'
+      ? `${title.value} — פתוח לקריאה; „שמור” יבקש מקום חדש`
+      : null;
+  if (vba.autoRun.length > 0 && vba.status) setStatus(vba.status);
+  else if (readOnlyNotice) setStatus(readOnlyNotice);
+  else if (vba.status) setStatus(vba.status);
 
   save?.reset(file && file.access === 'readwrite' ? { token: file.token, name: file.name } : null);
 
@@ -1712,14 +1779,19 @@ async function restoreDocumentView(
 
 async function onSave(forceSaveAs = false): Promise<void> {
   if (!swap?.current || !save) return;
-  const outcome = await save.saveNow({ forceSaveAs, suggestedName: title.value });
+  // ההצעה נושאת את הסיומת: זה מה שהמשתמש רואה בדיאלוג „שמור בשם”, וכאן נקבע
+  // אם מסמך המאקרו שלו יישאר `.docm`.
+  const outcome = await save.saveNow({
+    forceSaveAs,
+    suggestedName: documentFileName(title.value, saveExtension.value),
+  });
 
   if (outcome.status === 'failed') {
     setStatus(outcome.message, true);
     return;
   }
   if (outcome.status === 'saved') {
-    title.value = outcome.name.replace(/\.docx$/i, '') || title.value;
+    title.value = stripWordExtension(outcome.name) || title.value;
     // זוכר-ההפעלה אינו מעודכן כאן אלא ב-`onSaved` של הקואורדינטור: שם עוברות
     // גם השמירה האוטומטית וגם „לשמור לפני שפותחים אחר”, שאינן עוברות כאן.
     setStatus(`${title.value} נשמר`);
@@ -1781,7 +1853,7 @@ async function onPickAndOpen(): Promise<void> {
       }
 
       if (decision.action === 'save-first') {
-        const outcome = await save.saveNow({ suggestedName: title.value });
+        const outcome = await save.saveNow({ suggestedName: documentFileName(title.value, saveExtension.value) });
         if (outcome.status !== 'saved') {
           if (outcome.status === 'failed') setStatus(outcome.message, true);
           else setStatus('הפתיחה נעצרה — המסמך לא נשמר');
@@ -1813,7 +1885,7 @@ async function onNewDocument(): Promise<void> {
     if (decision.action === 'switch') await keeper?.discardDraft();
     if (decision.action === 'cancel') return;
     if (decision.action === 'save-first') {
-      const outcome = await save.saveNow({ suggestedName: title.value });
+      const outcome = await save.saveNow({ suggestedName: documentFileName(title.value, saveExtension.value) });
       if (outcome.status !== 'saved') return;
     }
   }
@@ -1854,7 +1926,7 @@ async function onExit(): Promise<void> {
       return;
     }
     if (decision.action === 'save-first') {
-      const outcome = await save.saveNow({ suggestedName: title.value });
+      const outcome = await save.saveNow({ suggestedName: documentFileName(title.value, saveExtension.value) });
       // שמירה שנכשלה או שבוטלה עוצרת את היציאה: המשתמש ביקש לשמור, וללכת
       // בכל זאת היה מתעלם ממה שביקש.
       if (outcome.status !== 'saved') {
@@ -1874,8 +1946,9 @@ async function onExportDocx(): Promise<void> {
   const active = swap?.current;
   if (!active) return;
   try {
-    const blob = await exportDocx(active.superdoc);
-    downloadBlob(blob, docxFileName(title.value));
+    const extension = saveExtension.value;
+    const blob = retypeBlob(await exportDocx(active.superdoc), extension);
+    downloadBlob(blob, documentFileName(title.value, extension));
     setStatus(`${title.value} יוצא ל-Word`);
   } catch (error) {
     setStatus(error instanceof Error ? error.message : 'הייצוא נכשל', true);
@@ -1992,6 +2065,16 @@ function sessionIsDirty(session: DocumentSession): boolean {
   return session === activeSession.value ? saveSnapshot.value.isDirty : session.ui.saveSnapshot.isDirty;
 }
 
+/**
+ * הסיומת שתחתיה הטאב הזה נשמר — מהתצוגה החיה אם הוא הפעיל, אחרת מתמונת
+ * המצב שלו. אותו דפוס כמו `sessionDisplayTitle`, ומאותו טעם: קואורדינטור
+ * השמירה של טאב ברקע רץ על **המסמך שלו**, ו-`saveExtension.value` מתאר את
+ * המסמך שמזדמן להיות מוצג באותו רגע.
+ */
+function sessionSaveExtension(session: DocumentSession): WordExtension {
+  return session === activeSession.value ? saveExtension.value : session.ui.saveExtension;
+}
+
 /** רצועת הטאבים האמיתית — אחד לכל `DocumentSession` פתוח, לפי סדר הפתיחה. */
 const documentTabs = computed<DocumentTabItem[]>(() =>
   Array.from(sessions.values()).map((session) => ({
@@ -2038,7 +2121,9 @@ async function onDocumentTabClose(id: DocumentSessionId): Promise<void> {
   }
 
   if (decision.action === 'save-first') {
-    const outcome = await session.save.saveNow({ suggestedName: sessionDisplayTitle(session) });
+    const outcome = await session.save.saveNow({
+      suggestedName: documentFileName(sessionDisplayTitle(session), sessionSaveExtension(session)),
+    });
     if (outcome.status !== 'saved') {
       if (outcome.status === 'failed') setStatus(outcome.message, true);
       else setStatus('סגירת הטאב בוטלה — המסמך לא נשמר');
@@ -2114,13 +2199,56 @@ watch([activeEditorContainer, activeSuperdoc, bookCompletionEnabled, documentGen
 });
 
 /**
+ * הפסים שנחשפים בקצה העליון, לפי הסלקטורים שה-CSS של מצב המיקוד מסתיר.
+ *
+ * הסרגל האנכי (`.doc-vruler`) חסר מהרשימה בכוונה, למרות שהוא נחשף יחד איתם:
+ * הוא נמתח לכל גובה המסמך, וגובל שנגזר ממנו היה הופך את „קרוב לקצה העליון”
+ * לכל המסך.
+ */
+const TOP_BAR_SELECTORS = ['.word-titlebar', '.word-ribbon-container', '.doc-ruler', '.ruler-corner'];
+
+/**
+ * עד איפה מגיעים הפסים בפועל.
+ *
+ * נמדד ולא קבוע: הגובה תלוי במה שמוצג — רצועה מכונסת, סרגל מידות כבוי, שורת
+ * מצב בגופן אחר. ההסתרה במצב מיקוד היא `opacity` ולא `display`, ולכן הפסים
+ * תופסים את מקומם גם כשאינם נראים והמדידה תקפה בשני המצבים.
+ */
+function measureRevealBounds(): RevealBounds | null {
+  const shell = shellRef.value;
+  if (!shell) return null;
+
+  let top = 0;
+  for (const selector of TOP_BAR_SELECTORS) {
+    for (const element of shell.querySelectorAll(selector)) {
+      const rect = element.getBoundingClientRect();
+      // פס שאינו מצויר כרגע אינו מרחיב את האזור.
+      if (rect.height > 0) top = Math.max(top, rect.bottom);
+    }
+  }
+
+  const statusbar = shell.querySelector('.word-statusbar');
+  const statusRect = statusbar?.getBoundingClientRect();
+  const bottom = statusRect && statusRect.height > 0 ? statusRect.top : window.innerHeight;
+
+  return { top, bottom };
+}
+
+/**
  * במצב מיקוד הפסים מוסתרים, ומתגלים כשהמצביע מתקרב לקצה. הקצה ולא כל המעטפת:
  * `:hover` על השורש החזיר את כולם בכל תנועה בחלון, כלומר המצב לא הסתיר כלום.
  * ההחלטה עצמה ב-composables/focus-mode.ts, כדי שתהיה נבדקת.
+ *
+ * המדידה נעשית רק כשמשהו כבר חשוף — כלומר רק כשהמצביע נמצא באזור הפסים.
+ * בזמן הקלדה, כשהמצביע בגוף המסמך, אין כאן שום קריאת גאומטריה.
  */
 function onPointerMove(event: PointerEvent): void {
   if (!isFocusMode.value) return;
-  revealed.value = revealZone(event.clientY, window.innerHeight);
+  const current = revealed.value;
+  revealed.value = revealZone(event.clientY, window.innerHeight, {
+    current,
+    bounds: current ? measureRevealBounds() : null,
+  });
 }
 
 /**

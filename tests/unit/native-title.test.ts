@@ -33,7 +33,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { basename, join, relative } from 'node:path';
+import { basename, join, relative, sep } from 'node:path';
 import { parse } from 'vue/compiler-sfc';
 import {
   TIP_DESCRIPTION_ATTR,
@@ -42,6 +42,11 @@ import {
 } from '../../src/ui/tooltip/tooltip-content';
 
 const SRC = join(__dirname, '..', '..', 'src');
+
+/** נתיב יחסי בהפרדת '/', גם ב-Windows — רשימות ההיתר כתובות כך. */
+function rel(file: string): string {
+  return relative(SRC, file).split(sep).join('/');
+}
 
 /** שם תג שמתחיל באות קטנה הוא אלמנט DOM; באות גדולה — קומפוננטה. */
 const NATIVE_TAG = /^[a-z]/;
@@ -124,7 +129,7 @@ function domAttributes(): Array<Finding & { name: string }> {
 
   for (const file of sourceFiles(SRC, '.vue')) {
     const { descriptor, errors } = parse(readFileSync(file, 'utf8'), { filename: file });
-    expect(errors, `${relative(SRC, file)} אינו נפרס`).toEqual([]);
+    expect(errors, `${rel(file)} אינו נפרס`).toEqual([]);
 
     const root = descriptor.template?.ast as TemplateNode | undefined;
     if (!root) continue;
@@ -132,7 +137,7 @@ function domAttributes(): Array<Finding & { name: string }> {
     const walk = (node: TemplateNode): void => {
       // 1 = ELEMENT ב-AST של Vue.
       if (node.type === 1 && node.tag === 'title') {
-        TITLE_TAGS.push(`${relative(SRC, file)}:${node.loc?.start.line ?? 0}`);
+        TITLE_TAGS.push(`${rel(file)}:${node.loc?.start.line ?? 0}`);
       }
       if (node.type === 1 && node.tag) {
         const native = NATIVE_TAG.test(node.tag);
@@ -144,7 +149,7 @@ function domAttributes(): Array<Finding & { name: string }> {
           found.push({
             name,
             what: `<${node.tag}>${native ? '' : ' — נוזל דרך fallthrough'}`,
-            where: `${relative(SRC, file)}:${prop.loc.start.line}`,
+            where: `${rel(file)}:${prop.loc.start.line}`,
           });
         }
       }
@@ -235,14 +240,14 @@ function scriptBodies(): Array<{ where: string; code: string }> {
   const bodies: Array<{ where: string; code: string }> = [];
 
   for (const file of sourceFiles(SRC, '.ts')) {
-    bodies.push({ where: relative(SRC, file), code: readFileSync(file, 'utf8') });
+    bodies.push({ where: rel(file), code: readFileSync(file, 'utf8') });
   }
   for (const file of sourceFiles(SRC, '.vue')) {
     const { descriptor } = parse(readFileSync(file, 'utf8'), { filename: file });
     const code = [descriptor.script?.content, descriptor.scriptSetup?.content]
       .filter(Boolean)
       .join('\n');
-    if (code) bodies.push({ where: relative(SRC, file), code });
+    if (code) bodies.push({ where: rel(file), code });
   }
 
   return bodies;

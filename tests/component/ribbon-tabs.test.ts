@@ -28,6 +28,7 @@ import LayoutTab from '../../src/ui/ribbon/tabs/LayoutTab.vue';
 import ReferencesTab from '../../src/ui/ribbon/tabs/ReferencesTab.vue';
 import ReviewTab from '../../src/ui/ribbon/tabs/ReviewTab.vue';
 import ViewTab from '../../src/ui/ribbon/tabs/ViewTab.vue';
+import ShulchanTab from '../../src/ui/ribbon/tabs/ShulchanTab.vue';
 import OtzariaTab from '../../src/ui/ribbon/tabs/OtzariaTab.vue';
 import Ribbon from '../../src/ui/ribbon/Ribbon.vue';
 import {
@@ -67,6 +68,7 @@ const TABS: ReadonlyArray<{
   { name: 'הפניות', component: ReferencesTab },
   { name: 'סקירה', component: ReviewTab },
   { name: 'תצוגה', component: ViewTab },
+  { name: 'שולחן העורך', component: ShulchanTab },
 ];
 
 /** מה שמזהה כפתור בהודעת כשל — כדי שאפשר יהיה למצוא אותו בקובץ. */
@@ -207,6 +209,7 @@ describe('הפקדים שמנוטרלים בכוונה', () => {
     פריסה: [],
     הפניות: [],
     תצוגה: [],
+    'שולחן העורך': [],
   };
 
   for (const tab of TABS) {
