@@ -1797,6 +1797,10 @@ async function onPickAndOpen(): Promise<void> {
 }
 
 async function onNewDocument(): Promise<void> {
+  // כמו שאר מתחילי הפתיחה (onPickAndOpen/onDocumentTab*): הכפתור ברצועה
+  // מנוטרל בזמן isOpening, אבל Ctrl+N מגיע דרך runShellAction ועוקף אותו —
+  // בלי הבדיקה הזאת הוא היה פותח מסמך שני לתוך אותו טאב באמצע פתיחה ראשונה.
+  if (isOpening.value) return;
   ensureOpenTargetTab();
   if (save && swap && save.snapshot.isDirty) {
     const decision = await decideDocumentSwitch({
