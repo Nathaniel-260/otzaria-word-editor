@@ -21,10 +21,14 @@ import {
   openLibrary,
   openSearchTab,
   registerSendToDocumentItem,
-  unregisterSendToDocumentItem,
   handleSendToDocument,
+  takePendingContextMenuClicks,
+  CONTEXT_MENU_LATCH_KEY,
+  SEND_TO_DOCUMENT_ITEM,
   SEND_TO_DOCUMENT_ITEM_ID,
 } from '../../src/host/otzaria-reader';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 /** כפיל שמצליח ומחזיר את מה שאוצריא מתועדת כמחזירה. */
 function hostReturns(data: unknown): ReturnType<typeof vi.fn> {
@@ -514,14 +518,15 @@ function documentHost(options: { ready?: boolean } = {}): {
 }
 
 describe('registerSendToDocumentItem', () => {
-  it('רושמת פריט עם openPlugin, כדי שהלחיצה תגיע גם כשלשונית התוסף סגורה', async () => {
+  it('רושמת בדיוק את הפריט שמוצהר במניפסט — openPlugin ושני הקשרי הקריאה', async () => {
     const call = hostReturns(true);
 
     await expect(registerSendToDocumentItem()).resolves.toEqual({ ok: true, value: undefined });
     expect(call).toHaveBeenCalledWith('reader.addContextMenuItem', {
       id: SEND_TO_DOCUMENT_ITEM_ID,
-      label: 'שלח למסמך',
+      title: 'שלח למסמך',
       icon: 'document_text_24_regular',
+      contexts: ['reader-selection', 'reader-page-shape-selection'],
       openPlugin: true,
     });
   });
@@ -532,14 +537,6 @@ describe('registerSendToDocumentItem', () => {
     const outcome = await registerSendToDocumentItem();
     expect(outcome.ok).toBe(false);
     if (!outcome.ok) expect(outcome.message).toContain('reader.context_menu');
-  });
-
-  it('ההסרה שולחת את אותו מזהה', async () => {
-    const call = hostReturns(true);
-    await unregisterSendToDocumentItem();
-    expect(call).toHaveBeenCalledWith('reader.removeContextMenuItem', {
-      id: SEND_TO_DOCUMENT_ITEM_ID,
-    });
   });
 });
 
@@ -658,5 +655,102 @@ describe('handleSendToDocument', () => {
 
     expect(outcome.ok).toBe(false);
     if (!outcome.ok) expect(outcome.message).toContain('אין מסמך פתוח');
+  });
+});
+
+/* ===========================================================================
+ *  ה-latch של הלחיצה
+ * ========================================================================= */
+
+/**
+ * זה הפער שהפיל את הפיצ'ר: אוצריא משגרת את אירוע הלחיצה מיד אחרי ה-boot,
+ * והמאזין ב-App.vue נרשם רק אחרי שהבאנדל נטען — שניות אחר כך. אירוע window
+ * בלי מאזין אובד, ואוצריא אינה משחזרת אותו. ה-latch ב-`index.html` הוא מה
+ * שגישר, והבדיקות כאן מקבעות את שני צדדיו.
+ */
+describe('ה-latch של „שלח למסמך”', () => {
+  // הנרמול אינו מתקן כשל: במאגר index.html הוא LF, ובלעדיו הבדיקה נשברת רק
+  // אצל מי ש-git שלו המיר ל-CRLF.
+  const html = readFileSync(join(process.cwd(), 'index.html'), 'utf8').replace(/\r\n/g, '\n');
+
+  afterEach(() => {
+    delete (window as unknown as Record<string, unknown>)[CONTEXT_MENU_LATCH_KEY];
+  });
+
+  it('ה-latch ב-index.html נושא את השם שהקוד קורא לו, ומאזין לאירוע המטופס', () => {
+    expect(html).toContain(`window.${CONTEXT_MENU_LATCH_KEY} =`);
+    expect(html).toContain("window.addEventListener('contextMenu.itemClicked'");
+  });
+
+  it('הוא רץ ב-head, לפני הבאנדל — אחרת אין לו טעם', () => {
+    expect(html.indexOf(CONTEXT_MENU_LATCH_KEY)).toBeLessThan(html.indexOf('src/main.ts'));
+  });
+
+  /**
+   * הסקריפט האמיתי מ-index.html, מורץ ב-jsdom.
+   *
+   * בלי זה הבדיקות היו נשענות על latch מזויף שנכתב כאן, כלומר על ההנחה שכך
+   * ה-HTML מתנהג. מי שיחליף `push(event.detail)` ב-`push(event)` היה מקבל
+   * ירוק, והפיצ'ר היה נשבר בדיוק כפי שנשבר לפני ה-latch.
+   */
+  function runLatchScript(): void {
+    const body = html.slice(
+      html.indexOf('(function () {', html.indexOf(CONTEXT_MENU_LATCH_KEY)),
+      html.indexOf('})();', html.indexOf(CONTEXT_MENU_LATCH_KEY)) + '})();'.length,
+    );
+    new Function(body)();
+  }
+
+  function click(detail: unknown): void {
+    window.dispatchEvent(new CustomEvent('contextMenu.itemClicked', { detail }));
+  }
+
+  it('ה-latch שב-HTML צובר את ה-detail של הלחיצה, ומוסר אותו בריקון', () => {
+    runLatchScript();
+    click({ itemId: SEND_TO_DOCUMENT_ITEM_ID, selectedText: 'ויאמר' });
+
+    expect(takePendingContextMenuClicks()).toEqual([
+      { itemId: SEND_TO_DOCUMENT_ITEM_ID, selectedText: 'ויאמר' },
+    ]);
+  });
+
+  it('אחרי הריקון הוא מפסיק לצבור — המאזין החי הוא היחיד שרואה לחיצות', () => {
+    runLatchScript();
+    takePendingContextMenuClicks();
+    click({ itemId: SEND_TO_DOCUMENT_ITEM_ID });
+
+    expect(takePendingContextMenuClicks()).toEqual([]);
+  });
+
+  it('שומר על תקרה, כדי שלחיצות בזמן שהעורך עולה לא יצטברו בלי גבול', () => {
+    runLatchScript();
+    for (let i = 0; i < 12; i++) click({ itemId: SEND_TO_DOCUMENT_ITEM_ID, selectedText: `${i}` });
+
+    const pending = takePendingContextMenuClicks();
+    expect(pending).toHaveLength(8);
+    // הנשמרות הן האחרונות: לחיצה טרייה רלוונטית יותר מאחת שנדחקה.
+    expect(pending[pending.length - 1]).toEqual({
+      itemId: SEND_TO_DOCUMENT_ITEM_ID,
+      selectedText: '11',
+    });
+  });
+
+  it('מרוקנת את התור ומעבירה את ה-latch למצב חי, כדי שלא יטופל פעמיים', () => {
+    const latch = { queue: [{ itemId: SEND_TO_DOCUMENT_ITEM_ID }], live: false };
+    (window as unknown as Record<string, unknown>)[CONTEXT_MENU_LATCH_KEY] = latch;
+
+    expect(takePendingContextMenuClicks()).toEqual([{ itemId: SEND_TO_DOCUMENT_ITEM_ID }]);
+    expect(latch.live).toBe(true);
+    expect(latch.queue).toEqual([]);
+    expect(takePendingContextMenuClicks()).toEqual([]);
+  });
+
+  it('בלי latch — למשל בבדיקה או בדפדפן — מחזירה ריק ואינה זורקת', () => {
+    expect(takePendingContextMenuClicks()).toEqual([]);
+  });
+
+  it('הפריט שנרשם מ-JS הוא אותו אובייקט שמוצהר במניפסט', () => {
+    expect(SEND_TO_DOCUMENT_ITEM.id).toBe(SEND_TO_DOCUMENT_ITEM_ID);
+    expect(SEND_TO_DOCUMENT_ITEM.openPlugin).toBe(true);
   });
 });

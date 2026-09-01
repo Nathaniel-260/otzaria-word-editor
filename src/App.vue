@@ -226,8 +226,9 @@ import {
   openLibrary,
   openSearchTab,
   registerSendToDocumentItem,
-  unregisterSendToDocumentItem,
   handleSendToDocument,
+  takePendingContextMenuClicks,
+  type SendToDocumentEvent,
   type ReaderResult,
 } from './host/otzaria-reader';
 import {
@@ -2197,41 +2198,47 @@ let shortcuts: ShortcutDispatcher | null = null;
 let directionShortcut: { dispose: () => void } | null = null;
 let undoRedoWatcher: UndoRedoWatcher | null = null;
 
+/** לחיצה אחת על „שלח למסמך” — מה-latch או מהמאזין החי, אותו מסלול בדיוק. */
+function runSendToDocument(event: SendToDocumentEvent): void {
+  void handleSendToDocument(event, {
+    host: activeSuperdoc.value,
+    resolveHost: () => activeSuperdoc.value,
+  }).then((outcome) => {
+    if (outcome.ok) {
+      setStatus(outcome.value === 'at-cursor' ? 'הקטע נוסף במקום הסמן' : 'הקטע נוסף בסוף המסמך');
+    } else if (outcome.message) {
+      setStatus(outcome.message);
+    }
+  });
+}
+
 /**
  * „שלח למסמך” בתפריט ההקשר של הקורא.
  *
- * נקראת בסוף העלייה ולא בתוכה, ועטופה: `on` פונה ל-SDK דרך `bridge()`,
- * שזורק כשאין `window.Otzaria`. קריאה מוקדמת יותר בתוך `onMounted` הפילה את
- * כל מה שאחריה — המסמך לא נפתח, השמירה לא אותחלה, וההפעלה לא שוחזרה. פריט
- * בתפריט ההקשר אינו תנאי לעלייה של העורך, ולכן כשל כאן נרשם וזהו: „ציטוט
- * מהקורא” ברצועה עושה את אותו דבר מתוך העורך.
+ * נקראת מוקדם בעלייה, לפני פתיחת המסמך: `openPlugin: true` מוסר את אירוע
+ * הלחיצה מיד אחרי ה-boot, והמאזין צריך להיות שם קודם. מה שקרה לפני שהוא
+ * הגיע נאסף ב-latch שב-`index.html` — ולכן הסדר כאן: קודם המאזין החי, ורק
+ * אחריו `takePendingContextMenuClicks`, שמעביר את ה-latch למצב חי. שניהם
+ * באותה משימה סינכרונית, ואין חלון שבו אירוע נופל בין השניים.
  *
- * הפריטים נשמרים בזיכרון בצד אוצריא, ולכן הרישום חוזר בכל boot.
+ * ההמתנה למסמך היא בצד השני, ב-`handleSendToDocument`: כאן עוד אין מסמך.
+ *
+ * עטופה ב-try: `on` פונה ל-SDK דרך `bridge()`, שזורק כשאין `window.Otzaria`.
+ * פריט בתפריט ההקשר אינו תנאי לעליית העורך, ולכן כשל כאן נרשם וזהו —
+ * „ציטוט מהקורא” ברצועה עושה את אותו דבר מתוך העורך.
  */
 function registerSendToDocument(): void {
   if (!isAvailable()) return;
 
   try {
+    // הפריט עצמו מוצהר ב-`contributes.startup` שבמניפסט, ואוצריא רושמת אותו
+    // בעלייה בלי JS; הרישום כאן הוא הגיבוי למי שביטל את ההרשאה להצהרה.
     void registerSendToDocumentItem().then((outcome) => {
       if (!outcome.ok) console.warn('[otzaria-word]', outcome.message);
     });
 
-    // `openPlugin: true` מעביר ללשונית התוסף ומוסר את האירוע אחרי ה-boot —
-    // כלומר ייתכן שהוא יגיע לפני שהמנוע סיים לפרוס מסמך. `resolveHost` הוא
-    // מה שמאפשר ל-handler להמתין: הוא נקרא שוב בכל סבב, ומחזיר את המסמך
-    // הנוכחי ולא את זה שהיה ברגע הלחיצה.
-    contextMenuListener = on('reader.context_menu_item_clicked', (event) => {
-      void handleSendToDocument(event, {
-        host: activeSuperdoc.value,
-        resolveHost: () => activeSuperdoc.value,
-      }).then((outcome) => {
-        if (outcome.ok) {
-          setStatus(outcome.value === 'at-cursor' ? 'הקטע נוסף במקום הסמן' : 'הקטע נוסף בסוף המסמך');
-        } else if (outcome.message) {
-          setStatus(outcome.message);
-        }
-      });
-    });
+    contextMenuListener = on('contextMenu.itemClicked', (event) => runSendToDocument(event));
+    for (const pending of takePendingContextMenuClicks()) runSendToDocument(pending);
   } catch (error) {
     console.warn('[otzaria-word] רישום „שלח למסמך” נכשל', error);
   }
@@ -2248,6 +2255,12 @@ onMounted(async () => {
   void loadInstalledFonts().then((snapshot) => {
     installedFonts.value = snapshot;
   });
+
+  // „שלח למסמך” — לפני כל `await` שבהמשך. אוצריא מוסרת את אירוע הלחיצה מיד
+  // אחרי ה-boot, וכל שלב שנכשל לפני הרישום היה מפיל אותו לבור: ה-latch היה
+  // ממשיך לצבור ואיש לא היה מרוקן אותו. אינו תלוי בכלום כאן — קיומו של מסמך
+  // נבדק בזמן הלחיצה, לא עכשיו.
+  registerSendToDocument();
 
   shortcuts = createShortcutDispatcher({
     runCommand: (id, payload) => void runShortcutCommand(id, payload),
@@ -2304,7 +2317,6 @@ onMounted(async () => {
     // וההנמקה — ב-host/lifecycle.ts.
     hiddenListener = onPluginHidden(() => void keeper?.flush());
 
-
     swap = createEditorSwap(editorStackRef.value, (host, source, signal) =>
       createEditor({
         container: host,
@@ -2349,8 +2361,6 @@ onMounted(async () => {
       // מה שצריך להיקרא.
       splashDone();
     }
-
-    registerSendToDocument();
   } else {
     splashDone();
   }
@@ -2371,10 +2381,9 @@ onUnmounted(() => {
   hiddenListener = null;
   contextMenuListener?.();
   contextMenuListener = null;
-  // הפריט עצמו מוסר גם הוא: הוא חי בזיכרון של אוצריא, ופריט שנשאר רשום אחרי
-  // שהדף פורק היה שולח את המשתמש ללשונית שאין בה מי שיטפל בלחיצה. מותנה
-  // ב-`isAvailable` מאותו טעם כמו הרישום: פירוק אינו מקום להיכשל בו.
-  if (isAvailable()) void unregisterSendToDocumentItem();
+  // הפריט עצמו אינו מוסר כאן: אוצריא מסירה את רישומי המופע בעצמה בפירוק,
+  // וההסרה הידנית רק מסתכנת במחיקת העותק ההצהרתי — הפריט שאמור להישאר
+  // בתפריט גם כשהתוסף סגור. ההנמקה המלאה ב-host/otzaria-reader.ts.
   keeper?.dispose();
   keeper = null;
   // ה-interval של הזחילה הוא הדבר היחיד כאן שממשיך לרוץ בלי בעלים.

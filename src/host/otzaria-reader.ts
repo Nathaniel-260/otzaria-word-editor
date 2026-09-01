@@ -53,7 +53,6 @@ export const READER_PERMISSIONS: Record<string, string> = {
   'reader.getSectionTextMap': 'reader.open',
   'navigation.goTo': 'navigation.write',
   'reader.addContextMenuItem': 'reader.context_menu',
-  'reader.removeContextMenuItem': 'reader.context_menu',
 };
 
 /**
@@ -408,6 +407,68 @@ export async function insertCitation(
 export const SEND_TO_DOCUMENT_ITEM_ID = 'otzaria-word-send-to-document';
 
 /**
+ * הפריט עצמו — אובייקט אחד לשני מסלולי הרישום.
+ *
+ * המסלול העיקרי הוא הצהרתי: `contributes.startup.contextMenuItems` במניפסט.
+ * אוצריא רושמת אותו ב-Dart בעליית האפליקציה, בלי להריץ שורת JS אחת, והוא
+ * שורד גם סגירה של לשונית התוסף (`reapply` ב-unregisterController). רישום
+ * מ-JS בלבד חי רק כל עוד המופע חי — כלומר הפריט לא היה קיים בדיוק בתרחיש
+ * שהוא נכתב בשבילו: משתמש שקורא בספרייה ועדיין לא פתח את התוסף.
+ *
+ * הרישום מ-JS אינו מיותר: `app.startup_contributions` היא הרשאה רגישה שמגיעה
+ * **כבויה** בהתקנה (`pluginPermissionDefaultGrant`), וכל עוד המשתמש לא הדליק
+ * אותה ההצהרה אינה מיושמת כלל. `getAll` באוצריא מאחד לפי `(תוסף, id)`, ולכן
+ * שני המסלולים יחד אינם מייצרים פריט כפול.
+ *
+ * `openPlugin: true` הוא הלב: בלעדיו הלחיצה מגיעה רק לתוסף שכבר פתוח, וזה
+ * הפוך מהתרחיש. `title` ולא `label` — `label` הוא הכינוי מדור קודם.
+ *
+ * שני ההקשרים מפורשים, ולא בהשמטת `contexts`: זו ברירת המחדל של אוצריא ממילא,
+ * וכתובה היא מונעת את הצמצום שנראה מתבקש וגוזל את הפיצ'ר. „צורת הדף” אינה
+ * בחירת צורה גרפית — היא תצוגת הטקסט של הגמרא והשו„ע, עם בחירת טקסט מלאה
+ * (`simple_text_viewer.dart` בונה שם אותו `selection` בדיוק), וציטוט משם הוא
+ * בדיוק מה שהפיצ'ר נועד לו.
+ *
+ * tests/unit/manifest.test.ts מקבע שההצהרה במניפסט זהה לאובייקט הזה.
+ */
+export const SEND_TO_DOCUMENT_ITEM = {
+  id: SEND_TO_DOCUMENT_ITEM_ID,
+  title: 'שלח למסמך',
+  icon: 'document_text_24_regular',
+  contexts: ['reader-selection', 'reader-page-shape-selection'],
+  openPlugin: true,
+} as const;
+
+/**
+ * השם של ה-latch ב-`index.html`. מוגדר כאן ושם, ו-
+ * tests/unit/otzaria-reader.test.ts מקבע את הזהות — בדיוק כמו `BOOT_LATCH_KEY`.
+ */
+export const CONTEXT_MENU_LATCH_KEY = '__otzariaContextMenuClicks';
+
+interface ContextMenuLatch {
+  queue: SendToDocumentEvent[];
+  live: boolean;
+}
+
+/**
+ * מרוקנת את התור של ה-latch ומעבירה אותו למצב „חי”.
+ *
+ * זה החצי השני של ה-latch: אוצריא משגרת את אירוע הלחיצה מיד אחרי ה-boot,
+ * והמאזין ב-App.vue נרשם רק אחרי שהבאנדל נטען — פער של שניות שבו אירוע window
+ * פשוט אובד. ה-latch ב-`index.html` צובר, וכאן הצבירה נעצרת: מרגע ש-`live`
+ * דלוק, המאזין החי הוא היחיד שרואה אירועים ואין טיפול כפול. הסדר בקריאה חשוב —
+ * קודם נרשם המאזין, ורק אחר כך מרוקנים, ושניהם באותה משימה סינכרונית.
+ */
+export function takePendingContextMenuClicks(): SendToDocumentEvent[] {
+  const latch = (window as unknown as Record<string, ContextMenuLatch | undefined>)[
+    CONTEXT_MENU_LATCH_KEY
+  ];
+  if (!latch) return [];
+  latch.live = true;
+  return latch.queue.splice(0, latch.queue.length);
+}
+
+/**
  * כמה זמן פריט התפריט „מחכה” למסמך אחרי שאוצריא העבירה לדף התוסף.
  *
  * `openPlugin: true` מוסר את האירוע אחרי סיום ה-boot, אבל ה-boot מסתיים לפני
@@ -419,8 +480,13 @@ const DOCUMENT_WAIT_MS = 15_000;
 const DOCUMENT_POLL_MS = 150;
 
 /**
- * הצורה שנצרכת מאירוע הלחיצה. מוגדרת כאן ולא מיובאת מלאה: מהאירוע נדרשים
- * שני שדות בלבד, והצרה מאפשרת לבדיקות למסור אובייקט מינימלי.
+ * הצורה שנצרכת מאירוע הלחיצה (`contextMenu.itemClicked`). מוגדרת כאן ולא
+ * מיובאת מלאה: מהאירוע נדרשים שדות בודדים, והצרה מאפשרת לבדיקות למסור
+ * אובייקט מינימלי.
+ *
+ * הנושא הוא `contextMenu.itemClicked` ולא `reader.context_menu_item_clicked`:
+ * אוצריא יורה את שניהם על אותה לחיצה, אבל רק הראשון מטופס עם `selection`
+ * ב-d.ts הרשמי — והעדפת `sourceSelectedText` על הטקסט המרונדר תלויה בו.
  */
 export interface SendToDocumentEvent {
   itemId?: string;
@@ -431,28 +497,17 @@ export interface SendToDocumentEvent {
 }
 
 /**
- * רושמת את הפריט בתפריט ההקשר של הקורא.
+ * רושמת את הפריט מ-JS — מסלול הגיבוי שמתואר ב-`SEND_TO_DOCUMENT_ITEM`.
  *
- * `openPlugin: true` הוא הלב: בלעדיו הלחיצה מגיעה רק לתוסף שכבר פתוח, וזה
- * הפוך מהתרחיש — המשתמש נמצא בקורא, לא בעורך. איתו אוצריא מעבירה ללשונית
- * התוסף ומוסרת את האירוע גם אם הדף נטען רק עכשיו.
- *
- * `contexts` אינו מוגדר בכוונה, ולכן הפריט מופיע בשני הקשרי הבחירה — בחירת
- * טקסט ובחירת צורה בעמוד — כפי שהיה ברישום המקורי של ה-SDK.
+ * אין הסרה מקבילה, ובכוונה: אוצריא מסירה את רישומי המופע לבד ב-dispose של
+ * הגשר (`removeInstance`), כך שהסרה מ-JS אינה מוסיפה דבר — ורק מסתכנת. אם
+ * הרישום כאן נכשל ואין עותק ברמת המופע, `remove` נופל לרשימה שברמת התוסף,
+ * כלומר מוחק דווקא את הפריט ההצהרתי שאמור לשרוד את סגירת הלשונית.
  */
 export function registerSendToDocumentItem(): Promise<ReaderResult> {
   return callAck('reader.addContextMenuItem', 'רישום פריט תפריט ההקשר נכשל', {
-    id: SEND_TO_DOCUMENT_ITEM_ID,
-    label: 'שלח למסמך',
-    icon: 'document_text_24_regular',
-    openPlugin: true,
-  });
-}
-
-/** מסירה את הפריט. משמשת בפירוק, ובבדיקות. */
-export function unregisterSendToDocumentItem(): Promise<ReaderResult> {
-  return callAck('reader.removeContextMenuItem', 'הסרת פריט תפריט ההקשר נכשלה', {
-    id: SEND_TO_DOCUMENT_ITEM_ID,
+    ...SEND_TO_DOCUMENT_ITEM,
+    contexts: [...SEND_TO_DOCUMENT_ITEM.contexts],
   });
 }
 
