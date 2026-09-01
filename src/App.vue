@@ -183,6 +183,7 @@
     <MacrosDialog
       :is-open="isMacrosOpen"
       :handle="activeMacros"
+      :document-vba="documentVba"
       @close="isMacrosOpen = false"
       @status="setStatus"
     />
@@ -342,7 +343,16 @@ import {
   applyHebrewPaperSize,
 } from './engine/document-defaults';
 import type { SuperDoc } from 'superdoc';
-import { DOCX_MIME, exportDocx, docxFileName } from './engine/export';
+import {
+  DOCX_MIME,
+  documentFileName,
+  exportDocx,
+  resolveSaveExtension,
+  retypeBlob,
+  stripWordExtension,
+  type WordExtension,
+} from './engine/export';
+import { NO_VBA, type DocumentVba } from './engine/vba-import';
 import { exportPdfDocument, pdfSuggestedName, printDocument } from './engine/print';
 import { downloadBlob } from './host/download';
 import {
@@ -494,6 +504,24 @@ provide(ACTIVE_MACROS, activeMacros);
 
 /** דיאלוג ניהול המאקרו (Alt+F8). */
 const isMacrosOpen = ref(false);
+
+/**
+ * המאקרו של Word שכבר במסמך — לקריאה בלבד (engine/vba-import.ts).
+ *
+ * נקרא בשלב המקדים, שם הבייטים כבר בזיכרון, ומתאפס בכל פתיחה: זו תכונה של
+ * **המסמך**, לא של ה-session של המאקרו, ולכן היא אינה יושבת ב-`activeMacros`
+ * — שם מגיעים רק דברים שאפשר להריץ.
+ */
+const documentVba = shallowRef<DocumentVba>(NO_VBA);
+
+/**
+ * הסיומת שתחתה המסמך יישמר.
+ *
+ * נגזרת מסיומת המקור ומקיומו של חלק מאקרו בחבילה, ולא קבועה `docx`: קובץ עם
+ * `vbaProject` שנשמר כ-`docx` הוא קובץ ש-Word מתלונן עליו. ראו
+ * `resolveSaveExtension` ב-engine/export.ts.
+ */
+const saveExtension = shallowRef<WordExtension>('docx');
 
 /**
  * שני המטפלים מחזירים „האם טופל”, בשביל מסלול הקיצורים: בלי מסמך פתוח אין
@@ -801,10 +829,15 @@ provide(COMMAND_REPORTER, reportCommand);
  */
 function initSaveCoordinator(getSession: () => DocumentSession): SaveCoordinator {
   return createSaveCoordinator({
-    exportDocument: () => {
-      const active = getSession().swap.current;
+    exportDocument: async () => {
+      const session = getSession();
+      const active = session.swap.current;
       if (!active) throw new Error('אין מסמך פתוח');
-      return exportDocx(active.superdoc);
+      // ה-MIME הוא מה שנשלח כ-`Content-Type` בכתיבה, ו-`superdoc.export`
+      // מסמן תמיד `docx`. מסמך עם מאקרו היה מוצהר לא נכון למי שקורא את
+      // ההצהרה — ראו `retypeBlob`. הסיומת נקראת מהטאב הזה ולא מה-ref המוצג:
+      // שמירה אוטומטית של טאב ברקע רצה כאן, על המסמך שלו.
+      return retypeBlob(await exportDocx(active.superdoc), sessionSaveExtension(session));
     },
     beginWrite: (size) => beginBinaryWrite(size),
     upload: uploadBytes,
@@ -813,7 +846,11 @@ function initSaveCoordinator(getSession: () => DocumentSession): SaveCoordinator
       commitUserFileWrite({
         writeToken: input.writeToken,
         targetToken: input.targetToken,
-        suggestedName: input.suggestedName ?? getSession().ui.title,
+        // הנפילה-לאחור נושאת סיומת גם היא: מסלול שלא העביר `suggestedName`
+        // (שמירה אוטומטית) אינו אמור להציע לכתוב מסמך מאקרו בשם בלי סיומת.
+        suggestedName:
+          input.suggestedName ??
+          documentFileName(sessionDisplayTitle(getSession()), sessionSaveExtension(getSession())),
         title: 'שמירת המסמך',
       }),
     onStateChange: (snapshot) => {
@@ -1008,6 +1045,8 @@ function stashActiveInto(session: DocumentSession): void {
     styleGallery: styleGallery.value,
     engineFontSlice: engineFontSlice.value,
     readoutSelection: readoutSelection.value,
+    documentVba: documentVba.value,
+    saveExtension: saveExtension.value,
   };
   swap = null;
   save = null;
@@ -1051,6 +1090,8 @@ function restoreFromSession(session: DocumentSession): void {
   styleGallery.value = ui.styleGallery;
   engineFontSlice.value = ui.engineFontSlice;
   readoutSelection.value = ui.readoutSelection;
+  documentVba.value = ui.documentVba;
+  saveExtension.value = ui.saveExtension;
 
   swap = session.swap;
   save = session.save;
@@ -1191,7 +1232,7 @@ async function openDocumentInto(
   // החוט הראשי, ומשם אין חזרה — גם `OPEN_TIMEOUT_MS` אינו יכול לירות. ראו
   // engine/docx-preflight.ts. השלב הזה אינו יכול להיכשל: הוא מחזיר את המקור
   // כמות שהוא בכל מקרה שאינו „מצאתי בדיוק את הערך הזה”.
-  const { source, fontTable } = await preflightSource(options.draft ?? file?.url);
+  const { source, fontTable, vba } = await preflightSource(options.draft ?? file?.url);
   // „דלג” בזמן שהבייטים נקראו. הבדיקה כאן ולא רק לפני המנוע: שאר הפונקציה
   // כותבת למצב של המעטפת — כותרת, יעד שמירה, רשומת ההפעלה — ופתיחה שהמשתמש
   // נטש אינה אמורה לכתוב שם דבר.
@@ -1574,7 +1615,12 @@ async function openDocumentInto(
     }
   });
 
-  title.value = file ? file.name.replace(/\.docx$/i, '') : 'מסמך חדש';
+  title.value = file ? stripWordExtension(file.name) : 'מסמך חדש';
+  // שני הדברים שהמסמך הזה מביא איתו, יחד: מה יש בו, ותחת איזו סיומת הוא
+  // נשמר. הסיומת נגזרת מהשם **ומהחבילה** — מסמך `.docx` שנושא חלק מאקרו
+  // (קורה) יישמר כ-`.docm`, אחרת Word יתלונן עליו.
+  documentVba.value = vba;
+  saveExtension.value = resolveSaveExtension(file?.name, vba.hasMacroPart);
   // זמן הטעינה הוא מדידת פיתוח ולא הודעה למשתמש: „נטען ב-473 מילישניות” תפס
   // את שורת המצב עד ההודעה הבאה. הוא נשמר — הוא מה שמסביר פתיחה איטית —
   // בלוג של אוצריא, במקום שבו מסתכלים על מדידות.
@@ -1583,9 +1629,18 @@ async function openDocumentInto(
   );
   setStatus('');
 
-  if (file && file.access !== 'readwrite') {
-    setStatus(`${title.value} — פתוח לקריאה; „שמור” יבקש מקום חדש`);
-  }
+  /* שורת המצב מציגה הודעה אחת, ולכן יש סדר עדיפות בין השתיים שיכולות להיאמר
+     כאן. „יש במסמך מאקרו שWord מריץ בפתיחה” קודמת ל„פתוח לקריאה”: הראשונה היא
+     מה שהמשתמש צריך לדעת על הקובץ שהוא פתח, והשנייה תתגלה לו בעצמה ברגע
+     שילחץ „שמור”. ספירת מודולים בלבד — הפחות דחוף — נאמרת רק כשאין השתקה
+     אחרת. */
+  const readOnlyNotice =
+    file && file.access !== 'readwrite'
+      ? `${title.value} — פתוח לקריאה; „שמור” יבקש מקום חדש`
+      : null;
+  if (vba.autoRun.length > 0 && vba.status) setStatus(vba.status);
+  else if (readOnlyNotice) setStatus(readOnlyNotice);
+  else if (vba.status) setStatus(vba.status);
 
   save?.reset(file && file.access === 'readwrite' ? { token: file.token, name: file.name } : null);
 
@@ -1712,14 +1767,19 @@ async function restoreDocumentView(
 
 async function onSave(forceSaveAs = false): Promise<void> {
   if (!swap?.current || !save) return;
-  const outcome = await save.saveNow({ forceSaveAs, suggestedName: title.value });
+  // ההצעה נושאת את הסיומת: זה מה שהמשתמש רואה בדיאלוג „שמור בשם”, וכאן נקבע
+  // אם מסמך המאקרו שלו יישאר `.docm`.
+  const outcome = await save.saveNow({
+    forceSaveAs,
+    suggestedName: documentFileName(title.value, saveExtension.value),
+  });
 
   if (outcome.status === 'failed') {
     setStatus(outcome.message, true);
     return;
   }
   if (outcome.status === 'saved') {
-    title.value = outcome.name.replace(/\.docx$/i, '') || title.value;
+    title.value = stripWordExtension(outcome.name) || title.value;
     // זוכר-ההפעלה אינו מעודכן כאן אלא ב-`onSaved` של הקואורדינטור: שם עוברות
     // גם השמירה האוטומטית וגם „לשמור לפני שפותחים אחר”, שאינן עוברות כאן.
     setStatus(`${title.value} נשמר`);
@@ -1874,8 +1934,9 @@ async function onExportDocx(): Promise<void> {
   const active = swap?.current;
   if (!active) return;
   try {
-    const blob = await exportDocx(active.superdoc);
-    downloadBlob(blob, docxFileName(title.value));
+    const extension = saveExtension.value;
+    const blob = retypeBlob(await exportDocx(active.superdoc), extension);
+    downloadBlob(blob, documentFileName(title.value, extension));
     setStatus(`${title.value} יוצא ל-Word`);
   } catch (error) {
     setStatus(error instanceof Error ? error.message : 'הייצוא נכשל', true);
@@ -1990,6 +2051,16 @@ function sessionDisplayTitle(session: DocumentSession): string {
 
 function sessionIsDirty(session: DocumentSession): boolean {
   return session === activeSession.value ? saveSnapshot.value.isDirty : session.ui.saveSnapshot.isDirty;
+}
+
+/**
+ * הסיומת שתחתיה הטאב הזה נשמר — מהתצוגה החיה אם הוא הפעיל, אחרת מתמונת
+ * המצב שלו. אותו דפוס כמו `sessionDisplayTitle`, ומאותו טעם: קואורדינטור
+ * השמירה של טאב ברקע רץ על **המסמך שלו**, ו-`saveExtension.value` מתאר את
+ * המסמך שמזדמן להיות מוצג באותו רגע.
+ */
+function sessionSaveExtension(session: DocumentSession): WordExtension {
+  return session === activeSession.value ? saveExtension.value : session.ui.saveExtension;
 }
 
 /** רצועת הטאבים האמיתית — אחד לכל `DocumentSession` פתוח, לפי סדר הפתיחה. */

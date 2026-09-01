@@ -323,6 +323,87 @@
           </p>
         </div>
 
+        <!-- ═══ מאקרו VBA שבמסמך ═══ -->
+        <div
+          v-else-if="section === 'vba'"
+          class="md-body"
+        >
+          <p
+            class="md-note md-note--warn"
+            role="note"
+          >
+            אלה מאקרו ה-VBA שכבר נמצאים במסמך. הם <strong>אינם מורצים כאן</strong>
+            — אין מנוע VBA בדפדפן — ונשמרים בקובץ כמות שהם. הקוד מוצג לעיון, כדי
+            שאפשר יהיה להעביר אותו למאקרו של העורך.
+          </p>
+
+          <p
+            v-for="(warning, index) in documentVba.warnings"
+            :key="index"
+            class="md-note md-note--warn"
+            role="alert"
+          >
+            {{ warning }}
+          </p>
+
+          <div
+            v-if="vbaModules.length > 0"
+            class="md-input-row"
+          >
+            <label
+              for="md-vba-module"
+              class="md-label"
+            >מודול:</label>
+            <select
+              id="md-vba-module"
+              v-model="vbaModuleName"
+              class="md-input"
+            >
+              <option
+                v-for="module in vbaModules"
+                :key="module.name"
+                :value="module.name"
+              >
+                {{ module.name }} — {{ moduleKindLabel(module.kind) }}
+              </option>
+            </select>
+          </div>
+
+          <div
+            v-if="selectedVbaModule"
+            class="md-input-row md-input-row--top"
+          >
+            <label
+              for="md-vba-source"
+              class="md-label"
+            >קוד:</label>
+            <textarea
+              id="md-vba-source"
+              class="md-textarea md-textarea--code"
+              rows="10"
+              dir="ltr"
+              readonly
+              spellcheck="false"
+              :value="selectedVbaModule.source"
+            />
+          </div>
+
+          <p
+            v-else-if="documentVba.hasMacroPart"
+            class="md-note"
+            role="note"
+          >
+            לא נקרא אף מודול מפרויקט המאקרו של המסמך.
+          </p>
+          <p
+            v-else
+            class="md-note"
+            role="note"
+          >
+            במסמך הזה אין מאקרו VBA.
+          </p>
+        </div>
+
         <!-- ═══ ייבוא/ייצוא ═══ -->
         <div
           v-else
@@ -416,6 +497,14 @@
             </button>
           </template>
 
+          <!--
+            „VBA במסמך” אינה מוסיפה דבר ל-footer — „סגור” בלבד. במפורש ולא
+            דרך ה-`v-else`: בלי הענף הזה הלשונית הייתה מקבלת את כפתורי
+            הייבוא/ייצוא של „ייבוא וייצוא”, כלומר כפתור „ייבא” על לשונית
+            שכל עניינה הוא שהקוד הזה אינו נכנס לשום מקום.
+          -->
+          <template v-else-if="section === 'vba'" />
+
           <template v-else>
             <button
               type="button"
@@ -436,8 +525,13 @@
             </button>
           </template>
 
+          <!--
+            `managesItems` ולא רשימת `!==`: כל לשונית חדשה שאינה מנהלת פריטים
+            של ה-kit הייתה מקבלת „מחק” בשקט. על „VBA במסמך” הכפתור הזה גם היה
+            שקר — אין שם מה למחוק, המאקרו שייכים לקובץ.
+          -->
           <button
-            v-if="section !== 'transfer'"
+            v-if="managesItems"
             type="button"
             class="md-btn"
             :disabled="!selectedId"
@@ -447,7 +541,7 @@
             מחק
           </button>
           <button
-            v-if="section !== 'transfer' && section !== 'recordings'"
+            v-if="managesItems && section !== 'recordings'"
             type="button"
             class="md-btn"
             @pointerdown.prevent
@@ -490,16 +584,22 @@
  * לא יופעל (הלקח של BookmarkDialog מול `normalizeBookmarkName`).
  */
 import { computed, ref, shallowRef, watch } from 'vue';
-import type { RecordedMacro, SavedScript, Snippet } from 'superdoc-macros';
+import type { RecordedMacro, SavedScript, Snippet, VbaModule } from 'superdoc-macros';
 import type { MacrosHandle } from '../../engine/macros';
+import { MODULE_KIND_LABEL, NO_VBA, type DocumentVba } from '../../engine/vba-import';
 
 const props = withDefaults(
   defineProps<{
     isOpen?: boolean;
     /** מערכת המאקרו של המסמך הפתוח, או `null` כשאין מסמך. */
     handle?: MacrosHandle | null;
+    /**
+     * מאקרו ה-VBA שכבר במסמך — לתצוגה בלבד. תכונה של המסמך ולא של ה-kit,
+     * ולכן prop נפרד: אין שום מסלול שמריץ אותם או שומר אותם כפריט.
+     */
+    documentVba?: DocumentVba;
   }>(),
-  { isOpen: false, handle: null }
+  { isOpen: false, handle: null, documentVba: () => NO_VBA }
 );
 
 const emit = defineEmits<{
@@ -512,20 +612,60 @@ const DIALOG_TITLE = 'ניהול מאקרו';
 const SNIPPET_TEXT_PLACEHOLDER = 'הטקסט שיוכנס. אפשר לשלב {{date}}, {{time}}, {{selection}}';
 const SCRIPT_PLACEHOLDER = `await api.insertText('...');`;
 
-type Section = 'recordings' | 'snippets' | 'scripts' | 'transfer';
+type Section = 'recordings' | 'snippets' | 'scripts' | 'vba' | 'transfer';
 
 /**
  * לשונית הסקריפטים מוצגת רק כשהדגל דלוק (ראו SCRIPTS_FLAG_KEY ב-engine/macros.ts):
  * מאקרו כתובים נשארים feature flag עד שההקשחה תוכרע. הקלטות וקטעים — תמיד.
+ *
+ * לשונית „VBA במסמך” מוצגת רק כשיש מה להציג בה: היא מתארת את הקובץ שנפתח, ולא
+ * יכולת של העורך, ולשונית ריקה על מסמך רגיל הייתה רק מבלבלת.
  */
 const TABS = computed<ReadonlyArray<{ id: Section; title: string }>>(() => [
   { id: 'recordings', title: 'הקלטות' },
   { id: 'snippets', title: 'קטעי טקסט' },
   ...(props.handle?.scriptsEnabled ? [{ id: 'scripts' as const, title: 'סקריפטים' }] : []),
+  ...(props.documentVba.hasMacroPart ? [{ id: 'vba' as const, title: 'VBA במסמך' }] : []),
   { id: 'transfer', title: 'ייבוא וייצוא' },
 ]);
 
+/* ---------- VBA שבמסמך (קריאה בלבד) ---------- */
+
+const vbaModules = computed<readonly VbaModule[]>(() => props.documentVba.modules);
+
+/** המודול המוצג. `''` כשאין מודולים. */
+const vbaModuleName = ref('');
+
+function moduleKindLabel(kind: VbaModule['kind']): string {
+  return MODULE_KIND_LABEL[kind];
+}
+
+const selectedVbaModule = computed<VbaModule | null>(
+  () => vbaModules.value.find((module) => module.name === vbaModuleName.value) ?? null
+);
+
+/* מסמך אחר — מודולים אחרים. בלי האיפוס הבחירה הייתה מצביעה על מודול של המסמך
+   הקודם, והתיבה הייתה מוצגת ריקה בלי הסבר. */
+watch(
+  vbaModules,
+  (modules) => {
+    if (!modules.some((module) => module.name === vbaModuleName.value)) {
+      vbaModuleName.value = modules[0]?.name ?? '';
+    }
+  },
+  { immediate: true }
+);
+
 const section = ref<Section>('recordings');
+
+/**
+ * האם הלשונית הנוכחית מנהלת פריטים של ה-kit — כלומר האם „מחק”/„חדש” נכונים
+ * בה. „ייבוא וייצוא” ו„VBA במסמך” אינן: הראשונה עובדת על המצב כולו, והשנייה
+ * מציגה את הקובץ ואין בה מה למחוק.
+ */
+const managesItems = computed(
+  () => section.value === 'recordings' || section.value === 'snippets' || section.value === 'scripts'
+);
 
 /** הרשימות — תצלום מה-kit, מרוענן אחרי כל פעולה. ראו הערת הפתיחה. */
 const recordings = shallowRef<readonly RecordedMacro[]>([]);
@@ -961,6 +1101,17 @@ function onImport(): void {
   font-size: 11px;
   line-height: 1.4;
   color: var(--color-on-surface-variant);
+}
+
+/**
+ * הערה שיש לקרוא, לא רק לראות: „הקוד הזה אינו רץ כאן” ואזהרות פרויקט המאקרו.
+ * צבע הטקסט הרגיל ופס בקצה ההתחלה — לא אדום: אין כאן כשל ואין מה לתקן, יש
+ * עובדה על הקובץ. אדום היה קורא למשתמש לחפש בעיה שאינה קיימת.
+ */
+.md-note--warn {
+  padding-inline-start: 8px;
+  border-inline-start: 2px solid var(--color-outline);
+  color: var(--color-on-surface);
 }
 
 .md-error {

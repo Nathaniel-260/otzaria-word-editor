@@ -40,7 +40,12 @@ export async function pickDocxFile(
 
   const request = async (mode: 'read' | 'readwrite'): Promise<UserFile | null> => {
     const res = await call<PickResponse>('fs.pickUserFile', {
-      extensions: ['docx'],
+      // `docm` ולא רק `docx`: מסמך עם מאקרו הוא אותה חבילת OOXML בדיוק, והוא
+      // נפתח ונערך כאן כמו כל מסמך אחר — המאקרו עצמם אינם מורצים (אין מנוע
+      // VBA בדפדפן) אבל נשמרים כמות שהם, ואפשר לראות את הקוד שלהם ב-Alt+F8.
+      // בלי הסיומת הזאת הקובץ פשוט לא הופיע בבורר, ולמשתמש לא הייתה שום דרך
+      // לפתוח את המסמך שהוא עובד עליו שנים.
+      extensions: ['docx', 'docm'],
       access: mode,
       ...(title ? { title } : {}),
     });
