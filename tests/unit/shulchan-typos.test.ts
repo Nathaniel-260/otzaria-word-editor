@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import {
   applyEditsToText,
   defaultTyposOptions,
+  orderedEdits,
   ruleEdits,
   runTypos,
   typosSummaryText,
@@ -42,6 +43,36 @@ describe('shulchan/typos — הכללים הטהורים', () => {
   it('רווחים בצד הפנימי של סוגריים מתוקנים לשני הכיוונים', () => {
     expect(applyRule('bracketSpaces', 'שלום ( עולם ) טוב')).toBe('שלום (עולם) טוב');
     expect(applyRule('bracketSpaces', 'שלום( עולם )טוב')).toBe('שלום (עולם) טוב');
+  });
+
+  /* רווח יחיד בין פותח לסוגר נוגע בשניהם. שתי סריקות נפרדות היו תופסות אותו
+     פעמיים ומייצרות עריכות חופפות, וההחלה של השנייה הייתה **מוחקת את
+     הסוגר** — `"א ( ) ב"` יצא `"א ( ב"`. אלה גם שתי קריאות `doc.replace`,
+     כלומר התו נמחק מהמסמך עצמו ולא רק מהעותק המקומי. */
+  it('סוגריים שאין ביניהם אלא רווח — הרווח נמחק, שני התווים נשארים', () => {
+    expect(applyRule('bracketSpaces', 'א ( ) ב')).toBe('א () ב');
+    expect(applyRule('bracketSpaces', 'א [ ] ב')).toBe('א [] ב');
+    expect(applyRule('bracketSpaces', '( )')).toBe('()');
+    // ובלי רווחים בחוץ — הרווח שנמחק מבפנים חוזר משני הצדדים.
+    expect(applyRule('bracketSpaces', 'א( )ב')).toBe('א () ב');
+  });
+
+  it('אף כלל אינו מייצר עריכות חופפות', () => {
+    const samples = [
+      'א ( ) ב',
+      'א [ ] ב',
+      'א(  )ב',
+      'שלום  ,  עולם ..',
+      'א ( ב ) [ ג ] ד',
+      '  ( )  ',
+    ];
+    for (const rule of Object.keys(defaultTyposOptions()) as (keyof TyposOptions)[]) {
+      for (const text of samples) {
+        const edits = ruleEdits(rule, text);
+        // `orderedEdits` היא הרשת האחרונה; כאן נבדק שאין לה מה לתפוס.
+        expect(orderedEdits(edits), `${rule}: ${text}`).toHaveLength(edits.length);
+      }
+    }
   });
 
   it('רווחי קצה פסקה נמחקים', () => {

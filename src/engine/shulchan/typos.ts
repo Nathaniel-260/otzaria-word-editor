@@ -107,6 +107,43 @@ function swapSpaceAfter(text: string, charClass: string): TextEdit[] {
   });
 }
 
+const BRACKET_OPENERS = '([';
+const BRACKET_CLOSERS = ')]';
+
+/** רווח או קצה פסקה — הצד ה„חיצוני” שאין טעם להוסיף אליו רווח נוסף. */
+function isEdgeOrSpace(char: string | undefined): boolean {
+  return char === undefined || char === ' ';
+}
+
+/**
+ * רווח שנוגע בצד הפנימי של סוגר עובר אל צידו החיצוני.
+ *
+ * פעם אחת על כל **רווח**, ולא שתי סריקות נפרדות של פותחים ושל סוגרים: רווח
+ * שנוגע בשניהם — `( )` — נתפס בשתיהן, ושתי העריכות שיצאו משם היו חופפות
+ * (`[2,4)` ו-`[3,5)`). ההחלה של השנייה על היסטים שהראשונה כבר הזיזה מחקה
+ * את הסוגר מהמסמך, ולא רק מהעותק המקומי: אלה שתי קריאות `doc.replace`.
+ * המעבר על הרווחים אינו יכול לייצר חפיפה — טווח של רווח אחד מגיע לכל היותר
+ * עד התו שאחריו, ותו יחיד אינו גם פותח וגם סוגר.
+ */
+function bracketSpaceEdits(text: string): TextEdit[] {
+  const edits: TextEdit[] = [];
+  for (let i = 0; i < text.length; i += 1) {
+    if (text[i] !== ' ') continue;
+    const afterOpener = BRACKET_OPENERS.includes(text[i - 1] ?? '\0');
+    const beforeCloser = BRACKET_CLOSERS.includes(text[i + 1] ?? '\0');
+    if (!afterOpener && !beforeCloser) continue;
+
+    const start = afterOpener ? i - 1 : i;
+    const end = beforeCloser ? i + 2 : i + 1;
+    const brackets = `${afterOpener ? text[i - 1] : ''}${beforeCloser ? text[i + 1] : ''}`;
+    // הרווח נמחק מבפנים וחוזר בחוץ — אבל רק כשאין שם כבר רווח או קצה פסקה.
+    const outerStart = afterOpener && !isEdgeOrSpace(text[start - 1]) ? ' ' : '';
+    const outerEnd = beforeCloser && !isEdgeOrSpace(text[end]) ? ' ' : '';
+    edits.push({ start, end, text: `${outerStart}${brackets}${outerEnd}` });
+  }
+  return edits;
+}
+
 /** העריכות של כלל אחד על טקסט בלוק אחד. מפתח הכלל ⟵ פונקציה טהורה. */
 export function ruleEdits(rule: keyof TyposOptions, text: string): TextEdit[] {
   switch (rule) {
@@ -124,15 +161,8 @@ export function ruleEdits(rule: keyof TyposOptions, text: string): TextEdit[] {
     }
     case 'manyDots':
       return collectRegexEdits(text, /\.{4,}/g, () => '...');
-    case 'bracketSpaces': {
-      const closers = swapSpaceAfter(text, ')\\]');
-      const openers = collectRegexEdits(text, /([([]) /g, (match) => {
-        const before = text[match.index - 1];
-        if (before === undefined || before === ' ') return match[1]!;
-        return ` ${match[1]!}`;
-      });
-      return [...closers, ...openers];
-    }
+    case 'bracketSpaces':
+      return bracketSpaceEdits(text);
     case 'paragraphEdgeSpaces': {
       const edits: TextEdit[] = [];
       const leading = /^ +/.exec(text);
@@ -157,10 +187,33 @@ export function ruleEdits(rule: keyof TyposOptions, text: string): TextEdit[] {
   }
 }
 
-/** מחילה עריכות (שאינן חופפות) על מחרוזת — לעדכון העותק המקומי בין כלל לכלל. */
+/**
+ * העריכות בסדר ההחלה — מהאחרונה לראשונה, כך שההיסטים של המוקדמות נשארים
+ * תקפים אחרי כל החלה — ובלי חפיפות.
+ *
+ * הרשת הזאת אינה אמורה לתפוס דבר: כל כלל מייצר עריכות זרות זו לזו. היא כאן
+ * מפני שמחיר החפיפה אינו „תוצאה מוזרה” אלא תו שנמחק מהמסמך — שתי קריאות
+ * `doc.replace`, והשנייה חלה על היסטים שהראשונה כבר הזיזה. תיקון שלא חל
+ * עדיף על סוגר שנעלם.
+ */
+export function orderedEdits(edits: readonly TextEdit[]): TextEdit[] {
+  const kept: TextEdit[] = [];
+  let lowestStart = Number.POSITIVE_INFINITY;
+  for (const edit of [...edits].sort((a, b) => b.start - a.start)) {
+    if (edit.end > lowestStart) {
+      console.warn('[otzaria-word] עריכה חופפת דולגה בתיקון השגיאות', edit);
+      continue;
+    }
+    kept.push(edit);
+    lowestStart = edit.start;
+  }
+  return kept;
+}
+
+/** מחילה עריכות על מחרוזת — לעדכון העותק המקומי בין כלל לכלל. */
 export function applyEditsToText(text: string, edits: readonly TextEdit[]): string {
   let result = text;
-  for (const edit of [...edits].sort((a, b) => b.start - a.start)) {
+  for (const edit of orderedEdits(edits)) {
     result = result.slice(0, edit.start) + edit.text + result.slice(edit.end);
   }
   return result;
@@ -243,10 +296,12 @@ export async function runTypos(host: ShulchanTarget, options: TyposOptions): Pro
     for (const block of blocks) {
       if (!alive.has(block.blockId)) continue;
       const text = texts.get(block.blockId) ?? '';
-      const edits = ruleEdits(rule, text);
+      // רשימה אחת לשני הצדדים: מה שנשלח למנוע ומה שהעותק המקומי מקבל חייבים
+      // להיות אותן עריכות בדיוק, אחרת הכלל הבא מחשב על טקסט שאינו במסמך.
+      const edits = orderedEdits(ruleEdits(rule, text));
       if (edits.length === 0) continue;
 
-      for (const edit of [...edits].sort((a, b) => b.start - a.start)) {
+      for (const edit of edits) {
         const outcome = await replaceRange(host, textTarget(block.blockId, edit.start, edit.end), edit.text, FAILED);
         if (!outcome.ok) return { ok: false, message: outcome.message, fixes, removedParagraphs };
         fixes += 1;
