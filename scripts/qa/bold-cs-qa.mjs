@@ -23,6 +23,21 @@
  * ובקרה שלישית שאינה פחות חשובה: המסמך **לפני** ההחדרה חייב להישאר דק. שער
  * שמדגיש הכול היה עובר את שני הראשונים ומשקר.
  *
+ * ## שני מקרים שאינם על המסך
+ *
+ * **מעקב שינויים.** `w:bCs` מופיע גם בתוך `w:rPrChange`, שהוא העיצוב שהיה
+ * *לפני* שינוי מסומן. המסך אינו יכול להוכיח שלא נגענו שם — היסטוריה אינה
+ * מרונדרת בין כה וכה — ולכן המקרה הזה נמדד ב**ייצוא**: אחרי סבב שלם, ה-
+ * `rPrChange` חייב לצאת בדיוק כפי שנכנס, בלי `w:b` שהוזרק לתוכו.
+ *
+ * הספירה היא **גם בכניסה וגם ביציאה**, ולא ביציאה בלבד. „אפס בייצוא” נראה
+ * בדיוק כמו „המנוע מחק את ההיסטוריה” וגם כמו „ההזרקה לא קרתה”, ומדידה שאינה
+ * מבדילה ביניהם דיווחה כאן פעם אחת על פער במנוע שלא היה קיים.
+ *
+ * **ההודעה למשתמש.** התיקון נכתב לתוך המסמך וייצא איתו בשמירה, ולכן שורת המצב
+ * אומרת זאת (COMPLEX_SCRIPT_BOLD_NOTICE). שער שמודד רק פיקסלים היה מרשה
+ * להודעה הזאת להיעלם בשקט.
+ *
  *   npm run build && node scripts/qa/bold-cs-qa.mjs [נתיב.docx]
  */
 import { readFileSync } from 'node:fs';
@@ -146,10 +161,31 @@ function writeZip(entries) {
   return Buffer.concat([...locals, centralBytes, eocd]);
 }
 
-/** ה-DOCX של המסמך שעל המסך, אחרי שהחלקים שנמסרו עברו את `edit`. */
-async function rebuild(app, edit) {
+/** חלקי ה-DOCX של המסמך שעל המסך, כמחרוזות. */
+async function exportedParts(app) {
   const base64 = await app.js('window.__qa.exportBase64()');
-  const entries = readZip(Buffer.from(base64, 'base64'));
+  const parts = {};
+  for (const entry of readZip(Buffer.from(base64, 'base64'))) {
+    parts[entry.name] = entry.bytes.toString('utf8');
+  }
+  return parts;
+}
+
+/** ה-DOCX של המסמך שעל המסך, כבייטים. */
+async function exportBuffer(app) {
+  return Buffer.from(await app.js('window.__qa.exportBase64()'), 'base64');
+}
+
+/**
+ * עותק של `buffer` שהחלקים שבו עברו את `edit`.
+ *
+ * **גוזר מ-buffer שנמסר ולא מהמסמך שעל המסך, וזה תוקן אחרי שנמדד:** כל מקרה
+ * כאן פותח מסמך, ולכן מקרה שגוזר „מה שפתוח כרגע” גוזר את התוצר של קודמו. כך
+ * שלב מעקב השינויים נבנה על מסמך שכבר נשא `bCs` בברירות המחדל מהשלב שלפניו,
+ * נצבע מודגש בצדק, והשער דיווח על „הדגשה שחלחלה מההיסטוריה” שלא הייתה.
+ */
+function injectInto(buffer, edit) {
+  const entries = readZip(buffer);
   let touched = 0;
   for (const entry of entries) {
     const before = entry.bytes.toString('utf8');
@@ -188,6 +224,21 @@ function injectDefaults(name, xml) {
     '<w:docDefaults>',
     '<w:docDefaults><w:rPrDefault><w:rPr><w:bCs/></w:rPr></w:rPrDefault>',
   );
+}
+
+/**
+ * `<w:bCs/>` **רק** בתוך `w:rPrChange` — כלומר בהיסטוריה של שינוי מסומן, ולא
+ * בעיצוב החי. `rPrChange` הוא האיבר האחרון ב-`CT_RPr`, ולכן הוא נדחף לסוף.
+ */
+const RPR_CHANGE =
+  '<w:rPrChange w:id="991" w:author="qa" w:date="2024-01-01T00:00:00Z">' +
+  '<w:rPr><w:bCs/></w:rPr></w:rPrChange>';
+
+function injectTrackedHistory(name, xml) {
+  if (name !== 'word/document.xml') return undefined;
+  return xml
+    .replace(/<\/w:rPr>/g, `${RPR_CHANGE}</w:rPr>`)
+    .replace(/<w:r>(?!<w:rPr)/g, `<w:r><w:rPr>${RPR_CHANGE}</w:rPr>`);
 }
 
 /* ------------------------------------------------------------------ */
@@ -270,6 +321,7 @@ async function main() {
     }
     await sleep(1_200);
 
+    const seeded = await exportBuffer(app);
     const plain = await lines(app);
     log('הוקלד:', JSON.stringify(plain.map((row) => `${row.text}=${row.weight}`)));
     if (plain.length === 0) {
@@ -281,13 +333,15 @@ async function main() {
     }
 
     /* -------- שני המסלולים שבהם `bCs` מגיע במסמכים אמיתיים -------- */
+    let statusAfterRepair = null;
     for (const [name, inject] of [
       ['bCs על הריצה', injectRunLevel],
       ['bCs על ברירות המחדל', injectDefaults],
     ]) {
-      const docx = await rebuild(app, inject);
+      const docx = injectInto(seeded, inject);
       await open(app, docx, 'bcs.docx');
       const rows = await lines(app);
+      if (statusAfterRepair === null) statusAfterRepair = await app.status();
       log(`${name}:`, JSON.stringify(rows.map((row) => `${row.text}=${row.weight}`)));
 
       if (rows.length === 0) report.stuck(name, 'המסמך נפתח בלי טקסט');
@@ -298,6 +352,73 @@ async function main() {
           `${rows.filter(isBold).length} מתוך ${rows.length} מודגשות — ` +
             `w:bCs אינו מגיע למסך: ${JSON.stringify(rows)}`,
         );
+    }
+
+    /* -------- ההודעה למשתמש: המסמך שלו שונה -------- */
+    log('שורת המצב אחרי התיקון:', JSON.stringify(statusAfterRepair));
+    if (!statusAfterRepair) {
+      report.stuck('הודעה למשתמש', 'שורת המצב לא נקראה');
+    } else if (statusAfterRepair.error) {
+      report.fail('הודעה למשתמש', `ההודעה הוצגה כשגיאה: „${statusAfterRepair.text}”`);
+    } else if ((statusAfterRepair.text ?? '').includes('הושלמה במסמך')) {
+      report.pass('הודעה למשתמש', `„${statusAfterRepair.text}”`);
+    } else {
+      report.fail(
+        'הודעה למשתמש',
+        `המסמך שונה ושורת המצב אינה אומרת זאת: „${statusAfterRepair.text ?? '—'}”`,
+      );
+    }
+
+    /* -------- מעקב שינויים: מה שבתוך `w:rPrChange` אינו נגוע -------- */
+    {
+      const docx = injectInto(seeded, injectTrackedHistory);
+      // נספר גם בכניסה: „אפס בייצוא” אומר משהו רק לצד מה שנכנס.
+      const injected = (
+        readZip(docx)
+          .find((entry) => entry.name === 'word/document.xml')
+          .bytes.toString('utf8')
+          .match(/<w:rPrChange/g) ?? []
+      ).length;
+      await open(app, docx, 'tracked.docx');
+      const rows = await lines(app);
+      log('מעקב שינויים על המסך:', JSON.stringify(rows.map((row) => `${row.text}=${row.weight}`)));
+
+      // ההיסטוריה אינה מרונדרת, ולכן המסך יכול להוכיח רק את חצי השאלה: שהדגשה
+      // שיושבת *רק* בהיסטוריה אינה מחלחלת לעיצוב החי.
+      if (rows.length === 0) {
+        report.stuck('מעקב שינויים — המסך', 'המסמך נפתח בלי טקסט');
+      } else if (rows.some(isBold)) {
+        report.fail(
+          'מעקב שינויים — המסך',
+          `הדגשה שיושבת רק ב-w:rPrChange חלחלה לעיצוב החי: ${JSON.stringify(rows)}`,
+        );
+      } else {
+        report.pass('מעקב שינויים — המסך', `${rows.length} שורות נשארו ב-weight ${rows[0].weight}`);
+      }
+
+      // וחצייה השני נמדד בייצוא: ה-`rPrChange` חייב לצאת כפי שנכנס.
+      const parts = await exportedParts(app);
+      const body = parts['word/document.xml'] ?? '';
+      const changes = body.match(/<w:rPrChange[^>]*>.*?<\/w:rPrChange>/gs) ?? [];
+      const poisoned = changes.filter((change) => /<w:b(?:\s[^>]*)?\/?>/.test(change));
+      log(`rPrChange: נכנסו ${injected}, יצאו ${changes.length}, מזוהמים ${poisoned.length}`);
+      if (changes.length === 0) {
+        report.skip(
+          'מעקב שינויים — הייצוא',
+          `${injected} רשומות w:rPrChange נכנסו ו-0 יצאו — המנוע לא שמר אותן בסבב, ` +
+            'ולכן אין כאן מה למדוד. נמדד 2→2, כלומר שינוי התנהגות במנוע',
+        );
+      } else if (poisoned.length > 0) {
+        report.fail(
+          'מעקב שינויים — הייצוא',
+          `w:b הוזרק לתוך ${poisoned.length} מתוך ${changes.length} רשומות היסטוריה: ${poisoned[0]}`,
+        );
+      } else {
+        report.pass(
+          'מעקב שינויים — הייצוא',
+          `${changes.length} רשומות w:rPrChange יצאו בלי w:b שהוזרק`,
+        );
+      }
     }
 
     /* -------- המסמך שדווח, כשנמסר -------- */
