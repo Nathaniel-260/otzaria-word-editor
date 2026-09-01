@@ -334,7 +334,7 @@ export interface Shortcut {
 | `Ctrl+1` / `Ctrl+2` / `Ctrl+5` | ריווח 1 / 2 / 1.5 | `line-height` |
 | `Ctrl+Shift+C` | העתקת עיצוב (מתג) | `copy-format` |
 
-**טסטים** — `tests/component/shortcuts-format.test.ts`:
+**טסטים** — *(אוחדו בפועל ל-`tests/component/shortcuts-core.test.ts`; הקובץ הנפרד שנקוב כאן לא נוצר.)*
 
 1. שמונה‑עשרה בדיקות (1‑18), אחת לכל צירוף: מזהה הפקודה וה‑payload.
 19. `Ctrl+]` מגדיל מ‑12 ל‑13, לא ל‑14 — הגודל נקרא מהמנוע ולא מנוחש.
@@ -451,7 +451,7 @@ export interface Shortcut {
   התנהגות ה‑WebView שהמשתמש מכיר. לזום יש פקד ייעודי בשורת המצב, ו‑Word עצמו
   אינו מגדיר לו קיצור.
 
-**טסטים** — `tests/component/shortcuts-review-view.test.ts`:
+**טסטים** — *(אוחדו בפועל ל-`tests/component/shortcuts-core.test.ts`.)*
 
 1. עשר בדיקות (1‑10), אחת לכל צירוף.
 11. `F3` כשדיאלוג החיפוש סגור — פותח אותו במקום ליפול.
@@ -482,7 +482,7 @@ export interface Shortcut {
 (`doc.styles.apply` מקבל `scope: 'docDefaults'` בלבד, כלומר משנה את המסמך
 כולו). קיצור לפעולה שאינה קיימת הוא בדיוק מה שהתוכנית באה לחסל.
 
-**טסטים** — `tests/component/shortcuts-otzaria.test.ts`:
+**טסטים** — *(אוחדו בפועל ל-`tests/component/shortcuts-core.test.ts`.)*
 
 1. שש בדיקות (1‑6), אחת לכל צירוף מול הכפיל של המאחז.
 7. `Ctrl+Shift+G` אינו נבלע על ידי `Ctrl+G`, ו‑`Ctrl+Shift+F` נשאר של
@@ -501,7 +501,7 @@ export interface Shortcut {
 **הדיווח:** „אני לוחץ Ctrl+Z ולא קורה כלום; כשהמקלדת באנגלית זה עובד.”
 
 **מה שנמדד** — לא בבדיקות אלא ב‑Chrome אמיתי מול שרת הפיתוח, בהקלדה בתוך
-המסמך (`scratchpad/undo-probe.mjs`): `document.activeElement` בזמן עריכה הוא
+המסמך (בפרובה חד-פעמית שלא נשמרה במאגר): `document.activeElement` בזמן עריכה הוא
 
 ```
 <textarea aria-label="Text composition input">   // 1px, בתוך .editor-stack
@@ -788,5 +788,7 @@ Windows הידני.
 | 55 | `Shift+F6` | מעבר לאזור הקודם | ניווט בממשק | `focus-prev-region` |
 | 56 | `Esc` | סגירת החלון הפתוח, או חזרה למסמך | ניווט בממשק | `escape` |
 
-סה״כ **56** רשומות (נכון למועד כתיבת הטבלה; ב‑31.8.26 יש ברג'יסטרי בפועל 58 —
-הרג'יסטרי הוא האמת, כאמור למעלה, ולא נסרקה מחדש הטבלה עצמה).
+סה״כ **56** רשומות (נכון למועד כתיבת הטבלה; ב‑1.9.26 יש ברג'יסטרי בפועל 61 —
+הרג'יסטרי הוא האמת, כאמור למעלה, ולא נסרקה מחדש הטבלה עצמה. החמישה שאינם
+בטבלה: `macro-record`, `macro-play`, `macro-manage`, `context-menu`,
+`context-menu-key`).
