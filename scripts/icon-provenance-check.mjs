@@ -55,7 +55,8 @@ const VARIANT = '_20_regular.svg';
  */
 /**
  * אייקונים שה-path data שלהם הוא של Microsoft, אבל **הסידור** שלו הוא של
- * התוסף: פיצול לשני `<path>` ו-`<g transform>` שמשקף אחד מהם.
+ * התוסף: `<g transform>` שעוטף אותו, ובמידת הצורך פיצול ל-`<path>` נפרדים
+ * כדי שהעטיפה תחול על חלק מהם.
  *
  * הם אינם בטבלת ההעתקים, כי השוואה byte-for-byte של המחרוזת כולה תיכשל
  * עליהם — ואינם בין החריגים, כי שום קו לא צויר כאן. מה שהשער מאמת עליהם הוא
@@ -63,8 +64,14 @@ const VARIANT = '_20_regular.svg';
  * כאן, מחזיר את המחרוזת של גליף המקור בדיוק.** כלומר סודר מחדש, לא צויר
  * מחדש — וזה ההבדל שקובע אם ה-MIT מכסה אותם.
  *
- * `order` הוא סדר החלקים ב-SVG שלנו מול סדרם במקור: `document_bullet_list`
- * פותח בתוכן וממשיך בדף, ואצלנו הדף ראשון (כדי שהתוכן יעטוף ב-`<g>`).
+ * `order` הוא סדר החלקים ב-SVG שלנו מול סדרם במקור. ב-`toc` הגליף כולו
+ * נכנס ל-`<g>` אחד ולכן הוא חלק יחיד, [0]; פיצול היה מזיז את הסדר.
+ *
+ * `transform` הוא מה שהופך את הסידור הזה לשינוי שנראה, והוא נבדק כמחרוזת
+ * מדויקת. בלי הבדיקה הזאת מחיקת ה-`<g>` מחזירה את הגליף כולו ל-LTR **בלי
+ * לשנות אף קו**, כלומר בלי ששרשור ה-`d` ירגיש — כל ה-PR מתבטל והשער עובר
+ * בירוק. באייקון שאינו נגזר transform אסור לגמרי, כדי שלא ייכנס אחד בלי
+ * שיירשם ויימדד.
  */
 const DERIVED = new Map([
   [
@@ -72,6 +79,7 @@ const DERIVED = new Map([
     {
       from: 'document_bullet_list',
       order: [0],
+      transform: 'translate(20 0) scale(-1 1)',
       why: 'הגליף כולו משוקף סביב x=10 — דף, קיפול ותבליטים — כמו text_bullet_list_rtl',
     },
   ],
@@ -182,6 +190,23 @@ for (const [list, label] of [
   }
 }
 
+// שער שני, וגם הוא אינו זקוק לרשת: ה-`transform` הוא הקוד היחיד שלנו באייקון
+// נגזר — הקווים הם של Microsoft — ולכן הוא נבדק כמחרוזת מדויקת, ואסור בכל
+// אייקון אחר. ראו את ההערה על DERIVED.
+for (const [name, raw] of icons) {
+  const found = [...raw.matchAll(/\stransform="([^"]+)"/g)].map((m) => m[1]);
+  const want = DERIVED.get(name)?.transform;
+  if (!want) {
+    if (found.length)
+      problems.push(
+        `${name}: transform="${found[0]}" באייקון שאינו נגזר — צריך להירשם ב-DERIVED כדי שיימדד`
+      );
+  } else if (found.length !== 1 || found[0] !== want) {
+    const got = found.length ? found.map((t) => `"${t}"`).join(', ') : 'אין';
+    problems.push(`${name}: ה-transform בקובץ הוא ${got}, וההצהרה היא "${want}"`);
+  }
+}
+
 const pkg = fetchPackage();
 if (!pkg.dir) {
   console.log(`\n⚠ אין גישה ל-npm registry — ההשוואה מול החבילה מדולגת (${pkg.error})`);
@@ -229,9 +254,10 @@ if (!pkg.dir) {
     // 1. שרשור ה-`d` שלנו לפי `order` מחזיר את ה-`d` של גליף המקור בדיוק.
     //    שינוי של תו אחד בקו — כלומר ציור מחדש — נופל כאן, וזה ההבדל שקובע
     //    אם ה-MIT מכסה את מה שנלקח.
-    // 2. יש `transform` ב-SVG. בלעדיו הנגזרת אינה נגזרת אלא **העתק**, ומקומה
-    //    בטבלת ההעתקים שבמסמך ולא ברשימה הזאת — רשימה שמרפה את ההשוואה
-    //    ה-byte-for-byte אסור לה לכסות אייקון שאינו זקוק להקלה.
+    // 2. ה-`transform` הוא בדיוק המחרוזת שנרשמה — וזה נבדק למעלה, בשער שאינו
+    //    זקוק לרשת, כי הוא הקוד היחיד שלנו כאן. בלי transform בכלל הנגזרת
+    //    אינה נגזרת אלא **העתק**, ומקומה בטבלת ההעתקים ולא ברשימה שמרפה את
+    //    ההשוואה ה-byte-for-byte.
     for (const [name, spec] of DERIVED) {
       const raw = icons.get(name);
       if (raw === undefined) continue;
@@ -245,8 +271,10 @@ if (!pkg.dir) {
         problems.push(`${name}: ${parts.length} חלקי path, ו-order מתאר ${spec.order.length}`);
         continue;
       }
-      if (!/\stransform="/.test(raw)) {
-        problems.push(`${name}: מוצהר כנגזרת ואין בו transform — זהו העתק, ומקומו בטבלה`);
+      // תמורה, ולא סתם אורך תואם: `order` שמפספס חלק ייפול בהשוואה למטה
+      // בהודעה „הקווים שונו”, שמאשימה את הדבר הלא נכון.
+      if (new Set(spec.order).size !== parts.length) {
+        problems.push(`${name}: order אינו תמורה של ${parts.length} החלקים — [${spec.order}]`);
         continue;
       }
       const rebuilt = spec.order.map((i) => parts[i]).join('');
