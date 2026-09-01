@@ -19,6 +19,7 @@ import {
 } from '../paragraph-format';
 import { firstWordLength } from './first-word';
 import {
+  inParagraphsText,
   readResolvedBody,
   resolvedFontAt,
   scopedBlocks,
@@ -68,7 +69,9 @@ export interface LineSpacingResult {
 
 export function lineSpacingSummaryText(result: LineSpacingResult, removed: boolean): string {
   if (result.updated === 0) return 'לא נמצאו פסקאות לעדכון';
-  return removed ? `מרווח השורות הוחזר ל„מרובה” ב-${result.updated} פסקאות` : `נקבע מרווח „בדיוק” ב-${result.updated} פסקאות`;
+  return removed
+    ? `מרווח השורות הוחזר ל„מרובה” ${inParagraphsText(result.updated)}`
+    : `נקבע מרווח „בדיוק” ${inParagraphsText(result.updated)}`;
 }
 
 interface BlockSpacing {

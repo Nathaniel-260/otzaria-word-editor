@@ -247,8 +247,13 @@ export function conversionSummaryText(result: ConversionResult, direction: 'to-n
   if (result.converted === 0) {
     return direction === 'to-notes' ? 'לא נמצאו סוגריים להמרה' : 'לא נמצאו הערות להמרה';
   }
-  return direction === 'to-notes'
-    ? `הומרו ${result.converted} קטעים להערות שוליים`
+  if (direction === 'to-notes') {
+    return result.converted === 1
+      ? 'הומר קטע אחד להערת שוליים'
+      : `הומרו ${result.converted} קטעים להערות שוליים`;
+  }
+  return result.converted === 1
+    ? 'הומרה הערה אחת לטקסט בסוגריים'
     : `הומרו ${result.converted} הערות לטקסט בסוגריים`;
 }
 

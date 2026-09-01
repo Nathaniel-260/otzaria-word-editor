@@ -246,8 +246,16 @@ export interface TyposResult extends Record<string, unknown> {
 export function typosSummaryText(result: TyposResult): string {
   if (result.fixes === 0 && result.removedParagraphs === 0) return 'לא נמצאו שגיאות לתיקון';
   const parts: string[] = [];
-  if (result.fixes > 0) parts.push(`בוצעו ${result.fixes} תיקונים`);
-  if (result.removedParagraphs > 0) parts.push(`נמחקו ${result.removedParagraphs} פסקאות ריקות`);
+  if (result.fixes > 0) {
+    parts.push(result.fixes === 1 ? 'בוצע תיקון אחד' : `בוצעו ${result.fixes} תיקונים`);
+  }
+  if (result.removedParagraphs > 0) {
+    parts.push(
+      result.removedParagraphs === 1
+        ? 'נמחקה פסקה ריקה אחת'
+        : `נמחקו ${result.removedParagraphs} פסקאות ריקות`,
+    );
+  }
   return parts.join(', ');
 }
 

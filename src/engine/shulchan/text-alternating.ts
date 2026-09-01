@@ -80,5 +80,6 @@ export async function runTextAlternating(
 }
 
 export function alternatingSummaryText(result: AlternatingResult): string {
-  return result.bolded === 0 ? 'לא נמצאו קטעים להדגשה' : `הודגשו ${result.bolded} קטעים`;
+  if (result.bolded === 0) return 'לא נמצאו קטעים להדגשה';
+  return result.bolded === 1 ? 'הודגש קטע אחד' : `הודגשו ${result.bolded} קטעים`;
 }

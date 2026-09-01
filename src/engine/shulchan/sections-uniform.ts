@@ -234,4 +234,9 @@ export async function applyColumnsProfile(host: ShulchanTarget, profile: Columns
   return { ok: true };
 }
 
+/** „3 מקטעים” מול „מקטע אחד” — ליד כל פרופיל ברשימת הבחירה. */
+export function sectionCountText(count: number): string {
+  return count === 1 ? 'מקטע אחד' : `${count} מקטעים`;
+}
+
 export const UNIFORM_NO_ERRORS_TEXT = 'לא נמצאו שגיאות — כל המקטעים אחידים';

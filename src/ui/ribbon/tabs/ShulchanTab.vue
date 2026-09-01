@@ -198,6 +198,7 @@ import {
   pageProfileLabel,
   readColumnsProfiles,
   readPageProfiles,
+  sectionCountText,
   type ColumnsProfile,
   type PageProfile,
 } from '../../../engine/shulchan/sections-uniform';
@@ -369,7 +370,7 @@ async function onOpenPageUniform(): Promise<void> {
     uniformTitle.value = 'אחידות גודל עמוד ושוליים';
     uniformNote.value = 'נמצאו במסמך כמה פרופילים של גודל עמוד ושוליים. יש לבחור את הנכון — והוא יוחל על כל המקטעים:';
     uniformItems.value = result.groups.map(
-      (group) => `${pageProfileLabel(group.profile)} (${group.sections} מקטעים)`,
+      (group) => `${pageProfileLabel(group.profile)} (${sectionCountText(group.sections)})`,
     );
     uniformOpen.value = true;
   } finally {
@@ -396,7 +397,7 @@ async function onOpenColumnsUniform(): Promise<void> {
     uniformTitle.value = 'אחידות רוחב טורים';
     uniformNote.value = 'נמצאו במסמך כמה פרופילים של טורים. יש לבחור את הנכון — והוא יוחל על כל המקטעים מרובי-הטורים:';
     uniformItems.value = result.groups.map(
-      (group) => `${columnsProfileLabel(group.profile)} (${group.sections} מקטעים)`,
+      (group) => `${columnsProfileLabel(group.profile)} (${sectionCountText(group.sections)})`,
     );
     uniformOpen.value = true;
   } finally {

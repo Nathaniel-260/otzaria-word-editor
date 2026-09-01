@@ -141,8 +141,14 @@ describe('shulchan/typos — ריצה מול המסמך', () => {
     expect(result.message).toBeTruthy();
   });
 
-  it('נוסח הסיכום', () => {
+  it('נוסח הסיכום, ביחיד וברבים', () => {
     expect(typosSummaryText({ ok: true, fixes: 0, removedParagraphs: 0 })).toBe('לא נמצאו שגיאות לתיקון');
-    expect(typosSummaryText({ ok: true, fixes: 3, removedParagraphs: 1 })).toBe('בוצעו 3 תיקונים, נמחקו 1 פסקאות ריקות');
+    expect(typosSummaryText({ ok: true, fixes: 3, removedParagraphs: 2 })).toBe(
+      'בוצעו 3 תיקונים, נמחקו 2 פסקאות ריקות',
+    );
+    // „בוצעו 1 תיקונים” אינו עברית, וזה המקרה השכיח: תיקון בודד.
+    expect(typosSummaryText({ ok: true, fixes: 1, removedParagraphs: 1 })).toBe(
+      'בוצע תיקון אחד, נמחקה פסקה ריקה אחת',
+    );
   });
 });

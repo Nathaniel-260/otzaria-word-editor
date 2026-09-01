@@ -96,6 +96,17 @@ export function shulchanUi(host: ShulchanTarget): ShulchanUi | undefined {
   return (host as ShulchanHost | null | undefined)?.ui ?? undefined;
 }
 
+/**
+ * „ב-3 פסקאות” מול „בפסקה אחת”.
+ *
+ * „ב-1 פסקאות” אינו עברית, וזה בדיוק מה שהמשתמש רואה בשורת המצב אחרי
+ * הרצה שנגעה בפסקה אחת — המקרה השכיח כשמסמנים פסקה ומפעילים כלי.
+ * המקבילה ל-`moduleCountText` ב-engine/vba-import.ts.
+ */
+export function inParagraphsText(count: number): string {
+  return count === 1 ? 'בפסקה אחת' : `ב-${count} פסקאות`;
+}
+
 export const NO_DOCUMENT_TEXT = 'אין מסמך פתוח, או שהמסמך אינו תומך בפעולה';
 export const NO_SELECTION_TEXT = 'יש לסמן את הפסקאות לעיבוד, או להעמיד את הסמן בפסקה';
 

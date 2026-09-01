@@ -13,6 +13,7 @@
  */
 import {
   applyInline,
+  inParagraphsText,
   resolvedFontAt,
   readResolvedBody,
   scopedBlocks,
@@ -75,7 +76,12 @@ export interface FirstWordResult {
 
 export function firstWordSummaryText(result: FirstWordResult, removed: boolean): string {
   if (result.formatted === 0) return 'לא נמצאו פסקאות מתאימות (נדרשת פסקה עם יותר ממילה אחת)';
-  return removed ? `הוסר עיצוב מ-${result.formatted} פסקאות` : `עוצבה מילה ראשונה ב-${result.formatted} פסקאות`;
+  if (removed) {
+    return result.formatted === 1
+      ? 'הוסר עיצוב מפסקה אחת'
+      : `הוסר עיצוב מ-${result.formatted} פסקאות`;
+  }
+  return `עוצבה מילה ראשונה ${inParagraphsText(result.formatted)}`;
 }
 
 export async function applyFirstWordDesign(
