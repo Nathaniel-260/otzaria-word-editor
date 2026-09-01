@@ -407,7 +407,14 @@ import {
   type SessionState,
 } from './sessions/session-state';
 import { createSessionKeeper, type SessionKeeper } from './sessions/session-keeper';
-import { applyCaretAnchor, readCaretAnchor, type CaretAnchor } from './engine/caret-anchor';
+import {
+  applyCaretAnchor,
+  applyDocumentStartCaret,
+  hasTextCaret,
+  readCaretAnchor,
+  type CaretAnchor,
+} from './engine/caret-anchor';
+import { createTextCursorWatch } from './engine/text-cursor';
 import {
   deleteWorkspaceEntry,
   readWorkspaceBytes,
@@ -1083,6 +1090,7 @@ function createOpenEditorForSession(session: DocumentSession): OpenEditor {
         session.save.markDirty();
         session.metrics?.noteDocumentChanged();
         session.ruler?.noteDocumentChanged();
+        session.textCursor?.noteDocumentChanged();
         session.pageBorders?.noteDocumentChanged();
         session.lineNumbers?.noteDocumentChanged();
         session.formattingMarks?.noteDocumentChanged();
@@ -1523,6 +1531,25 @@ async function openDocumentInto(
   });
 
   /**
+   * סמן-הטקסט של העכבר (I-beam על כל עמודת הטקסט, כמו Word) — ראו
+   * engine/text-cursor.ts. פר-session כי הוא מאזין על ה-host של **המסמך
+   * הזה** וכותב עליו `style.cursor`; טאב ברקע ממשיך להחזיק מעקב משלו בלי
+   * להפריע לפעיל. `refreshNow` מיד — מסמך חדש צריך את הסמן הנכון מהרגע
+   * הראשון, לא אחרי העריכה הראשונה.
+   */
+  const sessionTextCursor = createTextCursorWatch({
+    host: paintedHost(editor.ui),
+    ui: editor.ui as ViewportSource,
+    readMargins: () => readPageMargins(editor.superdoc),
+  });
+  if (session) session.textCursor = sessionTextCursor;
+  sessionTextCursor.refreshNow();
+  editor.onDispose(() => {
+    sessionTextCursor.dispose();
+    if (session && session.textCursor === sessionTextCursor) session.textCursor = null;
+  });
+
+  /**
    * „גבולות עמוד” של ה-session: אותה תבנית בדיוק כמו הסרגל, ומאותה סיבה —
    * הוא קורא את המקטע של **המסמך הזה**, ולכן הוא נבנה ונפרק איתו. קריאה
    * מיידית מיד אחרי היצירה (`refreshNow`) ולא רק בהמתנה ל-`onUpdate` הראשון:
@@ -1810,7 +1837,23 @@ async function openDocumentInto(
   // ואחריו המקום שהמשתמש היה בו. **אחרי** המיקוד ולא לפניו: `focus` עם
   // `restoreSelection` מציב סמן משלו, ומי שרץ אחרון הוא זה שקובע איפה הוא
   // יושב.
-  await restoreDocumentView(editor, adapter, options.restore);
+  const caretRestored = await restoreDocumentView(editor, adapter, options.restore);
+
+  /*
+   * מסמך שנפתח בלי מקום שמור נפתח בלי סמן בכלל: `focus()` של המנוע ממקד את
+   * המקלדת אבל אינו מציב סמן כשאין בחירה קודמת, וכל הקלדה נבלעת עד קליק
+   * (ראו applyDocumentStartCaret). לכן — סמן בתחילת המסמך, כמו Word.
+   *
+   * אותם שערים כמו `focusOpenedDocument`, ומאותו טעם; ועוד אחד: בחירה
+   * שהמשתמש כבר הספיק להציב בקליק בזמן שהפתיחה רצה אינה נדרסת.
+   */
+  if (
+    !caretRestored &&
+    !isOutsideDocumentEditing(document.activeElement) &&
+    !hasTextCaret(editor.ui)
+  ) {
+    await applyDocumentStartCaret(editor.ui, editor.superdoc);
+  }
 
   // אחרון, ולא ליד `outcome.status === 'opened'`: מרגע ש-100% על המסך „דלג”
   // נעלם, ואילו שחזור התצוגה הוא עוד המתנה שהמשתמש רואה.
@@ -1862,13 +1905,15 @@ async function onSkipLoad(): Promise<void> {
  * כשל בשחזור אינו מגיע לשורת המצב: המשתמש ביקש לפתוח מסמך, לא לקפוץ למקום,
  * והודעת שגיאה על „לא מצאתי את השורה שהיית בה” היא רעש. הוא כן מגיע ללוג של
  * אוצריא, כי שם מודדים.
+ *
+ * מחזירה האם סמן הוצב — הקורא מציב סמן פתיחה בתחילת המסמך רק כשלא.
  */
 async function restoreDocumentView(
   editor: EditorSession,
   adapter: CommandAdapter,
   restore: OpenOptions['restore'],
-): Promise<void> {
-  if (!restore) return;
+): Promise<boolean> {
+  if (!restore) return false;
 
   if (restore.zoom !== null) {
     // `adapter` (של הטאב הזה, נקבע ב-openDocumentInto) ולא `commandAdapter.value`
@@ -1881,9 +1926,12 @@ async function restoreDocumentView(
     }
   }
 
-  if (restore.caret && !(await applyCaretAnchor(editor.ui, editor.superdoc, restore.caret))) {
+  if (!restore.caret) return false;
+  const caretApplied = await applyCaretAnchor(editor.ui, editor.superdoc, restore.caret);
+  if (!caretApplied) {
     console.info('[otzaria-word] מקום הסמן השמור לא נמצא במסמך שנפתח');
   }
+  return caretApplied;
 }
 
 async function onSave(forceSaveAs = false): Promise<void> {

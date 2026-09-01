@@ -33,6 +33,7 @@ import type {
   PageBordersReading,
 } from '../engine/page-setup';
 import type { FormattingMarksModel } from '../engine/formatting-marks';
+import type { TextCursorWatch } from '../engine/text-cursor';
 import type { FormattingMarksBlock } from '../engine/formatting-marks-layer';
 import type { CommandAdapter } from '../engine/command-adapter';
 import type { SearchAdapter, SearchState } from '../engine/search';
@@ -98,6 +99,8 @@ export interface DocumentSession {
   readonly keeper: SessionKeeper;
   metrics: DocMetricsAdapter | null;
   ruler: RulerModel | null;
+  /** סמן-הטקסט של העכבר על העמוד — ראו engine/text-cursor.ts. */
+  textCursor: TextCursorWatch | null;
   pageBorders: PageBorderModel | null;
   lineNumbers: LineNumberingModel | null;
   formattingMarks: FormattingMarksModel | null;
@@ -177,6 +180,7 @@ export function createDocumentSession(parts: DocumentSessionParts): DocumentSess
     keeper: parts.keeper,
     metrics: null,
     ruler: null,
+    textCursor: null,
     pageBorders: null,
     lineNumbers: null,
     formattingMarks: null,
