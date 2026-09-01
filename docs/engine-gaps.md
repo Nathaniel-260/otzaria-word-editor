@@ -283,17 +283,18 @@ supported by v2 yet”).
 **אינצ'ים** ב-API, twips ב-XML. גרשיים בתוך `style` מוברחים ל-`&quot;` —
 אין הזרקת XML.
 
-### מספור עמודים עברי — **אינו אפשרי**, בניגוד להערות השוליים
+### מספור עמודים עברי — היה בלתי אפשרי, ונסגר ב-2.10.0
 
-זה ההבדל המדויק מול `footnotes.configure`: שם `numFmt` נכתב גולמית ו-
-`'hebrew1'` היה מייצר `<w:numFmt w:val="hebrew1"/>` תקני (ולא נשלח רק מפני
-שהערך אינו בטיפוסים הציבוריים). כאן ה-union **נאכף בזמן ריצה**, ואין דרך
-ציבורית לכתוב `<w:pgNumType w:fmt="hebrew1"/>`. `SectionPageNumberingFormat`
-הוא שש אפשרויות בלבד, וכולן לטיניות.
+הפער נמדד על 2.8.0: ה-union **נאכף בזמן ריצה**, ולא הייתה דרך ציבורית לכתוב
+`<w:pgNumType w:fmt="hebrew1"/>` — `SectionPageNumberingFormat` היה שש
+אפשרויות לטיניות בלבד. זה ההבדל שהיה אז מול `footnotes.configure`, שבו
+`numFmt` נכתב גולמית.
 
-`readPageLayoutState` בכל זאת מסנן פורמט שאינו ב-union: מסמך שנוצר ב-Word
-עם מספור עברי **כן** מחזיר `format: 'hebrew1'` מ-`sections.list`, וטופס
-שהיה מציג אותו כערך נבחר היה נזרק באישור.
+**ב-superdoc@2.10.0 ה-union כולל `hebrew1` ו-`hebrew2`**, ואותה קריאה בדיוק
+נמדדה כמצליחה: `<w:pgNumType w:start="1" w:fmt="hebrew1"/>` ב-docx המיוצא.
+שני הפורמטים מוצעים בדיאלוג, נשלחים, וחוזרים מ-`sections.list` — ר'
+`PAGE_NUMBER_FORMATS` ב-`src/engine/page-setup.ts` ואת שתי הבדיקות
+(`tests/unit/page-setup.test.ts`, `tests/component/layout-group.test.ts`).
 
 ### ההפיכות נמדדה
 
