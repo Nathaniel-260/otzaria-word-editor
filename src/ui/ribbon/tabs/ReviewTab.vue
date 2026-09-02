@@ -6,8 +6,11 @@
         icon="proofing"
         label="בדיקת איות"
         variant="large"
-        tooltip="בדיקת איות בעברית — תתווסף עם המילון התורני, בשלב נפרד"
-        :disabled="true"
+        :tooltip="spellcheckTooltip"
+        :active="spellcheck.enabled.value"
+        :disabled="spellcheck.busy.value"
+        @pointerdown.prevent
+        @click="spellcheck.toggle()"
       />
     </RibbonGroup>
 
@@ -123,14 +126,18 @@
  * `viewing`, לא ב-`suggesting`) — וזה נכון: אי אפשר גם לחסום קלט וגם להשאיר
  * מעקב פעיל. הביטול משחזר את `'suggesting'`, לא רק את `enforced`.
  *
- * **שני פקדים מנוטרלים במפורש, ולא כפתור מת:**
- *   - „בדיקת איות” היא שלב שלם בתכנית (§13.2): ספק איות תורני, המרת המילון
- *     למודול נתונים, ו-offsets ב-UTF-16 שמכבדים ניקוד וטעמים. הקיצור `F7`
- *     שהוצג כאן לא היה רשום בשום מקום והוסר.
- *   - „תגובה חדשה” דורשת טקסט תגובה **וזהות מחבר קבועה מהגדרת משתמש מקומית**
- *     (§13.1). זהות המשתמש אינה קיימת עדיין בהגדרות, ותגובה בלי מחבר אינה
- *     תגובה. חצי מימוש כאן היה יוצר מערכת תגובות מקבילה — בדיוק מה שהתכנית
- *     אוסרת.
+ * **„בדיקת איות” היא מתג של שכבת התצוגה שלנו, לא פקודת מנוע.** אין למנוע
+ * פקודת איות ואין לו decorations שמותר לנו לקרוא להם, ולכן הסימון הוא שכבה
+ * מעל המסמך (ui/shell/SpellingOverlay.vue) והמצב מגיע מ-`SPELLCHECK`
+ * (composables/keys.ts) ולא מ-`useCommand`. הלחיצה הראשונה גם **מושכת את
+ * המילון** — נכס נפרד של 1.3MB (issue #25, engine/spellcheck-dictionary.ts) —
+ * ולכן `busy` מנטרל את הכפתור בזמן הטעינה במקום להשאיר אותו נראה-מת. הקיצור
+ * `F7` שהוצג כאן פעם לא היה רשום בשום מקום והוסר.
+ *
+ * **„תגובה חדשה” מנוטרלת במפורש, ולא כפתור מת:** היא דורשת טקסט תגובה
+ * **וזהות מחבר קבועה מהגדרת משתמש מקומית** (§13.1). זהות המשתמש אינה קיימת
+ * עדיין בהגדרות, ותגובה בלי מחבר אינה תגובה. חצי מימוש כאן היה יוצר מערכת
+ * תגובות מקבילה — בדיוק מה שהתכנית אוסרת.
  */
 import { computed, inject, ref, shallowRef, watch } from 'vue';
 import RibbonGroup from '../common/RibbonGroup.vue';
@@ -143,7 +150,13 @@ import {
   syncProtectionRuntime,
 } from '../../../engine/protection';
 import { ACTIVE_SUPERDOC } from '../../../engine/document-api';
-import { COMMAND_ADAPTER, COMMAND_REPORTER, type CommandReporter } from '../../../composables/keys';
+import {
+  COMMAND_ADAPTER,
+  COMMAND_REPORTER,
+  SPELLCHECK,
+  type CommandReporter,
+  type SpellcheckHandle,
+} from '../../../composables/keys';
 
 const acceptCmd = useCommand('acceptChange');
 const rejectCmd = useCommand('rejectChange');
@@ -152,6 +165,25 @@ const rejectAllCmd = useCommand('rejectAllChanges');
 const modeCmd = useCommand('document-mode');
 
 const isSuggesting = computed(() => modeCmd.value.value === 'suggesting');
+
+/* ------------------------------------------------------------------ */
+/* בדיקת איות תורנית                                                   */
+/* ------------------------------------------------------------------ */
+
+/** ברירת מחדל מנוטרלת: בהרכבת רכיב בלי המעטפת הכפתור פשוט אינו עושה כלום. */
+const spellcheckFallback: SpellcheckHandle = {
+  enabled: ref(false),
+  busy: ref(false),
+  toggle: () => {},
+};
+const spellcheck = inject(SPELLCHECK, spellcheckFallback);
+
+const spellcheckTooltip = computed(() => {
+  if (spellcheck.busy.value) return 'טוען את המילון התורני…';
+  return spellcheck.enabled.value
+    ? 'כיבוי בדיקת האיות התורנית'
+    : 'סימון מילים שאינן במילון התורני. לחיצה ימנית על מילה מסומנת מאפשרת להוסיף אותה למילון';
+});
 
 /* ------------------------------------------------------------------ */
 /* הגנת מסמך (גל 19)                                                   */

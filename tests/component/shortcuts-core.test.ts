@@ -137,6 +137,10 @@ vi.mock('../../src/host/settings', () => ({
   saveAutosaveEnabled: async () => {},
   loadRulerVisible: async () => false,
   saveRulerVisible: async () => {},
+  loadSpellcheckEnabled: async () => false,
+  saveSpellcheckEnabled: async () => {},
+  loadSpellcheckWords: async () => [],
+  saveSpellcheckWords: async () => {},
 }));
 
 vi.mock('../../src/host/otzaria-client', async (importOriginal) => ({

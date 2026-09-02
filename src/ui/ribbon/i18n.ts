@@ -440,8 +440,10 @@ const EN: Readonly<Record<string, string>> = {
   // ── לשונית „סקירה” ─────────────────────────────────────────────────
   'הגהה': 'Proofing',
   'בדיקת איות': 'Spelling Check',
-  'בדיקת איות בעברית — תתווסף עם המילון התורני, בשלב נפרד':
-    'Hebrew spelling check — will be added with the Torah dictionary, in a separate phase',
+  'טוען את המילון התורני…': 'Loading the Torah dictionary…',
+  'כיבוי בדיקת האיות התורנית': 'Turn off Torah spelling check',
+  'סימון מילים שאינן במילון התורני. לחיצה ימנית על מילה מסומנת מאפשרת להוסיף אותה למילון':
+    'Mark words that are not in the Torah dictionary. Right-click a marked word to add it to the dictionary',
   'תגובה חדשה': 'New Comment',
   'הוספת תגובה — תתווסף בשלב הבא, יחד עם זהות המחבר ופאנל התגובות':
     'Adding comments — coming in the next phase, together with author identity and the comments panel',

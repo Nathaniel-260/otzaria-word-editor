@@ -229,6 +229,10 @@ vi.mock('../../src/host/settings', () => ({
   saveSessionRecord: async (value: unknown) => {
     stub.persistedSessions.push(value);
   },
+  loadSpellcheckEnabled: async () => false,
+  saveSpellcheckEnabled: async () => {},
+  loadSpellcheckWords: async () => [],
+  saveSpellcheckWords: async () => {},
 }));
 
 // הייבוא **אחרי** ה-mocks במכוון (הם מורמים בכל מקרה, וזה הסדר שקורא נכון).

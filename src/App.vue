@@ -120,6 +120,13 @@
         :blocks="formattingMarksBlocks"
         :visible="formattingMarksVisible"
       />
+      <SpellingOverlay
+        ref="spellingOverlayRef"
+        :host="rulerHost"
+        :viewport-source="rulerViewport"
+        :dictionary="spellcheckDictionary"
+        :revision="spellcheckRevision"
+      />
     </div>
 
     <!-- תפריט הלחצן הימני. אחרי אזור המסמך ולפני הדיאלוגים, כמו ה-z-index שלו. -->
@@ -222,6 +229,7 @@ import VerticalRuler from './ui/shell/VerticalRuler.vue';
 import PageBorderOverlay from './ui/shell/PageBorderOverlay.vue';
 import LineNumberOverlay from './ui/shell/LineNumberOverlay.vue';
 import PilcrowOverlay from './ui/shell/PilcrowOverlay.vue';
+import SpellingOverlay from './ui/shell/SpellingOverlay.vue';
 import FindReplaceDialog from './ui/panels/FindReplaceDialog.vue';
 import AboutDialog from './ui/panels/AboutDialog.vue';
 import LinkDialog from './ui/panels/LinkDialog.vue';
@@ -236,10 +244,13 @@ import {
   DOCUMENT_GENERATION,
   FONT_OPTIONS,
   READOUT_SELECTION,
+  SPELLCHECK,
   STYLE_GALLERY,
 } from './composables/keys';
 import { ACTIVE_SUPERDOC } from './engine/document-api';
 import { readDocSelection } from './engine/doc-selection';
+import type { Dictionary } from './engine/spellcheck';
+import { loadTorahDictionary, rememberUserWord } from './engine/spellcheck-dictionary';
 import {
   buildCitationText,
   getReaderSelection,
@@ -377,6 +388,8 @@ import {
   saveAutosaveEnabled,
   loadRulerVisible,
   saveRulerVisible,
+  loadSpellcheckEnabled,
+  saveSpellcheckEnabled,
   loadSessionRecord,
   saveSessionRecord,
 } from './host/settings';
@@ -671,6 +684,96 @@ const lineNumbering = shallowRef<LineNumberingReading | null>(null);
 const formattingMarksBlocks = shallowRef<readonly FormattingMarksBlock[] | null>(null);
 /** מצב הפקד „הצג/הסתר סימני עיצוב", ל-`visible` של PilcrowOverlay.vue. */
 const formattingMarksVisible = ref(false);
+
+/* ------------------------------------------------------------------ */
+/* בדיקת איות תורנית                                                   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * המילון התורני, ל-ui/shell/SpellingOverlay.vue. `null` = הבדיקה כבויה, וזו
+ * גם ברירת המחדל: המילון הוא נכס נפרד של 1.3MB שנמשך רק כשמדליקים
+ * (engine/spellcheck-dictionary.ts).
+ *
+ * המילון אינו של הטאב אלא של התוסף — הוא נטען פעם אחת ומשותף לכל המסמכים,
+ * ולכן הוא כאן ולא ב-`DocumentSession`.
+ */
+const spellcheckDictionary = shallowRef<Dictionary | null>(null);
+const spellcheckBusy = ref(false);
+/**
+ * מונה שעולה אחרי עריכה. השכבה מודדת מחדש עליו — עריכה בתוך פסקה אינה מזיזה
+ * שום מלבן עמוד, ולכן מעקב הגיאומטריה לבדו אינו יורה עליה.
+ */
+const spellcheckRevision = ref(0);
+/** רק מה שנצרך מהשכבה — ראו `defineExpose` ב-SpellingOverlay.vue. */
+const spellingOverlayRef = shallowRef<{ wordAt: (x: number, y: number) => string | null } | null>(null);
+
+/**
+ * השקטת המדידה החוזרת אחרי עריכה. ארוכה מזו של הסרגל (150) בכוונה: קו גלי
+ * שמהבהב על כל הקשה מפריע לקריאה יותר משהוא עוזר, ו-Word עצמו מסמן מילה רק
+ * אחרי שעזבו אותה.
+ */
+const SPELLCHECK_DEBOUNCE_MS = 400;
+let spellcheckTimer: ReturnType<typeof setTimeout> | undefined;
+
+function noteSpellcheckChanged(): void {
+  if (!spellcheckDictionary.value) return;
+  clearTimeout(spellcheckTimer);
+  spellcheckTimer = setTimeout(() => {
+    spellcheckRevision.value += 1;
+  }, SPELLCHECK_DEBOUNCE_MS);
+}
+
+/**
+ * הדלקה/כיבוי. ההדלקה הראשונה מושכת את המילון, וכשל בה מדווח למשתמש ומשאיר
+ * את המתג כבוי — עורך שנופל בגלל בדיקת איות גרוע מעורך בלי בדיקת איות.
+ *
+ * ההעדפה נשמרת בשני הכיוונים, אבל **רק אחרי שההדלקה הצליחה**: משתמש שהמילון
+ * לא נטען אצלו לא אמור לפגוש את אותו כשל בכל עלייה.
+ */
+async function toggleSpellcheck(): Promise<void> {
+  if (spellcheckBusy.value) return;
+
+  if (spellcheckDictionary.value) {
+    spellcheckDictionary.value = null;
+    clearTimeout(spellcheckTimer);
+    await saveSpellcheckEnabled(false);
+    return;
+  }
+
+  spellcheckBusy.value = true;
+  try {
+    const dictionary = await loadTorahDictionary();
+    if (!dictionary) {
+      setStatus('טעינת המילון התורני נכשלה — בדיקת האיות נשארה כבויה');
+      return;
+    }
+    spellcheckDictionary.value = dictionary;
+    setStatus(`בדיקת איות תורנית פעילה — ${dictionary.size.toLocaleString('he-IL')} ערכים`);
+    await saveSpellcheckEnabled(true);
+  } finally {
+    spellcheckBusy.value = false;
+  }
+}
+
+provide(SPELLCHECK, {
+  enabled: computed(() => spellcheckDictionary.value !== null),
+  busy: spellcheckBusy,
+  toggle: () => void toggleSpellcheck(),
+});
+
+/**
+ * „הוסף למילון” מתפריט ההקשר. המילה נשמרת ב-`storage` (רשימת המשתמש בלבד,
+ * לא עותק של 102,465 הערכים), והסימון נמדד מחדש מיד — אחרת המילה שנוספה
+ * נשארת מסומנת עד הגלילה הבאה.
+ */
+function addWordToDictionary(word: string): void {
+  void (async () => {
+    const dictionary = spellcheckDictionary.value;
+    if (!(await rememberUserWord(dictionary, word))) return;
+    spellcheckRevision.value += 1;
+    setStatus(`„${word}” נוספה למילון`);
+  })();
+}
 /** ההעדפה שנשמרת בין הפעלות. ראו host/settings.ts. */
 let rulerPreference = false;
 
@@ -983,6 +1086,10 @@ function createOpenEditorForSession(session: DocumentSession): OpenEditor {
         session.pageBorders?.noteDocumentChanged();
         session.lineNumbers?.noteDocumentChanged();
         session.formattingMarks?.noteDocumentChanged();
+        // המילון משותף לכל הטאבים, ולכן זה מונה אחד ולא שדה של ה-session:
+        // מדידה חוזרת שנגרמה מעריכה בטאב אחר עולה כלום — `sameTextSegments`
+        // מזהה שהמסמך שעל המסך לא זז, ואין ציור מחדש.
+        noteSpellcheckChanged();
         session.keeper.noteChange();
       },
       onPaginationUpdate: (totalPages) => session.metrics?.notePaginationUpdate(totalPages),
@@ -2462,6 +2569,8 @@ const contextMenu = useContextMenu({
   isModalOpen: isModalDialogOpen,
   runAction: (action) => runShellAction(action),
   report: reportCommand,
+  misspelledWordAt: (at) => spellingOverlayRef.value?.wordAt(at.x, at.y) ?? null,
+  addToDictionary: addWordToDictionary,
 });
 
 /**
@@ -2889,6 +2998,14 @@ onMounted(async () => {
 
     // גם ההעדפה של הסרגל, ומאותו טעם: היא חלה על המסמך שנפתח מיד אחרי כאן.
     rulerPreference = await loadRulerVisible();
+
+    // בדיקת האיות — **לא** ב-await: משיכת המילון היא 1.3MB, והעלייה לא
+    // תמתין לה. מי שהדליק בהפעלה הקודמת יקבל את הסימון כשהמילון יגיע.
+    if (await loadSpellcheckEnabled()) {
+      void loadTorahDictionary().then((dictionary) => {
+        if (dictionary) spellcheckDictionary.value = dictionary;
+      });
+    }
 
     // הרשומה, לפני יצירת הטאב הראשון: נתיב הטיוטה של הזוכר תלוי במזהה הטאב,
     // וזה חייב להיות מזהה המסמך **שנטען עכשיו** — לא מזהה חדש שאין לו קשר

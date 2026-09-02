@@ -75,3 +75,21 @@ export const READOUT_SELECTION: InjectionKey<Ref<ReadoutSelection>> = Symbol('re
  * מסמך בדיוק נטען מחדש ברכיב (למשל לשונית שהוחלפה וחזרה).
  */
 export const DOCUMENT_GENERATION: InjectionKey<Ref<number>> = Symbol('documentGeneration');
+
+/**
+ * מתג בדיקת האיות התורנית, ל-`ui/ribbon/tabs/ReviewTab.vue`.
+ *
+ * מפתח משלו ולא `CommandId`: אין למנוע פקודת איות, וזו תכונה של שכבת התצוגה
+ * שלנו לגמרי (‏ui/shell/SpellingOverlay.vue). `busy` אינו קישוט — ההדלקה
+ * מושכת נכס של 1.3MB (engine/spellcheck-dictionary.ts), וכפתור שאינו אומר
+ * שהוא באמצע נראה שבור.
+ */
+export interface SpellcheckHandle {
+  /** האם הבדיקה דלוקה **ומילון טעון**. */
+  readonly enabled: Ref<boolean>;
+  /** המילון בטעינה כרגע. */
+  readonly busy: Ref<boolean>;
+  toggle: () => void;
+}
+
+export const SPELLCHECK: InjectionKey<SpellcheckHandle> = Symbol('spellcheck');

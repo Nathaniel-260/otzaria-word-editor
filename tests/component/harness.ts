@@ -51,7 +51,9 @@ import {
   DOCUMENT_GENERATION,
   FONT_OPTIONS,
   READOUT_SELECTION,
+  SPELLCHECK,
   STYLE_GALLERY,
+  type SpellcheckHandle,
 } from '../../src/composables/keys';
 import { ACTIVE_SUPERDOC } from '../../src/engine/document-api';
 import { ACTIVE_MACROS, type MacrosHandle } from '../../src/engine/macros';
@@ -1279,6 +1281,21 @@ export function mountUi(component: Component, options: HarnessOptions = {}): Har
   provide[READOUT_SELECTION as unknown as symbol] = readoutSelectionRef;
   const documentGenerationRef = shallowRef((documentGenerationCounter += 1));
   provide[DOCUMENT_GENERATION as unknown as symbol] = documentGenerationRef;
+
+  /**
+   * מתג בדיקת האיות. כפיל **מתפקד** ולא no-op: `toggle` מהפך את `enabled`
+   * בדיוק כמו המעטפת, וזה מה שמאפשר לשער „אין כפתור מת” (ribbon-tabs) למדוד
+   * את הכפתור הזה — לחיצה שאינה משנה דבר בכפיל הייתה נראית שם כפקד שבור.
+   * המילון עצמו אינו נטען כאן: זו הרכבת רכיב, ואין בה DOM של מסמך לסמן.
+   */
+  const spellcheckEnabled = ref(false);
+  provide[SPELLCHECK as unknown as symbol] = {
+    enabled: spellcheckEnabled,
+    busy: ref(false),
+    toggle: () => {
+      spellcheckEnabled.value = !spellcheckEnabled.value;
+    },
+  } satisfies SpellcheckHandle;
 
   const wrapper = mount(component, {
     props: options.props,
