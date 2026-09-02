@@ -49,6 +49,12 @@
  * `<w:b w:val="0"/>` **אינו** נהפך. היעדר `w:b` הוא מה ש-Word השאיר מאחור;
  * `w:b` מכובה הוא אמירה מפורשת של מי שכתב את הקובץ, ואין לנו רשות להפוך אותה.
  *
+ * וההיקף הרחב ביותר של אותו מחיר: `bCs` על `w:rPrDefault` ב-`styles.xml`
+ * מקבלת `w:b` בדיוק כמו כל `rPr` אחרת, ואז **כל** ריצה לטינית במסמך תהיה
+ * מודגשת ב-Word אחרי שמירה — ברירת מחדל של המסמך, לא כותרת. זה הכלל עצמו
+ * ולא חריג ממנו, וזה נאמר כאן כי הסקלה שונה. בקורפוס של 81 מסמכי Word אמיתיים
+ * אין אף אחד שנושא `bCs` דולקת ב-`rPrDefault`.
+ *
  * ## הכלל: לתקן, ולא לחסום
  *
  * כל כשל בדרך — zip שלא נקרא, חלק חסר, דחיסה שלא נתמכת — מחזיר את המקור כמות
@@ -57,26 +63,31 @@
  *
  * ## למה zip מלא ולא חיפוש-והחלפה על הבייטים
  *
- * החלקים דחוסים בתוך הארכיון, ולכן אי אפשר לגעת בהם בלי לפרוס אותם. מה שכן
- * נחסך: **אין כאן דוחס**. חלק שתוקן נכתב כרשומה לא-דחוסה (`STORED`), וכל שאר
- * החלקים מועתקים בייט-בבייט בדיוק כפי שהיו. כך הקובץ שנמסר למנוע זהה למקור
+ * החלקים דחוסים בתוך הארכיון, ולכן אי אפשר לגעת בהם בלי לפרוס אותם. כל חלק
+ * שלא תוקן מועתק בייט-בבייט בדיוק כפי שהיה, וכך הקובץ שנמסר למנוע זהה למקור
  * בכל מה שאינו התיקון עצמו.
  *
- * המחיר גדל מאז שהתיקון השני נכנס: `document.xml` הוא החלק הגדול במסמך, ומסמך
- * שיש בו `bCs` נמסר עם החלק הזה לא-דחוס. נמדד על מסמכים אמיתיים, ה-Blob שנמסר
- * למנוע גדל **פי 2 עד פי 4**:
+ * ### החלק שתוקן נכתב דחוס, ורק אחרי שהדחיסה אומתה
  *
- *     חזון-למועד-מעומד      890,825 → 1,787,858 בייט   (+101%)   648ms
- *     שבועת-הדיינין          27,959 →    69,679 בייט   (+149%)    78ms
- *     לכבוד ידידינו הנכבד    25,048 →   101,584 בייט   (+306%)    61ms
+ * הגרסה הראשונה כתבה את החלק המתוקן כרשומה לא-דחוסה (`STORED`), מהטעם ש„דוחס
+ * שמתנהג אחרת מהצפוי הוא באג שקט”. שני דברים שנמדדו הפכו את זה:
  *
- * הגבול הוא גודל הטקסט של המסמך עצמו, הוא נשלם פעם אחת בפתיחה, וזו זיכרון ולא
- * קובץ — הייצוא דוחס מחדש, ולכן `STORED` אינו מגיע לדיסק. ורק על מסמכים שיש
- * בהם מה לתקן: מסמך שאין בו `bCs` אינו נכתב מחדש בכלל. `STORED` הוא רשומת ZIP
- * חוקית לגמרי, ו-Word פותח קובץ כזה כרגיל.
+ * 1. **המחיר לא היה „פי 2 עד פי 4”.** על 81 מסמכים אמיתיים, 34 תוקנו, וסך
+ *    ה-Blob שנמסר למנוע גדל מ-68.8MB ל-359.7MB — **פי 5.2**, והגרוע פי 15.3:
+ *    מסמך של 4.3MB הגיע למנוע כ-35.9MB. חמישה מסמכים חצו 17MB. וזה בדיוק על
+ *    מסמכי הספרים שהם קהל היעד.
+ * 2. **הבאג „השקט” אינו שקט.** ה-CRC נמדד על הבייטים הלא-דחוסים, והמנוע פורס
+ *    את החלק מיד בפתיחה — deflate שגוי הוא כשל רועש בפתיחה, לא שינוי שקט
+ *    במסמך. ובכל זאת אין כאן הסתמכות על זה: הפלט נפרס בחזרה ומושווה למקור
+ *    (`deflateVerified`), ורק אז נכתב. דוחס שגוי נופל ל-`STORED`, לא למסמך.
  *
- * `CompressionStream` היה חוסך את הקילובייטים האלה, אבל דוחס שמתנהג אחרת
- * מהצפוי הוא באג שקט במסמך של המשתמש; רשומה לא-דחוסה אינה יכולה להשתבש.
+ * `CompressionStream('deflate-raw')` הוא אותו API שהקובץ הזה כבר משתמש בהופכי
+ * שלו, ועם אותה נפילה-חזרה כשהוא חסר או נכשל: `STORED`, שהוא רשומת ZIP חוקית
+ * לגמרי. אותם 59 `document.xml`: 337.1MB גלוי מול 25.9MB דחוס, ב-~41ms למסמך.
+ *
+ * זה זיכרון ולא קובץ — הייצוא דוחס מחדש מהמנוע, ולכן שום רשומה שנכתבה כאן
+ * אינה מגיעה לדיסק. ורק על מסמכים שיש בהם מה לתקן: מסמך שאין בו `bCs` אינו
+ * נכתב מחדש בכלל.
  */
 import { DOCX_MIME } from './export';
 import { NO_VBA, readDocumentVba, type DocumentVba } from './vba-import';
@@ -123,6 +134,9 @@ const ZIP_FLAG_ENCRYPTED = 0x0001;
 
 const METHOD_STORED = 0;
 const METHOD_DEFLATE = 8;
+
+/** „גרסה נדרשת” 2.0 — המינימום שרשומת deflate מצהירה עליו (APPNOTE 4.4.3.2). */
+const ZIP_VERSION_DEFLATE = 20;
 
 /** הסימן שהארכיון הוא ZIP64. אין כאלה ב-DOCX ריאלי, ולכן פשוט לא נוגעים בהם. */
 const ZIP64_MARKER_32 = 0xffffffff;
@@ -206,8 +220,10 @@ export function repairSettings(xml: string): string | null {
     if (current === null) {
       // אין `w:val` בכלל. הוא נדרש ב-`CT_TwipsMeasure`, ולכן זה מסמך שגוי —
       // אבל הכתיבה כאן היא בדיוק מה שהערך הנעדר אומר, ולכן היא גם התיקון.
-      // נכנס לפני ה-`/` של תג סוגר-עצמו, ובסוף המאפיינים בכל צורה אחרת.
-      const insertAt = attributesAt + attributes.length - (attributes.endsWith('/') ? 1 : 0);
+      // נכנס לפני ה-`/` של תג סוגר-עצמו, ובסוף המאפיינים בכל צורה אחרת — ואחרי
+      // שהרווח שלפני ה-`/` (אם יש) נדחף אל אחרי הערך, כדי לא לכתוב שניים.
+      const before = attributes.slice(0, attributes.length - (attributes.endsWith('/') ? 1 : 0));
+      const insertAt = attributesAt + before.trimEnd().length;
       return (
         xml.slice(0, insertAt) +
         ` ${prefix}:val="${DEFAULT_TAB_STOP_TWIPS}"` +
@@ -455,12 +471,29 @@ export function repairComplexScriptBold(xml: string): string | null {
   return parts.join('');
 }
 
+/**
+ * מה שנאמר למשתמש כשהדגשת כתב מורכב הושלמה.
+ *
+ * מנוסח כמצב ולא כשגיאה, ואומר גם את מה שיקרה אחר כך — השמירה תכתוב את
+ * ההשלמה לקובץ, וזה החלק שהמשתמש אינו יכול לנחש.
+ */
+export const COMPLEX_SCRIPT_BOLD_NOTICE =
+  'הדגשה שמוצגת ב-Word ולא הוצגה כאן הושלמה במסמך — שמירה תכתוב אותה לקובץ';
+
 /** תיקון אחד: על אילו חלקים הוא חל, מה הוא עושה, ומה נרשם ביומן כשעשה. */
 interface PartRepair {
   matches(name: string): boolean;
   /** `null` = אין מה לתקן בחלק הזה. */
   repair(xml: string): string | null;
   note(name: string): string;
+  /**
+   * מה שנאמר למשתמש בשורת המצב כשהתיקון הוחל, או `null` כשאין מה לומר לו.
+   *
+   * שדה מפורש ולא גזירה מנוסח ה-`note`: שורת המצב שהמשתמש רואה אינה אמורה
+   * להיות תלויה במחרוזת שנכתבת ליומן, ושינוי נוסח ביומן אינו אמור להעלים
+   * אותה בשקט.
+   */
+  notice: string | null;
 }
 
 /**
@@ -476,11 +509,16 @@ const REPAIRS: PartRepair[] = [
     repair: repairSettings,
     note: () =>
       `${SETTINGS_PART}: defaultTabStop מתוקן ל-${DEFAULT_TAB_STOP_TWIPS} — הערך שהיה מקפיא את המנוע`,
+    // `defaultTabStop` אינו נראה למשתמש בשום צורה — הוא רק ההפרש בין מסמך
+    // שנפתח למסמך שקופא — ושורת מצב שמדווחת על כל דבר היא שורת מצב שאיש אינו
+    // קורא.
+    notice: null,
   },
   {
     matches: (name) => CONTENT_PARTS.test(name),
     repair: repairComplexScriptBold,
     note: (name) => `${name}: <w:b/> הושלם לצד <w:bCs/> — בלעדיו הדגשת עברית אינה מגיעה למסך`,
+    notice: COMPLEX_SCRIPT_BOLD_NOTICE,
   },
 ];
 
@@ -510,15 +548,6 @@ export interface PreflightResult {
    */
   notice: string | null;
 }
-
-/**
- * מה שנאמר למשתמש כשהדגשת כתב מורכב הושלמה.
- *
- * מנוסח כמצב ולא כשגיאה, ואומר גם את מה שיקרה אחר כך — השמירה תכתוב את
- * ההשלמה לקובץ, וזה החלק שהמשתמש אינו יכול לנחש.
- */
-export const COMPLEX_SCRIPT_BOLD_NOTICE =
-  'הדגשה שמוצגת ב-Word ולא הוצגה כאן הושלמה במסמך — שמירה תכתוב אותה לקובץ';
 
 /**
  * מקור המסמך, אחרי תיקון. מחזירה את המקור עצמו כשאין מה לתקן — כולל כשהבדיקה
@@ -551,20 +580,26 @@ export async function preflightSource(
   // על בייטי המקור ולא על המתוקנים: התיקונים נוגעים לחלקי ה-XML של הגוף
   // והסגנונות, ואין טעם לקרוא את המאקרו מעותק שנכתב מחדש.
   const vba = await readDocumentVba(bytes);
-  const repaired = await preflightDocx(bytes);
+
+  let repaired: DocxRepair | null;
+  try {
+    repaired = await preflightDocx(bytes);
+  } catch (error) {
+    // „לתקן, ולא לחסום” גם כאן: הזריקה היחידה שנשארה בפנים היא הקצאה של
+    // ארכיון גדול מדי, ומסמך שהיה נפתח בלי השלב הזה ייפתח בלעדיו.
+    console.warn('[otzaria-word] הבדיקה המקדימה נכשלה, והמסמך נמסר כמות שהוא', error);
+    return { source, fontTable, vba, notice: null };
+  }
   if (!repaired) return { source, fontTable, vba, notice: null };
 
   // כל תיקון נרשם בנפרד: מי שיקרא את היומן על מסמך שהתנהג במפתיע צריך לדעת
   // **מה** שונה בו, ולא רק שנגענו.
   for (const note of repaired.notes) console.warn(`[otzaria-word] ${note}`);
-  // רק התיקון שנכתב לתוך המסמך מגיע למשתמש. `defaultTabStop` אינו נראה לו
-  // בשום צורה — הוא רק ההפרש בין מסמך שנפתח למסמך שקופא — ושורת מצב שמדווחת
-  // על כל דבר היא שורת מצב שאיש אינו קורא.
   return {
     source: new Blob([repaired.bytes], { type: DOCX_MIME }),
     fontTable,
     vba,
-    notice: repaired.notes.some((note) => note.includes('w:bCs')) ? COMPLEX_SCRIPT_BOLD_NOTICE : null,
+    notice: repaired.notice,
   };
 }
 
@@ -582,6 +617,11 @@ export interface DocxRepair {
   bytes: Bytes;
   /** שורה לכל תיקון שהוחל, לפי הסדר. ריק אינו אפשרי — בלי תיקון אין תוצאה. */
   notes: string[];
+  /**
+   * מה שיש לומר למשתמש, או `null` כשכל מה שתוקן אינו נראה לו. רק התיקון
+   * שנכתב לתוך המסמך מגיע לשורת המצב — ראו `PartRepair.notice`.
+   */
+  notice: string | null;
 }
 
 /**
@@ -599,7 +639,8 @@ export async function preflightDocx(bytes: Bytes): Promise<DocxRepair | null> {
   if (!entries) return null;
 
   const notes: string[] = [];
-  const patched = new Map<ZipEntry, Bytes>();
+  let notice: string | null = null;
+  const patched = new Map<ZipEntry, ZipEntry>();
 
   for (const entry of entries) {
     const repairs = REPAIRS.filter((candidate) => candidate.matches(entry.name));
@@ -614,25 +655,39 @@ export async function preflightDocx(bytes: Bytes): Promise<DocxRepair | null> {
       if (next === null) continue;
       xml = next;
       notes.push(repair.note(entry.name));
+      notice ??= repair.notice;
     }
-    if (xml !== original) patched.set(entry, new TextEncoder().encode(xml));
+    if (xml !== original) patched.set(entry, await rewriteEntry(entry, new TextEncoder().encode(xml)));
   }
 
   if (patched.size === 0) return null;
 
-  const rewritten = entries.map((entry) => {
-    const content = patched.get(entry);
-    if (!content) return entry;
-    return {
-      ...entry,
-      flags: entry.flags & ~ZIP_FLAG_DATA_DESCRIPTOR,
-      method: METHOD_STORED,
-      crc: crc32(content),
-      data: content,
-      uncompressedSize: content.byteLength,
-    };
-  });
-  return { bytes: writeZip(rewritten), notes };
+  const rewritten = entries.map((entry) => patched.get(entry) ?? entry);
+  return { bytes: writeZip(rewritten), notes, notice };
+}
+
+/**
+ * הרשומה של חלק שתוקן: דחוסה כשאפשר, ו-`STORED` כשלא.
+ *
+ * ה-CRC והגודל הלא-דחוס נמדדים על התוכן, ולא על מה שנכתב — כך ZIP מגדיר אותם,
+ * וכך גם קורא שפורס את הרשומה יודע לאמת אותה. הדחיסה היא **בונוס**, לא תנאי:
+ * אם `CompressionStream` חסר או נכשל, הרשומה נכתבת גלויה, ובשני המקרים הקורא
+ * מקבל בדיוק את אותם בייטים אחרי הפריסה.
+ *
+ * `versionNeeded` מורם ל-2.0 כשנכתב deflate: רשומה שהמקור שלה היה `STORED`
+ * (1.0) ועכשיו דחוסה מצהירה על מה שהיא. מקור שכבר היה 2.0 ומעלה נשאר כפי שהוא.
+ */
+async function rewriteEntry(entry: ZipEntry, content: Bytes): Promise<ZipEntry> {
+  const deflated = await deflateVerified(content);
+  return {
+    ...entry,
+    flags: entry.flags & ~ZIP_FLAG_DATA_DESCRIPTOR,
+    method: deflated ? METHOD_DEFLATE : METHOD_STORED,
+    versionNeeded: deflated ? Math.max(entry.versionNeeded, ZIP_VERSION_DEFLATE) : entry.versionNeeded,
+    crc: crc32(content),
+    data: deflated ?? content,
+    uncompressedSize: content.byteLength,
+  };
 }
 
 /** תוכן החלק כטקסט, או `null` כשאי אפשר לפרוס אותו. */
@@ -650,11 +705,57 @@ async function readEntryText(entry: ZipEntry): Promise<string | null> {
  * `null` כשהסביבה אינה מכירה אותו או כשהנתונים אינם נפרסים — שני מקרים שבהם
  * אין לנו מה לומר על המסמך, ולכן הוא נמסר למנוע כמות שהוא.
  */
-async function inflateRaw(data: Bytes): Promise<Bytes | null> {
+function inflateRaw(data: Bytes): Promise<Bytes | null> {
   const Decompression = (globalThis as { DecompressionStream?: typeof DecompressionStream })
     .DecompressionStream;
-  if (!Decompression) return null;
+  if (!Decompression) return Promise.resolve(null);
+  return pipeThrough(data, () => new Decompression('deflate-raw'), 'פריסת חלק מהמסמך נכשלה');
+}
 
+/**
+ * דחיסת deflate גולמי דרך `CompressionStream` — ההופכי של `inflateRaw`, באותו
+ * API ובאותה נפילה-חזרה.
+ *
+ * `null` כשהסביבה אינה מכירה אותו או כשהדחיסה נכשלה. בשני המקרים החלק נכתב
+ * `STORED`, ולכן זה אינו כשל של התיקון אלא רק ויתור על החיסכון בזיכרון.
+ */
+function deflateRaw(data: Bytes): Promise<Bytes | null> {
+  const Compression = (globalThis as { CompressionStream?: typeof CompressionStream })
+    .CompressionStream;
+  if (!Compression) return Promise.resolve(null);
+  return pipeThrough(data, () => new Compression('deflate-raw'), 'דחיסת חלק מהמסמך נכשלה');
+}
+
+/**
+ * דחיסה שאומתה: הפלט נפרס בחזרה ומושווה למקור לפני שהוא נכתב.
+ *
+ * זה מה שעונה על החשש שבגללו לא הייתה כאן דחיסה עד עכשיו — „דוחס שמתנהג אחרת
+ * מהצפוי הוא באג שקט במסמך של המשתמש”. אחרי סבב מלא של דחיסה-ופריסה עם
+ * השוואת CRC, דוחס שגוי אינו יכול להיות שקט: הוא נופל כאן ל-`STORED`. המחיר
+ * הוא פריסה נוספת של החלק, ובשביל `document.xml` של ספר זה עשרות מילישניות
+ * על פתיחה שממילא נמדדת במאות.
+ *
+ * `null` גם כשהדחיסה אינה קטנה מהמקור: רשומה גלויה קצרה יותר היא פשוט
+ * הרשומה הנכונה.
+ */
+async function deflateVerified(content: Bytes): Promise<Bytes | null> {
+  const deflated = await deflateRaw(content);
+  if (!deflated || deflated.byteLength >= content.byteLength) return null;
+
+  const restored = await inflateRaw(deflated);
+  if (!restored || restored.byteLength !== content.byteLength || crc32(restored) !== crc32(content)) {
+    console.warn('[otzaria-word] הדחיסה לא שחזרה את החלק בדיוק — נכתב לא-דחוס');
+    return null;
+  }
+  return deflated;
+}
+
+/** מעבירה בייטים דרך זרם-טרנספורמציה ואוספת את הפלט. `null` ומיומן על כשל. */
+async function pipeThrough(
+  data: Bytes,
+  transform: () => ReadableWritablePair<Uint8Array, BufferSource>,
+  failure: string,
+): Promise<Bytes | null> {
   try {
     const source = new ReadableStream<BufferSource>({
       start(controller) {
@@ -662,7 +763,7 @@ async function inflateRaw(data: Bytes): Promise<Bytes | null> {
         controller.close();
       },
     });
-    const reader = source.pipeThrough(new Decompression('deflate-raw')).getReader();
+    const reader = source.pipeThrough(transform()).getReader();
 
     const chunks: Uint8Array[] = [];
     let total = 0;
@@ -681,7 +782,7 @@ async function inflateRaw(data: Bytes): Promise<Bytes | null> {
     }
     return out;
   } catch (error) {
-    console.warn('[otzaria-word] פריסת חלק מהמסמך נכשלה', error);
+    console.warn(`[otzaria-word] ${failure}`, error);
     return null;
   }
 }

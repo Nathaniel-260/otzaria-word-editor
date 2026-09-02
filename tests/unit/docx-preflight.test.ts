@@ -28,6 +28,7 @@ import {
   DEFAULT_TAB_STOP_TWIPS,
   preflightDocx,
   preflightSource,
+  readDocxPart,
   repairComplexScriptBold,
   repairSettings,
   SETTINGS_PART,
@@ -136,6 +137,12 @@ function contains(haystack: Uint8Array, needle: Uint8Array): boolean {
 }
 
 const bytesOf = (text: string): Uint8Array<ArrayBuffer> => new TextEncoder().encode(text);
+
+/**
+ * החלק כטקסט, דרך אותו קורא שהמוצר משתמש בו. החלק המתוקן נכתב **דחוס**, ולכן
+ * חיפוש טקסט גלוי בבייטים של הארכיון היה מוכיח רק שהוא *לא* דחוס.
+ */
+const partText = (bytes: Uint8Array<ArrayBuffer>, name: string) => readDocxPart(bytes, name);
 
 /**
  * jsdom אינו מממש `Blob.arrayBuffer`, שקיים בכל דפדפן מ-2019. בלי ההשלמה הזאת
@@ -256,6 +263,24 @@ describe('repairSettings', () => {
     );
   });
 
+  it('רווח לפני `/>` אינו מוכפל כשהמאפיין מתווסף', () => {
+    expect(repairSettings('<w:settings><w:defaultTabStop /></w:settings>')).toBe(
+      `<w:settings><w:defaultTabStop w:val="${DEFAULT_TAB_STOP_TWIPS}" /></w:settings>`,
+    );
+  });
+
+  it('זוג פתיחה-סגירה בלי `w:val` מקבל אותו בפתיחה', () => {
+    expect(repairSettings('<w:defaultTabStop></w:defaultTabStop>')).toBe(
+      `<w:defaultTabStop w:val="${DEFAULT_TAB_STOP_TWIPS}"></w:defaultTabStop>`,
+    );
+  });
+
+  it('ערך שאינו מספר, ערך שגולש, וערך עם סימן פלוס', () => {
+    expect(repairSettings('<w:defaultTabStop w:val="abc"/>')).toContain(`"${DEFAULT_TAB_STOP_TWIPS}"`);
+    expect(repairSettings('<w:defaultTabStop w:val="1e999"/>')).toContain(`"${DEFAULT_TAB_STOP_TWIPS}"`);
+    expect(repairSettings('<w:defaultTabStop w:val="+720"/>')).toBeNull();
+  });
+
   it('הוראת עיבוד שיש בה האלמנט אינה נערכת', () => {
     const pi = '<w:settings xmlns:w="ns"><?tool <w:defaultTabStop w:val="0"/> ?></w:settings>';
     expect(repairSettings(pi)).toBeNull();
@@ -339,6 +364,33 @@ describe('repairComplexScriptBold', () => {
       '<w:styles xmlns:w="ns"><w:style w:type="paragraph" w:styleId="2"><w:name w:val="heading 2"/>' +
       '<w:rPr><w:rFonts w:cs="FrankRuehl DP"/><w:bCs/><w:szCs w:val="28"/></w:rPr></w:style></w:styles>';
     expect(repairComplexScriptBold(styles)).toContain('<w:b/><w:bCs/>');
+  });
+
+  it('`b` ו-`bCs` בצורת זוג פתיחה-סגירה נקראות כמו סוגרות-עצמן', () => {
+    expect(repairComplexScriptBold(runProps('<w:b></w:b><w:bCs/>'))).toBeNull();
+    expect(repairComplexScriptBold(runProps('<w:bCs></w:bCs>'))).toContain(
+      '<w:rPr><w:b/><w:bCs></w:bCs></w:rPr>',
+    );
+  });
+
+  it('ילד-הרחבה בתוך `rPr` (w14) אינו מבלבל את ההכנסה', () => {
+    const repaired = repairComplexScriptBold(
+      runProps(
+        '<w:bCs/><w14:textFill><w14:solidFill><w14:srgbClr w14:val="FF0000"/>' +
+          '</w14:solidFill></w14:textFill>',
+      ),
+    )!;
+    expect(repaired.split('<w:b/>')).toHaveLength(2);
+    expect(repaired).toContain('<w:rPr><w:b/><w:bCs/><w14:textFill>');
+  });
+
+  it('ריצה בתוך נוסחה (OMML): `m:rPr` אינה נוגעת, ו-`w:rPr` שלצדה מתוקנת', () => {
+    const math =
+      '<m:oMath><m:r><m:rPr><m:sty m:val="p"/></m:rPr><w:rPr><w:bCs/></w:rPr>' +
+      '<m:t>x</m:t></m:r></m:oMath>';
+    const repaired = repairComplexScriptBold(math)!;
+    expect(repaired).toContain('<m:rPr><m:sty m:val="p"/></m:rPr><w:rPr><w:b/><w:bCs/></w:rPr>');
+    expect(repaired.split('<w:b/>')).toHaveLength(2);
   });
 
   it('אינה נוגעת במסמך שאין בו `bCs` בכלל', () => {
@@ -592,9 +644,11 @@ describe('preflightDocx', () => {
     const repaired = await preflightDocx(original);
     expect(repaired).not.toBeNull();
 
-    // ההגדרות נכתבות כרשומה לא-דחוסה, ולכן הערך המתוקן נמצא בקובץ כטקסט גלוי.
-    expect(contains(repaired!.bytes, bytesOf(`<w:defaultTabStop w:val="${DEFAULT_TAB_STOP_TWIPS}"/>`))).toBe(true);
-    expect(contains(repaired!.bytes, bytesOf('<w:defaultTabStop w:val="0"/>'))).toBe(false);
+    const settings = await partText(repaired!.bytes, SETTINGS_PART);
+    expect(settings).toContain(`<w:defaultTabStop w:val="${DEFAULT_TAB_STOP_TWIPS}"/>`);
+    expect(settings).not.toContain('<w:defaultTabStop w:val="0"/>');
+    // והחלק המתוקן נכתב דחוס: הטקסט אינו גלוי בבייטים של הארכיון.
+    expect(contains(repaired!.bytes, bytesOf('<w:defaultTabStop'))).toBe(false);
 
     // החלקים האחרים עברו בייט-בבייט: גם הדחוס וגם זה שלא.
     expect(contains(repaired!.bytes, new Uint8Array(deflateRawSync(bytesOf('<Types/>'))))).toBe(true);
@@ -628,9 +682,13 @@ describe('preflightDocx', () => {
     );
 
     expect(repaired).not.toBeNull();
-    expect(contains(repaired!.bytes, bytesOf('<w:rPr><w:b/><w:bCs/></w:rPr>'))).toBe(true);
+    await expect(partText(repaired!.bytes, 'word/styles.xml')).resolves.toContain(
+      '<w:rPr><w:b/><w:bCs/></w:rPr>',
+    );
     expect(repaired!.notes).toHaveLength(2);
     expect(repaired!.notes[1]).toContain('word/styles.xml');
+    // ההודעה למשתמש היא של התיקון שנכתב לתוך המסמך, ולא נגזרת מנוסח היומן.
+    expect(repaired!.notice).toBe(COMPLEX_SCRIPT_BOLD_NOTICE);
     // ושוב על התוצאה: אין יותר מה לתקן, לא בהגדרות ולא בסגנונות.
     await expect(preflightDocx(repaired!.bytes)).resolves.toBeNull();
   });
@@ -650,6 +708,68 @@ describe('preflightDocx', () => {
 
     expect(repaired!.notes).toEqual([expect.stringContaining('defaultTabStop')]);
     expect(contains(repaired!.bytes, new Uint8Array(deflateRawSync(bytesOf(body))))).toBe(true);
+  });
+
+  it('תיקון שאינו נראה למשתמש אינו מפיק הודעה', async () => {
+    const repaired = await preflightDocx(buildZip([{ name: SETTINGS_PART, content: SETTINGS_WITH_ZERO }]));
+    expect(repaired!.notes).toHaveLength(1);
+    expect(repaired!.notice).toBeNull();
+  });
+
+  it('החלק המתוקן נכתב דחוס, וקטן מהמקור הגלוי', async () => {
+    // גוף גדול ובעל חזרות, כמו מסמך אמיתי: כאן ההפרש בין `STORED` לדחוס הוא
+    // ההפרש שנמדד על ספרים — פי 5 עד פי 15 בזיכרון של המנוע.
+    const body =
+      '<w:document xmlns:w="ns"><w:body>' +
+      runProps('<w:bCs/>').repeat(2000) +
+      '</w:body></w:document>';
+    const original = buildZip([{ name: 'word/document.xml', content: body }]);
+
+    const repaired = await preflightDocx(original);
+    expect(repaired).not.toBeNull();
+    // קטן בהרבה מהטקסט עצמו — ולא רק „לא גדול ממנו”.
+    expect(repaired!.bytes.byteLength).toBeLessThan(body.length / 4);
+    // ונקרא בחזרה בדיוק, דרך המסלול שהמנוע קורא בו.
+    const restored = await partText(repaired!.bytes, 'word/document.xml');
+    expect(restored).toBe(repairComplexScriptBold(body));
+  });
+
+  it('בלי `CompressionStream` החלק נכתב גלוי, והתיקון עדיין קורה', async () => {
+    vi.stubGlobal('CompressionStream', undefined);
+    const repaired = await preflightDocx(
+      buildZip([{ name: SETTINGS_PART, content: SETTINGS_WITH_ZERO }]),
+    );
+    expect(repaired).not.toBeNull();
+    // `STORED`: הטקסט המתוקן גלוי בבייטים.
+    expect(contains(repaired!.bytes, bytesOf(`<w:defaultTabStop w:val="${DEFAULT_TAB_STOP_TWIPS}"/>`))).toBe(true);
+    await expect(preflightDocx(repaired!.bytes)).resolves.toBeNull();
+  });
+
+  it('דוחס שאינו משחזר את המקור נופל ל-`STORED`, ולא למסמך', async () => {
+    // דוחס שמחזיר זבל תקין-למראה: הפריסה שלו לא תיתן את המקור, וזה בדיוק
+    // המקרה שהאימות קיים בשבילו.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    class BrokenCompression extends TransformStream<BufferSource, Uint8Array> {
+      constructor() {
+        super({
+          transform(_chunk, controller) {
+            controller.enqueue(new Uint8Array(deflateRawSync(bytesOf('לא המקור'))));
+          },
+        });
+      }
+    }
+    vi.stubGlobal('CompressionStream', BrokenCompression);
+
+    const repaired = await preflightDocx(
+      buildZip([{ name: SETTINGS_PART, content: SETTINGS_WITH_ZERO }]),
+    );
+    expect(repaired).not.toBeNull();
+    expect(contains(repaired!.bytes, bytesOf(`<w:defaultTabStop w:val="${DEFAULT_TAB_STOP_TWIPS}"/>`))).toBe(true);
+    await expect(partText(repaired!.bytes, SETTINGS_PART)).resolves.toContain(
+      `w:val="${DEFAULT_TAB_STOP_TWIPS}"`,
+    );
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('הדחיסה לא שחזרה'));
+    warn.mockRestore();
   });
 
   it('אינה נוגעת במסמך תקין', async () => {
@@ -758,7 +878,44 @@ describe('preflightSource', () => {
     const { source } = await preflightSource('http://127.0.0.1:1/doc.docx');
     expect(source).toBeInstanceOf(Blob);
     const bytes = new Uint8Array(await (source as Blob).arrayBuffer());
-    expect(contains(bytes, bytesOf(`<w:defaultTabStop w:val="${DEFAULT_TAB_STOP_TWIPS}"/>`))).toBe(true);
+    await expect(partText(bytes, SETTINGS_PART)).resolves.toContain(
+      `<w:defaultTabStop w:val="${DEFAULT_TAB_STOP_TWIPS}"/>`,
+    );
+  });
+
+  it('שלב מקדים שזורק מחזיר את המקור, ואינו מונע פתיחה', async () => {
+    // הזריקה היחידה שנשארה בפנים היא הקצאה שנכשלה; כאן היא מדומה על המקודד.
+    // „לתקן, ולא לחסום”: מסמך שהיה נפתח בלי השלב הזה נפתח בלעדיו.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const bytes = buildZip([{ name: SETTINGS_PART, content: SETTINGS_WITH_ZERO }]);
+    // המקודד נשבר רק **אחרי** שהבייטים נקראו: כך הכשל נופל בתוך `preflightDocx`
+    // ולא במסלול הקריאה, שיש לו טיפול משלו.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        arrayBuffer: async () => {
+          vi.stubGlobal(
+            'TextEncoder',
+            class {
+              encode(): never {
+                throw new RangeError('Array buffer allocation failed');
+              }
+            },
+          );
+          return bytes.buffer;
+        },
+      })),
+    );
+
+    const { source, notice } = await preflightSource('http://127.0.0.1:1/doc.docx');
+    expect(source).toBe('http://127.0.0.1:1/doc.docx');
+    expect(notice).toBeNull();
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('הבדיקה המקדימה נכשלה'),
+      // לא `expect.any(RangeError)`: המחלקה ב-jsdom היא של realm אחר.
+      expect.objectContaining({ message: 'Array buffer allocation failed' }),
+    );
+    warn.mockRestore();
   });
 
   it('קריאה שנכשלה מחזירה את המקור, ואינה מונעת פתיחה', async () => {
@@ -778,7 +935,9 @@ describe('preflightSource', () => {
     const { source } = await preflightSource(draft);
     expect(source).not.toBe(draft);
     const bytes = new Uint8Array(await (source as Blob).arrayBuffer());
-    expect(contains(bytes, bytesOf(`<w:defaultTabStop w:val="${DEFAULT_TAB_STOP_TWIPS}"/>`))).toBe(true);
+    await expect(partText(bytes, SETTINGS_PART)).resolves.toContain(
+      `<w:defaultTabStop w:val="${DEFAULT_TAB_STOP_TWIPS}"/>`,
+    );
   });
 });
 
@@ -918,6 +1077,12 @@ describe('repairComplexScriptBold — מכולות שאינן ריצה', () => {
     ],
     ['רמה במספור', '<w:num><w:lvl w:ilvl="0"><w:rPr><w:bCs/></w:rPr></w:lvl></w:num>'],
     ['סגנון', '<w:style w:styleId="Heading2"><w:rPr><w:bCs/></w:rPr></w:style>'],
+    [
+      // ברירת המחדל של המסמך כולו — אותו כלל, בסקלה של כל ריצה לטינית במסמך.
+      // ראו את ההסתייגות בכותרת המודול.
+      'ברירות המחדל של המסמך',
+      '<w:docDefaults><w:rPrDefault><w:rPr><w:bCs/></w:rPr></w:rPrDefault></w:docDefaults>',
+    ],
     [
       'סגנון טבלה מותנה',
       '<w:style><w:tblStylePr w:type="firstRow"><w:rPr><w:bCs/></w:rPr></w:tblStylePr></w:style>',

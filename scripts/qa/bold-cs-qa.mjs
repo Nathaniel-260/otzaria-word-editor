@@ -448,6 +448,10 @@ async function main() {
 
 main()
   .catch((error) => {
-    report.stuck('השער', String(error && error.message));
+    // חריגה היא **כשל** של השער, לא „תקוע”: `stuck` אינו נספר כשבור גם
+    // ב-strict (קפיאת מדידה אינה כשל פקד), ולכן הרצה שנפלה על הרצפה — הרצועה
+    // השתנתה, ההחדרה לא מצאה חלק, הקובץ שדווח אינו נקרא — הייתה יוצאת עם 0
+    // ונראית ב-`verify:qa` כירוקה. השורות שלא נמדדו נשארות חסרות, וזה נראה.
+    report.fail('השער', String(error && (error.stack || error.message)));
   })
   .finally(() => report.print());
