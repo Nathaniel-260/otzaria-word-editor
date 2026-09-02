@@ -1,11 +1,20 @@
 /**
- * אותה שאלה של `font-focus-probe.mjs`, אבל דרך תיבת הגודל שבתפריט הלחצן הימני.
+ * אותה שאלה של `font-focus-probe.mjs`, אבל דרך שורת הגופן שבתפריט הלחצן הימני.
  *
- * למה זה שער נפרד ולא עוד שלב שם: הסדר הפנימי שונה. ברצועה הפקד פולט „סיימתי”
- * ו„בית” מחזירה את המיקוד **לפני** ההחלה; בכרטיס (`ContextMenuFontPicker.vue`)
- * ההחלה רצה ראשונה, ורק אחריה הכרטיס נסגר והמעטפת מחזירה מיקוד
- * (`App.vue`, `closeContextMenu`). זה בדיוק הסדר ההפוך, ומה שנמדד ברצועה אינו
- * מלמד עליו — אחד השניים עובד ואחד לא, וזה מה שנמדד כאן.
+ * למה זה שער נפרד ולא עוד שלב שם: המסלול שונה. ברצועה הפקד יושב בתוך „בית”,
+ * והמאזין ל„סיימתי” הוא `returnFocusToDocument` שלה. בכרטיס
+ * (`ContextMenuFontPicker.vue`) הפקד פולט `done`, הכרטיס נסגר, ומי שמחזיר את
+ * המיקוד הוא המעטפת (`App.vue`, `closeContextMenu`) — שרשרת בת שלוש חוליות
+ * שאף אחת מהן אינה נמדדת ברצועה. חוליה אחת שנשמטת פירושה שההקלדה הבאה נכנסת
+ * לתיבה ולא לטקסט.
+ *
+ * ## שני מסלולים, ולא אחד
+ *
+ * תיבת הגודל ותיבת הגופן **אינן** אותו פקד: על הגופן מחוברים גם `@preview`
+ * ו-`@preview-end`, כלומר ריחוף על שורה ברשימה מריץ `format.apply` אמיתי
+ * במסמך ו„החזרה” אחריו מריצה עוד אחד (composables/font-preview.ts,
+ * engine/font-preview.ts). זה מסלול שלם שאין לו מקבילה בתיבת הגודל, והבאג
+ * שדווח הוא דווקא עליו — „כאשר אני משנה כתב הסמן לא כותב”. לכן שני השלבים.
  *
  * ההקשר: Y-PLONI#14 סעיף א. \`context-menu-model.ts\` מצהיר במפורש שהמקטע
  * הזה חל גם על סמן מכווץ („הוא קובע את מה שיוקלד”), ולכן זו ההבטחה שנבדקת.
@@ -14,7 +23,7 @@
  */
 import { openApp, createReport } from './harness.mjs';
 
-const report = createReport('מיקוד אחרי תיבת הגודל בתפריט ההקשר', { strict: true });
+const report = createReport('מיקוד אחרי שורת הגופן בתפריט ההקשר', { strict: true });
 const app = await openApp({ name: 'ctx-font-focus', port: Number(process.env.QA_PORT ?? 9542) });
 
 const note = (...p) =>
@@ -30,13 +39,30 @@ const focused = () =>
 
 const xml = async () => (await app.docx())['word/document.xml'] || '';
 
-function szOf(doc, text) {
+/** הריצה שהתו הוקלד לתוכה. `null` = אין ריצה כזאת בכלל. */
+function runOf(doc, text) {
   const body = doc.slice(doc.indexOf('<w:body'));
   const runs = body.match(/<w:r(?:\s[^>]*)?>[\s\S]*?<\/w:r>/g) || [];
-  const hit = runs.find((r) => new RegExp(`<w:t[^>]*>[^<]*${text}[^<]*</w:t>`).test(r));
+  return runs.find((r) => new RegExp(`<w:t[^>]*>[^<]*${text}[^<]*</w:t>`).test(r)) ?? null;
+}
+
+function szOf(doc, text) {
+  const hit = runOf(doc, text);
   if (!hit) return null;
   const sz = hit.match(/<w:sz w:val="(\d+)"/);
   return sz ? Number(sz[1]) : 0;
+}
+
+/**
+ * תג `<w:rFonts>` של הריצה, כפי שהוא. המחרוזת ולא שדה מפורק: המנוע כותב את
+ * הגופן ל-`w:ascii`, ל-`w:hAnsi` ול-`w:cs` בהרכבים שונים לפי הכתב, ומה שנשאל
+ * כאן הוא אם השם נכתב **בכלל** — ולא לאיזה מהם.
+ */
+function rFontsOf(doc, text) {
+  const hit = runOf(doc, text);
+  if (!hit) return null;
+  const fonts = hit.match(/<w:rFonts[^>]*\/?>/);
+  return fonts ? fonts[0] : '«אין rFonts בריצה»';
 }
 
 /** לחיצה ימנית אמיתית. `contextmenu` מסונתז ב-Chromium מהודעת הכפתור. */
@@ -48,13 +74,23 @@ async function rightClick(x, y) {
 }
 
 const menuOpen = () => app.exists('.ctx-menu');
-const boxInMenu = () =>
-  app.js(`JSON.stringify(window.__qa.rect('גודל גופן', { scope: '.ctx-menu' }))`).then(JSON.parse);
-const boxValueInMenu = () =>
+/** המלבן של תיבה בכרטיס. `גופן` אינו מתנגש ב„גודל גופן” — ההתאמה היא בתחילית. */
+const boxInMenu = (title) =>
+  app
+    .js(`JSON.stringify(window.__qa.rect(${JSON.stringify(title)}, { scope: '.ctx-menu' }))`)
+    .then(JSON.parse);
+const boxValueInMenu = (title) =>
   app.js(`(function () {
     var m = document.querySelector('.ctx-menu');
-    var el = m && m.querySelector('input[role="combobox"][data-tip-title="גודל גופן"]');
+    var el = m && m.querySelector('input[role="combobox"][data-tip-title="${title}"]');
     return el ? el.value : null;
+  })()`);
+
+/** האפשרות המסומנת ברשימה שנפתחה מתוך הכרטיס — מה ש-Enter יחיל. */
+const highlightedInMenu = () =>
+  app.js(`(function () {
+    var el = document.querySelector('.ctx-menu [role="listbox"] .ribbon-combo-option.active');
+    return el ? el.getAttribute('data-value') : null;
   })()`);
 
 async function waitForLines(min = 2, ms = 30_000) {
@@ -83,17 +119,17 @@ try {
   await app.sleep(1500);
   note('פיקסטורה:', await app.screenText(), '| שורות:', await waitForLines());
 
-  /* ===== סמן מכווץ, ואז לחיצה ימנית באותה נקודה ===== */
+  /* ===== שלב א: תיבת הגודל ===== */
   const spot = await app.caret(1);
   await app.sleep(300);
   await rightClick(spot.x, spot.y);
   const opened = await menuOpen();
-  note('התפריט נפתח:', opened, '| הגודל שהתיבה בכרטיס מציגה:', await boxValueInMenu());
+  note('התפריט נפתח:', opened, '| הגודל שהתיבה בכרטיס מציגה:', await boxValueInMenu('גודל גופן'));
 
   if (!opened) {
-    report.fail('התפריט נפתח בלחיצה ימנית', 'אין `.ctx-menu` — אי אפשר למדוד את התיבה שבו');
+    report.fail('התפריט נפתח בלחיצה ימנית', 'אין `.ctx-menu` — אי אפשר למדוד את התיבות שבו');
   } else {
-    const rect = await boxInMenu();
+    const rect = await boxInMenu('גודל גופן');
     if (!rect) {
       report.fail('תיבת הגודל קיימת בכרטיס', 'לא נמצאה תיבה עם הטולטיפ „גודל גופן” בתוך `.ctx-menu`');
     } else {
@@ -105,7 +141,7 @@ try {
       await app.sleep(1000);
 
       const afterEnter = { focus: await focused(), menu: await menuOpen() };
-      note('אחרי Enter — מיקוד:', afterEnter.focus, '| התפריט עדיין פתוח:', afterEnter.menu);
+      note('אחרי Enter בתיבת הגודל — מיקוד:', afterEnter.focus, '| התפריט עדיין פתוח:', afterEnter.menu);
 
       const screenBefore = (await app.screenText()) || '';
       await app.type('q');
@@ -116,8 +152,8 @@ try {
       note('  מסך:', JSON.stringify(screenBefore.slice(0, 50)), '→', JSON.stringify(screenAfter.slice(0, 50)));
 
       typedIntoDoc
-        ? report.pass('ההקלדה אחרי הבחירה בכרטיס נכנסת למסמך', `מיקוד: ${afterEnter.focus}`)
-        : report.fail('ההקלדה אחרי הבחירה בכרטיס נכנסת למסמך', `המיקוד ב-${afterEnter.focus}`);
+        ? report.pass('ההקלדה אחרי בחירת הגודל בכרטיס נכנסת למסמך', `מיקוד: ${afterEnter.focus}`)
+        : report.fail('ההקלדה אחרי בחירת הגודל בכרטיס נכנסת למסמך', `המיקוד ב-${afterEnter.focus}`);
 
       const szq = szOf(await xml(), 'q');
       note('sz של „q”:', szq);
@@ -127,6 +163,64 @@ try {
             'הגודל שהוחל מהכרטיס על סמן מכווץ שרד',
             `התו נכתב ב-${szq === null ? 'אין ריצה כזאת' : 'w:sz=' + szq}`,
           );
+    }
+  }
+
+  /* ===== שלב ב: תיבת הגופן — המסלול שהבאג דווח עליו ===== */
+  const spotB = await app.caret(1);
+  await app.sleep(300);
+  await rightClick(spotB.x, spotB.y);
+  const openedB = await menuOpen();
+  note('התפריט נפתח שוב:', openedB, '| הגופן שהתיבה בכרטיס מציגה:', await boxValueInMenu('גופן'));
+
+  if (!openedB) {
+    report.fail('התפריט נפתח בלחיצה ימנית שנייה', 'אין `.ctx-menu` — מסלול הגופן אינו נגיש');
+  } else {
+    const rectB = await boxInMenu('גופן');
+    if (!rectB) {
+      report.fail('תיבת הגופן קיימת בכרטיס', 'לא נמצאה תיבה עם הטולטיפ „גופן” בתוך `.ctx-menu`');
+    } else {
+      await app.clickAt(rectB.x, rectB.y);
+      await app.sleep(350);
+      // „frank” ולא שם מלא: ההתאמה המדורגת הראשונה היא Frank Ruhl הארוז, כלומר
+      // גופן שקיים בכל מכונה. מה שיוחל נקרא מהרשימה עצמה ולא מונח.
+      await app.type('frank');
+      await app.sleep(500);
+      const target = await highlightedInMenu();
+      note('האפשרות המסומנת ברשימה:', target);
+
+      if (!target) {
+        report.fail(
+          'רשימת הגופנים בכרטיס מסמנת התאמה',
+          'הוקלד „frank” ואין שורה מסומנת — Enter לא יחיל דבר',
+        );
+      } else {
+        await app.press('Enter', 'Enter', 13);
+        await app.sleep(1200);
+
+        const afterB = { focus: await focused(), menu: await menuOpen() };
+        note('אחרי Enter בתיבת הגופן — מיקוד:', afterB.focus, '| התפריט עדיין פתוח:', afterB.menu);
+
+        const beforeB = (await app.screenText()) || '';
+        await app.type('z');
+        await app.sleep(900);
+        const afterScreenB = (await app.screenText()) || '';
+        const typedB = afterScreenB.includes('z') && afterScreenB.length > beforeB.length;
+        note('אחרי הקלדת „z” — נכנס למסמך:', typedB);
+
+        typedB
+          ? report.pass('ההקלדה אחרי בחירת הגופן בכרטיס נכנסת למסמך', `מיקוד: ${afterB.focus}`)
+          : report.fail('ההקלדה אחרי בחירת הגופן בכרטיס נכנסת למסמך', `המיקוד ב-${afterB.focus}`);
+
+        const fonts = rFontsOf(await xml(), 'z');
+        note('rFonts של „z”:', fonts);
+        fonts && fonts.includes(target)
+          ? report.pass('הגופן שהוחל מהכרטיס על סמן מכווץ שרד', `התו שהוקלד נכתב ב-${target}`)
+          : report.fail(
+              'הגופן שהוחל מהכרטיס על סמן מכווץ שרד',
+              `התו נכתב ב-${fonts === null ? 'אין ריצה כזאת' : fonts} ולא ב-${target}`,
+            );
+      }
     }
   }
 

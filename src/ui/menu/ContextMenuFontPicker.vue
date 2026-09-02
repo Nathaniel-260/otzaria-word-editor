@@ -12,7 +12,8 @@
       :disabled="!fonts.familyEnabled.value"
       width="100%"
       title="גופן"
-      @update:model-value="onFamily"
+      @done="onDone"
+      @update:model-value="fonts.setFamily"
       @preview="fonts.hoverFamily"
       @preview-end="fonts.endHoverFamily"
     />
@@ -30,7 +31,8 @@
       list-min-width="52px"
       width="100%"
       title="גודל גופן"
-      @update:model-value="onSize"
+      @done="onDone"
+      @update:model-value="fonts.setSize"
     />
   </div>
 </template>
@@ -70,21 +72,36 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
-  /** הוחל משהו — הכרטיס נסגר, כמו אחרי כל פריט אחר בתפריט. */
-  (e: 'applied'): void;
+  /**
+   * הפקד סיים — הכרטיס נסגר, כמו אחרי כל פריט אחר בתפריט.
+   *
+   * `done` ולא „הוחל”, וזה תיקון של באג ולא שינוי שם: האירוע נפלט קודם מתוך
+   * המטפלים של `update:modelValue`, כלומר רק כשהערך **השתנה**. `RibbonCombo`
+   * פולט `update:modelValue` בבחירה בלבד (`choose`), ולכן לחיצה על הגופן שהתיבה
+   * כבר מציגה — מילה ב-Arial, פתיחת הרשימה, לחיצה על „Arial” — לא סגרה את
+   * הכרטיס ולא החזירה מיקוד, וההקלדה הבאה נכנסה לתיבת הגופן. אותו דבר קרה
+   * ב-`Escape`: הפקד פולט `done` ומחזיר את המשתמש, ובלי מאזין נדרש `Escape`
+   * שני. זה „הסמן לא כותב” של Y-PLONI#14 סעיף א.
+   *
+   * ההחלה **אינה** תנאי לפליטה, וזו הנקודה: „סיימתי עם הפקד” היא שאלה על
+   * המשתמש, ולא על מה שהמסמך קיבל. גם ויתור, וגם בחירה שהוולידטור דחה, הם
+   * סיום — ובשני המצבים הכרטיס חייב להיעלם ולהחזיר את המיקוד למסמך.
+   */
+  (e: 'done'): void;
 }>();
 
 const fonts = useFontControls();
 const rootRef = ref<HTMLElement | null>(null);
 
-function onFamily(family: string): void {
-  fonts.setFamily(family);
-  emit('applied');
-}
-
-function onSize(size: string): void {
-  fonts.setSize(size);
-  emit('applied');
+/**
+ * `RibbonCombo` פולט `done` **לפני** `update:modelValue` (ראו שם), ולכן הסגירה
+ * רצה לפני ההחלה — בדיוק כמו ברצועה, שבה `returnFocusToDocument` מוקדם ל-
+ * `fonts.setFamily`. ההחלה עצמה אינה נאבדת: `emit` הוא סינכרוני, ההסרה מה-DOM
+ * היא של הפריסה הבאה, ולכן הפקודה נשלחת מפקד שעדיין מורכב. מה שקריטי הוא
+ * שהמיקוד יחזור בכלל — נמדד ב-`scripts/qa/context-font-focus-probe.mjs`.
+ */
+function onDone(): void {
+  emit('done');
 }
 
 /**
