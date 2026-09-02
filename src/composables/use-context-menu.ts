@@ -75,6 +75,14 @@ export interface ContextMenuDeps {
   isModalOpen: () => boolean;
   runAction: (action: ShellAction) => boolean;
   report: CommandReporter;
+  /**
+   * המילה שבדיקת האיות סימנה מתחת לנקודה, או `null`. מגיעה משכבת הסימון
+   * (ui/shell/SpellingOverlay.vue), שהיא היחידה שיודעת מה היא ציירה ואיפה —
+   * ולא מ-hit-test על ה-DOM של המנוע, שאסור (tests/unit/engine-boundaries.test.ts).
+   */
+  misspelledWordAt?: (at: MenuPoint) => string | null;
+  /** „הוסף למילון”. נקראת עם המילה שהפריט נבנה עליה. */
+  addToDictionary?: (word: string) => void;
 }
 
 export interface ContextMenuController {
@@ -338,6 +346,9 @@ export function useContextMenu(deps: ContextMenuDeps): ContextMenuController {
       hasDocument: capabilities.available,
       hasRange: selection.hasRange,
       storyType: storyTypeOf(selection.story),
+      // נקרא כאן ולא לפני ההמתנות: הזזת הסמן אינה משנה טקסט ואינה מזיזה
+      // סימון, וקריאה מאוחרת מקבלת את המדידה העדכנית ביותר.
+      misspelledWord: deps.misspelledWordAt?.(at) ?? null,
       can: (question: DocCapabilityQuestion) => capabilities.can(question),
     });
     // מקטעים ריקים (למשל המסמך עדיין נטען) הם „אין מה להציג”, לא „תפריט פתוח
@@ -416,7 +427,7 @@ export function useContextMenu(deps: ContextMenuDeps): ContextMenuController {
 
   /**
    * הרצה. פקודות מנוע כבר רצו בפקד עצמו (ContextMenuButton), ולכן כאן נשארו
-   * שני הסוגים האחרים. `focusDocument` לפניהם: הוא קורא
+   * שלושת הסוגים האחרים. `focusDocument` לפניהם: הוא קורא
    * `focus({restoreSelection:true})`, וזה מה שמחזיר את המסמך למצב שבו הפעולה
    * מתייחסת לבחירה שהתפריט נפתח עליה.
    */
@@ -426,6 +437,11 @@ export function useContextMenu(deps: ContextMenuDeps): ContextMenuController {
 
     if (entry.run.kind === 'action') {
       deps.runAction(entry.run.action);
+      return;
+    }
+
+    if (entry.run.kind === 'dictionary') {
+      deps.addToDictionary?.(entry.run.word);
       return;
     }
 

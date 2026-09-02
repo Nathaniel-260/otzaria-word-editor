@@ -23,6 +23,7 @@ function sections(over: Partial<ContextMenuSnapshot> = {}): readonly ContextMenu
     hasDocument: true,
     hasRange: true,
     storyType: 'body',
+    misspelledWord: null,
     can: () => true,
     ...over,
   });

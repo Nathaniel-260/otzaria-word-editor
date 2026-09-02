@@ -36,13 +36,18 @@ import type { ShellAction, ShortcutId } from '../shortcuts/registry';
 export type ClipboardOp = 'cut' | 'copy' | 'paste';
 
 /**
- * איך הפריט רץ. שלושת המסלולים הם **בדיוק** אלה שכבר קיימים בתוסף, ואין
- * רביעי: פקודה של המנוע, פעולת מעטפת (אותה שקיצור מקלדת מריץ), ופעולת לוח.
+ * איך הפריט רץ. שלושת הראשונים הם המסלולים שכבר קיימים בתוסף: פקודה של
+ * המנוע, פעולת מעטפת (אותה שקיצור מקלדת מריץ), ופעולת לוח.
+ *
+ * `dictionary` הוא הרביעי, והוא נוסף כי שלושת האחרים אינם יכולים לשאת אותו:
+ * הוא פועל על **מילה מסוימת שנלחצה**, ולא על הבחירה. `ShellAction` הוא
+ * מילון של קיצורי מקלדת ואין לו מקום לפרמטר, ופקודת מנוע לא קיימת כאן כלל.
  */
 export type ContextMenuRun =
   | { readonly kind: 'command'; readonly command: CommandId }
   | { readonly kind: 'action'; readonly action: ShellAction }
-  | { readonly kind: 'clipboard'; readonly op: ClipboardOp };
+  | { readonly kind: 'clipboard'; readonly op: ClipboardOp }
+  | { readonly kind: 'dictionary'; readonly word: string };
 
 export interface ContextMenuEntry {
   /** מזהה יציב — לבדיקות ולמפתח ב-`v-for`. */
@@ -78,6 +83,12 @@ export interface ContextMenuSnapshot {
    * הודעה בעברית, וזה עדיף על תפריט שמסתיר פריטים בגלל קריאה שלא חזרה.
    */
   readonly storyType: string | null;
+  /**
+   * המילה שבדיקת האיות סימנה מתחת לנקודה שנלחצה, או `null` — גם כשהבדיקה
+   * כבויה. זה המקור היחיד ל„הוסף למילון”: תפריט שמציע להוסיף את מה שאינו
+   * מסומן היה מציע לתקן משהו שאינו שבור.
+   */
+  readonly misspelledWord: string | null;
   readonly can: (question: DocCapabilityQuestion) => boolean;
 }
 
@@ -192,6 +203,26 @@ function otzariaSection(snapshot: ContextMenuSnapshot): ContextMenuSection {
   return { id: 'otzaria', layout: 'items', label: 'אוצריא', entries };
 }
 
+/**
+ * „הוסף למילון”. מקטע משלו ובראש התפריט, כמו ב-Word: כשהלחיצה נחתה על מילה
+ * מסומנת, זו הסיבה שהמשתמש לחץ שם.
+ */
+function dictionarySection(word: string): ContextMenuSection {
+  return {
+    id: 'dictionary',
+    layout: 'items',
+    label: 'איות',
+    entries: [
+      {
+        id: 'add-to-dictionary',
+        label: `הוסף את „${word}” למילון`,
+        icon: 'proofing',
+        run: { kind: 'dictionary', word },
+      },
+    ],
+  };
+}
+
 /** עריכה כללית. „בחירת הכול” עוברת ב-`ranges.resolve`, ולכן זו היכולת שנשאלת. */
 function editSection(snapshot: ContextMenuSnapshot): ContextMenuSection {
   return {
@@ -226,6 +257,7 @@ export function contextMenuModel(snapshot: ContextMenuSnapshot): readonly Contex
   if (!snapshot.hasDocument) return [];
 
   const sections = [
+    ...(snapshot.misspelledWord ? [dictionarySection(snapshot.misspelledWord)] : []),
     clipboardSection(snapshot),
     formatSection(),
     insertSection(snapshot),

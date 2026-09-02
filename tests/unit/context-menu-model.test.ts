@@ -19,6 +19,7 @@ function snapshot(over: Partial<ContextMenuSnapshot> = {}): ContextMenuSnapshot 
     hasDocument: true,
     hasRange: true,
     storyType: 'body',
+    misspelledWord: null,
     can: () => true,
     ...over,
   };
@@ -100,14 +101,27 @@ describe('contextMenuModel', () => {
     expect(entry(model, 'select-all')?.disabled).toBe(true);
   });
 
-  it('כל פריט רץ באחד משלושת המסלולים הקיימים, ואין רביעי', () => {
+  it('בלי מילה מסומנת רצים רק שלושת המסלולים הרגילים', () => {
     const kinds = new Set(contextMenuEntries(contextMenuModel(snapshot())).map((item) => item.run.kind));
 
     expect([...kinds].sort()).toEqual(['action', 'clipboard', 'command']);
   });
 
+  it('מילה מסומנת מוסיפה „הוסף למילון” בראש התפריט, עם המילה עצמה', () => {
+    const model = contextMenuModel(snapshot({ misspelledWord: 'זצ"ל' }));
+
+    expect(model[0]!.id).toBe('dictionary');
+    const item = entry(model, 'add-to-dictionary');
+    expect(item?.label).toBe('הוסף את „זצ"ל” למילון');
+    expect(item?.run).toEqual({ kind: 'dictionary', word: 'זצ"ל' });
+  });
+
+  it('בלי מילה מסומנת — אין מקטע איות', () => {
+    expect(entry(contextMenuModel(snapshot()), 'add-to-dictionary')).toBeUndefined();
+  });
+
   it('אין פריט בלי אייקון או בלי תווית', () => {
-    for (const item of contextMenuEntries(contextMenuModel(snapshot()))) {
+    for (const item of contextMenuEntries(contextMenuModel(snapshot({ misspelledWord: 'זזזזז' })))) {
       expect(item.icon, item.id).toBeTruthy();
       expect(item.label, item.id).toBeTruthy();
     }
