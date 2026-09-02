@@ -35,7 +35,7 @@ import {
   type ComputedRef,
   type Ref,
 } from 'vue';
-import { FONT_MEMORY, READOUT_SELECTION } from './keys';
+import { DOCUMENT_GENERATION, FONT_MEMORY, READOUT_SELECTION } from './keys';
 import { useCommand } from './useCommand';
 import { useFontOptions } from './useFontOptions';
 import { createFontPreview } from './font-preview';
@@ -132,6 +132,34 @@ export function useFontControls(): FontControls {
   const selection = inject(READOUT_SELECTION, () => shallowRef(UNSETTLED_SELECTION), true);
 
   /**
+   * מסמך אחר — והזיכרון של הקודם נמחק.
+   *
+   * ## למה זה אינו „זהירות” אלא באג שנסגר
+   *
+   * שתי שכבות הזיכרון קיימות בשביל רגע אחד: המנוע אינו מדווח ערך (בחירה
+   * מעורבת, או בחירה שטרם נפתרה), ואז הבורר מציג את **האחרון שידענו** במקום
+   * להתרוקן. הצדקה שלהן היא שהערך הזה נמדד באותו מסמך — ובדיוק זה מה שנשבר
+   * בהחלפה: „TaameyDavidCLM 20” של הספר שנסגר אינו „האחרון שידענו” על הטאב
+   * שנפתח עכשיו, הוא ניחוש על מסמך אחר. וזה בדיוק הרגע שבו המנוע שותק —
+   * מסמך טרי, לפני שהבחירה התיישבה — כלומר הזיהום נראה תמיד.
+   *
+   * `DOCUMENT_GENERATION` ולא זהות `ACTIVE_SUPERDOC`: אותו מסמך שנטען מחדש
+   * ברכיב (טאב שהוחלף וחזר) אינו „מסמך אחר”, והזיכרון שם דווקא נכון. ראו
+   * composables/keys.ts.
+   *
+   * גם שכבת ה-`pending` מתאפסת, ומאותו טעם: בקשה שיצאה למסמך שכבר אינו על
+   * המסך אינה אמורה להיות מוצגת. התשובה שלה תיפול ממילא על השומר
+   * `pending.value !== next` ב-`applyOptimistically`.
+   */
+  const documentGeneration = inject(DOCUMENT_GENERATION, () => shallowRef(0), true);
+  watch(documentGeneration, () => {
+    memory.family.value = DEFAULT_FONT_FAMILY;
+    memory.size.value = DEFAULT_FONT_SIZE_PT;
+    memory.pendingFamily.value = null;
+    memory.pendingSize.value = null;
+  });
+
+  /**
    * אפשרויות הגופן מהמנוע (`ui.fonts`), ממוזגות עם שלנו. ראו
    * engine/font-options.ts — רשימה קשיחה לא הייתה יודעת מה יש במסמך.
    */
@@ -174,6 +202,8 @@ export function useFontControls(): FontControls {
         hebrew: option.hebrew,
       })),
       family.value,
+      // גופן שאינו ברשימה מוצג בגופן עצמו, כמו כל שאר השורות.
+      { preview: true },
     ),
   );
 
@@ -181,6 +211,9 @@ export function useFontControls(): FontControls {
     withCurrent(
       sizes.value.map((option) => ({ value: option.value, label: option.label })),
       size.value,
+      // `numeric` ובלי `preview`: ראו composables/picker-value.ts — 13pt נכנס
+      // בין 12 ל-14 ואינו מכריז על `font-family` בשם „13”.
+      { numeric: true },
     ),
   );
 

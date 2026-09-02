@@ -32,16 +32,61 @@ export interface PickerOption {
 }
 
 /**
+ * צורת הרשימה שהערך נוסף אליה.
+ *
+ * פרמטר מפורש ולא ניחוש טיפוס מהמחרוזת: „20.5” הוא גודל, „Arial” הוא שם, ו-
+ * `Number(current)` היה מכריע את זה נכון בדיוק עד לגופן שהשם שלו מתחיל בספרה.
+ * הקורא יודע איזה בורר הוא מרכיב, וזה סוף הדיון.
+ */
+export interface CurrentShape {
+  /**
+   * האפשרות שנוספת נושאת `preview`, כלומר הערך הוא שם גופן.
+   *
+   * ברירת המחדל `false` היא מה שמונע `style="font-family: 13"` בבורר הגודל:
+   * `preview` הוא `font-family` של CSS, ובורר מספרי שמכריז עליו מבקש
+   * מהדפדפן גופן בשם „13”. ברצועה זה לא נראה כל עוד הגודל היה `<select>`
+   * (`RibbonSelect` אינו מצייר `preview` בכלל), ונראה מיד כשהוא הפך
+   * ל-`RibbonCombo`.
+   */
+  readonly preview?: boolean;
+  /**
+   * הרשימה מספרית, ולכן הערך נכנס **במקומו לפי הסדר** ולא בראשה.
+   *
+   * גם זה נראה רק מרגע שבורר הגודל הפך לרשימה נפתחת: 13pt בראש הרשימה נתן
+   * „13, 8, 9, 10, 11, 12…”, כלומר סולם מספרים שאינו מסודר — ובורר שאי אפשר
+   * לאמוד בו מרחק הוא בורר שצריך לקרוא כל שורה בו.
+   */
+  readonly numeric?: boolean;
+}
+
+/**
  * הערך הנוכחי חייב להיות אחת האפשרויות, אחרת `<select>` מציג את הראשונה
  * ומשקר. גופן או גודל שאינם ברשימה (מסמך שנכתב בגופן שהמנוע לא הציע, טקסט
- * ב-20.5pt) מתווספים בראשה — בדיוק מה ש-Word עושה.
+ * ב-20.5pt) מתווספים אליה — בדיוק מה ש-Word עושה.
  */
 export function withCurrent<T extends PickerOption>(
   options: readonly T[],
   current: string,
+  shape: CurrentShape = {},
 ): readonly (T | PickerOption)[] {
   if (current === '' || options.some((option) => option.value === current)) return options;
-  return [{ value: current, label: current, preview: current }, ...options];
+
+  const added: PickerOption = shape.preview
+    ? { value: current, label: current, preview: current }
+    : { value: current, label: current };
+
+  const value = Number(current);
+  // ערך שאינו מספר בבורר מספרי אינו „שגיאה” כאן — פשוט אין לו מקום בסולם,
+  // ולכן הוא חוזר להתנהגות הרגילה: בראש, שם רואים אותו.
+  if (!shape.numeric || !Number.isFinite(value)) return [added, ...options];
+
+  const at = options.findIndex((option) => {
+    const other = Number(option.value);
+    return Number.isFinite(other) && other > value;
+  });
+  return at === -1
+    ? [...options, added]
+    : [...options.slice(0, at), added, ...options.slice(at)];
 }
 
 /**

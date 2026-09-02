@@ -16,9 +16,12 @@ import {
 } from '../../src/ui/menu/context-menu-model';
 import HomeTab from '../../src/ui/ribbon/tabs/HomeTab.vue';
 import { createFontMemory } from '../../src/composables/use-font-controls';
+import RibbonCombo from '../../src/ui/ribbon/common/RibbonCombo.vue';
+import type { PickerOption } from '../../src/composables/picker-value';
 import {
   autoUnmount,
   createCommandDouble,
+  createSuperdocDouble,
   mountUi,
   pickerValue,
   setPicker,
@@ -58,6 +61,27 @@ function buttonById(harness: Harness, id: string) {
   const button = harness.wrapper.find(`[data-entry-id="${id}"]`);
   if (!button.exists()) throw new Error(`אין פריט בתפריט עם המזהה "${id}"`);
   return button;
+}
+
+/** תיבת הבורר שבכרטיס, לפי הטולטיפ שלה. */
+function boxInCard(harness: Harness, tip: string) {
+  const box = harness.wrapper.find(`input[role="combobox"][data-tip-title="${tip}"]`);
+  if (!box.exists()) throw new Error(`אין תיבה בכרטיס עם הטולטיפ „${tip}”`);
+  return box;
+}
+
+/** האפשרויות שהתיבה בכרטיס קיבלה — הצורה שלהן, ולא רק מה שנצבע ממנה. */
+function optionsOf(harness: Harness, tip: string): readonly PickerOption[] {
+  const combo = harness.wrapper
+    .findAllComponents(RibbonCombo)
+    .find((instance) => instance.props('title') === tip);
+  if (!combo) throw new Error(`אין בורר בכרטיס עם הכותרת „${tip}”`);
+  return combo.props('options') as readonly PickerOption[];
+}
+
+/** הערכים שברשימה הנפתחת, בסדר שבו הם מצוירים. */
+function rowValues(harness: Harness): (string | undefined)[] {
+  return harness.wrapper.findAll('[role="option"]').map((row) => row.attributes('data-value'));
 }
 
 describe('ContextMenu', () => {
@@ -283,6 +307,95 @@ describe('שורת הגופן בתפריט ההקשר', () => {
     expect(pickerValue(menu.wrapper, 'גופן')).toBe('TaameyDavidCLM');
   });
 
+  /**
+   * Y-PLONI#14 סעיף א, בתת-המקרה „בחרתי את מה שכבר היה”.
+   *
+   * `RibbonCombo.choose()` פולט `done` תמיד ו-`update:modelValue` רק כשהערך
+   * **שונה** — ולכן כרטיס שהאזין להחלה בלבד נשאר פתוח בדיוק במקרה הזה: מילה
+   * ב-Arial, פתיחת הרשימה, לחיצה על „Arial”. המיקוד נשאר ב-`input`, וההקלדה
+   * הבאה נכנסה לתיבת הגופן ולא למסמך.
+   *
+   * הסגירה **היא** מה שמחזיר את המיקוד (`App.vue`, `closeContextMenu`), ולכן
+   * זו הפליטה שנמדדת כאן.
+   */
+  it('בחירת הגופן שהתיבה כבר מציגה סוגרת את הכרטיס, אף שאין מה להחיל', async () => {
+    const menu = open();
+    await settle();
+    expect(pickerValue(menu.wrapper, 'גופן')).toBe('Assistant');
+
+    const box = boxInCard(menu, 'גופן');
+    await box.trigger('focus');
+    await settle();
+
+    const current = menu.wrapper
+      .findAll('[role="option"]')
+      .find((row) => row.attributes('data-value') === 'Assistant');
+    expect(current).toBeDefined();
+    await current?.trigger('mousedown');
+    await settle();
+
+    // שום דבר לא הוחל — הערך זהה — ובכל זאת הכרטיס נסגר פעם אחת בדיוק.
+    expect(menu.adapter.payloads('font-family')).toEqual([]);
+    expect(menu.wrapper.emitted('close')).toHaveLength(1);
+  });
+
+  /**
+   * המקבילה של „וגם אחרי Escape בתיבה” שבבדיקת הרצועה
+   * (tests/component/picker-state.test.ts): `RibbonCombo` עוצר את `Escape`
+   * ופולט `done`, ובלי מאזין ה-`Escape` הראשון נבלע — כלומר נדרש שני.
+   */
+  it('Escape בתיבה שבכרטיס סוגר אותו, בלי להחיל דבר', async () => {
+    const menu = open();
+    await settle();
+
+    const box = boxInCard(menu, 'גודל גופן');
+    await box.trigger('focus');
+    await box.trigger('keydown', { key: 'Escape' });
+    await settle();
+
+    expect(menu.adapter.payloads('font-size')).toEqual([]);
+    expect(menu.wrapper.emitted('close')).toHaveLength(1);
+  });
+
+  /**
+   * שני חצאים של אותו באג, ושניהם נראו רק מרגע שבורר הגודל הפך מ-`<select>`
+   * לרשימה נפתחת: `preview` הוא `font-family` של CSS, ורשימה מספרית שהערך
+   * הנוכחי בראשה אינה סולם.
+   */
+  it('גודל שאינו בסולם נכנס במקומו לפי הסדר, ובלי לטעון שהוא גופן', async () => {
+    const adapter = createCommandDouble();
+    adapter.setState('font-size', { value: 13 });
+
+    const menu = open(sections(), { adapter });
+    await settle();
+    expect(pickerValue(menu.wrapper, 'גודל גופן')).toBe('13');
+
+    const added = optionsOf(menu, 'גודל גופן').find((option) => option.value === '13');
+    expect(added).toBeDefined();
+    expect(added?.preview).toBeUndefined();
+
+    await boxInCard(menu, 'גודל גופן').trigger('focus');
+    await settle();
+
+    const values = rowValues(menu);
+    expect(values).toContain('13');
+    expect(values).toEqual([...values].sort((a, b) => Number(a) - Number(b)));
+    expect(values[values.indexOf('13') - 1]).toBe('12');
+    expect(values[values.indexOf('13') + 1]).toBe('14');
+  });
+
+  /** ובבורר הגופן `preview` כן שם — שם שאינו ברשימה מוצג בגופן של עצמו. */
+  it('גופן שאינו ברשימה נוסף בראשה, ומוצג בגופן עצמו', async () => {
+    const adapter = createCommandDouble();
+    adapter.setState('font-family', { value: 'Guttman Yad' });
+
+    const menu = open(sections(), { adapter });
+    await settle();
+
+    const options = optionsOf(menu, 'גופן');
+    expect(options[0]).toMatchObject({ value: 'Guttman Yad', preview: 'Guttman Yad' });
+  });
+
   it('גופן שהוחל מהתפריט מופיע ברצועה מיד', async () => {
     const fontMemory = createFontMemory();
     const adapter = createCommandDouble();
@@ -295,6 +408,44 @@ describe('שורת הגופן בתפריט ההקשר', () => {
     await settle();
 
     expect(pickerValue(ribbon.wrapper, 'גופן')).toBe('TaameyDavidCLM');
+  });
+});
+
+/**
+ * זיכרון הבוררים והחלפת מסמך.
+ *
+ * שתי שכבות הזיכרון (`FONT_MEMORY`) קיימות בשביל רגע אחד: המנוע אינו מדווח
+ * ערך — בחירה מעורבת, או בחירה שטרם נפתרה — ואז הבורר מציג את „האחרון שידענו”
+ * במקום להתרוקן. ההצדקה שלהן היא שהערך נמדד **באותו מסמך**, ובהחלפה היא
+ * נופלת: הזיכרון של הספר שנסגר אינו ידיעה על הטאב שנפתח, והרגע שבו הוא מוצג
+ * הוא בדיוק הרגע הנפוץ — מסמך טרי, לפני שהבחירה התיישבה.
+ *
+ * ההחלפה נעשית כאן בשני צעדים, כמו במעטפת: `session` חדש הוא **אדפטר** חדש
+ * (`useCommand` מנקה אז את ההחזקה שלו — ראו composables/useCommand.ts), ומונה
+ * `DOCUMENT_GENERATION` עולה. בלי שני הצעדים אין מה למדוד: ההחזקה של הקריאה
+ * הייתה מציגה את הערך הישן במקום הזיכרון, ושתי התקלות היו מתחפשות זו לזו.
+ */
+describe('החלפת מסמך', () => {
+  it('מאפסת את זיכרון הבוררים — הכרטיס אינו מציג את הגופן של המסמך הקודם', async () => {
+    const first = createCommandDouble();
+    const menu = open(sections(), { adapter: first });
+    await settle();
+
+    // הדיווח **אחרי** ההרכבה, ולא כמצב פתיחה: זה מה שכותב לזיכרון. מצב שהיה
+    // שם עוד לפני שהבורר עלה אינו „שינוי”, ואף watch אינו רואה אותו.
+    first.setState('font-family', { value: 'TaameyDavidCLM' });
+    first.setState('font-size', { value: 20 });
+    await settle();
+    expect(pickerValue(menu.wrapper, 'גופן')).toBe('TaameyDavidCLM');
+    expect(pickerValue(menu.wrapper, 'גודל גופן')).toBe('20');
+
+    // מסמך אחר, ועליו המנוע עדיין שותק — כלומר הזיכרון הוא כל מה שיש.
+    await menu.setAdapter(createCommandDouble());
+    await menu.setSuperdoc(createSuperdocDouble());
+    await settle();
+
+    expect(pickerValue(menu.wrapper, 'גופן')).toBe('Assistant');
+    expect(pickerValue(menu.wrapper, 'גודל גופן')).toBe('12');
   });
 });
 
