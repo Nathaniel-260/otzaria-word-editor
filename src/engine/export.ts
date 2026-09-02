@@ -79,7 +79,7 @@ export function stripWordExtension(name: string): string {
  * ## איפה הסיומת הזאת קובעת, ואיפה לא
  *
  * ב„שמור בשם”, בשם שמוצע ובסינון של הדיאלוג (`extension` ב-
- * `commitUserFileWrite`), וב„ייצוא ל-Word”. **לא** בכתיבה במקום: שם
+ * `commitUserFileWrite`). **לא** בכתיבה במקום: שם
  * המאחז כותב ל-`targetToken` — הנתיב שממנו הקובץ נפתח — ומתעלם מהשם
  * המוצע, וזו ההתנהגות הנכונה: הקובץ נשאר היכן שהמשתמש שם אותו. מסמך
  * `.docx` שכבר נושא `vbaProject` נשמר לכן חזרה לאותו `.docx`; זה מצבו

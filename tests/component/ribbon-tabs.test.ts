@@ -233,7 +233,6 @@ describe('לשונית „קובץ” נשענת על מצב המעטפת', () =
     'פתח קובץ',
     'שמור',
     'שמור בשם...',
-    'ייצוא ל-Word',
     'ייצוא ל-PDF',
     'הדפסה',
     'יציאה',
@@ -253,7 +252,7 @@ describe('לשונית „קובץ” נשענת על מצב המעטפת', () =
     return byLabel;
   }
 
-  it('עשרה פקדים, וכל התוויות נמצאו — אחרת הבדיקות למטה מודדות אוויר', async () => {
+  it('תשעה פקדים, וכל התוויות נמצאו — אחרת הבדיקות למטה מודדות אוויר', async () => {
     const byLabel = await states({ hasDocument: true });
 
     expect(Object.keys(byLabel)).toHaveLength(LABELS.length);
@@ -265,7 +264,6 @@ describe('לשונית „קובץ” נשענת על מצב המעטפת', () =
 
     expect(byLabel['שמור']).toBe(true);
     expect(byLabel['שמור בשם...']).toBe(true);
-    expect(byLabel['ייצוא ל-Word']).toBe(true);
     expect(byLabel['הדפסה']).toBe(true);
     // „מסמך חדש” ו„פתח קובץ” הם בדיוק מה שעושים כשאין מסמך.
     expect(byLabel['מסמך חדש']).toBe(false);
@@ -278,14 +276,17 @@ describe('לשונית „קובץ” נשענת על מצב המעטפת', () =
   it('שמירה שרצה: אין שמירה נוספת ואין מעבר מסמך', async () => {
     // `decideDocumentSwitch` מחזיר cancel עם reason 'saving', ומפעיל הפעולות
     // של הקיצורים חוסם את Ctrl+S. הפקד מראה את זה מראש במקום לבלוע לחיצה.
-    const byLabel = await states({ hasDocument: true, isSaving: true });
+    // `hasPdfExport` דלוק כאן ולא בשאר הבדיקות: בלעדיו „ייצוא ל-PDF” מנוטרל
+    // מטעם אחר לגמרי (אין `ui.exportPdf` ב-Host), והטענה שהשמירה אינה חוסמת
+    // אותו לא הייתה נמדדת בכלל.
+    const byLabel = await states({ hasDocument: true, isSaving: true, hasPdfExport: true });
 
     expect(byLabel['שמור']).toBe(true);
     expect(byLabel['שמור בשם...']).toBe(true);
     expect(byLabel['מסמך חדש']).toBe(true);
     expect(byLabel['פתח קובץ']).toBe(true);
     // ייצוא והדפסה קוראים את המסמך ואינם מתנגשים בשמירה.
-    expect(byLabel['ייצוא ל-Word']).toBe(false);
+    expect(byLabel['ייצוא ל-PDF']).toBe(false);
     expect(byLabel['הדפסה']).toBe(false);
     // „יציאה” כן: הוא שואל „לשמור לפני יציאה?”, ובזמן סבב שמירה השאלה הזאת
     // הייתה מציעה לשמור שוב את מה שנשמר כרגע.
@@ -405,7 +406,7 @@ describe('„אוצריא”', () => {
     // לאוצריא היה לוקח מהמשתמש יכולת שעובדת. פקדי הציטוט/חיפוש/ספרייה כן
     // מנוטרלים — הם בדיוק מה שאין בלי ה-SDK.
     // „ייצוא לאוצריא” נשאר חי מחוץ לאוצריא: מסלול השמירה ממומש ב-dev-stub,
-    // וכך הוא נבדק בדפדפן — כמו „ייצוא ל-Word” בלשונית „קובץ”.
+    // וכך הוא נבדק בדפדפן — כמו „שמור בשם” בלשונית „קובץ”.
     expect(live).toEqual(['ייצוא לאוצריא', 'ניהול מאקרו', 'הקלט מאקרו', 'נגן אחרון']);
   });
 });

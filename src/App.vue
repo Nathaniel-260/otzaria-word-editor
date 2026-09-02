@@ -57,7 +57,6 @@
         @open-doc="onPickAndOpen"
         @save-doc="onSave(false)"
         @save-as-doc="onSave(true)"
-        @export-doc="onExportDocx"
         @print-doc="onPrint"
         @export-pdf="onExportPdf"
         @export-otzaria="onExportOtzaria"
@@ -422,7 +421,6 @@ import {
 import { NO_VBA, type DocumentVba } from './engine/vba-import';
 import { exportPdfDocument, pdfSuggestedName, printDocument } from './engine/print';
 import { buildOtzariaBook, otzariaBookFileName } from './engine/otzaria-book';
-import { downloadBlob } from './host/download';
 import {
   beginBinaryWrite,
   uploadBytes,
@@ -2571,19 +2569,6 @@ async function onExit(): Promise<void> {
   reportReader(await openLibrary());
 }
 
-async function onExportDocx(): Promise<void> {
-  const active = swap?.current;
-  if (!active) return;
-  try {
-    const extension = saveExtension.value;
-    const blob = retypeBlob(await exportDocx(active.superdoc), extension);
-    downloadBlob(blob, documentFileName(title.value, extension));
-    setStatus(`${title.value} יוצא ל-Word`);
-  } catch (error) {
-    setStatus(error instanceof Error ? error.message : 'הייצוא נכשל', true);
-  }
-}
-
 /**
  * הדפסה. הכפתור קרא ל-`window.print()` בלבד, ולא היה בפרויקט אף `@media print`
  * — כלומר הוא הדפיס את הממשק (נמדד ב-CDP). הגלון ב-styles/print.css, וקביעת
@@ -2649,8 +2634,9 @@ async function onExportPdf(): Promise<void> {
  * engine/otzaria-book.ts; כאן רק מסלול השמירה והדיווח.
  *
  * המסלול הוא מסלול השמירה הבינארית הרגיל (begin ← PUT ← commit עם דיאלוג
- * „שמור בשם”), עם סיומת `txt` — לא `downloadBlob`: הורדה לתיקיית ההורדות
- * הייתה מפספסת את הנקודה, שהיא לשים את הקובץ בתיקייה אישית של אוצריא.
+ * „שמור בשם”), עם סיומת `txt` — ולא הורדה דרך `<a download>`: תיקיית
+ * ההורדות הייתה מפספסת את הנקודה, שהיא לשים את הקובץ בתיקייה אישית של
+ * אוצריא. (זה גם מה שהוריד את „ייצוא ל-Word” מלשונית „קובץ” — ראו FileTab.vue.)
  *
  * אחרי שמירה מוצלחת נקרא `library.refreshUserBooks`: אם המשתמש שמר
  * לתיקייה אישית רשומה, הספר נקלט מיד; אחרת הסריקה פשוט לא תמצא דבר,

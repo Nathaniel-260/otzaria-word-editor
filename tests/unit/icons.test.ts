@@ -761,7 +761,6 @@ describe('אתרי הקריאה לאייקונים', () => {
       ['folder', 'פתח קובץ'],
       ['save', 'שמור'],
       ['saveAs', 'שמור בשם...'],
-      ['export', 'ייצוא ל-Word'],
       ['exportPdf', 'ייצוא ל-PDF'],
     ] as const) {
       const quoted = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
