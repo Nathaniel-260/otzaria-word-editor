@@ -151,3 +151,36 @@ describe('commitValue', () => {
     expect(commitValue(buildComboRows(OPTIONS, 'ari'), -1, 'ari')).toBeNull();
   });
 });
+
+/**
+ * תיבת ערך — בורר הגודל.
+ *
+ * שם הרשימה היא הצעה ולא מלאי, ולכן ההכרעה של „יש התאמות” מתהפכת: מי שהקליד
+ * „1” מתכוון ל-1pt, ולא ל-10 שהוא ההתאמה הראשונה בדירוג.
+ */
+describe('commitValue עם normalize', () => {
+  const SIZES: readonly ComboOption[] = [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 36, 48, 72].map(
+    (size) => option(String(size)),
+  );
+  const asTyped = (typed: string) => typed;
+
+  it('הטקסט מנצח את הדירוג — „1” הוא 1, לא 10', () => {
+    const rows = buildComboRows(SIZES, '1');
+    expect(rows.count).toBeGreaterThan(0);
+    expect(commitValue(rows, -1, '1')).toBeNull();
+    expect(commitValue(rows, -1, '1', asTyped)).toBe('1');
+  });
+
+  it('גודל שאינו בסולם מוחל כמות שהוא', () => {
+    expect(commitValue(buildComboRows(SIZES, '13'), -1, '13', asTyped)).toBe('13');
+  });
+
+  it('סימון מפורש עדיין גובר — מי שירד בחץ בחר מהרשימה', () => {
+    const rows = buildComboRows(SIZES, '1');
+    expect(commitValue(rows, 0, '1', asTyped)).toBe('10');
+  });
+
+  it('נרמול שדחה את הקלט אינו מחיל דבר', () => {
+    expect(commitValue(buildComboRows(SIZES, 'גדול'), -1, 'גדול', () => null)).toBeNull();
+  });
+});

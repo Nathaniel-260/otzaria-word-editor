@@ -127,9 +127,11 @@ const EN: Readonly<Record<string, string>> = {
     'Copy formatting from one place and apply it elsewhere',
   'גופן': 'Font',
   // כותרות הקבוצות בבורר הגופן (engine/font-options.ts).
+  'גופנים אחרונים': 'Recent Fonts',
   'עברית': 'Hebrew',
   'כל הגופנים': 'All Fonts',
   'אין גופן בשם הזה': 'No matching font',
+  'Enter מחיל את הגודל שהוקלד': 'Enter applies the size you typed',
   'פתח את הרשימה': 'Open the list',
   'גודל גופן': 'Font Size',
   'הגדל גופן': 'Increase Font Size',

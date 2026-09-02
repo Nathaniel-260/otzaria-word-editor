@@ -21,30 +21,66 @@
  *
  * מנייה אמיתית מחזירה מאות משפחות — 294 נמדדו ב-Windows — ורשימה שטוחה בגודל
  * כזה אינה שמישה. הקיבוץ נקבע כאן ולא בקומפוננטה מפני שכאן יודעים **מאיזה
- * מקור** כל אפשרות הגיעה; אחרי המיזוג המידע הזה אבוד. שלוש קבוצות, בסדר הזה:
+ * מקור** כל אפשרות הגיעה; אחרי המיזוג המידע הזה אבוד. ארבע קבוצות, בסדר הזה:
  *
  * | קבוצה | מה בה |
  * |---|---|
- * | `''` (בראש, בלי כותרת) | הגופנים שלנו, גופני המסמך מהמנוע, וזנב הלטינית |
- * | „עברית” | מה שמותקן במכונה ומכסה עברית |
- * | „כל הגופנים” | כל השאר שמותקן |
+ * | `''` (בראש, בלי כותרת) | הגופנים שלנו וזנב הלטינית — מה שתמיד שם |
+ * | „גופנים אחרונים” | מה שהמנוע מדווח מהמסמך, עד `RECENT_FONT_LIMIT` |
+ * | „עברית” | מה שמכסה עברית |
+ * | „כל הגופנים” | כל השאר |
+ *
+ * ## למה יש מכסה על „אחרונים”, ולמה מה שנחתך אינו נעלם
+ *
+ * הקבוצה הזאת גדלה מעצמה: המנוע מרכיב אותה מהגופנים שהמסמך משתמש בהם, ומאז
+ * שיש תצוגה חיה (composables/font-preview.ts) גם גופן שרוחפים מעליו נכנס לרגע
+ * לשימוש המסמך ומצטרף אליה. עשרים שמות בראש הבורר הם עשרים שמות שדוחפים את כל
+ * השאר למטה, ורשימה שמשתנה תוך כדי גלילה היא רשימה שבורחת מתחת לעכבר.
+ *
+ * המכסה היא על **התצוגה בקבוצה**, לא על הזמינות: מה שנחתך ממנה נכנס שוב בסוף,
+ * תחת „כל הגופנים”. גופן שהמסמך נכתב בו ואינו מותקן במכונה היה נעלם מהבורר
+ * לגמרי אחרת — וזה בדיוק מה שהרשימה מהמנוע נועדה למנוע.
  *
  * הצורה של `ui` מוגדרת כאן מבנית ולא מיובאת: הבדיקה מעבירה כפיל, ומימוש של
  * `FontsHandle` המלא בכפיל היה מחייב גם את שלושת מסלולי ה-subscription שאין
  * להם קשר לאפשרויות.
  */
 import type { FontFamilyOption, FontSizeOption } from 'superdoc/ui';
+import { coversHebrew } from './docx-fonts';
 import { emptyInstalledFonts, type InstalledFontsSnapshot } from './system-fonts';
 import { WORD_FONT_SIZES } from './payloads';
 
 /** כותרות הקבוצות בבורר. `''` הוא „בראש, בלי כותרת”. */
 export const FONT_GROUP_TOP = '';
+export const FONT_GROUP_RECENT = 'גופנים אחרונים';
 export const FONT_GROUP_HEBREW = 'עברית';
 export const FONT_GROUP_ALL = 'כל הגופנים';
 
-/** אפשרות גופן אחת, עם הקבוצה שהיא שייכת לה. */
+/**
+ * כמה גופנים מציגה קבוצת „אחרונים”. ראו „למה יש מכסה” בהערת הפתיחה.
+ *
+ * שישה: מספיק כדי שמסמך רגיל יראה את הגופנים שלו בראש, ומעט מספיק כדי שהם לא
+ * ידחפו את הרשימה כולה מתחת לקו. מה שמעבר לזה זמין תחת „כל הגופנים”.
+ */
+export const RECENT_FONT_LIMIT = 6;
+
+/** אפשרות גופן אחת, עם הקבוצה שלה ועם מה שידוע על כיסוי העברית שלה. */
 export interface FontFamilyChoice extends FontFamilyOption {
   group: string;
+  /**
+   * הגופן מכסה עברית, ולכן הבורר מצייר לפני שמו דגימה של אותיות עבריות
+   * (`RibbonCombo`) — שם לטיני של גופן עברי אינו מראה דבר על צורת האותיות.
+   *
+   * **לא** „גופן עברי” במובן של ייעוד: `Arial` ו-`Times New Roman` מכסים
+   * עברית, והדגימה בהם אמיתית בדיוק כמו ב-`FrankRuhlCLM`. וזה גם הגבול —
+   * דגימה בגופן שאינו מכסה עברית הייתה נופלת ל-fallback, כלומר מציגה את
+   * האותיות של **גופן אחר** תחת שמו. כיסוי הוא מה שהופך אותה לאמת.
+   *
+   * הדגל נקבע במיזוג ולא בפקד מאותו טעם שהקבוצה נקבעת שם: רק אז יודעים מאיזה
+   * מקור האפשרות באה. ואי אפשר לגזור אותו מהקבוצה — שש המשפחות שלנו יושבות
+   * בראש הרשימה (`FONT_GROUP_TOP`) וכולן עבריות.
+   */
+  hebrew: boolean;
 }
 
 /** מה שהבוררים ב-Ribbon מציגים. */
@@ -118,33 +154,68 @@ function familyKey(value: string): string {
 export function mergeFontFamilies(
   engineOptions: readonly FontFamilyOption[] | undefined,
   installed: InstalledFontsSnapshot = emptyInstalledFonts(),
+  covers: (family: string) => boolean = coversHebrew,
 ): readonly FontFamilyChoice[] {
-  const isHebrew = (option: FontFamilyOption): boolean =>
-    typeof option?.value === 'string' && installed.hebrew.has(familyKey(option.value));
+  /**
+   * שני מקורות לידיעה, ולא אחד: מה שהמנייה **אמרה** ומה שהדפדפן **מדד**.
+   *
+   * המנייה יודעת רק על מה שהיא מכירה — במסלול המארח סיווג אמיתי, ובמסלול
+   * המדידה רשימת מועמדים מתוחזקת ביד (system-fonts.ts). המדידה עונה על כל שם
+   * שנשאלת עליו, כולל גופן שהמסמך הביא ואיש לא כתב ברשימה. זה מה שתיקן את
+   * „יש גופנים עם עברית שאינם מוצגים ככאלה”.
+   */
+  const isHebrew = (option: FontFamilyOption): boolean => {
+    if (typeof option?.value !== 'string') return false;
+    return installed.hebrew.has(familyKey(option.value)) || covers(option.value.trim());
+  };
 
-  const sources: readonly (readonly [readonly FontFamilyOption[], string])[] = [
-    [OTZARIA_FONT_FAMILIES, FONT_GROUP_TOP],
-    [engineOptions ?? [], FONT_GROUP_TOP],
+  const engine = engineOptions ?? [];
+
+  /**
+   * לכל מקור: הקבוצה שלו, מה שידוע מראש על כיסוי העברית (`true`/`false` =
+   * המקור יודע, `undefined` = נשאל `isHebrew`), ומכסה על כמה יתווספו ממנו.
+   *
+   * שש המשפחות שלנו מסומנות `true` ואינן נמדדות: הן מוזרקות **אחרי** שהמנייה
+   * רצה, ובמדידה הן תלויות גם בטעינת ה-`@font-face`. דגימה שנעלמת לשנייה
+   * מ-Frank Ruhl ואז חוזרת גרועה משתי האפשרויות.
+   *
+   * `false` מפורש לזנב („כל הגופנים”) ולא `undefined`: הוא סוּנן בדיוק לפי
+   * `isHebrew`, ומאות מדידות חוזרות אינן צריכות לקרות שוב.
+   *
+   * המקור האחרון הוא רשימת המנוע **בשנית**: מה שנחתך מהמכסה נכנס שם, אחרי
+   * הכול. הכפילות אינה תקלה — הלולאה מדלגת על מה שכבר נוסף — והיא מה שמבטיח
+   * שגופן של המסמך לא ייעלם מהבורר בגלל המכסה.
+   */
+  const sources: readonly (readonly [readonly FontFamilyOption[], string, boolean?, number?])[] = [
+    [OTZARIA_FONT_FAMILIES, FONT_GROUP_TOP, true],
     [LATIN_FONT_FAMILIES, FONT_GROUP_TOP],
-    [installed.families.filter(isHebrew), FONT_GROUP_HEBREW],
-    [installed.families.filter((option) => !isHebrew(option)), FONT_GROUP_ALL],
+    [engine, FONT_GROUP_RECENT, undefined, RECENT_FONT_LIMIT],
+    [installed.families.filter(isHebrew), FONT_GROUP_HEBREW, true],
+    [installed.families.filter((option) => !isHebrew(option)), FONT_GROUP_ALL, false],
+    [engine, FONT_GROUP_ALL],
   ];
 
   const merged: FontFamilyChoice[] = [];
   const seen = new Set<string>();
 
-  for (const [options, group] of sources) {
+  for (const [options, group, hebrew, limit] of sources) {
+    // נספר מה ש**נוסף**, ולא מה שנסרק: מכסה שסופרת גם שמות שכבר הופיעו למעלה
+    // הייתה מציגה קבוצה ריקה בדיוק כשהמסמך משתמש בגופנים שלנו.
+    let added = 0;
     for (const option of options) {
+      if (limit !== undefined && added >= limit) break;
       const value = typeof option?.value === 'string' ? option.value.trim() : '';
       if (value === '') continue;
       const key = familyKey(value);
       if (seen.has(key)) continue;
       seen.add(key);
+      added += 1;
       merged.push({
         value,
         label: typeof option.label === 'string' && option.label.trim() !== '' ? option.label : value,
         previewFamily: option.previewFamily ?? value,
         group,
+        hebrew: hebrew ?? isHebrew(option),
       });
     }
   }
@@ -207,9 +278,10 @@ export function mergeFontSizes(
 export function composeFontOptions(
   slice: FontsSliceLike | null | undefined,
   installed: InstalledFontsSnapshot = emptyInstalledFonts(),
+  covers: (family: string) => boolean = coversHebrew,
 ): FontOptions {
   return {
-    families: mergeFontFamilies(slice?.options, installed),
+    families: mergeFontFamilies(slice?.options, installed, covers),
     sizes: mergeFontSizes(slice?.sizeOptions),
   };
 }

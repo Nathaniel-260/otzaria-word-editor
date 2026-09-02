@@ -239,6 +239,59 @@ export function isFamilyAvailable(name: string): boolean {
   );
 }
 
+/** מחרוזת המדידה לכיסוי עברית בלבד. ראו `coversHebrew`. */
+const HEBREW_PROBE_TEXT = 'אבגדהוזחטיכלמנסעפצקרשת';
+
+/**
+ * זיכרון התשובות. `coversHebrew` נשאלת על כל שם ברשימה בכל מיזוג מחדש — מאות
+ * שמות, וכל מיזוג הוא דיווח של המנוע — והתשובה אינה משתנה לאורך ההפעלה.
+ */
+const hebrewCoverage = new Map<string, boolean>();
+
+/**
+ * האם הגופן מצייר עברית **בעצמו**.
+ *
+ * זו שאלה אחרת מ-`isFamilyAvailable`, והבחנה שהבורר חי ממנה: שם שהדפדפן פותר
+ * אינו בהכרח שם שיש בו אות עברית אחת. הבורר מציג דגימה של אותיות עבריות ליד
+ * כל גופן שמכסה עברית, ודגימה בגופן שאינו מכסה הייתה נופלת ל-fallback — כלומר
+ * מציגה את האותיות של גופן **אחר** תחת השם הזה.
+ *
+ * המדידה: רוחב מחרוזת עברית במשפחה מול הרוחב באותה שרשרת בלי המשפחה. גופן
+ * בלי עברית נופל בדיוק לאותו fallback בשני המקרים ומודד זהה; גופן שמכסה
+ * מצייר משלו ונבדל. שני בסיסים ולא אחד, מאותו טעם של `isFamilyAvailable` —
+ * צירוף מקרים ברוחב מול בסיס אחד אפשרי, מול שניים כמעט לא.
+ *
+ * **`false` כשאין canvas**, וזה ההפך מ-`isFamilyAvailable`: שם „בלי מדידה אל
+ * תיגע” הוא הצד הבטוח, וכאן הצד הבטוח הוא לא להבטיח. דגימה שלא נמדדה היא
+ * דגימה שעלולה לשקר.
+ *
+ * ## למה זה החליף רשימה מתוחזקת ביד
+ *
+ * הסיווג היה קודם רשימת מועמדים ב-system-fonts.ts, וזה עבד רק על מה שברשימה:
+ * גופן עברי שמותקן במכונה ולא נכתב בה — או גופן שהמסמך עצמו משתמש בו והמנוע
+ * הביא — הופיע בבורר בלי דגימה ובקבוצה הלא נכונה. זה דווח, וזו התשובה: מודדים
+ * את מה שיש, במקום לנחש מראש מה יהיה.
+ */
+export function coversHebrew(name: string): boolean {
+  const cached = hebrewCoverage.get(name);
+  if (cached !== undefined) return cached;
+
+  const context = measurementContext();
+  if (!context) return false;
+
+  const width = (font: string): number => {
+    context.font = font;
+    return context.measureText(HEBREW_PROBE_TEXT).width;
+  };
+  const quoted = JSON.stringify(name);
+  const covers =
+    width(`72px ${quoted}, monospace`) !== width('72px monospace') ||
+    width(`72px ${quoted}, serif`) !== width('72px serif');
+
+  hebrewCoverage.set(name, covers);
+  return covers;
+}
+
 /**
  * האם יש כאן במה למדוד בכלל.
  *
