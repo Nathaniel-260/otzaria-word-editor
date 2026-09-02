@@ -309,14 +309,119 @@ describe('exportPdfDocument', () => {
       withBoth.push(input);
       return { saved: true, name: 'a.pdf' };
     }, { root: fakeRoot(), fileName: 'ספר', title: 'ייצוא' });
-    expect(withBoth[0]).toEqual({ fileName: 'ספר', title: 'ייצוא' });
+    expect(withBoth[0]).toMatchObject({ fileName: 'ספר', title: 'ייצוא' });
 
     const bare: unknown[] = [];
     await exportPdfDocument(fakeHost(), async (input) => {
       bare.push(input);
       return { saved: true, name: 'a.pdf' };
     }, { root: fakeRoot() });
-    expect(bare[0]).toEqual({});
+    expect(bare[0]).not.toHaveProperty('fileName');
+    expect(bare[0]).not.toHaveProperty('title');
+  });
+
+  it('גודל נייר מוכר נמסר בשמו — הצורה שאוצריא מכירה מאז שהמתודה נוספה', async () => {
+    const inputs: unknown[] = [];
+    await exportPdfDocument(fakeHost(), async (input) => {
+      inputs.push(input);
+      return { saved: true, name: 'a.pdf' };
+    }, { root: fakeRoot() });
+
+    // fakeHost מחזיר 8.269×11.694 אינץ' — A4 אחרי ceilTo3, כלומר
+    // 210.04×297.03 מ"מ: בתוך הסבילות של מ"מ אחד מ-210×297.
+    expect(inputs[0]).toMatchObject({
+      pageSize: 'a4',
+      marginMm: 0,
+      printBackgrounds: true,
+    });
+  });
+
+  it('גודל שאין לו שם נמסר כמידות מפורשות במ"מ', async () => {
+    const inputs: unknown[] = [];
+    // 6.5×9.5 אינץ' — קונטרס, לא A4 ולא Letter.
+    await exportPdfDocument(
+      fakeHost({ items: [{ pageSetup: { width: 6.5, height: 9.5 } }] }),
+      async (input) => {
+        inputs.push(input);
+        return { saved: true, name: 'a.pdf' };
+      },
+      { root: fakeRoot() },
+    );
+
+    expect(inputs[0]).toMatchObject({
+      pageSize: { widthMm: 165.1, heightMm: 241.3 },
+      marginMm: 0,
+      printBackgrounds: true,
+    });
+  });
+
+  it('A4 לרוחב אינו „a4”: השם אינו יכול לתאר אותו בלי orientation', async () => {
+    const inputs: unknown[] = [];
+    await exportPdfDocument(
+      fakeHost({ items: [{ pageSetup: { width: 11.694, height: 8.269 } }] }),
+      async (input) => {
+        inputs.push(input);
+        return { saved: true, name: 'a.pdf' };
+      },
+      { root: fakeRoot() },
+    );
+
+    expect(inputs[0]).toMatchObject({ pageSize: { widthMm: 297.03, heightMm: 210.04 } });
+  });
+
+  it('`invalid_params` על גודל הדף — סבב שני בלעדיו, והייצוא מצליח באזהרה', async () => {
+    // Host שאינו מכיר את צורת ה-pageSize שנשלחה. הדחייה שם קורית לפני
+    // שנפתח דיאלוג, ולכן הניסיון החוזר אינו יכול לשמור קובץ פעמיים.
+    const inputs: Array<Record<string, unknown>> = [];
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const outcome = await exportPdfDocument(
+      fakeHost(),
+      async (input) => {
+        inputs.push(input as Record<string, unknown>);
+        if ('pageSize' in input) {
+          throw Object.assign(new Error('unknown pageSize'), {
+            code: 'error.invalid_params',
+          });
+        }
+        return { saved: true, name: 'a.pdf' };
+      },
+      { root: fakeRoot() },
+    );
+
+    expect(inputs).toHaveLength(2);
+    expect(inputs[1]).not.toHaveProperty('pageSize');
+    expect(inputs[1]).toMatchObject({ marginMm: 0, printBackgrounds: true });
+    expect(outcome).toMatchObject({ ok: true, saved: true, name: 'a.pdf' });
+    if (outcome.ok && outcome.saved) expect(outcome.warning).toContain('גודל הדף');
+    warn.mockRestore();
+  });
+
+  it('`invalid_params` בלי גודל בכלל אינו מפעיל סבב שני', async () => {
+    // אין `pageSize` בקריאה, ולכן הדחייה אינה עליו — ניסיון חוזר היה
+    // מסתיים באותה דחייה ובקריאה מיותרת לאוצריא.
+    const inputs: unknown[] = [];
+    const outcome = await exportPdfDocument(
+      fakeHost({ omitList: true }),
+      async (input) => {
+        inputs.push(input);
+        throw Object.assign(new Error('bad fileName'), { code: 'error.invalid_params' });
+      },
+      { root: fakeRoot() },
+    );
+
+    expect(inputs).toHaveLength(1);
+    expect(outcome).toMatchObject({ ok: false, reason: 'threw' });
+  });
+
+  it('גודל שלא נקרא — בלי pageSize, אבל שוליים ורקעים עדיין נמסרים', async () => {
+    const inputs: unknown[] = [];
+    await exportPdfDocument(fakeHost({ omitList: true }), async (input) => {
+      inputs.push(input);
+      return { saved: true, name: 'a.pdf' };
+    }, { root: fakeRoot() });
+
+    expect(inputs[0]).not.toHaveProperty('pageSize');
+    expect(inputs[0]).toMatchObject({ marginMm: 0, printBackgrounds: true });
   });
 
   it('ביטול אינו כישלון — ואינו נושא שם', async () => {
@@ -329,18 +434,23 @@ describe('exportPdfDocument', () => {
   });
 
   it('`forbidden` מקבל הסבר שאומר מה לעשות, ולא „הייצוא נכשל”', async () => {
-    const outcome = await exportPdfDocument(
-      fakeHost(),
-      async () => {
-        throw Object.assign(new Error('user activation required'), { code: 'forbidden' });
-      },
-      { root: fakeRoot() },
-    );
-    expect(outcome).toEqual({
-      ok: false,
-      message: 'הייצוא ל-PDF דורש לחיצה ישירה על הכפתור — נסו שוב',
-      reason: 'forbidden',
-    });
+    // שתי הצורות: אוצריא מחזירה `error.forbidden` בפועל (API_REFERENCE
+    // §קודי שגיאה), והתיעוד מזכיר גם קודים בלי הקידומת. השוואה מדויקת
+    // ל-`forbidden` הייתה מפספסת בדיוק את הצורה האמיתית.
+    for (const code of ['forbidden', 'error.forbidden']) {
+      const outcome = await exportPdfDocument(
+        fakeHost(),
+        async () => {
+          throw Object.assign(new Error('user activation required'), { code });
+        },
+        { root: fakeRoot() },
+      );
+      expect(outcome, code).toEqual({
+        ok: false,
+        message: 'הייצוא ל-PDF דורש לחיצה ישירה על הכפתור — נסו שוב',
+        reason: 'forbidden',
+      });
+    }
   });
 
   it('כשל אחר נושא את ההודעה של ה-Host', async () => {

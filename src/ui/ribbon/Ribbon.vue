@@ -98,6 +98,7 @@
         @insert-citation="$emit('insert-citation')"
         @search-otzaria="$emit('search-otzaria')"
         @open-library="$emit('open-library')"
+        @export-otzaria="$emit('export-otzaria')"
         @manage-macros="$emit('manage-macros')"
         @macro-record="$emit('macro-record')"
         @macro-play="$emit('macro-play')"
@@ -204,6 +205,7 @@ defineEmits<{
   (e: 'export-doc'): void;
   (e: 'print-doc'): void;
   (e: 'export-pdf'): void;
+  (e: 'export-otzaria'): void;
   (e: 'about'): void;
   (e: 'shortcuts-help'): void;
   (e: 'exit-app'): void;

@@ -210,15 +210,57 @@ export async function beginBinaryWrite(expectedSize: number): Promise<WriteTicke
 }
 
 /**
+ * אבחון חד-פעמי לכשל רשת בהעלאה („Failed to fetch”).
+ *
+ * „Failed to fetch” הוא כל מה שהדפדפן אומר, והוא מכסה שני עולמות שונים
+ * לגמרי: שרת ה-loopback אינו נגיש בכלל, או שדווקא ה-PUT נחסם (שער בקשות
+ * של ה-WebView, preflight שנכשל). ההבחנה נמדדת: GET לשורש השרת. אם ה-GET
+ * עובר (כל סטטוס HTTP הוא הוכחת נגישות) — הבעיה ב-PUT עצמו; אם גם הוא
+ * נופל — השרת אינו נגיש מהדף.
+ *
+ * חד-פעמי לכל חיי הדף: שמירה אוטומטית רצה כל כמה שניות, ואבחון בכל כשל
+ * היה מציף את הלוג ואת השרת. הממצא נכנס גם להודעת השגיאה — צילום מסך של
+ * שורת המצב הוא ערוץ הדיווח בפועל.
+ */
+let uploadDiagnosed = false;
+
+async function uploadFailureDetail(uploadUrl: string): Promise<string> {
+  if (uploadDiagnosed) return '';
+  uploadDiagnosed = true;
+
+  let probe: string;
+  try {
+    const origin = new URL(uploadUrl).origin;
+    const res = await fetch(`${origin}/`, { method: 'GET' });
+    probe = `GET לשרת עבר (${res.status}) — ה-PUT עצמו נחסם`;
+  } catch (probeError) {
+    probe = `גם GET לשרת נכשל (${
+      probeError instanceof Error ? probeError.message : String(probeError)
+    }) — השרת אינו נגיש מהדף`;
+  }
+
+  const detail = `דף=${window.location.origin || window.location.protocol}, יעד=${uploadUrl}, ${probe}`;
+  console.error('[otzaria-word] אבחון כשל העלאה:', detail);
+  return ` [${detail}]`;
+}
+
+/**
  * שולחת את הבייטים ב-PUT יחיד. לא עוברת בגשר — `fetch` ישירות לשרת ה-loopback.
  * `keepalive` אינו בשימוש בכוונה: הוא מוגבל לגוף קטן, וכאן מדובר במסמך.
  */
 export async function uploadBytes(uploadUrl: string, blob: Blob): Promise<void> {
-  const response = await fetch(uploadUrl, {
-    method: 'PUT',
-    headers: { 'Content-Type': blob.type || DOCX_MIME },
-    body: blob,
-  });
+  let response: Response;
+  try {
+    response = await fetch(uploadUrl, {
+      method: 'PUT',
+      headers: { 'Content-Type': blob.type || DOCX_MIME },
+      body: blob,
+    });
+  } catch (error) {
+    // TypeError של fetch: הבקשה לא הגיעה לשרת בכלל. ראו uploadFailureDetail.
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(`העלאת המסמך נכשלה: ${reason}${await uploadFailureDetail(uploadUrl)}`);
+  }
   if (!response.ok) {
     throw new Error(`העלאת המסמך נכשלה (${response.status})`);
   }
@@ -251,8 +293,11 @@ export interface CommitOptions {
    * `ספר.docm.docx` — ועוד סינן את הדיאלוג ל-`docx`. כלומר בדיוק החבילה
    * עם `vbaProject` שנושאת שם `.docx` שאותה יש להימנע ממנה.
    * ראו `resolveSaveExtension` ב-engine/export.ts.
+   *
+   * `txt` — ייצוא לפורמט ספר של אוצריא (engine/otzaria-book.ts), שעובר
+   * באותו מסלול שמירה בדיוק.
    */
-  extension?: WordExtension;
+  extension?: WordExtension | 'txt';
 }
 
 /** כותבת את ההעלאה לקובץ. `cancelled` פירושו שהמשתמש סגר את „שמור בשם”. */

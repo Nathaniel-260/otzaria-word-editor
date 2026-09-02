@@ -210,6 +210,10 @@ export function applyPrintPageSize(size: PrintPageSize | null, root: Document): 
 const NO_PAPER_WARNING =
   'גודל הדף לא נקרא מהמסמך — בדקו את גודל הנייר בדיאלוג ההדפסה';
 
+/** גודל הדף נמסר אבל אוצריא דחתה אותו; ראו את הנפילה-לאחור ב-`exportPdfDocument`. */
+const SIZE_ARG_REJECTED_WARNING =
+  'גרסת אוצריא הזאת אינה מקבלת את גודל הדף של המסמך — בדקו את גודל הנייר בקובץ שנוצר';
+
 /**
  * מכינה את הדף להדפסה ופותחת את דיאלוג ההדפסה.
  *
@@ -261,6 +265,71 @@ export interface ExportPdfReply {
   name?: string | null;
 }
 
+/**
+ * ארגומנטי העימוד של `ui.exportPdf` (אוצריא 0.9.97, API_REFERENCE.md §ui.exportPdf).
+ *
+ * `pageSize` מתקבל שם או מפה, ואנחנו מוסרים את שניהם — ראו `pdfPageSizeArg`.
+ *
+ * `orientation` מושמט בכוונה: הרוחב והגובה כבר נושאים את הכיוון, ודגל נוסף
+ * מסתכן במנוע שמסובב את המידות פעם שנייה — ואוצריא אף דוחה את השילוב.
+ */
+export interface ExportPdfLayoutInput {
+  pageSize?: PdfPageSizeArg;
+  marginMm?: number;
+  printBackgrounds?: boolean;
+}
+
+/** מה שאוצריא מקבלת ב-`pageSize`: שם מוכר, או מידות מפורשות במ"מ. */
+export type PdfPageSizeArg = string | { widthMm: number; heightMm: number };
+
+const MM_PER_INCH = 25.4;
+
+/**
+ * ההמרה לממ"ים של `ui.exportPdf`. העיגול כלפי מעלה לשתי ספרות — אותו כיוון
+ * ואותה סיבה כמו `ceilTo3`: נייר שקטן מתיבת העמוד בשבריר שובר כל עמוד לשניים.
+ */
+export function pdfPageSizeMm(size: PrintPageSize): { widthMm: number; heightMm: number } {
+  const ceil2 = (value: number): number => Math.ceil(value * 100) / 100;
+  return { widthMm: ceil2(size.widthIn * MM_PER_INCH), heightMm: ceil2(size.heightIn * MM_PER_INCH) };
+}
+
+/**
+ * גדלי הנייר שיש להם שם באוצריא, במ"מ (רוחב, גובה) לאורך — העתק של
+ * `_pdfPageSizesMm` ב-`plugin_bridge_adapter.dart`.
+ */
+const NAMED_PAGE_SIZES_MM: ReadonlyArray<[string, number, number]> = [
+  ['a4', 210, 297],
+  ['a5', 148, 210],
+  ['letter', 215.9, 279.4],
+  ['legal', 215.9, 355.6],
+];
+
+/**
+ * הסטייה שעוד נחשבת „אותו נייר”. מידות הדף עוברות טוויפס ואינצ'ים עם עיגול
+ * כלפי מעלה בדרך (A4 יוצא 210.04×297.03 במ"מ), ולכן השוואה מדויקת לא הייתה
+ * מזהה אף גודל שמי. מ"מ אחד בטוח: אין שני גדלים שמיים קרובים כל כך.
+ */
+const NAMED_SIZE_TOLERANCE_MM = 1;
+
+/**
+ * מה למסור ב-`pageSize`: **שם** כשמידות המסמך הן גודל נייר מוכר, ואחרת מפה.
+ *
+ * למה להעדיף את השם דווקא: הוא נותן לאוצריא את המידות התקניות המדויקות
+ * (210×297 ולא 210.04×297.03), והוא הצורה שהיא הכירה מאז שהמתודה נוספה —
+ * כלומר מסמך A4/Letter, שהוא הרוב המוחלט, מיוצא נכון גם מול Host שטרם קיבל
+ * את תמיכת המפה. המפה נשמרת למה שאין לו שם: גודל דף מותאם אישית, וגם A4
+ * לרוחב (297×210) — שהשם אינו יכול לתאר בלי `orientation`.
+ */
+export function pdfPageSizeArg(size: PrintPageSize): PdfPageSizeArg {
+  const mm = pdfPageSizeMm(size);
+  const close = (a: number, b: number): boolean => Math.abs(a - b) <= NAMED_SIZE_TOLERANCE_MM;
+
+  for (const [name, widthMm, heightMm] of NAMED_PAGE_SIZES_MM) {
+    if (close(mm.widthMm, widthMm) && close(mm.heightMm, heightMm)) return name;
+  }
+  return mm;
+}
+
 export interface ExportPdfOptions {
   /** ברירת המחדל: המסמך של הדפדפן. מוחלף בבדיקות. */
   root?: Document;
@@ -292,6 +361,19 @@ export type ExportPdfOutcome =
  * עם מידות הדף של המסמך. בלי ההכנה הזאת ה-PDF היה מכיל את הרצועה ואת שורת
  * המצב, ועמוד A4 היה נשבר לשני גיליונות — אותן שלוש הבעיות שתועדו בראש הקובץ.
  *
+ * ## שתי שכבות לאותו גודל דף — בכוונה
+ *
+ * מידות הדף נמסרות **גם** כארגומנטים לאוצריא (`pageSize`/`marginMm`, ראו
+ * ExportPdfLayoutInput) וגם כ-`@page` מוזרק. הארגומנטים הם המחייבים — הם
+ * מגיעים ל-`PrintJobSettings` של ה-WebView, שאינו מחויב לכבד `@page` של הדף.
+ * ההזרקה נשארת כי היא מה שמשרת את `window.print()` (מסלול ההדפסה), ושתי
+ * השכבות מחושבות מאותה קריאה אחת ל-`readPrintPageSize` — אין להן דרך לסתור.
+ *
+ * `marginMm: 0` ו-`printBackgrounds: true` נמסרים תמיד, גם כשהגודל לא נקרא:
+ * השוליים כבר מצוירים בתוך תיבת העמוד מה-DOCX (שוליים של המנוע היו נוספים
+ * עליהם — שוליים כפולים), והרקעים הם חלק מהמסמך (הצללת תאים, הדגשות) שמנועי
+ * הדפסה משמיטים כברירת מחדל.
+ *
  * ## ההזרקה, ולמה היא כאן
  *
  * `exportPdf` מוזרק ואינו נקרא מכאן: שכבת ה-engine אינה נוגעת ב-Host (אף
@@ -308,10 +390,24 @@ export type ExportPdfOutcome =
  *
  * `forbidden` בכל זאת מטופל בשמו: אם אוצריא תדחה, המשתמש יקבל הסבר שאומר מה
  * לעשות ולא „הייצוא נכשל”.
+ *
+ * ## ארגומנט עימוד שנדחה אינו מבטל את הייצוא
+ *
+ * `invalid_params` על `pageSize` פירושו Host שאינו מכיר את הצורה שנשלחה —
+ * ואז נשלחת קריאה שנייה בלי `pageSize` בכלל, ומה שקובע את גודל הנייר הוא
+ * ה-`@page` המוזרק, כמו לפני שהארגומנטים נוספו. הייצוא מצליח עם אזהרה, ולא
+ * נכשל על אופטימיזציה.
+ *
+ * הניסיון החוזר בטוח דווקא כאן: אוצריא מפרשת את ארגומנטי העימוד **לפני**
+ * שהיא פותחת דיאלוג (נמדד ב-plugin_bridge_ui_print_test.dart: „ערכי עימוד
+ * פסולים נדחים בלי לפתוח דיאלוג”), ולכן הדחייה הזאת אינה יכולה להשאיר קובץ
+ * שנשמר או דיאלוג פתוח. הוא מוגבל ל-`invalid_params` בלבד ולסבב אחד.
  */
 export async function exportPdfDocument(
   host: PrintTarget,
-  exportPdf: (input: { fileName?: string; title?: string }) => Promise<ExportPdfReply>,
+  exportPdf: (
+    input: { fileName?: string; title?: string } & ExportPdfLayoutInput,
+  ) => Promise<ExportPdfReply>,
   options: ExportPdfOptions = {},
 ): Promise<ExportPdfOutcome> {
   const root = options.root ?? document;
@@ -319,33 +415,72 @@ export async function exportPdfDocument(
   const size = await readPrintPageSize(host);
   applyPrintPageSize(size, root);
 
+  const base = {
+    ...(options.fileName ? { fileName: options.fileName } : {}),
+    ...(options.title ? { title: options.title } : {}),
+    marginMm: 0,
+    printBackgrounds: true,
+  };
+
   let reply: ExportPdfReply;
+  let sizeRejected = false;
   try {
     reply = await exportPdf({
-      ...(options.fileName ? { fileName: options.fileName } : {}),
-      ...(options.title ? { title: options.title } : {}),
+      ...base,
+      ...(size ? { pageSize: pdfPageSizeArg(size) } : {}),
     });
   } catch (error) {
-    const code = (error as { code?: unknown } | null)?.code;
-    if (code === 'forbidden') {
+    // הקוד מגיע מאוצריא עם קידומת (`error.forbidden`), ומקצת המקומות בלעדיה
+    // (API_REFERENCE §קודי שגיאה) — ההשוואה בזנב, כמו ב-`isPermissionDenied`.
+    const raw = (error as { code?: unknown } | null)?.code;
+    const code = typeof raw === 'string' ? raw : '';
+    if (code.endsWith('forbidden')) {
       return {
         ok: false,
         message: 'הייצוא ל-PDF דורש לחיצה ישירה על הכפתור — נסו שוב',
         reason: 'forbidden',
       };
     }
-    return {
-      ok: false,
-      message: `הייצוא ל-PDF נכשל: ${error instanceof Error ? error.message : String(error)}`,
-      reason: 'threw',
-    };
+
+    // Host שאינו מכיר את צורת ה-`pageSize` שנשלחה — סבב שני בלעדיה, ראו
+    // „ארגומנט עימוד שנדחה אינו מבטל את הייצוא”. רק כשהיה מה לדחות.
+    if (!(size && code.endsWith('invalid_params'))) {
+      return {
+        ok: false,
+        message: `הייצוא ל-PDF נכשל: ${error instanceof Error ? error.message : String(error)}`,
+        reason: 'threw',
+      };
+    }
+
+    console.warn('[otzaria-word] אוצריא דחתה את ארגומנט גודל הדף; ייצוא בלעדיו', error);
+    sizeRejected = true;
+    try {
+      reply = await exportPdf(base);
+    } catch (retryError) {
+      const retryCode = (retryError as { code?: unknown } | null)?.code;
+      if (typeof retryCode === 'string' && retryCode.endsWith('forbidden')) {
+        return {
+          ok: false,
+          message: 'הייצוא ל-PDF דורש לחיצה ישירה על הכפתור — נסו שוב',
+          reason: 'forbidden',
+        };
+      }
+      return {
+        ok: false,
+        message: `הייצוא ל-PDF נכשל: ${
+          retryError instanceof Error ? retryError.message : String(retryError)
+        }`,
+        reason: 'threw',
+      };
+    }
   }
 
   // ביטול אינו כישלון: המשתמש סגר את דיאלוג „שמור בשם”, וזו תשובה.
   if (!reply?.saved) return { ok: true, saved: false };
 
   const name = typeof reply.name === 'string' && reply.name ? reply.name : 'הקובץ';
-  return size
-    ? { ok: true, saved: true, name, size }
-    : { ok: true, saved: true, name, size: null, warning: NO_PAPER_WARNING };
+  if (!size) return { ok: true, saved: true, name, size: null, warning: NO_PAPER_WARNING };
+  return sizeRejected
+    ? { ok: true, saved: true, name, size, warning: SIZE_ARG_REJECTED_WARNING }
+    : { ok: true, saved: true, name, size };
 }

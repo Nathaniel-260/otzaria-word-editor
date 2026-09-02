@@ -81,9 +81,45 @@ function deferredEntry(): Plugin {
 
              בצורה הזאת כל תחנה מדווחת ברגע שהיא אכן נכונה: כאן הבאנדל של
              המנוע מתחיל לרדת, ובסיום שלו app.js מתחיל להיפרס. */
+          /* חימום worker המסמך, ברגע ש-engine-workers.js הציב את המקורות —
+             כלומר בזמן ש-app.js (12MB) עוד נפרס. ‏Worker זמני על ה-blob URL
+             מקמפל את ~4.6MB קוד ה-worker במקביל לפריסה הזאת, ומושלך ברגע
+             שאיתת שעלה; כשהמנוע יקים Worker על **אותו URL** הקומפילציה כבר
+             חמה (נמדד: ‏~210ms במקום ~325ms). לכן ה-URL נשמר על window,
+             ו-engine/workers.ts מאמץ אותו במקום לבנות URL חדש — blob אחר,
+             גם עם אותו תוכן, אינו פוגע ב-cache.
+
+             חימום שנכשל אינו נוגע בעלייה: ה-catch בולע, ו-workers.ts בונה
+             את ה-URL בעצמו כשהגלובל חסר. השם __otzariaDocWorkerUrl משותף
+             עם src/engine/workers.ts. */
+          function warm() {
+            try {
+              var sources = window.__SUPERDOC_WORKER_SOURCES__;
+              if (!sources || !sources.document || typeof Worker !== 'function') return;
+              var url = URL.createObjectURL(new Blob([sources.document], { type: 'text/javascript' }));
+              window.__otzariaDocWorkerUrl = url;
+              // Worker קלאסי, ובמכוון — אל תוסיפו כאן type: 'module'.
+              //
+              // ה-code cache ממופתח גם בסוג הסקריפט, ולכן probe מסוג אחר
+              // מזה שהמנוע יוצר לא היה מחמם דבר. מה המנוע יוצר בפועל נמדד
+              // (עטיפת window.Worker לפני העלייה, על ה-dist הארוז מ-file://):
+              // Worker **קלאסי** בשם superdoc-v2-edit, על אותו URL בדיוק.
+              // ובאותה מדידה: Worker מסוג module על blob URL טרי נכשל כאן
+              // מיד (‏~10ms, גם על סקריפט של 14 בתים) — module workers מ-blob
+              // חסומים ב-origin האטום של file://. כלומר probe כזה היה מת
+              // בשקט, ומבטל את החימום כולו.
+              var probe = new Worker(url);
+              function drop() { try { probe.terminate(); } catch (ignored) {} }
+              probe.addEventListener('message', drop, { once: true });
+              probe.addEventListener('error', drop, { once: true });
+              // רשת ביטחון בלבד: ‏ה-worker מודיע מיוזמתו תוך ~70ms (נמדד),
+              // ואז הוא נזרק שם. הקומפילציה נשמרת ב-cache גם אחרי שהוא מת.
+              setTimeout(drop, 10000);
+            } catch (ignored) { /* חימום הוא קיצור, לא תנאי */ }
+          }
           say({ at: 22, text: 'טוען את מנוע המסמכים…' });
           [
-            { src: '${WORKERS_SRC}', next: { at: 55, text: 'מרכיב את הממשק…' } },
+            { src: '${WORKERS_SRC}', next: { at: 55, text: 'מרכיב את הממשק…' }, warm: true },
             { src: '${match[1]}', next: null }
           ].forEach(function (step) {
             var script = document.createElement('script');
@@ -91,6 +127,7 @@ function deferredEntry(): Plugin {
             script.src = step.src;
             script.addEventListener('load', function () {
               say(step.next);
+              if (step.warm) warm();
             });
             script.addEventListener('error', function () {
               if (splash) splash.fail('טעינת קוד התוסף נכשלה');
@@ -286,6 +323,11 @@ export default defineConfig({
   // ה-URL היחסי מצביע לשם — ושם אין קובץ worker, כלומר המסמך לא נפתח בפיתוח.
   // החרגה מה-optimizer משאירה את המנוע במקומו, ואת ה-URL נפתר.
   optimizeDeps: { exclude: ['@superdoc/docx-engine'] },
+
+  // PORT מכובד כשהוא מוגדר: כלי תצוגה (וכל סביבת עבודה עם כמה שרתי פיתוח
+  // במקביל) מקצים פורט דרך משתנה הסביבה, ו-Vite מעצמו קורא רק --port.
+  // בלי זה שרת שני נופל ל-5174 בעוד הכלי מצביע על הפורט שהקצה — דף ריק.
+  server: process.env.PORT ? { port: Number(process.env.PORT), strictPort: true } : undefined,
 
   build: {
     target: 'es2020',

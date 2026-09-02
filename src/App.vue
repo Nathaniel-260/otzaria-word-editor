@@ -53,6 +53,7 @@
       @export-doc="onExportDocx"
       @print-doc="onPrint"
       @export-pdf="onExportPdf"
+      @export-otzaria="onExportOtzaria"
       @about="isAboutOpen = true"
       @shortcuts-help="isShortcutsHelpOpen = true"
       @exit-app="onExit"
@@ -367,6 +368,7 @@ import {
 } from './engine/export';
 import { NO_VBA, type DocumentVba } from './engine/vba-import';
 import { exportPdfDocument, pdfSuggestedName, printDocument } from './engine/print';
+import { buildOtzariaBook, otzariaBookFileName } from './engine/otzaria-book';
 import { downloadBlob } from './host/download';
 import {
   beginBinaryWrite,
@@ -376,9 +378,10 @@ import {
   pickDocxFile,
   resolveFileUrl,
   type UserFile,
+  type WriteTicket,
 } from './host/files';
 import { decideDocumentSwitch } from './sessions/open-flow';
-import { call, confirm, isAvailable, notifyError, on } from './host/otzaria-client';
+import { call, confirm, isAvailable, notifyError, on, tryCall } from './host/otzaria-client';
 import { supportsPdfExport } from './host/host-capabilities';
 import { splashDone } from './host/splash';
 import {
@@ -407,7 +410,14 @@ import {
   type SessionState,
 } from './sessions/session-state';
 import { createSessionKeeper, type SessionKeeper } from './sessions/session-keeper';
-import { applyCaretAnchor, readCaretAnchor, type CaretAnchor } from './engine/caret-anchor';
+import {
+  applyCaretAnchor,
+  applyDocumentStartCaret,
+  hasTextCaret,
+  readCaretAnchor,
+  type CaretAnchor,
+} from './engine/caret-anchor';
+import { createTextCursorWatch } from './engine/text-cursor';
 import {
   deleteWorkspaceEntry,
   readWorkspaceBytes,
@@ -1083,6 +1093,7 @@ function createOpenEditorForSession(session: DocumentSession): OpenEditor {
         session.save.markDirty();
         session.metrics?.noteDocumentChanged();
         session.ruler?.noteDocumentChanged();
+        session.textCursor?.noteDocumentChanged();
         session.pageBorders?.noteDocumentChanged();
         session.lineNumbers?.noteDocumentChanged();
         session.formattingMarks?.noteDocumentChanged();
@@ -1523,6 +1534,25 @@ async function openDocumentInto(
   });
 
   /**
+   * סמן-הטקסט של העכבר (I-beam על כל עמודת הטקסט, כמו Word) — ראו
+   * engine/text-cursor.ts. פר-session כי הוא מאזין על ה-host של **המסמך
+   * הזה** וכותב עליו `style.cursor`; טאב ברקע ממשיך להחזיק מעקב משלו בלי
+   * להפריע לפעיל. `refreshNow` מיד — מסמך חדש צריך את הסמן הנכון מהרגע
+   * הראשון, לא אחרי העריכה הראשונה.
+   */
+  const sessionTextCursor = createTextCursorWatch({
+    host: paintedHost(editor.ui),
+    ui: editor.ui as ViewportSource,
+    readMargins: () => readPageMargins(editor.superdoc),
+  });
+  if (session) session.textCursor = sessionTextCursor;
+  sessionTextCursor.refreshNow();
+  editor.onDispose(() => {
+    sessionTextCursor.dispose();
+    if (session && session.textCursor === sessionTextCursor) session.textCursor = null;
+  });
+
+  /**
    * „גבולות עמוד” של ה-session: אותה תבנית בדיוק כמו הסרגל, ומאותה סיבה —
    * הוא קורא את המקטע של **המסמך הזה**, ולכן הוא נבנה ונפרק איתו. קריאה
    * מיידית מיד אחרי היצירה (`refreshNow`) ולא רק בהמתנה ל-`onUpdate` הראשון:
@@ -1810,7 +1840,23 @@ async function openDocumentInto(
   // ואחריו המקום שהמשתמש היה בו. **אחרי** המיקוד ולא לפניו: `focus` עם
   // `restoreSelection` מציב סמן משלו, ומי שרץ אחרון הוא זה שקובע איפה הוא
   // יושב.
-  await restoreDocumentView(editor, adapter, options.restore);
+  const caretRestored = await restoreDocumentView(editor, adapter, options.restore);
+
+  /*
+   * מסמך שנפתח בלי מקום שמור נפתח בלי סמן בכלל: `focus()` של המנוע ממקד את
+   * המקלדת אבל אינו מציב סמן כשאין בחירה קודמת, וכל הקלדה נבלעת עד קליק
+   * (ראו applyDocumentStartCaret). לכן — סמן בתחילת המסמך, כמו Word.
+   *
+   * אותם שערים כמו `focusOpenedDocument`, ומאותו טעם; ועוד אחד: בחירה
+   * שהמשתמש כבר הספיק להציב בקליק בזמן שהפתיחה רצה אינה נדרסת.
+   */
+  if (
+    !caretRestored &&
+    !isOutsideDocumentEditing(document.activeElement) &&
+    !hasTextCaret(editor.ui)
+  ) {
+    await applyDocumentStartCaret(editor.ui, editor.superdoc);
+  }
 
   // אחרון, ולא ליד `outcome.status === 'opened'`: מרגע ש-100% על המסך „דלג”
   // נעלם, ואילו שחזור התצוגה הוא עוד המתנה שהמשתמש רואה.
@@ -1862,13 +1908,15 @@ async function onSkipLoad(): Promise<void> {
  * כשל בשחזור אינו מגיע לשורת המצב: המשתמש ביקש לפתוח מסמך, לא לקפוץ למקום,
  * והודעת שגיאה על „לא מצאתי את השורה שהיית בה” היא רעש. הוא כן מגיע ללוג של
  * אוצריא, כי שם מודדים.
+ *
+ * מחזירה האם סמן הוצב — הקורא מציב סמן פתיחה בתחילת המסמך רק כשלא.
  */
 async function restoreDocumentView(
   editor: EditorSession,
   adapter: CommandAdapter,
   restore: OpenOptions['restore'],
-): Promise<void> {
-  if (!restore) return;
+): Promise<boolean> {
+  if (!restore) return false;
 
   if (restore.zoom !== null) {
     // `adapter` (של הטאב הזה, נקבע ב-openDocumentInto) ולא `commandAdapter.value`
@@ -1881,9 +1929,12 @@ async function restoreDocumentView(
     }
   }
 
-  if (restore.caret && !(await applyCaretAnchor(editor.ui, editor.superdoc, restore.caret))) {
+  if (!restore.caret) return false;
+  const caretApplied = await applyCaretAnchor(editor.ui, editor.superdoc, restore.caret);
+  if (!caretApplied) {
     console.info('[otzaria-word] מקום הסמן השמור לא נמצא במסמך שנפתח');
   }
+  return caretApplied;
 }
 
 async function onSave(forceSaveAs = false): Promise<void> {
@@ -2109,7 +2160,7 @@ async function onExportPdf(): Promise<void> {
 
   const outcome = await exportPdfDocument(
     activeSuperdoc.value,
-    (input) => call('ui.exportPdf', input),
+    (input) => call('ui.exportPdf', { ...input }),
     { fileName: pdfSuggestedName(title.value), title: 'ייצוא ל-PDF' },
   );
 
@@ -2122,6 +2173,86 @@ async function onExportPdf(): Promise<void> {
     return;
   }
   setStatus(outcome.warning ? `${outcome.name} נשמר — ${outcome.warning}` : `${outcome.name} נשמר`);
+}
+
+/**
+ * ייצוא לפורמט ספר של אוצריא — טקסט עם רמות כותרות. הבנייה ב-
+ * engine/otzaria-book.ts; כאן רק מסלול השמירה והדיווח.
+ *
+ * המסלול הוא מסלול השמירה הבינארית הרגיל (begin ← PUT ← commit עם דיאלוג
+ * „שמור בשם”), עם סיומת `txt` — לא `downloadBlob`: הורדה לתיקיית ההורדות
+ * הייתה מפספסת את הנקודה, שהיא לשים את הקובץ בתיקייה אישית של אוצריא.
+ *
+ * אחרי שמירה מוצלחת נקרא `library.refreshUserBooks`: אם המשתמש שמר
+ * לתיקייה אישית רשומה, הספר נקלט מיד; אחרת הסריקה פשוט לא תמצא דבר,
+ * וההודעה אומרת מה אפשר לעשות. הרענון הוא best-effort (`tryCall`) —
+ * היעדר ההרשאה או Host ישן אינם כשל של הייצוא, שכבר הצליח.
+ *
+ * **ולא בהמתנה.** הרענון סורק מחדש את כל התיקיות האישיות ומרענן את קטלוג
+ * הספרייה, ולאוצריא יש עליו timeout של 15 דקות (`_userBooksRefreshTimeout`).
+ * המתנה לו לפני ההודעה הייתה משאירה את המשתמש בלי שום אישור על קובץ שכבר
+ * נכתב לדיסק — כמה זמן שהסריקה תימשך. לכן: „נשמר” מיד, והתוצאה מעדכנת את
+ * השורה כשהיא חוזרת — ורק אם בינתיים לא נאמר שם משהו חדש יותר.
+ */
+async function onExportOtzaria(): Promise<void> {
+  if (!swap?.current) {
+    setStatus('אין מסמך פתוח לייצוא', true);
+    return;
+  }
+
+  const built = await buildOtzariaBook(activeSuperdoc.value, title.value);
+  if (!built.ok) {
+    setStatus(built.message, true);
+    return;
+  }
+
+  let ticket: WriteTicket | null = null;
+  try {
+    const blob = new Blob([built.text], { type: 'text/plain' });
+    ticket = await beginBinaryWrite(blob.size);
+    await uploadBytes(ticket.uploadUrl, blob);
+    const result = await commitUserFileWrite({
+      writeToken: ticket.writeToken,
+      suggestedName: otzariaBookFileName(title.value),
+      title: 'ייצוא לספר אוצריא',
+      extension: 'txt',
+    });
+    // ה-commit צרך את ההעלאה — מכאן אין מה לבטל, גם אם הדיווח ייכשל.
+    ticket = null;
+    if (result.cancelled) {
+      setStatus('הייצוא בוטל');
+      return;
+    }
+
+    const name = result.name ?? 'הספר';
+    const saved = `${name} נשמר — מרענן את ספריית אוצריא…`;
+    setStatus(saved);
+
+    void tryCall<{ addedBooks?: number; updatedBooks?: number }>(
+      'library.refreshUserBooks',
+      {},
+    ).then((refreshed) => {
+      // השורה מעודכנת רק אם היא עוד שלנו: בזמן הסריקה המשתמש המשיך לעבוד,
+      // ודריסת „נשמר” או הודעת שגיאה חדשה בתוצאה של רענון היא בדיוק ההפתעה
+      // שאסור לייצר.
+      if (statusText.value !== saved) return;
+      const landed = (refreshed?.addedBooks ?? 0) + (refreshed?.updatedBooks ?? 0) > 0;
+      // הנוסח כשאין ספר חדש הוא מותנה, ולא הוראה: אפס נספרים פירושו גם
+      // „לא בתיקייה רשומה” וגם „אותו ספר בדיוק כבר שם” (ייצוא חוזר שדורס
+      // קובץ זהה), ואי אפשר להבחין ביניהם מהתשובה.
+      setStatus(
+        landed
+          ? `${name} נשמר ונקלט בספריית אוצריא`
+          : `${name} נשמר — אם אינו מופיע בספרייה, ודאו שהתיקייה רשומה בהגדרות אוצריא`,
+      );
+    });
+  } catch (error) {
+    if (ticket) void abortBinaryWrite(ticket.writeToken);
+    setStatus(
+      `הייצוא לספר אוצריא נכשל: ${error instanceof Error ? error.message : String(error)}`,
+      true,
+    );
+  }
 }
 
 /**
@@ -2995,11 +3126,19 @@ onMounted(async () => {
 
     // הבחירה נטענת לפני שנפתח מסמך: העריכה הראשונה עלולה להתחיל סבב autosave,
     // ואם ההעדפה עוד לא הגיעה הוא היה רץ לפי ברירת המחדל ולא לפי מה שהמשתמש
-    // בחר בהפעלה הקודמת.
-    autosaveEnabled.value = await loadAutosaveEnabled();
-
-    // גם ההעדפה של הסרגל, ומאותו טעם: היא חלה על המסמך שנפתח מיד אחרי כאן.
-    rulerPreference = await loadRulerVisible();
+    // בחר בהפעלה הקודמת. ההעדפה של הסרגל — מאותו טעם: היא חלה על המסמך שנפתח
+    // מיד אחרי כאן.
+    //
+    // שלוש הקריאות במקביל ולא בזו אחר זו: כל אחת היא סבב IPC מלא מול אוצריא,
+    // הן קוראות מפתחות שונים ואינן תלויות זו בזו — והן עומדות בין המשתמש לבין
+    // פתיחת המסמך הראשון.
+    const [storedAutosave, storedRuler, stored] = await Promise.all([
+      loadAutosaveEnabled(),
+      loadRulerVisible(),
+      loadPreviousSession(),
+    ]);
+    autosaveEnabled.value = storedAutosave;
+    rulerPreference = storedRuler;
 
     // בדיקת האיות — **לא** ב-await: משיכת המילון היא 1.3MB, והעלייה לא
     // תמתין לה. מי שהדליק בהפעלה הקודמת יקבל את הסימון כשהמילון יגיע.
@@ -3018,7 +3157,6 @@ onMounted(async () => {
     // כולל פתיחת קבצים מרובים בעלייה — נדחה לשלב הבא: `activeEntry` כבר
     // מחזירה רק את רשומת הטאב הפעיל, וזה בדיוק מה שמשוחזר כאן. משתמש עם טאב
     // יחיד (הרוב המוחלט היום) אינו מבחין בהבדל.
-    const stored = await loadPreviousSession();
     const restoredId = activeEntry(stored)?.id ?? createDocumentSessionId();
 
     // טיוטות של טאבים שלא שוחזרו (רק הפעיל משוחזר, ראו למעלה) לעולם לא

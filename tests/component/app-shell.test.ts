@@ -699,7 +699,8 @@ describe('חזרה למה שהיה', () => {
 
   it('זום וסמן של מסמך אחר אינם מוחלים על מה שנפתח', async () => {
     // ה-token לא נפתר, נפתח מסמך חדש — וקפיצה לאמצע מסמך אחר עליו היא
-    // בדיוק מה שאסור.
+    // בדיוק מה שאסור. סמן **הפתיחה** (תחילת המסמך, applyDocumentStartCaret)
+    // כן מוצב — הוא של המסמך שנפתח, לא של האחר.
     stub.storedSession = storedSession({
       view: { zoom: 150, focusMode: false, ribbonTab: null, ribbonCollapsed: false },
       caret: { start: { blockId: 'b9', ordinal: 8, offset: 4 }, end: null },
@@ -708,7 +709,13 @@ describe('חזרה למה שהיה', () => {
 
     await mountShell();
 
-    expect(stub.caretApplied).toEqual([]);
+    expect(stub.caretApplied).toEqual([
+      {
+        kind: 'selection',
+        start: { kind: 'text', blockId: 'block-1', offset: 0 },
+        end: { kind: 'text', blockId: 'block-1', offset: 0 },
+      },
+    ]);
   });
 
   it('הרשומה נכתבת בפועל, ולא רק „הייתה אמורה להיכתב”', async () => {

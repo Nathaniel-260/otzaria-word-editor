@@ -18,7 +18,8 @@
     "reader.context_menu",
     "app.startup_contributions",
     "navigation.write",
-    "clipboard.read"
+    "clipboard.read",
+    "library.refresh"
   ],
   "contributes": {
     "startup": {
