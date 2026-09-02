@@ -187,7 +187,84 @@ describe('repairSettings', () => {
 
   it('סובלנית לרווחים ולסדר מאפיינים', () => {
     const odd = '<w:settings xmlns:w="ns"><w:defaultTabStop w:foo="x" w:val = "0" /></w:settings>';
-    expect(repairSettings(odd)).toContain(`w:val="${DEFAULT_TAB_STOP_TWIPS}"`);
+    expect(repairSettings(odd)).toContain(`"${DEFAULT_TAB_STOP_TWIPS}"`);
+  });
+
+  /* ------- שלוש דרכים שבהן הקיפאון לא נמנע, וסקירה יריבה מצאה אותן -------
+   *
+   * לא „תיקון פחות מדויק”: בכל השלוש התיקון פשוט לא קרה, והמשתמש נשאר עם
+   * אוצריא תקועה שאין ממנה יציאה. לכן כל אחת מהן היא בדיקה משלה.                */
+
+  it('הערה שיש בה ערך תקין אינה מסתירה את הערך האמיתי שאחריה', () => {
+    // הרגקס הקודם לקח את ההתאמה הראשונה — זו שבהערה — ראה 720, והחזיר null.
+    const shadowed =
+      '<w:settings xmlns:w="ns"><!-- <w:defaultTabStop w:val="720"/> -->' +
+      '<w:defaultTabStop w:val="0"/></w:settings>';
+    const repaired = repairSettings(shadowed);
+    expect(repaired).not.toBeNull();
+    // ההערה נשארת תו-בתו; מה שהשתנה הוא רק האלמנט החי.
+    expect(repaired).toContain('<!-- <w:defaultTabStop w:val="720"/> -->');
+    expect(repaired).toContain(`<w:defaultTabStop w:val="${DEFAULT_TAB_STOP_TWIPS}"/>`);
+  });
+
+  it('הערה שיש בה הערך המקפיא אינה נערכת — אין שם עיצוב', () => {
+    const inComment =
+      '<w:settings xmlns:w="ns"><!-- <w:defaultTabStop w:val="0"/> --></w:settings>';
+    expect(repairSettings(inComment)).toBeNull();
+  });
+
+  it('צורה שאינה סוגרת את עצמה מתוקנת, ונשארת זוג פתיחה-סגירה', () => {
+    const paired =
+      '<w:settings xmlns:w="ns"><w:defaultTabStop w:val="0"></w:defaultTabStop></w:settings>';
+    const repaired = repairSettings(paired);
+    expect(repaired).toBe(
+      '<w:settings xmlns:w="ns">' +
+        `<w:defaultTabStop w:val="${DEFAULT_TAB_STOP_TWIPS}"></w:defaultTabStop></w:settings>`,
+    );
+  });
+
+  it('`>` בתוך ערך של מאפיין אחר אינו מסתיר את האלמנט', () => {
+    const tricky = '<w:settings xmlns:w="ns"><w:defaultTabStop w:foo="a>b" w:val="0"/></w:settings>';
+    const repaired = repairSettings(tricky);
+    expect(repaired).toContain('w:foo="a>b"');
+    expect(repaired).toContain(`w:val="${DEFAULT_TAB_STOP_TWIPS}"`);
+  });
+
+  /* ------------------- מה שנשמר, ולא נכתב מחדש ------------------- */
+
+  it('קידומת שאינה `w` נשמרת', () => {
+    const other = '<ns0:settings xmlns:ns0="ns"><ns0:defaultTabStop ns0:val="0"/></ns0:settings>';
+    expect(repairSettings(other)).toContain(`<ns0:defaultTabStop ns0:val="${DEFAULT_TAB_STOP_TWIPS}"/>`);
+  });
+
+  it('מרכאות בודדות נקראות, ונשארות בודדות', () => {
+    const single = "<w:settings xmlns:w='ns'><w:defaultTabStop w:val='0'/></w:settings>";
+    expect(repairSettings(single)).toContain(`w:val='${DEFAULT_TAB_STOP_TWIPS}'`);
+  });
+
+  it('מרכאות בודדות עם ערך תקין אינן נוגעות', () => {
+    // הרגקס הקודם קרא רק מרכאות כפולות, ולכן ראה „אין ערך” וכתב 720 על ערך
+    // תקין לחלוטין — כתיבה מיותרת לתוך המסמך של המשתמש.
+    const single = "<w:settings xmlns:w='ns'><w:defaultTabStop w:val='425'/></w:settings>";
+    expect(repairSettings(single)).toBeNull();
+  });
+
+  it('אלמנט בלי `w:val` כלל מקבל אותו, בקידומת שלו', () => {
+    const bare = '<w:settings xmlns:w="ns"><w:defaultTabStop/></w:settings>';
+    expect(repairSettings(bare)).toBe(
+      `<w:settings xmlns:w="ns"><w:defaultTabStop w:val="${DEFAULT_TAB_STOP_TWIPS}"/></w:settings>`,
+    );
+  });
+
+  it('הוראת עיבוד שיש בה האלמנט אינה נערכת', () => {
+    const pi = '<w:settings xmlns:w="ns"><?tool <w:defaultTabStop w:val="0"/> ?></w:settings>';
+    expect(repairSettings(pi)).toBeNull();
+  });
+
+  it('הצהרת ה-XML אינה מפריעה לתיקון שאחריה', () => {
+    // ההצהרה היא הוראת עיבוד, וההוראות נבלעות שלמות — צריך לוודא שהבליעה
+    // אינה בולעת גם את מה שבא אחריה.
+    expect(repairSettings(SETTINGS_WITH_ZERO)).toContain(`"${DEFAULT_TAB_STOP_TWIPS}"`);
   });
 });
 
@@ -325,10 +402,23 @@ describe('repairComplexScriptBold', () => {
     expect(repairComplexScriptBold(stray)).toBeNull();
   });
 
-  it('`rPr` שאינה נסגרת מאבדת רק את עצמה', () => {
+  it('`rPr` שאינה נסגרת בסוף החלק מאבדת רק את עצמה', () => {
     const truncated = `<w:body>${runProps('<w:bCs/>')}<w:r><w:rPr><w:bCs/>`;
     const repaired = repairComplexScriptBold(truncated);
     expect(repaired!.match(/<w:b\/>/g)).toHaveLength(1);
+  });
+
+  it('`rPr` שאינה נסגרת **באמצע** מכבה את מה שאחריה — וזה מתועד, לא מתוקן', () => {
+    // סקירה יריבה מצאה את זה, וזו אותה צורת כשל שכלל העומק נבחר כדי למנוע
+    // („מונה שנתקע מכבה את התיקון עד סוף החלק”) — רק שהטריגר אחר: פתיחה בלי
+    // סגירה משאירה את העומק על 1 לנצח, ולכן כל `bCs` שאחריה נראית כהיסטוריה.
+    //
+    // לא מתוקן, וזו החלטה: כדי להתאושש צריך לדעת **איפה** ה-`rPr` הפתוחה
+    // הייתה נסגרת, וזה בדיוק מה שאין ב-XML שאינו תקין. המנוע עצמו אינו פורס
+    // מסמך כזה, ולכן אין כאן הדגשה שאובדת למשתמש — יש מסמך שאינו נפתח.
+    // הבדיקה קיימת כדי שההתנהגות תהיה נמדדת ולא מופתעת.
+    const broken = `<w:body><w:r><w:rPr><w:bCs/><w:r><w:rPr><w:bCs/></w:rPr></w:r>`;
+    expect(repairComplexScriptBold(broken)).toBeNull();
   });
 
   /* ---------------- קידומות ---------------- */
@@ -458,6 +548,13 @@ describe('CONTENT_PARTS', () => {
       'word/footer.xml',
       'word/document2.xml',
       'Word/Document.xml',
+      // חלק אמיתי של Word 2010, ובו גיליון סגנונות שלם.
+      'word/stylesWithEffects.xml',
+      // הספרה מותרת בכל שם שיכול לשאת אותה, ולא רק בארבעה מהם.
+      'word/footnotes2.xml',
+      'word/endnotes2.xml',
+      'word/comments2.xml',
+      'word/numbering2.xml',
     ]) {
       expect(CONTENT_PARTS.test(name)).toBe(true);
     }
@@ -473,6 +570,11 @@ describe('CONTENT_PARTS', () => {
       'word/theme/theme1.xml',
       'customXml/item1.xml',
       'styles.xml',
+      // ההתאמה היא על שם החלק כולו, ולא על חלק ממנו.
+      'word/document.xml.rels',
+      'word/_rels/document.xml.rels',
+      'word/../word/document.xml',
+      'word/documentation.xml',
     ]) {
       expect(CONTENT_PARTS.test(name)).toBe(false);
     }

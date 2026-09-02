@@ -63,10 +63,17 @@
  * בכל מה שאינו התיקון עצמו.
  *
  * המחיר גדל מאז שהתיקון השני נכנס: `document.xml` הוא החלק הגדול במסמך, ומסמך
- * שיש בו `bCs` נמסר עם החלק הזה לא-דחוס. הגבול הוא גודל הטקסט של המסמך עצמו,
- * הוא נשלם פעם אחת בפתיחה, ורק על מסמכים שיש בהם מה לתקן — מסמך שאין בו
- * `bCs` אינו נכתב מחדש בכלל. `STORED` הוא רשומת ZIP חוקית לגמרי, ו-Word פותח
- * קובץ כזה כרגיל.
+ * שיש בו `bCs` נמסר עם החלק הזה לא-דחוס. נמדד על מסמכים אמיתיים, ה-Blob שנמסר
+ * למנוע גדל **פי 2 עד פי 4**:
+ *
+ *     חזון-למועד-מעומד      890,825 → 1,787,858 בייט   (+101%)   648ms
+ *     שבועת-הדיינין          27,959 →    69,679 בייט   (+149%)    78ms
+ *     לכבוד ידידינו הנכבד    25,048 →   101,584 בייט   (+306%)    61ms
+ *
+ * הגבול הוא גודל הטקסט של המסמך עצמו, הוא נשלם פעם אחת בפתיחה, וזו זיכרון ולא
+ * קובץ — הייצוא דוחס מחדש, ולכן `STORED` אינו מגיע לדיסק. ורק על מסמכים שיש
+ * בהם מה לתקן: מסמך שאין בו `bCs` אינו נכתב מחדש בכלל. `STORED` הוא רשומת ZIP
+ * חוקית לגמרי, ו-Word פותח קובץ כזה כרגיל.
  *
  * `CompressionStream` היה חוסך את הקילובייטים האלה, אבל דוחס שמתנהג אחרת
  * מהצפוי הוא באג שקט במסמך של המשתמש; רשומה לא-דחוסה אינה יכולה להשתבש.
@@ -140,26 +147,86 @@ interface ZipEntry {
   uncompressedSize: number;
 }
 
+/** שם האלמנט שהערך שבו מקפיא את המנוע. */
+const DEFAULT_TAB_STOP_ELEMENT = 'defaultTabStop';
+
 /**
  * מתקנת את `settings.xml`. `null` = אין מה לתקן.
  *
  * הבדיקה היא על **הערך** ולא על המחרוזת `"0"`: גם `-1` וגם ערך שאינו מספר
- * מגיעים למנוע כאותו צעד-אפס. הרגקס סובלני לסדר מאפיינים ולרווחים, מפני שזה
- * XML שנכתב על ידי כלים שונים ולא רק על ידי Word.
+ * מגיעים למנוע כאותו צעד-אפס.
+ *
+ * ## למה זה סורק, ולא רגקס אחד
+ *
+ * הגרסה הראשונה כאן הייתה `/<w:defaultTabStop\b[^>]*\/>/`, וסקירה יריבה מצאה
+ * בה **שלוש** דרכים שבהן הקיפאון פשוט אינו נמנע. לא „תיקון פחות מדויק” — הוא
+ * לא קורה, והמשתמש נשאר עם אוצריא תקועה שאין ממנה יציאה:
+ *
+ * | הקלט | מה קרה |
+ * |---|---|
+ * | `<!-- …val="720"… --><w:defaultTabStop w:val="0"/>` | ההתאמה הראשונה היא זו שבהערה, ערכה תקין, ולכן `null` |
+ * | `<w:defaultTabStop w:val="0"></w:defaultTabStop>` | XML חוקי לגמרי, אבל אינו נגמר ב-`/>` ולכן לא הותאם |
+ * | `<w:defaultTabStop w:foo="a>b" w:val="0"/>` | `[^>]*` נעצר על ה-`>` שבתוך הערך |
+ *
+ * ובכיוון ההפוך, `<!-- <w:defaultTabStop w:val="0"/> -->` **תוקן בתוך ההערה**
+ * — כלומר עריכה של טקסט שאינו עיצוב.
+ *
+ * לכן כאן אותו סורק של התיקון השני: מודע למרכאות, מדלג על הערות, CDATA
+ * והוראות עיבוד, ואינו נעול על הקידומת `w`.
+ *
+ * ## ולמה נכתב רק **הערך**
+ *
+ * במקום להחליף את האלמנט כולו ב-`<w:defaultTabStop w:val="720"/>`. כך צורת
+ * האלמנט נשמרת — סוגר-עצמו נשאר סוגר-עצמו, וזוג פתיחה-סגירה נשאר זוג — ואין
+ * מסלול שבו נכתב תג סוגר-עצמו וסגירתו הקודמת נשארת תלושה. הקידומת ומרכאות
+ * הערך נשמרות אף הן, מאותו טעם: כתיבה חוזרת של מה שלא היה צריך להשתנות היא
+ * בדיוק מה שהמודול הזה מבטיח לא לעשות.
  */
 export function repairSettings(xml: string): string | null {
-  const element = /<w:defaultTabStop\b[^>]*\/>/.exec(xml);
-  if (!element) return null;
+  const token = new RegExp(TOKEN_SOURCE.source, 'g');
+  for (let match = token.exec(xml); match; match = token.exec(xml)) {
+    const closer = SKIPPED_SPANS.get(match[0]);
+    if (closer !== undefined) {
+      const end = xml.indexOf(closer, token.lastIndex);
+      // הערה שאינה נסגרת. שום התאמה שאחריה אינה אמינה, ותיקון במקום הלא נכון
+      // גרוע מאי-תיקון: הקיפאון לפחות משוחזר ונראה.
+      if (end < 0) return null;
+      token.lastIndex = end + closer.length;
+      continue;
+    }
 
-  const value = /\bw:val\s*=\s*"([^"]*)"/.exec(element[0]);
-  const twips = value ? Number(value[1]) : Number.NaN;
-  if (Number.isFinite(twips) && twips > 0) return null;
+    const [, closing, prefix, name, attributes] = match;
+    if (closing || name !== DEFAULT_TAB_STOP_ELEMENT) continue;
 
-  return (
-    xml.slice(0, element.index) +
-    `<w:defaultTabStop w:val="${DEFAULT_TAB_STOP_TWIPS}"/>` +
-    xml.slice(element.index + element[0].length)
-  );
+    const current = valueOf(attributes);
+    const twips = current === null ? Number.NaN : Number(current.trim());
+    if (Number.isFinite(twips) && twips > 0) return null;
+
+    const attributesAt = match.index + 1 + closing.length + prefix.length + 1 + name.length;
+    if (current === null) {
+      // אין `w:val` בכלל. הוא נדרש ב-`CT_TwipsMeasure`, ולכן זה מסמך שגוי —
+      // אבל הכתיבה כאן היא בדיוק מה שהערך הנעדר אומר, ולכן היא גם התיקון.
+      // נכנס לפני ה-`/` של תג סוגר-עצמו, ובסוף המאפיינים בכל צורה אחרת.
+      const insertAt = attributesAt + attributes.length - (attributes.endsWith('/') ? 1 : 0);
+      return (
+        xml.slice(0, insertAt) +
+        ` ${prefix}:val="${DEFAULT_TAB_STOP_TWIPS}"` +
+        xml.slice(insertAt)
+      );
+    }
+
+    // מקום הערך עצמו: ההתאמה נגמרת במרכאת הסיום, ולכן הערך הוא האורך שלו
+    // אחורה ממנה. כך המאפיין, הקידומת וסוג המרכאות נשארים תו-בתו.
+    const inside = VAL_ATTRIBUTE.exec(attributes);
+    if (!inside) return null;
+    const valueEnd = attributesAt + inside.index + inside[0].length - 1;
+    const valueStart = valueEnd - current.length;
+    return (
+      xml.slice(0, valueStart) + String(DEFAULT_TAB_STOP_TWIPS) + xml.slice(valueEnd)
+    );
+  }
+
+  return null;
 }
 
 /**
@@ -171,9 +238,16 @@ export function repairSettings(xml: string): string | null {
  *
  * מה שאינו כאן ובכוונה: `word/glossary/*` (בלוקים לשימוש חוזר; אינם מרונדרים)
  * ו-`word/settings.xml`, שיש לו תיקון משלו.
+ *
+ * `stylesWithEffects.xml` **כן** כאן: זה חלק אמיתי של Word 2010 ובו גיליון
+ * סגנונות שלם. Word 2010 קורא מ-`bCs` בעצמו ולכן אינו נפגע, אבל להשאיר גיליון
+ * סגנונות שלם מחוץ לכלל „`rPr` היא `rPr`” הוא חוסר עקביות, לא החלטה.
+ *
+ * הספרה אופציונלית בכל השמות שיכולים לשאת אותה, ולא רק בארבעה מהם — הצורה
+ * הקודמת התירה `document2` ולא `footnotes2`, וזו הייתה השמטה ולא כלל.
  */
 export const CONTENT_PARTS =
-  /^word\/(?:document\d*|styles\d*|numbering|footnotes|endnotes|comments|header\d*|footer\d*)\.xml$/i;
+  /^word\/(?:document|styles|stylesWithEffects|numbering|footnotes|endnotes|comments|header|footer)\d*\.xml$/i;
 
 /**
  * ערכי `ST_OnOff` שמשמעותם „כבוי”. כל ערך אחר — ובכלל זה היעדר `w:val` — דולק,
@@ -182,22 +256,34 @@ export const CONTENT_PARTS =
 const OFF_VALUES = new Set(['0', 'false', 'off']);
 
 /**
- * `w:val` של דגל `ST_OnOff`.
+ * מאפיין `w:val`, לשני התיקונים כאחד.
  *
  * שני סוגי המרכאות, ולא רק כפולות: XML מתיר את שניהם, ו-`w:val='0'` שנקרא
  * כדולק היה הופך „לא מודגש” שנכתב במפורש למודגש — כלומר שינוי במסמך, בדיוק מה
  * שהמודול הזה מבטיח לא לעשות. הקידומת אופציונלית מאותו טעם שהסורק אינו נעול
  * על `w:` (ראו TOKEN_SOURCE).
  *
- * מה שכן נשאר לא-מטופל: ישות מספרית (`w:val="&#48;"`). היא חוקית, ואף כלי
+ * התחילית היא `\s` ולא `\b`, כדי שהמאפיין יתחיל במקום שבו מאפיין באמת מתחיל:
+ * `\b` היה מתאים גם ל-`val='0'` **בתוך ערך** של מאפיין אחר. (`\s` אינו סוגר
+ * את המקרה של רווח בתוך ערך כזה, למשל `w:foo="a val='0'"`, ולשם צריך פרסר
+ * ולא רגקס. לאף אחד משני האלמנטים שכאן אין מאפיין מלבד `val`.)
+ *
+ * מה שנשאר לא-מטופל: ישות מספרית (`w:val="&#48;"`). היא חוקית, ואף כלי
  * מציאותי אינו כותב אותה.
+ *
+ * קבוצה 1 — ערך במרכאות כפולות; קבוצה 2 — בבודדות.
  */
-const ON_OFF_VALUE = /\b(?:[\w.-]+:)?val\s*=\s*(?:"([^"]*)"|'([^']*)')/;
+const VAL_ATTRIBUTE = /\s(?:[\w.-]+:)?val\s*=\s*(?:"([^"]*)"|'([^']*)')/;
+
+/** הערך שב-`w:val`, או `null` כשאינו שם. */
+function valueOf(attributes: string): string | null {
+  const match = VAL_ATTRIBUTE.exec(attributes);
+  return match ? (match[1] ?? match[2]) : null;
+}
 
 /** האם דגל `ST_OnOff` דולק, לפי מאפייני התג. */
 function isOn(attributes: string): boolean {
-  const match = ON_OFF_VALUE.exec(attributes);
-  const value = match ? (match[1] ?? match[2]) : null;
+  const value = valueOf(attributes);
   return value === null || !OFF_VALUES.has(value.trim().toLowerCase());
 }
 
@@ -212,11 +298,31 @@ function isOn(attributes: string): boolean {
  * WordprocessingML לכל קידומת. מי שנעול על `w:` גם מפספס מסמך כזה לגמרי, וגם —
  * גרוע יותר — אינו רואה `ns0:b` קיימת ומוסיף `w:b` שנייה לצדה.
  *
- * הערות ו-CDATA נבלעות שלמות. הן נראות לרגקס בדיוק כמו תגים (`<!-- <w:rPr>
- * <w:bCs/></w:rPr> -->`), והתיקון בתוכן היה עריכה של טקסט המשתמש ולא של
- * העיצוב.
+ * **אבל קידומת היא חובה כאן, וזו מגבלה:** חבילה שקושרת את מרחב השמות
+ * כברירת מחדל (`<document xmlns="…/wordprocessingml/2006/main">` ואז `<bCs/>`
+ * בלי קידומת) אינה מותאמת כלל, ושני התיקונים פשוט אינם קורים — בשקט. Word
+ * כותב קידומת תמיד; מחולל צד-שלישי אינו חייב. הכיוון שמרני (לא לתקן, ולא
+ * לתקן לא נכון), ולכן זה מתועד ולא נסגר: לזהות „האם התג הזה בכלל
+ * WordprocessingML” בלי קידומת דורש מעקב אחר הכרזות מרחב שמות, כלומר פרסר.
+ *
+ * הערות, CDATA והוראות עיבוד נבלעות שלמות. שלושתן נראות לרגקס בדיוק כמו תגים
+ * (`<!-- <w:rPr><w:bCs/></w:rPr> -->`), והתיקון בתוכן היה עריכה של טקסט
+ * המשתמש — או של הצהרה — ולא של העיצוב. הצהרת ה-XML עצמה (`<?xml … ?>`) לא
+ * הותאמה גם קודם, מפני ש-`?` אינו ב-`[\w.-]`; מה שנסגר כאן הוא הוראת עיבוד
+ * שיש **בתוכה** משהו שנראה כמו תג.
  */
-const TOKEN_SOURCE = /<!--|<!\[CDATA\[|<(\/?)([\w.-]+):([\w.-]+)((?:[^>"']|"[^"]*"|'[^']*')*)>/;
+const TOKEN_SOURCE =
+  /<!--|<!\[CDATA\[|<\?|<(\/?)([\w.-]+):([\w.-]+)((?:[^>"']|"[^"]*"|'[^']*')*)>/;
+
+/**
+ * לכל פותח כזה — הסוגר שלו. מה שביניהם אינו XML שיש בו מה לתקן, וכל מה
+ * שהסורק צריך לעשות איתו הוא לדלג עליו שלם.
+ */
+const SKIPPED_SPANS = new Map([
+  ['<!--', '-->'],
+  ['<![CDATA[', ']]>'],
+  ['<?', '?>'],
+]);
 
 /** הכנסה אחת: המקום, והקידומת שבה לכתוב. */
 interface BoldInsert {
@@ -283,8 +389,8 @@ export function repairComplexScriptBold(xml: string): string | null {
   // זניח — נקרא לכל היותר פעם אחת לחלק.
   const token = new RegExp(TOKEN_SOURCE.source, 'g');
   for (let match = token.exec(xml); match; match = token.exec(xml)) {
-    if (match[0] === '<!--' || match[0] === '<![CDATA[') {
-      const closer = match[0] === '<!--' ? '-->' : ']]>';
+    const closer = SKIPPED_SPANS.get(match[0]);
+    if (closer !== undefined) {
       const end = xml.indexOf(closer, token.lastIndex);
       // הערה שאינה נסגרת: אין יותר תגים שאפשר לסמוך עליהם, וחצי סריקה גרועה
       // מלא-סריקה. מה שנאסף עד כאן מוחל, וזה בטוח — הוא כולו מלפני ההערה.
@@ -332,9 +438,13 @@ export function repairComplexScriptBold(xml: string): string | null {
   // נסגרת, והבאה אחריה נפתחת אחריה. הבדיקה „אינה משנה דבר מלבד ה-b שהוסיפה”
   // היא מה ששומר על ההנחה הזאת.
   //
-  // מערך ו-`join` ולא `+=`: על ספר עברי שההדגשה בו ישירה ולא בסגנון נמדדו
-  // 28,400 הכנסות בקובץ אחד, וזה הגודל שבו שרשור בלולאה מתחיל להיות מה
-  // שנמדד.
+  // מערך ו-`join` **לא בגלל מהירות** — נמדד, ואין הפרש. `+=` נראה מהיר פי
+  // עשרה בהרכבה (V8 בונה cons-string ודוחה את השיטוח), אבל השיטוח נפרע
+  // ב-`TextEncoder().encode` שקורא את התווים, ואז השניים שווים בתוך הרעש:
+  // על 28,400 הכנסות ב-3.5MB נמדדו 31 מול 27ms בהרצה אחת ו-48 מול 50ms
+  // בשנייה. מדידה של ההרכבה בלבד כאן היא מדידה של שום דבר.
+  //
+  // מה שכן: הצורה הזאת אומרת „חתוך, הכנס, חתוך” במקום לתחזק מחרוזת מצטברת.
   const parts: string[] = [];
   let at = 0;
   for (const insert of inserts) {
@@ -359,7 +469,10 @@ interface PartRepair {
  */
 const REPAIRS: PartRepair[] = [
   {
-    matches: (name) => name === SETTINGS_PART,
+    // ללא תלות ברישיות, כמו `CONTENT_PARTS`. שני התיקונים ניגשים לאותו
+    // ארכיון, ו„`Word/Settings.xml` מקבל אחד ולא את השני” הוא חוסר עקביות
+    // שאין לו טעם — גם אם אין כלי שכותב כך.
+    matches: (name) => name.toLowerCase() === SETTINGS_PART,
     repair: repairSettings,
     note: () =>
       `${SETTINGS_PART}: defaultTabStop מתוקן ל-${DEFAULT_TAB_STOP_TWIPS} — הערך שהיה מקפיא את המנוע`,
