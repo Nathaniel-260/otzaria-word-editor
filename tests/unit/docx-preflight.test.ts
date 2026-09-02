@@ -781,3 +781,164 @@ describe('preflightSource', () => {
     expect(contains(bytes, bytesOf(`<w:defaultTabStop w:val="${DEFAULT_TAB_STOP_TWIPS}"/>`))).toBe(true);
   });
 });
+
+/**
+ * הסורק מול פרסר XML אמיתי.
+ *
+ * כל הבדיקות שלמעלה נכתבו מול מקרים ש**נחשבו מראש**, וזו בדיוק החולשה שלהן:
+ * הסורק כבר נשבר פעם אחת בשש נקודות שאיש לא חשב עליהן. לכן כאן מימוש ייחוס
+ * עצמאי — `DOMParser`, שאינו יודע דבר על רגקסים, הערות וקידומות — ומסמכים
+ * שנבנים באקראי מהחלקים שמסמך אמיתי בנוי מהם: `rPrChange` מקננת, הערות
+ * ו-CDATA שיש בהם מה שנראה כמו עיצוב, `>` בתוך ערך של מאפיין, ושתי קידומות.
+ *
+ * הזרע קבוע, ולכן כשל כאן משוחזר.
+ */
+describe('repairComplexScriptBold מול מימוש ייחוס', () => {
+  const OFF = new Set(['0', 'false', 'off']);
+
+  /** כמה `w:b` צריך להשלים, לפי הכלל, כפי שפרסר אמיתי רואה אותו. */
+  function referenceInserts(xml: string): number {
+    const doc = new DOMParser().parseFromString(xml, 'application/xml');
+    expect(doc.querySelector('parsererror')).toBeNull();
+
+    let needed = 0;
+    for (const element of Array.from(doc.getElementsByTagName('*'))) {
+      if (element.localName !== 'rPr') continue;
+      // `rPr` בתוך `rPr` היא היסטוריה של שינוי מסומן, ואינה עיצוב חי.
+      let ancestor = element.parentElement;
+      while (ancestor && ancestor.localName !== 'rPr') ancestor = ancestor.parentElement;
+      if (ancestor) continue;
+
+      let hasBold = false;
+      let boldCsOn: boolean | null = null;
+      for (const child of Array.from(element.children)) {
+        if (child.localName === 'b') hasBold = true;
+        else if (child.localName === 'bCs') {
+          const value = Array.from(child.attributes).find((a) => a.localName === 'val')?.value;
+          boldCsOn = value === undefined || !OFF.has(value.trim().toLowerCase());
+        }
+      }
+      if (boldCsOn && !hasBold) needed += 1;
+    }
+    return needed;
+  }
+
+  /** מחולל דטרמיניסטי — mulberry32. */
+  function random(seed: number): () => number {
+    return () => {
+      seed = (seed + 0x6d2b79f5) | 0;
+      let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  it('מסכים איתו על 400 מסמכים שנבנו באקראי', () => {
+    const next = random(20260903);
+    const pick = <T,>(options: T[]): T => options[Math.floor(next() * options.length)];
+
+    // ההיסטוריה נכתבת עם `>` בתוך שם המחבר בכוונה: זה XML חוקי, והוא מה
+    // שהפיל את הגרסה הראשונה של הסורק.
+    const history = (p: string) =>
+      `<${p}:rPrChange ${p}:id="7" ${p}:author="a>b"><${p}:rPr><${p}:bCs/><${p}:sz ${p}:val="28"/>` +
+      `</${p}:rPr></${p}:rPrChange>`;
+
+    let withInserts = 0;
+    let inserted = 0;
+    for (let document = 0; document < 400; document++) {
+      const p = pick(['w', 'ns0']);
+      const body: string[] = [];
+
+      for (let block = 0; block < 1 + Math.floor(next() * 6); block++) {
+        const props = [
+          pick(['', `<${p}:rFonts ${p}:cs="David"/>`]),
+          pick(['', '', `<${p}:b/>`, `<${p}:b ${p}:val="0"/>`]),
+          pick([
+            `<${p}:bCs/>`,
+            `<${p}:bCs/>`,
+            `<${p}:bCs ${p}:val="1"/>`,
+            `<${p}:bCs ${p}:val='0'/>`,
+            `<${p}:bCs ${p}:val="off"/>`,
+            '',
+          ]),
+          pick(['', `<${p}:szCs ${p}:val="28"/>`]),
+          pick(['', history(p)]),
+        ].join('');
+
+        body.push(
+          pick([
+            `<${p}:r><${p}:rPr>${props}</${p}:rPr><${p}:t>שלום</${p}:t></${p}:r>`,
+            `<${p}:p><${p}:pPr><${p}:rPr>${props}</${p}:rPr></${p}:pPr></${p}:p>`,
+            `<${p}:sdt><${p}:sdtPr><${p}:rPr>${props}</${p}:rPr></${p}:sdtPr></${p}:sdt>`,
+            `<${p}:style><${p}:rPr>${props}</${p}:rPr></${p}:style>`,
+            `<!-- <${p}:rPr><${p}:bCs/></${p}:rPr> -->`,
+            `<${p}:r><${p}:t><![CDATA[<${p}:rPr><${p}:bCs/></${p}:rPr>]]></${p}:t></${p}:r>`,
+            `<?otzaria <${p}:bCs/> ?>`,
+            `<${p}:rPr/>`,
+          ]),
+        );
+      }
+
+      const xml = `<${p}:document xmlns:${p}="ns"><${p}:body>${body.join('')}</${p}:body></${p}:document>`;
+      const expected = referenceInserts(xml);
+      const repaired = repairComplexScriptBold(xml);
+      const actual = repaired === null ? 0 : (repaired.length - xml.length) / `<${p}:b/>`.length;
+
+      expect([document, actual]).toEqual([document, expected]);
+      if (repaired === null) continue;
+
+      withInserts += 1;
+      inserted += actual;
+      // הפלט תקין, לא נגע בשום דבר מלבד ה-b שהוסיף, ואין בו יותר מה לתקן.
+      expect(referenceInserts(repaired)).toBe(0);
+      const strip = (text: string) => text.split(`<${p}:b/>`).join('');
+      expect(strip(repaired)).toBe(strip(xml));
+    }
+
+    // הסף הוא נגד בדיקה ריקה: מחולל שהפסיק לייצר `bCs` היה „מסכים” על הכול.
+    expect(withInserts).toBeGreaterThan(50);
+    expect(inserted).toBeGreaterThan(100);
+  });
+});
+
+/**
+ * המקומות ש-`rPr` יושבת בהם במסמך אמיתי, מלבד ריצה.
+ *
+ * הכלל שהסורק אוכף הוא „`rPr` בתוך `rPr` היא היסטוריה”, וכל השאר הוא עיצוב חי
+ * שיש לתקן. הבדיקות כאן הן הצד השני של הכלל: לא „מה אין לגעת בו”, אלא שהצמצום
+ * לא בלע גם עיצוב חי שיושב במכולה שלא חשבו עליה.
+ */
+describe('repairComplexScriptBold — מכולות שאינן ריצה', () => {
+  const cases: [string, string][] = [
+    ['סימן פסקה', '<w:p><w:pPr><w:rPr><w:bCs/></w:rPr></w:pPr></w:p>'],
+    [
+      'סימן פסקה עם מעקב שינויים לצדו',
+      // `w:ins` ו-`w:del` הם איברים חוקיים ב-`CT_ParaRPr`, ואינם מקננים `rPr`.
+      '<w:p><w:pPr><w:rPr><w:ins w:id="1" w:author="a"/><w:bCs/></w:rPr></w:pPr></w:p>',
+    ],
+    ['רמה במספור', '<w:num><w:lvl w:ilvl="0"><w:rPr><w:bCs/></w:rPr></w:lvl></w:num>'],
+    ['סגנון', '<w:style w:styleId="Heading2"><w:rPr><w:bCs/></w:rPr></w:style>'],
+    [
+      'סגנון טבלה מותנה',
+      '<w:style><w:tblStylePr w:type="firstRow"><w:rPr><w:bCs/></w:rPr></w:tblStylePr></w:style>',
+    ],
+    ['פקד תוכן', '<w:sdt><w:sdtPr><w:rPr><w:bCs/></w:rPr></w:sdtPr></w:sdt>'],
+    ['ריצה שנמחקה במעקב שינויים', '<w:del><w:r><w:rPr><w:bCs/></w:rPr></w:r></w:del>'],
+  ];
+
+  it.each(cases)('%s', (_name, inner) => {
+    expect(repairComplexScriptBold(`<w:document xmlns:w="ns">${inner}</w:document>`)).toContain(
+      '<w:b/><w:bCs/>',
+    );
+  });
+
+  it('קינון עמוק של היסטוריה אינו נספר כעיצוב חי', () => {
+    const inner =
+      '<w:rPr><w:bCs/><w:rPrChange w:author="a"><w:rPr><w:bCs/>' +
+      '<w:rPrChange w:author="b"><w:rPr><w:bCs/></w:rPr></w:rPrChange>' +
+      '</w:rPr></w:rPrChange></w:rPr>';
+    const repaired = repairComplexScriptBold(`<w:document xmlns:w="ns">${inner}</w:document>`)!;
+    expect(repaired.split('<w:b/>')).toHaveLength(2);
+    expect(repaired).toContain('<w:rPr><w:b/><w:bCs/><w:rPrChange');
+  });
+});
