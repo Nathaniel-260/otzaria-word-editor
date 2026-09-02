@@ -41,20 +41,18 @@ try {
 
   /* ---------- העימוד שנמסר לאוצריא ----------
    *
-   * החוזה נמדד מול מה שאוצריא **באמת** מקבלת (`_parsePdfLayout` ב-
-   * plugin_bridge_adapter.dart): `pageSize` הוא שם מוכן מרשימה סגורה, או מפה
-   * `{widthMm, heightMm}`. השער כאן לא יכול לאמת את הצד השני — ה-Host הוא
-   * כפיל — ולכן הוא לפחות לא מאשר צורה שאוצריא הייתה דוחה.
+   * מול מה שאוצריא מקבלת ב-`_parsePdfLayout` (‏plugin_bridge_adapter.dart):
+   * `pageSize` כמפה `{widthMm, heightMm}`, ‏10–5080 מ"מ לצד. שם קבוע גם הוא
+   * מתקבל שם, אבל אנחנו מוסרים מידות — הן של המסמך, והן אלה שהוזרקו ל-`@page`
+   * (ראו ExportPdfLayoutInput). השער דורש את מה שאנחנו באמת שולחים, ובתחום
+   * שהגשר באמת מקבל.
    */
-  const NAMED_SIZES = ['a4', 'a5', 'letter', 'legal'];
   const layout = calls[0] ?? {};
   const size = layout.pageSize;
-  const sizeOk =
-    typeof size === 'string'
-      ? NAMED_SIZES.includes(size)
-      : size?.widthMm > 0 && size?.heightMm > 0;
-  sizeOk && layout.marginMm === 0 && layout.printBackgrounds === true
-    ? report.pass('גודל דף בצורה שאוצריא מקבלת, שוליים 0 ורקעים', JSON.stringify(size))
+  const sideOk = (mm) => typeof mm === 'number' && mm >= 10 && mm <= 5080;
+  sideOk(size?.widthMm) && sideOk(size?.heightMm) &&
+  layout.marginMm === 0 && layout.printBackgrounds === true
+    ? report.pass('מידות הדף במ"מ, שוליים 0 ורקעים — בתחום שהגשר מקבל', JSON.stringify(size))
     : report.fail('עימוד', JSON.stringify(layout));
 
   const pageStyle = await app.js(
