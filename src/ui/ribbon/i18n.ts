@@ -91,8 +91,6 @@ const EN: Readonly<Record<string, string>> = {
   'שמור בשם...': 'Save As...',
   'שמירת המסמך כקובץ חדש': 'Save the document as a new file',
   'ייצוא והדפסה': 'Export & Print',
-  'ייצוא ל-Word': 'Export to Word',
-  'הורדת קובץ .docx תואם Microsoft Word': 'Download a Microsoft Word-compatible .docx file',
   'הדפסה': 'Print',
   'הדפסת המסמך': 'Print the document',
   'ייצוא ל-PDF': 'Export to PDF',
