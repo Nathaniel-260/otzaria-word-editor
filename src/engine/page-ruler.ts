@@ -1009,6 +1009,259 @@ export function watchAllPageTextRuns(options: AllPageTextRunsWatchOptions): Page
 }
 
 /* ------------------------------------------------------------------ */
+/* טווחים בתוך שורת טקסט — לבדיקת האיות                                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * הקורא הרביעי, וזה שהוא צריך שונה מכל השלושה שלפניו: לא מלבן של עמוד, לא
+ * מלבן של שורה ולא מלבן של צומת שלם — אלא מלבן של **קטע בתוך צומת**, כדי
+ * למתוח קו גלי מתחת למילה אחת (ui/shell/SpellingOverlay.vue).
+ *
+ * ## למה מכאן, ולא דרך `ui.viewport.getRect`
+ *
+ * למנוע **יש** API ציבורי שפותר טווח טקסט לגיאומטריה: `ui.viewport.getRect
+ * ({ target, relativeTo })` עם `SelectionTarget` של בלוק+היסטים, בדיוק אותו
+ * יעד ש-engine/search.ts כבר בונה. הוא נמדד ועובד (Chrome headless על ה-dist
+ * הארוז): 288 טווחים, כולם נפתרו, מלבן לכל אחד.
+ *
+ * ומה שנמדד יחד איתו הוא הסיבה שהוא לא נבחר: **0.15ms לקריאה**. עמוד עברי
+ * ממוצע הוא ~400 מילים, מהן ~5% אינן במילון — 20 קריאות לעמוד זה עוד סביר,
+ * אבל הסימון נמדד מחדש בכל גלילה, וב„הצג הכול” על מסמך בן עשרות עמודים זה
+ * מגיע למאות מילישניות לפריים. המסלול כאן — TreeWalker ‏+ `Range` על אותו
+ * תוכן — נמדד **1.2ms לעמוד שלם** (31 צמתים, 480 מילים נסרקו, 24 טווחים
+ * נמדדו): פי 60 פחות, ובלי להישען על שום מבנה פנימי של המנוע.
+ *
+ * זו אותה טכניקה תקנית בדיוק שכבר עומדת מאחורי `measurePageContentRects`
+ * ו-`measurePageTextRuns` למעלה, רק ברזולוציה של קטע בתוך צומת. `getRect`
+ * נשאר המסלול הנכון לקריאה **בודדת** (למשל „גלול אל השגיאה הבאה”), ולא
+ * למאות בפריים.
+ *
+ * ## קיבוץ: „מה נחשב שורת טקסט אחת”
+ *
+ * מילה יכולה להתפצל לשני צמתים כשהעיצוב משתנה באמצעה (חצי מודגש), וסריקה
+ * צומת-צומת הייתה מסמנת שתי שגיאות במקום מילה אחת מוכרת. לכן צמתים עוקבים
+ * מצורפים לפי **האב הראשון שאינו אלמנט inline** — לפי שם התגית, ולא לפי שם
+ * מחלקה של המנוע (‏tests/unit/engine-boundaries.test.ts אוסר, ובצדק: המנוע
+ * מתעד את שמות המחלקות שלו כחוזה פנימי). בפועל הטיפוס הוא צעד אחד: הצומת
+ * יושב ב-`<span>`, וההורה שלו הוא כבר `<div>`.
+ *
+ * **תגית ולא `getComputedStyle`**, ושלוש סיבות: היא אינה עולה כלום בלולאה
+ * שרצה על כל צומת בעמוד; היא נותנת אותה תשובה בכל סביבה (ב-jsdom
+ * `getComputedStyle(span).display` הוא מחרוזת ריקה, כלומר בדיקה שרצה שם
+ * הייתה מודדת התנהגות שאינה קיימת בדפדפן); ותגית שאינה מוכרת מטופלת כבלוק —
+ * הכיוון הבטוח, שחותך קבוצה במקום להדביק שתי שורות למילה שאינה קיימת.
+ *
+ * הגבול הזה גם מספיק: המנוע מצייר **בלוק לכל שורה חזותית** (נמדד), ומילה
+ * אינה נשברת בין שורות — כלומר קבוצה אחת מכילה מילים שלמות בלבד.
+ *
+ * ## היקף: רק העמודים שרואים
+ *
+ * `measureAllPageTextRuns` סורק את כל העמודים, כי הוא מיישר רצף מול
+ * `blocks.list()` וחייב להיות שלם. כאן אין רצף לשמור — כל קבוצה עומדת בפני
+ * עצמה — ולכן נסרקים רק עמודים שנחתכים עם החלון (בתוספת `marginPx`). זה מה
+ * שהופך מסמך בן שמונים עמודים לאותה עלות כמו מסמך בן שניים.
+ */
+
+/** טווח בקואורדינטות-הטקסט של קבוצה אחת, כפי ש-`select` מחזירה. */
+export interface TextSegment {
+  readonly start: number;
+  readonly end: number;
+}
+
+/** טווח שנמדד: הטקסט שלו, ומלבן לכל תיבה שהוא נפרס עליה. */
+export interface MeasuredSegment {
+  readonly text: string;
+  readonly rects: readonly RawTextRect[];
+}
+
+export interface TextSegmentOptions {
+  /** כמה פיקסלים מעבר לחלון עדיין נסרקים, כדי שגלילה קצרה לא תגלה שטח ריק. */
+  readonly marginPx?: number;
+  /** תקרת טווחים. מסמך פתולוגי לא יהפוך פריים אחד למאות מילישניות. */
+  readonly limit?: number;
+}
+
+const SEGMENT_MARGIN_PX = 400;
+const SEGMENT_LIMIT = 600;
+
+/**
+ * תגיות שאינן שוברות שורת טקסט — כלומר צמתים משני צידיהן מצטרפים. אלה
+ * העוטפים שסימוני העיצוב של ProseMirror מייצרים (מודגש, נטוי, קישור, כתב
+ * עילי/תחתי), בתוספת שאר ה-inline של HTML כדי שמסמך שהגיע מ-Word עם עוטף
+ * פחות שכיח לא ייחתך לשווא.
+ */
+const INLINE_TAGS: ReadonlySet<string> = new Set([
+  'SPAN', 'A', 'B', 'STRONG', 'I', 'EM', 'U', 'S', 'STRIKE', 'DEL', 'INS',
+  'SUB', 'SUP', 'MARK', 'CODE', 'SMALL', 'BIG', 'TT', 'ABBR', 'CITE', 'Q',
+  'BDI', 'BDO', 'FONT', 'RUBY', 'RT', 'RP', 'VAR', 'SAMP', 'KBD', 'TIME',
+]);
+
+/** האב הראשון שאינו אלמנט inline. ראו הערת הראש — תגית, ולא סגנון מחושב. */
+function blockAncestor(element: Element, root: Element): Element {
+  let current: Element | null = element;
+  while (current && current !== root && INLINE_TAGS.has(current.tagName)) {
+    current = current.parentElement;
+  }
+  return current ?? root;
+}
+
+/** חלק אחד בקבוצה: הצומת, וההיסט שבו הוא מתחיל בטקסט המחובר. */
+interface SegmentPart {
+  readonly node: Text;
+  readonly offset: number;
+}
+
+/** מקום בתוך קבוצה ⟵ (צומת, היסט בתוכו). `null` = ההיסט מחוץ לקבוצה. */
+function locate(parts: readonly SegmentPart[], offset: number): { node: Text; at: number } | null {
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const part = parts[i]!;
+    if (offset >= part.offset) {
+      const at = offset - part.offset;
+      return at <= (part.node.nodeValue?.length ?? 0) ? { node: part.node, at } : null;
+    }
+  }
+  return null;
+}
+
+/** הטווחים שנבחרו בעמוד אחד, ביחס ל-`reference`. */
+function measurePageTextSegments(
+  pageEl: HTMLElement,
+  reference: HTMLElement,
+  select: (text: string) => readonly TextSegment[],
+  out: MeasuredSegment[],
+  limit: number,
+): void {
+  let walker: TreeWalker;
+  try {
+    walker = document.createTreeWalker(pageEl, NodeFilter.SHOW_TEXT);
+  } catch {
+    return;
+  }
+
+  const referenceBox = reference.getBoundingClientRect();
+  let parts: SegmentPart[] = [];
+  let text = '';
+  let group: Element | null = null;
+
+  function flush(): void {
+    if (text.length > 0 && out.length < limit) {
+      for (const segment of select(text)) {
+        if (out.length >= limit) break;
+        const from = locate(parts, segment.start);
+        const to = locate(parts, segment.end);
+        if (!from || !to) continue;
+
+        let range: Range;
+        try {
+          range = document.createRange();
+          range.setStart(from.node, from.at);
+          range.setEnd(to.node, to.at);
+        } catch {
+          continue;
+        }
+
+        const rects: RawTextRect[] = [];
+        const list = range.getClientRects();
+        for (let i = 0; i < list.length; i++) {
+          const rect = list[i]!;
+          if (!(rect.width > 0) || !(rect.height > 0)) continue;
+          rects.push({
+            leftPx: rect.left - referenceBox.left,
+            topPx: rect.top - referenceBox.top,
+            widthPx: rect.width,
+            heightPx: rect.height,
+          });
+        }
+        if (rects.length > 0) out.push({ text: text.slice(segment.start, segment.end), rects });
+      }
+    }
+    parts = [];
+    text = '';
+  }
+
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    const value = node.nodeValue ?? '';
+    if (value.length === 0) continue;
+
+    const parent = (node as Text).parentElement;
+    const owner = parent ? blockAncestor(parent, pageEl) : pageEl;
+    if (owner !== group) {
+      flush();
+      group = owner;
+    }
+    parts.push({ node: node as Text, offset: text.length });
+    text += value;
+  }
+  flush();
+}
+
+/**
+ * הטווחים שנבחרו בעמודים הגלויים, ביחס ל-`reference`.
+ *
+ * `select` מקבלת את הטקסט המחובר של קבוצה אחת ומחזירה טווחים בתוכו — כך
+ * המודול הזה נשאר גיאומטריה בלבד, ומי שיודע *מה* לסמן (engine/spellcheck.ts)
+ * אינו נוגע ב-DOM.
+ */
+export function measureAllPageTextSegments(
+  host: HTMLElement | null,
+  reference: HTMLElement | null,
+  select: (text: string) => readonly TextSegment[],
+  options: TextSegmentOptions = {},
+): readonly MeasuredSegment[] {
+  if (!host || !reference) return [];
+  if (typeof document === 'undefined' || typeof document.createTreeWalker !== 'function') return [];
+
+  const pages = host.querySelectorAll(`[${PAGE_INDEX_ATTRIBUTE}]`);
+  if (pages.length === 0) return [];
+
+  const margin = options.marginPx ?? SEGMENT_MARGIN_PX;
+  const limit = options.limit ?? SEGMENT_LIMIT;
+  const viewport = host.getBoundingClientRect();
+  const top = viewport.top - margin;
+  const bottom = viewport.bottom + margin;
+
+  const out: MeasuredSegment[] = [];
+
+  const ordered = Array.from(pages)
+    .filter((node): node is HTMLElement => node instanceof HTMLElement)
+    .map((el) => ({ el, pageIndex: Number(el.getAttribute(PAGE_INDEX_ATTRIBUTE)) }))
+    .filter((page) => Number.isInteger(page.pageIndex))
+    .sort((a, b) => a.pageIndex - b.pageIndex);
+
+  for (const { el } of ordered) {
+    if (out.length >= limit) break;
+    const box = el.getBoundingClientRect();
+    if (box.bottom < top || box.top > bottom) continue;
+    measurePageTextSegments(el, reference, select, out, limit);
+  }
+
+  return out;
+}
+
+/** שני מערכי טווחים שקולים — כדי לא לצייר מחדש מדידה שלא זזה. */
+export function sameTextSegments(a: readonly MeasuredSegment[], b: readonly MeasuredSegment[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i]!;
+    const y = b[i]!;
+    if (x.text !== y.text || x.rects.length !== y.rects.length) return false;
+    for (let j = 0; j < x.rects.length; j++) {
+      const rx = x.rects[j]!;
+      const ry = y.rects[j]!;
+      if (
+        Math.abs(rx.leftPx - ry.leftPx) >= 0.5 ||
+        Math.abs(rx.topPx - ry.topPx) >= 0.5 ||
+        Math.abs(rx.widthPx - ry.widthPx) >= 0.5 ||
+        Math.abs(rx.heightPx - ry.heightPx) >= 0.5
+      ) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+/* ------------------------------------------------------------------ */
 /* יחידת המידה                                                         */
 /* ------------------------------------------------------------------ */
 

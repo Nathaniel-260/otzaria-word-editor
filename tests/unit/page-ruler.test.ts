@@ -16,8 +16,10 @@ import {
   applyRulerIndents,
   createRulerModel,
   directionFromText,
+  measureAllPageTextSegments,
   measurePageRect,
   paintedHost,
+  sameTextSegments,
   readRulerUnit,
   watchPageRect,
   RULER_SELECTION_DEBOUNCE_MS,
@@ -532,5 +534,157 @@ describe('readRulerUnit', () => {
         },
       }),
     ).toBe('cm');
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* טווחים בתוך שורת טקסט — לבדיקת האיות                                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * מה שנמדד כאן הוא בדיוק מה שהופך „מילה מסומנת” ל„חצי מילה מסומנת”: הקיבוץ
+ * של צמתי הטקסט. מילה שהעיצוב משתנה באמצעה יושבת בשני צמתים, ומדידה
+ * צומת-צומת הייתה מסמנת שתי שגיאות במקום ערך מוכר אחד — ולהפך, קיבוץ שחוצה
+ * גבול בלוק היה מדביק סוף פסקה לתחילת הבאה ויוצר „מילה” שאינה קיימת.
+ *
+ * `getClientRects` מזויף: jsdom אינו מפריס, ולכן הרוחב נגזר מאורך הטווח.
+ */
+describe('measureAllPageTextSegments', () => {
+  const CHAR_PX = 10;
+  let restoreRects: (() => void) | null = null;
+
+  function fakeRects(): void {
+    const original = Range.prototype.getClientRects;
+    Range.prototype.getClientRects = function fake(this: Range) {
+      const length = this.toString().length;
+      const rect = {
+        left: this.startOffset * CHAR_PX,
+        top: 0,
+        width: length * CHAR_PX,
+        height: 20,
+        right: (this.startOffset + length) * CHAR_PX,
+        bottom: 20,
+      } as DOMRect;
+      return Object.assign([rect], { item: () => rect }) as unknown as DOMRectList;
+    };
+    restoreRects = () => {
+      Range.prototype.getClientRects = original;
+    };
+  }
+
+  /** עמוד עם בלוק אחד שבתוכו הצמתים שנמסרו, כל אחד ב-`<span>` משלו. */
+  function pageWithRuns(...runs: string[][]): { host: HTMLElement; root: HTMLElement } {
+    const { host, page } = pageHost();
+    for (const block of runs) {
+      const div = document.createElement('div');
+      for (const text of block) {
+        const span = document.createElement('span');
+        span.textContent = text;
+        div.appendChild(span);
+      }
+      page.appendChild(div);
+    }
+    const root = withRect(document.createElement('div'), 0, 900);
+    document.body.appendChild(root);
+    return { host, root };
+  }
+
+  beforeEach(fakeRects);
+  afterEach(() => {
+    restoreRects?.();
+    restoreRects = null;
+  });
+
+  it('מוצאת טווח בתוך צומת יחיד, עם המלבן שלו', () => {
+    const { host, root } = pageWithRuns(['אבגד הוזח']);
+    const found = measureAllPageTextSegments(host, root, (text) => [
+      { start: text.indexOf('הוזח'), end: text.indexOf('הוזח') + 4 },
+    ]);
+
+    expect(found).toHaveLength(1);
+    expect(found[0]!.text).toBe('הוזח');
+    expect(found[0]!.rects[0]).toMatchObject({ widthPx: 40, heightPx: 20 });
+  });
+
+  it('שני צמתים באותו בלוק הם טקסט אחד — מילה שהעיצוב משתנה באמצעה', () => {
+    const { host, root } = pageWithRuns(['תוס', 'פות']);
+    const seen: string[] = [];
+    measureAllPageTextSegments(host, root, (text) => {
+      seen.push(text);
+      return [];
+    });
+    expect(seen).toEqual(['תוספות']);
+  });
+
+  it('שני בלוקים אינם מתחברים — סוף פסקה אינו נדבק לתחילת הבאה', () => {
+    const { host, root } = pageWithRuns(['ראשונה'], ['שנייה']);
+    const seen: string[] = [];
+    measureAllPageTextSegments(host, root, (text) => {
+      seen.push(text);
+      return [];
+    });
+    expect(seen).toEqual(['ראשונה', 'שנייה']);
+  });
+
+  it('טווח שחוצה שני צמתים נמדד כמלבן אחד', () => {
+    const { host, root } = pageWithRuns(['תוס', 'פות']);
+    const found = measureAllPageTextSegments(host, root, () => [{ start: 0, end: 6 }]);
+    expect(found[0]!.text).toBe('תוספות');
+    expect(found[0]!.rects).toHaveLength(1);
+  });
+
+  it('עמוד שמחוץ לחלון אינו נסרק כלל', () => {
+    const { host, page } = pageHost();
+    // הרבה מתחת ל-host (שגובהו 22px, ברירת המחדל של `withRect`) ומעבר לשוליים.
+    withRect(page, 120, 794, 5_000, 1_000);
+    const div = document.createElement('div');
+    div.textContent = 'רחוק';
+    page.appendChild(div);
+    const root = withRect(document.createElement('div'), 0, 900);
+    document.body.appendChild(root);
+
+    const seen: string[] = [];
+    measureAllPageTextSegments(host, root, (text) => {
+      seen.push(text);
+      return [];
+    });
+    expect(seen).toEqual([]);
+  });
+
+  it('`limit` חוסם מסמך פתולוגי', () => {
+    const { host, root } = pageWithRuns(['אבגדהוזחט']);
+    const found = measureAllPageTextSegments(
+      host,
+      root,
+      (text) => [...text].map((_, index) => ({ start: index, end: index + 1 })),
+      { limit: 3 },
+    );
+    expect(found).toHaveLength(3);
+  });
+
+  it('בלי host או בלי reference — אין מדידה', () => {
+    expect(measureAllPageTextSegments(null, document.createElement('div'), () => [])).toEqual([]);
+    expect(measureAllPageTextSegments(document.createElement('div'), null, () => [])).toEqual([]);
+  });
+});
+
+describe('sameTextSegments', () => {
+  const segment = (text: string, leftPx: number) => ({
+    text,
+    rects: [{ leftPx, topPx: 0, widthPx: 40, heightPx: 20 }],
+  });
+
+  it('אותה מדידה — שקולה', () => {
+    expect(sameTextSegments([segment('אבג', 10)], [segment('אבג', 10)])).toBe(true);
+  });
+
+  it('הזזה של פחות מחצי פיקסל אינה שינוי', () => {
+    expect(sameTextSegments([segment('אבג', 10)], [segment('אבג', 10.4)])).toBe(true);
+  });
+
+  it('טקסט אחר, מלבן שזז, או מספר אחר — שינוי', () => {
+    expect(sameTextSegments([segment('אבג', 10)], [segment('דהו', 10)])).toBe(false);
+    expect(sameTextSegments([segment('אבג', 10)], [segment('אבג', 30)])).toBe(false);
+    expect(sameTextSegments([segment('אבג', 10)], [])).toBe(false);
   });
 });
