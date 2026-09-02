@@ -382,10 +382,13 @@ async function applyToSections(
   host: PageSetupTarget,
   failedAction: string,
   pick: (sections: Sections) => ((section: SectionItem, target: unknown) => MaybePromise<DocReceipt>) | null,
-  /** בדיקה לפני הכתיבה. מחרוזת = סירוב, עם הנימוק שיוצג למשתמש. */
-  guard?: (section: SectionItem) => string | null,
-  /** הודעת-מידע על הצלחה, נגזרת מהמקטעים שנכתבו בפועל. */
-  note?: (sections: readonly SectionItem[]) => string | undefined,
+  /** אובייקט ולא פרמטרים נוספים: קורא שרוצה `note` בלבד לא יעביר `undefined` ל-`guard`. */
+  extras: {
+    /** בדיקה לפני הכתיבה. מחרוזת = סירוב, עם הנימוק שיוצג למשתמש. */
+    guard?: (section: SectionItem) => string | null;
+    /** הודעת-מידע על הצלחה, נגזרת מהמקטעים שנכתבו בפועל. */
+    note?: (sections: readonly SectionItem[]) => string | undefined;
+  } = {},
 ): Promise<CommandOutcome> {
   const doc = (host as PageSetupHost | null | undefined)?.activeEditor?.doc;
   if (!doc) return unavailable(failedAction, 'המסמך עדיין נטען', 'document-api-unavailable');
@@ -410,7 +413,7 @@ async function applyToSections(
 
   // כל הבדיקות לפני כל הכתיבות: סירוב באמצע היה משאיר חצי מהמקטעים משונים.
   for (const section of targets) {
-    const refusal = guard?.(section);
+    const refusal = extras.guard?.(section);
     if (refusal) return unavailable(failedAction, refusal, 'invalid-input');
   }
 
@@ -429,7 +432,7 @@ async function applyToSections(
     }
   }
 
-  const info = note?.(targets);
+  const info = extras.note?.(targets);
   return info ? { ok: true, note: info } : { ok: true };
 }
 
@@ -674,7 +677,7 @@ export function applyPageMargins(
       if (!setPageMargins) return null;
       return (_section, target) => setPageMargins({ target, ...payload });
     },
-    (section) => leavesRoomForText(section, input),
+    { guard: (section) => leavesRoomForText(section, input) },
   );
 }
 
@@ -776,21 +779,23 @@ export function applyPaperSize(
         });
       };
     },
-    // דף קטן יותר עם אותם שוליים יכול לחצות את הצוק — A4 גבוה מ-Letter
-    // בכמעט אינץ'. אותו חסם בדיוק כמו בשוליים, ומאותה סיבה.
-    (section) => {
-      const { width, height } = sizeOf(section);
-      const top = inchesToTwips(section.margins?.top) ?? 0;
-      const bottom = inchesToTwips(section.margins?.bottom) ?? 0;
-      const left = inchesToTwips(section.margins?.left) ?? 0;
-      const right = inchesToTwips(section.margins?.right) ?? 0;
-      if (marginsLeaveRoom(height, top, bottom) === false) {
-        return `השוליים הנוכחיים גדולים מדי לגובה של ${size.label}`;
-      }
-      if (marginsLeaveRoom(width, left, right) === false) {
-        return `השוליים הנוכחיים גדולים מדי לרוחב של ${size.label}`;
-      }
-      return null;
+    {
+      // דף קטן יותר עם אותם שוליים יכול לחצות את הצוק — A4 גבוה מ-Letter
+      // בכמעט אינץ'. אותו חסם בדיוק כמו בשוליים, ומאותה סיבה.
+      guard: (section) => {
+        const { width, height } = sizeOf(section);
+        const top = inchesToTwips(section.margins?.top) ?? 0;
+        const bottom = inchesToTwips(section.margins?.bottom) ?? 0;
+        const left = inchesToTwips(section.margins?.left) ?? 0;
+        const right = inchesToTwips(section.margins?.right) ?? 0;
+        if (marginsLeaveRoom(height, top, bottom) === false) {
+          return `השוליים הנוכחיים גדולים מדי לגובה של ${size.label}`;
+        }
+        if (marginsLeaveRoom(width, left, right) === false) {
+          return `השוליים הנוכחיים גדולים מדי לרוחב של ${size.label}`;
+        }
+        return null;
+      },
     },
   );
 }
@@ -823,7 +828,7 @@ export function rtlColumnNote(
 ): string | undefined {
   if (count < 2) return undefined;
   if (!sections.some((section) => section.sectionDirection === 'rtl')) return undefined;
-  return 'העמודה הראשונה מצוירת בצד שמאל, וגם הסימון עובר שמאל→ימין. הקובץ נשמר נכון.';
+  return 'העמודה הראשונה מצוירת בצד שמאל, וגם הסימון עובר שמאל→ימין. הקובץ יישמר נכון.';
 }
 
 export function applyColumns(
@@ -838,19 +843,22 @@ export function applyColumns(
     });
   }
 
-  return applyToSections(host, `שינוי מספר העמודות ל-${count} נכשל`, (sections) => {
-    const setColumns = sections.setColumns;
-    if (!setColumns) return null;
-    return (_section, target) =>
-      setColumns({
-        target,
-        count,
-        gap: twipsToInches(COLUMN_GAP_TWIPS),
-        equalWidth: true,
-      });
-  },
-  undefined,
-  (sections) => rtlColumnNote(count, sections));
+  return applyToSections(
+    host,
+    `שינוי מספר העמודות ל-${count} נכשל`,
+    (sections) => {
+      const setColumns = sections.setColumns;
+      if (!setColumns) return null;
+      return (_section, target) =>
+        setColumns({
+          target,
+          count,
+          gap: twipsToInches(COLUMN_GAP_TWIPS),
+          equalWidth: true,
+        });
+    },
+    { note: (sections) => rtlColumnNote(count, sections) },
+  );
 }
 
 /* ------------------------------------------------------------------ */

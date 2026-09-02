@@ -808,7 +808,7 @@ describe('חזרה למה שהיה', () => {
  * כאן המדווח עצמו, בדיוק כפי שהפקד קורא לו.
  */
 describe('הודעת-מידע על פקודה שהצליחה', () => {
-  const NOTE = 'העמודה הראשונה מצוירת בצד שמאל, וגם הסימון עובר שמאל→ימין. הקובץ נשמר נכון.';
+  const NOTE = 'העמודה הראשונה מצוירת בצד שמאל, וגם הסימון עובר שמאל→ימין. הקובץ יישמר נכון.';
 
   function reporterOf(wrapper: Awaited<ReturnType<typeof mountShell>>): CommandReporter {
     const provides = (wrapper.vm.$ as unknown as { provides: Record<symbol, unknown> }).provides;

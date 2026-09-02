@@ -884,20 +884,24 @@ const saveStateMessage = computed(() => {
   return 'טרם נשמר';
 });
 
+/**
+ * ההודעה מ-`outcome.note` **כל עוד היא זו שעל המסך**, אחרת `null`.
+ *
+ * פקודה מוצלחת בלי הודעה מנקה את הקודמת: „עמודות ← אחת” אחרי „עמודות ←
+ * שתיים” חייבת להסיר הודעה שהפכה לשקר. אבל הפס יש לו כותבים נוספים —
+ * `STATUS_NOTIFIER` ומסלול פתיחת המסמך — ולכן הניקוי מותנה בכך שההודעה עדיין
+ * שם. את התנאי הזה אוכף `setStatus`, שמפקיע את המשתנה בכל כתיבה אחרת לפס.
+ */
+let lastCommandNote: string | null = null;
+
 function setStatus(text: string, isError = false): void {
   statusText.value = text;
   isStatusError.value = isError;
+  // כל כתיבה אחרת לפס מפקיעה את ההודעה. בלי זה `lastCommandNote` היה שורד
+  // גם ל-`setStatus('')` של פתיחת מסמך, ומצביע על טקסט שכבר איננו.
+  if (text !== lastCommandNote) lastCommandNote = null;
   if (isError) notifyError(text);
 }
-
-/**
- * ההודעה האחרונה שהוצגה מ-`outcome.note`, כדי שאפשר יהיה לנקות אותה.
- *
- * פקודה מוצלחת בלי הודעה מנקה אותה — אבל **רק אם היא עדיין זו שעל המסך**.
- * „עמודות ← אחת” אחרי „עמודות ← שתיים” חייבת להסיר הודעה שהפכה לשקר, ובלי
- * ההשוואה הזאת הייתה מוחקת גם הודעה תקינה שמישהו אחר כתב בינתיים.
- */
-let lastCommandNote: string | null = null;
 
 /**
  * כל פקד ב-Ribbon מדווח לכאן דרך useCommand. עד עכשיו הפקדים עשו
@@ -918,9 +922,9 @@ function reportCommand(outcome: CommandOutcome, commandId: string): void {
   if (outcome.note) {
     setStatus(outcome.note);
     lastCommandNote = outcome.note;
-  } else if (lastCommandNote !== null && statusText.value === lastCommandNote) {
+  } else if (lastCommandNote !== null) {
+    // לא-null פירושו שההודעה עדיין על המסך — `setStatus` מפקיע אותו אחרת.
     setStatus('');
-    lastCommandNote = null;
   }
 
   /**
