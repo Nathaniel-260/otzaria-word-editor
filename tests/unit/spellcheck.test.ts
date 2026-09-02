@@ -57,6 +57,31 @@ describe('חיפוש במילון', () => {
     expect(dictionary.has('ננן')).toBe(false);
   });
 
+  it('תחילית ממש של ערך אינה ערך', () => {
+    // הטענה הזאת היא מה ששומר על השורה האחרונה ב-`compareLine`: בלי השוואת
+    // האורכים, „תוס” היה נמצא רק מפני ש„תוספות” מתחיל בו — כלומר כל תחילית
+    // של כל ערך במילון הייתה מוכשרת, ובדיקת האיות מפסיקה לסמן כמעט כלום.
+    const dictionary = createDictionary(packWords(['תוספות']));
+    expect(dictionary.has('תוס')).toBe(false);
+    expect(dictionary.has('תוספותת')).toBe(false);
+    expect(dictionary.has('תוספות')).toBe(true);
+  });
+
+  it('אינה נתקעת כשהחיפוש נוחת על המפריד עצמו', {
+
+    // רגרסיה: `lastIndexOf(sep, mid)` החזיר את המפריד ש-`mid` נחת עליו,
+    // `start` יצא השורה הבאה — שיכולה להיות `hi` עצמו — ו-`hi = start` לא
+    // הזיז דבר. הלולאה רצה לנצח, ובעורך זה טאב קפוא ולא סימון חסר. התקרה
+    // כאן היא הבדיקה: לולאה אינסופית סינכרונית אינה נקטעת בזמן קצוב של
+    // vitest, ולכן הכשל מתבטא כהרצה שנתלית — וזה מה שקרה בפועל.
+    timeout: 2_000,
+  }, () => {
+    expect(createDictionary(packWords(['א', 'בב'])).has('אב')).toBe(false);
+    expect(createDictionary(packWords(['אב', 'ג'])).has('בג')).toBe(false);
+    expect(createDictionary(packWords(['א'])).has('א')).toBe(true);
+    expect(createDictionary(packWords(['א', 'ב', 'ג', 'דד'])).has('דד')).toBe(true);
+  });
+
   it('מילון ריק אינו מוצא דבר, ואינו נתקע', () => {
     const dictionary = createDictionary('');
     expect(dictionary.has('אמר')).toBe(false);
@@ -84,6 +109,24 @@ describe('תחיליות', () => {
   it('שלוש תחיליות רצופות **אינן** מוכשרות', () => {
     // „ושהתוספות” = ו+ש+ה+תוספות. שלוש הסרות היו מכשירות כמעט כל מחרוזת.
     expect(dict().has('ושהתוספות')).toBe(false);
+  });
+
+  it('כל שמונה התחיליות מופעלות, בשני הכיוונים', () => {
+    // בלי הבדיקה הזאת אפשר למחוק חמש מתוך שמונה מהרשימה בלי שדבר ייפול:
+    // שאר הבדיקות נוגעות ב-ו', ש' ו-ה' בלבד.
+    for (const prefix of ['ד', 'ו', 'ב', 'כ', 'ל', 'מ', 'ה', 'ש']) {
+      const stripping = createDictionary(packWords(['תוספות']));
+      expect(stripping.has(`${prefix}תוספות`), `הסרת ${prefix}`).toBe(true);
+
+      const adding = createDictionary(packWords([`${prefix}תוספות`]));
+      expect(adding.has('תוספות'), `הוספת ${prefix}`).toBe(true);
+    }
+  });
+
+  it('הסרה והוספה מצטרפות: „שכתב” דרך „וכתב”', () => {
+    // המסלול שבו `known` מופעל על השורש שנחתך — הסרת ש', ואז הוספת ו'.
+    const dictionary = createDictionary(packWords(['וכתב']));
+    expect(dictionary.has('שכתב')).toBe(true);
   });
 
   it('מילה בת שתי אותיות אינה מפורקת', () => {
@@ -132,6 +175,15 @@ describe('מילון המשתמש', () => {
     expect(dictionary.addUserWord('זזזזז')).toBe(false);
   });
 
+  it('מילה שמוכרת דרך תחילית אינה נרשמת', () => {
+    // „ואמר” אינו ערך, אבל הוא מוכר דרך „אמר” — כלומר אינו מסומן ממילא,
+    // ורישום שלו היה מנפח את מה שנשמר ב-`storage` בלי לשנות ולו סימון אחד.
+    const dictionary = dict();
+    expect(dictionary.has('ואמר')).toBe(true);
+    expect(dictionary.addUserWord('ואמר')).toBe(false);
+    expect(dictionary.userWords()).toEqual([]);
+  });
+
   it('המילה נשמרת מנורמלת, כדי שהצורה המנוקדת תימצא גם היא', () => {
     const dictionary = dict();
     dictionary.addUserWord('זַ״ץ');
@@ -164,6 +216,27 @@ describe('סריקת טקסט', () => {
   it('גרשיים הם חלק מהמילה ולא גבול שלה', () => {
     // פיצול על הגרשיים היה מסמן „רש” ו„י” כשתי שגיאות במקום ערך אחד מוכר.
     expect(findMisspellings('דברי רש״י כאן', dict()).map((m) => m.word)).toEqual(['דברי', 'כאן']);
+  });
+
+  it('מקף עברי הוא גבול מילה, ואינו נמחק', () => {
+    // U+05BE יושב בתוך טווח הניקוד, וטווח מלא היה מוחק אותו: „ושבת־בית”
+    // היה הופך למחרוזת אחת שאינה במילון — סימון אחד שמכסה שתי מילים תקינות.
+    expect(findMisspellings('ושבת־בית', dict())).toEqual([]);
+  });
+
+  it('גרשיים שסוגרים ציטוט אינם חלק מהמילה', () => {
+    expect(findMisspellings('אמר "בית" גמרא', dict())).toEqual([]);
+  });
+
+  it('גרש שהוא חלק מראשי תיבות נשמר', () => {
+    // 1,368 ערכים במילון מסתיימים בגרש; חיתוך גורף היה הופך אותם לשגיאות.
+    const dictionary = createDictionary(packWords(["ר'", 'בית']));
+    expect(findMisspellings("ר' בית", dictionary)).toEqual([]);
+  });
+
+  it('הסימון על מילה לא מוכרת אינו כולל את הגרשיים שאחריה', () => {
+    const text = 'אמר "זזזזז" גמרא';
+    expect(findMisspellings(text, dict())).toEqual([{ word: 'זזזזז', start: 5, end: 10 }]);
   });
 
   it('אותיות לטיניות וספרות אינן נסרקות כלל', () => {

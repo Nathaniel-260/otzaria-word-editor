@@ -122,6 +122,34 @@ const ENGINE_BEARING_FILES = ['assets/app.js', 'assets/engine-workers.js'];
  */
 const ICONS_LICENSE_MARK = 'Fluent System Icons — MIT';
 
+/**
+ * המילון התורני חייב להיות **נכס נפרד**, ו`assets/app.js` חייב לא להכיל
+ * אותו. זו לא בדיקת שפיות אלא השער היחיד שתופס את הנסיגה: מי שיחזיר את
+ * `src/data/torah-dictionary.txt` ל-`import` יקבל אריזה שעובדת בדיוק כמו
+ * קודם — `inlineDynamicImports` בולע גם `await import()` — רק ש-1.3MB
+ * נכנסים לבאנדל הראשי שכל משתמש פורס בעלייה, כולל מי שהתכונה כבויה אצלו.
+ * שער שבודק רק „האם המילון נטען כשהדליקו” היה נשאר ירוק על זה.
+ *
+ * הסמן הוא ערך אמיתי מהמילון שאין שום סיבה אחרת שיופיע בקוד.
+ */
+const DICTIONARY_ASSET = 'assets/torah-dictionary.js';
+const DICTIONARY_MARKER = 'אאוגרייהו';
+const dictionaryPath = join(DIST, DICTIONARY_ASSET);
+
+if (!existsSync(dictionaryPath)) {
+  errors.push(`חסר ${DICTIONARY_ASSET} — בדיקת האיות לא תמצא מילון`);
+} else if (!readFileSync(dictionaryPath, 'utf8').includes(DICTIONARY_MARKER)) {
+  errors.push(`${DICTIONARY_ASSET} אינו מכיל את המילון — התוסף שנארז חסר את הנתונים`);
+}
+
+const appPath = join(DIST, 'assets/app.js');
+if (existsSync(appPath) && readFileSync(appPath, 'utf8').includes(DICTIONARY_MARKER)) {
+  errors.push(
+    'assets/app.js מכיל את המילון התורני — הוא נבלע לבאנדל הראשי במקום להישאר נכס נפרד. ' +
+      'כל משתמש פורס עכשיו 1.3MB בעלייה בשביל תכונה שברירת המחדל שלה כבויה.',
+  );
+}
+
 const files = [];
 function walk(dir, prefix = '') {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {

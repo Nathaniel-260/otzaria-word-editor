@@ -3,29 +3,102 @@
  *
  * ארבע טענות, וכל אחת היא דבר שהיה נשבר בשקט:
  *
- *   1. **עצלות** — הנכס של המילון (1.3MB) אינו נטען עד שמדליקים. אם מישהו
- *      יחזיר אותו ל-`import`, Vite יבלע אותו לתוך `assets/app.js` והבדיקה
- *      הזאת היא היחידה שתראה זאת: הכול ימשיך לעבוד, רק לאט יותר לכולם.
- *   2. **דיוק** — מילה תורנית אינה מסומנת, ומילת ג'יבריש כן. בדיקת איות
- *      שמסמנת הכול היא בדיוק מה שהמילון הזה נבנה כדי למנוע.
+ *   1. **עצלות בזמן ריצה** — הנכס של המילון (1.3MB) אינו נמשך עד שמדליקים,
+ *      ונמשך פעם אחת. (הטענה המשלימה — שהוא לא נבלע ל-`assets/app.js`
+ *      מלכתחילה — היא של `npm run check:dist`, ולא של השער הזה: הגלובל היה
+ *      נשאר `undefined` גם אחרי נסיגה כזאת, והשער היה נשאר ירוק.)
+ *   2. **דיוק** — פסקה תורנית שלמה, ובה בדיוק שתי מחרוזות ג'יבריש. הספירה
+ *      **מדויקת** ולא „לפחות”: מילה תורנית שתסומן בטעות מרימה אותה, ומילת
+ *      ג'יבריש שתפוספס מורידה אותה.
  *   3. **„הוסף למילון”** — לחיצה ימנית על מילה מסומנת מציעה להוסיף אותה,
- *      והסימון נעלם.
- *   4. **מחיר** — זמן טעינה, זמן מדידה חוזרת, וגידול הזיכרון. המספרים
- *      נדפסים כעדות; הסף חוסם רק מה שכבר לא ניתן לחיות איתו.
+ *      והסימון נעלם מכל המסמך.
+ *   4. **מחיר** — הזמן שגלילה עולה **עם** הבדיקה מול **בלעדיה**, על אותו
+ *      מסמך ובאותה הרצה. זו מדידה של הקוד שנארז, ולא של שכפול שלו.
  */
 import { openApp, createReport, sleep } from './harness.mjs';
 
 /** תקרות: מה שמעליהן כבר נראה למשתמש כתקיעה, ולא כמדידה איטית. */
 const MAX_LOAD_MS = 3_000;
-const MAX_RESCAN_MS = 25;
+/**
+ * התקרה לפריים הכבד ביותר בזמן גלילה, **עם** בדיקת האיות. פריים ב-60Hz הוא
+ * 16.7ms, וחציו הוא הגבול שממנו והלאה הגלילה מתחילה להיראות קפואה.
+ */
+const MAX_FRAME_MS = 8;
+/** והתוספת מעל אותה מדידה בדיוק בלי הבדיקה — כדי לבודד את מה שאנחנו הוספנו. */
+const MAX_FRAME_COST_MS = 4;
+
+/** כמה פעמים הפסקה חוזרת. שלוש נכנסות בעמוד אחד — כלומר הכול גלוי ונספר. */
+const REPEATS = 3;
+/** מילות הג'יבריש בכל חזרה. אומת מול המילון: אף אחת אינה ערך ואינה נגזרת. */
+const UNKNOWN_PER_PARAGRAPH = 2;
+const EXPECTED_MARKS = REPEATS * UNKNOWN_PER_PARAGRAPH;
+
+/**
+ * פסקה תורנית. כל מילה בה נבדקה מול המילון ונמצאה מוכרת, חוץ מ„זזזזזז”
+ * ו„טטטטטט”.
+ *
+ * „ערוך” הוצא ממנה בכוונה: הוא מילה תורנית לגיטימית שחסרה במילון (ראו
+ * TODOs), כלומר הוא מסומן. גרסה קודמת של השער הזה כללה אותו, והספירה שלה
+ * הסתמכה עליו — כלומר התיקון הסביר ביותר למילון היה הופך אותה לאדומה בלי
+ * ששום דבר במוצר נשבר. מאותה סיבה בדיוק „חחחחחח” הוחלף: הוא **כן** ערך
+ * במילון, ולעולם לא היה מסומן.
+ */
+const PARAGRAPH =
+  'ועיין בתוספות שכתב הרא"ש דהא דאמרינן בגמרא ותירצו דהמדובר בשעת הדחק ' +
+  'ויש לעיין בשולחן כדעת הרמ"א ובמשנה ברורה זזזזזז טטטטטט ';
 
 const report = createReport('שער בדיקת איות תורנית', { strict: true });
 const app = await openApp({ name: 'spellcheck', port: Number(process.env.QA_PORT ?? 9362) });
 
-/** פסקה תורנית עם שתי מילים שאינן במילון בשום צורה. */
-const PARAGRAPH =
-  'ועיין בתוספות שכתב הרא"ש דהא דאמרינן בגמרא ותירצו דהמדובר בשעת הדחק ' +
-  'ויש לעיין בשולחן ערוך כדעת הרמ"א ובמשנה ברורה זזזזזז חחחחחח ';
+/**
+ * שלושים צעדי גלילה אמיתיים, ומה שהכבד שבפריימים שלהם עלה.
+ *
+ * שני דברים שהמדידה הזאת נזהרת מהם:
+ *
+ *   - **גלילה אמיתית ולא `dispatchEvent('scroll')`.** מלבני העמודים הם מה
+ *     שמפעיל את המדידה, ואירוע מזויף אינו מזיז אותם — כלומר הוא היה מודד את
+ *     הדף בלי להריץ את הקוד שנמדד בכלל.
+ *   - **זמן ה-callback, ולא זמן הלולאה.** גרסה קודמת מדדה כמה זמן לוקח
+ *     לגלול שלושים צעדים תוך המתנה לפריימים, וקיבלה 33.31ms לצעד בשני
+ *     המצבים — כלומר בדיוק שני פריימים של 60Hz. זו מדידה של קצב הציור, לא
+ *     של העבודה: היא הייתה מחזירה אותו מספר גם אם המדידה שלנו עלתה 15ms.
+ *     כאן `requestAnimationFrame` עטוף לזמן ההרצה של כל callback, והמדידה
+ *     שלנו רצה בתוך אחד מהם.
+ */
+const SCROLL_PROBE = `(async () => {
+  const host = window.__otzariaEditor.ui.viewport.getHost();
+  if (!host) return JSON.stringify({ error: 'no-host' });
+
+  const durations = [];
+  const original = window.requestAnimationFrame;
+  window.requestAnimationFrame = function (callback) {
+    return original.call(window, function (time) {
+      const started = performance.now();
+      try { callback(time); } finally { durations.push(performance.now() - started); }
+    });
+  };
+
+  const frame = () => new Promise((resolve) => original.call(window, resolve));
+  try {
+    for (let i = 0; i < 30; i++) {
+      host.scrollTop += (i % 2 === 0) ? 1 : -1;
+      await frame();
+      await frame();
+    }
+  } finally {
+    window.requestAnimationFrame = original;
+  }
+
+  const total = durations.reduce((sum, value) => sum + value, 0);
+  return JSON.stringify({
+    frames: durations.length,
+    maxMs: +Math.max(0, ...durations).toFixed(2),
+    meanMs: +(durations.length ? total / durations.length : 0).toFixed(2),
+  });
+})()`;
+
+const countMarks = () =>
+  app.js("document.querySelectorAll('.spelling-layer__mark').length").then(Number);
 
 try {
   /* 1. עצלות ------------------------------------------------------- */
@@ -34,10 +107,10 @@ try {
   );
   console.log('לפני ההדלקה:', beforeLoad);
   JSON.parse(beforeLoad).global === 'undefined'
-    ? report.pass('המילון אינו נטען כל עוד הבדיקה כבויה')
-    : report.fail('המילון נטען בעלייה', beforeLoad);
+    ? report.pass('המילון אינו נמשך כל עוד הבדיקה כבויה')
+    : report.fail('המילון נמשך בעלייה', beforeLoad);
 
-  /* המסמך: אותה פסקה שוב ושוב, כדי שיהיה מה למדוד ------------------- */
+  /* המסמך ---------------------------------------------------------- */
   const built = await app.js(`(async () => {
     const doc = window.__otzariaEditor.superdoc.activeEditor.doc;
     const listed = await doc.blocks.list({ includeText: true });
@@ -46,14 +119,24 @@ try {
       target: { kind: 'selection',
         start: { kind: 'text', blockId: first.nodeId, offset: 0 },
         end: { kind: 'text', blockId: first.nodeId, offset: (first.text || '').length } },
-      text: new Array(6).fill(${JSON.stringify(PARAGRAPH)}).join(''),
+      text: new Array(${REPEATS}).fill(${JSON.stringify(PARAGRAPH)}).join(''),
     });
     return 'ok';
   })()`);
   console.log('בניית המסמך:', built);
   await sleep(1_500);
 
-  /* 2. הדלקה, ומה נמדד --------------------------------------------- */
+  const pages = Number(await app.js("document.querySelectorAll('[data-page-index]').length"));
+  console.log('עמודים:', pages);
+  pages === 1
+    ? report.pass('כל המסמך בעמוד אחד — הספירה למטה מכסה אותו כולו')
+    : report.fail('המסמך גלש ליותר מעמוד', `${pages} עמודים; הספירה המדויקת אינה תקפה`);
+
+  /* המחיר, לפני ההדלקה --------------------------------------------- */
+  const idle = JSON.parse(await app.js(SCROLL_PROBE));
+  console.log('גלילה בלי בדיקת איות:', JSON.stringify(idle));
+
+  /* 2. הדלקה -------------------------------------------------------- */
   await app.tab('סקירה');
   const startedAt = Date.now();
   const clicked = await app.click('בדיקת איות');
@@ -62,124 +145,60 @@ try {
   let marks = 0;
   for (let waited = 0; waited < MAX_LOAD_MS + 5_000; waited += 250) {
     await sleep(250);
-    marks = Number(await app.js("document.querySelectorAll('.spelling-layer__mark').length"));
+    marks = await countMarks();
     if (marks > 0) break;
   }
   const loadMs = Date.now() - startedAt;
   console.log(`טעינה עד לסימון הראשון: ${loadMs}ms, ${marks} סימונים`);
 
-  marks > 0 ? report.pass('הסימון מצויר', `${marks} מילים`) : report.fail('לא צויר אף סימון');
   loadMs <= MAX_LOAD_MS
     ? report.pass('זמן הטעינה סביר', `${loadMs}ms`)
     : report.fail('טעינת המילון איטית מדי', `${loadMs}ms > ${MAX_LOAD_MS}ms`);
 
-  const loaded = await app.js(
-    "JSON.stringify({ chars: (window.__OTZARIA_TORAH_DICTIONARY__ || '').length, tags: document.querySelectorAll('script[src*=\"torah-dictionary\"]').length })",
+  const loaded = JSON.parse(
+    await app.js(
+      "JSON.stringify({ chars: (window.__OTZARIA_TORAH_DICTIONARY__ || '').length, tags: document.querySelectorAll('script[src*=\"torah-dictionary\"]').length })",
+    ),
   );
-  console.log('אחרי ההדלקה:', loaded);
-  JSON.parse(loaded).tags === 1
+  console.log('אחרי ההדלקה:', JSON.stringify(loaded));
+  loaded.tags === 1
     ? report.pass('הנכס נמשך פעם אחת בלבד')
-    : report.fail('הנכס נמשך יותר מפעם אחת', loaded);
+    : report.fail('הנכס נמשך יותר מפעם אחת', JSON.stringify(loaded));
 
   /* 3. דיוק --------------------------------------------------------- */
-  const marked = JSON.parse(
+  marks === EXPECTED_MARKS
+    ? report.pass('בדיוק המילים שאינן במילון סומנו', String(marks))
+    : report.fail(
+        'מספר הסימונים אינו מה שנספר בטקסט',
+        `${marks} במקום ${EXPECTED_MARKS} — ` +
+          (marks > EXPECTED_MARKS ? 'מילה תורנית סומנה בטעות' : "מילת ג'יבריש לא סומנה"),
+      );
+
+  const boxes = Number(
     await app.js(`(() => {
       const seen = new Set();
       for (const el of document.querySelectorAll('.spelling-layer__mark')) {
         const box = el.getBoundingClientRect();
         seen.add(Math.round(box.left) + 'x' + Math.round(box.top));
       }
-      return JSON.stringify({ boxes: seen.size });
+      return seen.size;
     })()`),
   );
-  console.log('מלבנים ייחודיים:', marked.boxes);
-  marked.boxes === marks
+  boxes === marks
     ? report.pass('כל סימון במקום משלו — אין ציור כפול')
-    : report.fail('שני סימונים על אותו מלבן', `${marked.boxes} ייחודיים מתוך ${marks}`);
+    : report.fail('שני סימונים על אותו מלבן', `${boxes} ייחודיים מתוך ${marks}`);
 
-  // שש חזרות של הפסקה × שתי מילות ג'יבריש; העמודים שמחוץ לחלון אינם נסרקים,
-  // ולכן זה רף תחתון ולא שוויון.
-  marks >= 12
-    ? report.pass('כל המילים שאינן במילון סומנו', `${marks} ≥ 12`)
-    : report.fail('חסרים סימונים', `${marks} < 12`);
-  marks <= 24
-    ? report.pass('מילים תורניות לא סומנו', `${marks} ≤ 24`)
-    : report.fail('סומנו מילים תורניות מוכרות', `${marks} > 24`);
+  /* 4. המחיר, אחרי ההדלקה ------------------------------------------- */
+  const active = JSON.parse(await app.js(SCROLL_PROBE));
+  const cost = +(active.maxMs - idle.maxMs).toFixed(2);
+  console.log(`גלילה עם בדיקת איות: ${JSON.stringify(active)}`);
 
-  /* 4. מחיר --------------------------------------------------------- */
-  /**
-   * חסם עליון על המדידה שהשכבה עושה בכל פריים: אותו מעבר בדיוק — TreeWalker,
-   * קיבוץ לפי תגיות inline, ו-`Range` **לכל מילה עברית** — בעוד שבפועל טווח
-   * נבנה רק למילים שאינן במילון (‏~5%). מה שנמדד כאן גדול לכן פי כמה ממה
-   * שקורה באמת, וזה מכוון: שער שמודד את המקרה הקל אינו שער.
-   */
-  const cost = JSON.parse(
-    await app.js(`(() => {
-      const host = window.__otzariaEditor.ui.viewport.getHost();
-      const layer = document.querySelector('.spelling-layer');
-      if (!host || !layer) return JSON.stringify({ error: 'no-host' });
-      const INLINE = new Set(['SPAN','A','B','STRONG','I','EM','U','S','SUB','SUP','MARK','CODE','FONT']);
-      const WORD = /[\u05D0-\u05EA][\u05D0-\u05EA'"]*/g;
-
-      function pass() {
-        const reference = layer.getBoundingClientRect();
-        let words = 0, rects = 0;
-        for (const page of host.querySelectorAll('[data-page-index]')) {
-          const walker = document.createTreeWalker(page, NodeFilter.SHOW_TEXT);
-          let parts = [], text = '', group = null, node;
-          const flush = () => {
-            WORD.lastIndex = 0;
-            let match;
-            while ((match = WORD.exec(text))) {
-              words++;
-              let from = null, to = null;
-              for (let i = parts.length - 1; i >= 0; i--) {
-                const part = parts[i];
-                if (to === null && match.index + match[0].length >= part.offset) to = { node: part.node, at: match.index + match[0].length - part.offset };
-                if (match.index >= part.offset) { from = { node: part.node, at: match.index - part.offset }; break; }
-              }
-              if (!from || !to) continue;
-              const range = document.createRange();
-              try { range.setStart(from.node, from.at); range.setEnd(to.node, to.at); } catch { continue; }
-              const list = range.getClientRects();
-              for (let i = 0; i < list.length; i++) {
-                const r = list[i];
-                if (r.width > 0 && r.height > 0) { void (r.left - reference.left); rects++; }
-              }
-            }
-            parts = []; text = '';
-          };
-          while ((node = walker.nextNode())) {
-            const value = node.nodeValue || '';
-            if (!value) continue;
-            let owner = node.parentElement;
-            while (owner && owner !== page && INLINE.has(owner.tagName)) owner = owner.parentElement;
-            if (owner !== group) { flush(); group = owner; }
-            parts.push({ node, offset: text.length });
-            text += value;
-          }
-          flush();
-        }
-        return { words, rects };
-      }
-
-      pass();
-      const t0 = performance.now();
-      let last;
-      for (let i = 0; i < 10; i++) last = pass();
-      const perPass = (performance.now() - t0) / 10;
-      return JSON.stringify({
-        perPassMs: +perPass.toFixed(2),
-        words: last.words,
-        rects: last.rects,
-        heapMb: performance.memory ? +(performance.memory.usedJSHeapSize / 1048576).toFixed(1) : null,
-      });
-    })()`),
-  );
-  console.log('מדידה חוזרת:', JSON.stringify(cost));
-  cost.perPassMs >= 0 && cost.perPassMs <= MAX_RESCAN_MS
-    ? report.pass('המדידה החוזרת זולה', `${cost.perPassMs}ms ל-${cost.words} מילים`)
-    : report.fail('המדידה החוזרת יקרה מדי', `${cost.perPassMs}ms > ${MAX_RESCAN_MS}ms`);
+  active.maxMs <= MAX_FRAME_MS
+    ? report.pass('הפריים הכבד בגלילה נשאר מתחת לחצי פריים', `${active.maxMs}ms`)
+    : report.fail('פריים בגלילה חורג', `${active.maxMs}ms > ${MAX_FRAME_MS}ms`);
+  cost <= MAX_FRAME_COST_MS
+    ? report.pass('התוספת של הבדיקה לפריים זניחה', `+${cost}ms`)
+    : report.fail('הבדיקה מייקרת את הפריים', `+${cost}ms > ${MAX_FRAME_COST_MS}ms`);
 
   /* 5. „הוסף למילון” ------------------------------------------------ */
   const markBox = JSON.parse(
@@ -187,6 +206,7 @@ try {
       const el = document.querySelector('.spelling-layer__mark');
       if (!el) return 'null';
       const b = el.getBoundingClientRect();
+      // מעל הקו הגלי, בתוך גוף המילה — שם המשתמש לוחץ.
       return JSON.stringify({ x: Math.round(b.left + b.width / 2), y: Math.round(b.top - 6) });
     })()`),
   );
@@ -194,12 +214,16 @@ try {
   if (!markBox) {
     report.fail('אין סימון ללחוץ עליו');
   } else {
-    await app.cdp.send('Input.dispatchMouseEvent', {
-      type: 'mousePressed', x: markBox.x, y: markBox.y, button: 'right', buttons: 2, clickCount: 1,
-    });
-    await app.cdp.send('Input.dispatchMouseEvent', {
-      type: 'mouseReleased', x: markBox.x, y: markBox.y, button: 'right', buttons: 0, clickCount: 1,
-    });
+    for (const type of ['mousePressed', 'mouseReleased']) {
+      await app.cdp.send('Input.dispatchMouseEvent', {
+        type,
+        x: markBox.x,
+        y: markBox.y,
+        button: 'right',
+        buttons: type === 'mousePressed' ? 2 : 0,
+        clickCount: 1,
+      });
+    }
     await sleep(600);
 
     const items = JSON.parse(
@@ -209,20 +233,19 @@ try {
         return JSON.stringify(Array.prototype.map.call(menu.querySelectorAll('button'), (b) => (b.textContent || '').trim()));
       })()`),
     );
-    console.log('פריטי התפריט:', JSON.stringify(items));
+    console.log('פריטי התפריט:', JSON.stringify(Array.isArray(items) ? items.filter(Boolean) : items));
 
     const add = Array.isArray(items) ? items.find((label) => label.startsWith('הוסף את')) : null;
     if (!add) {
       report.fail('„הוסף למילון” אינו בתפריט על מילה מסומנת', JSON.stringify(items));
     } else {
       report.pass('„הוסף למילון” מוצע על מילה מסומנת', add);
-      const before = marks;
+
       // `clickMenu` של המסגרת מכוון לתפריטי הרצועה (`.ribbon-menu__popover`),
       // ותפריט ההקשר הוא כרטיס אחר — לכן לחיצה לפי מלבן הפריט עצמו.
       const itemBox = JSON.parse(
         await app.js(`(() => {
-          const menu = document.querySelector('[role="menu"]');
-          for (const button of menu.querySelectorAll('button')) {
+          for (const button of document.querySelectorAll('[role="menu"] button')) {
             if (!(button.textContent || '').trim().startsWith('הוסף את')) continue;
             const b = button.getBoundingClientRect();
             return JSON.stringify({ x: Math.round(b.left + b.width / 2), y: Math.round(b.top + b.height / 2) });
@@ -232,11 +255,13 @@ try {
       );
       await app.clickAt(itemBox.x, itemBox.y);
       await sleep(1_500);
-      const after = Number(await app.js("document.querySelectorAll('.spelling-layer__mark').length"));
-      console.log(`סימונים לפני: ${before}, אחרי ההוספה: ${after}`);
-      after < before
-        ? report.pass('הסימון נעלם אחרי ההוספה למילון', `${before} ⟵ ${after}`)
-        : report.fail('הסימון נשאר אחרי ההוספה', `${before} ⟵ ${after}`);
+
+      const after = await countMarks();
+      console.log(`סימונים לפני: ${marks}, אחרי ההוספה: ${after}`);
+      // אותה מילה חוזרת בכל אחת מהחזרות, ולכן כולן יורדות יחד.
+      after === marks - REPEATS
+        ? report.pass('הסימון של המילה שנוספה נעלם מכל המסמך', `${marks} ⟵ ${after}`)
+        : report.fail('הסימון לא ירד כצפוי', `${marks} ⟵ ${after}, ציפינו ל-${marks - REPEATS}`);
     }
   }
 
@@ -245,8 +270,10 @@ try {
   await app.tab('סקירה');
   await app.click('בדיקת איות');
   await sleep(800);
-  const off = Number(await app.js("document.querySelectorAll('.spelling-layer__mark').length"));
-  off === 0 ? report.pass('כיבוי מוחק את כל הסימונים') : report.fail('נשארו סימונים אחרי כיבוי', String(off));
+  const off = await countMarks();
+  off === 0
+    ? report.pass('כיבוי מוחק את כל הסימונים')
+    : report.fail('נשארו סימונים אחרי כיבוי', String(off));
 
   console.log('לוג הדף:', JSON.stringify(await app.log()));
 } finally {

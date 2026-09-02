@@ -61,6 +61,7 @@ import {
   type ViewportSource,
 } from '../../engine/page-ruler';
 import { findMisspellings, type Dictionary } from '../../engine/spellcheck';
+import { buildSpellingMarks, wordAtPoint } from '../../engine/spelling-layer';
 
 /** מדידה שנייה אחרי עריכה, כשהעימוד כבר התיישב. */
 const SETTLE_RESCAN_MS = 300;
@@ -90,6 +91,14 @@ const segments = shallowRef<readonly MeasuredSegment[]>([]);
 let watcher: PageRectWatch | null = null;
 let settle: ReturnType<typeof setTimeout> | undefined;
 let frame: number | null = null;
+/**
+ * דגל נפרד מ-`frame`, בדיוק כמו ב-watchers של page-ruler.ts. `frame` מחזיק
+ * את המזהה לביטול בלבד: `frame = requestAnimationFrame(cb)` שבו `cb` רץ
+ * סינכרונית (‏polyfill, וגם ה-stub שהבדיקות כאן משתמשות בו) מאפס את `frame`
+ * מבפנים ואז ההשמה דורסת אותו בחזרה — כלומר גרסה ששוערת על `frame` הייתה
+ * מפסיקה למדוד אחרי הפריים הראשון.
+ */
+let pending = false;
 
 function rescanNow(): void {
   const host = props.host;
@@ -106,12 +115,14 @@ function rescanNow(): void {
 
 /** מדידה אחת לכל פריים ציור, בדיוק כמו ה-watchers ב-page-ruler.ts. */
 function scheduleRescan(): void {
-  if (frame !== null) return;
+  if (pending) return;
   if (typeof requestAnimationFrame !== 'function') {
     rescanNow();
     return;
   }
+  pending = true;
   frame = requestAnimationFrame(() => {
+    pending = false;
     frame = null;
     rescanNow();
   });
@@ -123,6 +134,7 @@ function stopWatching(): void {
   clearTimeout(settle);
   if (frame !== null && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(frame);
   frame = null;
+  pending = false;
 }
 
 watch(
@@ -155,62 +167,19 @@ watch(
 
 onBeforeUnmount(stopWatching);
 
-/** מלבן אחד לציור. מילה שנפרסה על שתי תיבות מקבלת קו לכל אחת. */
-interface SpellingMark {
-  key: string;
-  leftPx: number;
-  topPx: number;
-  widthPx: number;
-}
-
-/** גובה הקו הגלי. חייב להתאים ל-`height` ב-CSS למטה. */
-const UNDERLINE_PX = 3;
-
-const marks = computed<SpellingMark[]>(() => {
-  const out: SpellingMark[] = [];
-  segments.value.forEach((segment, index) => {
-    segment.rects.forEach((rect, part) => {
-      out.push({
-        key: `${index}:${part}:${segment.text}`,
-        leftPx: rect.leftPx,
-        // הקו יושב על הבסיס התחתון של המילה, ולא מתחתיה: קו שתלוי באוויר בין
-        // שתי שורות נראה שייך לשורה שאחריו.
-        topPx: rect.topPx + rect.heightPx - UNDERLINE_PX,
-        widthPx: rect.widthPx,
-      });
-    });
-  });
-  return out;
-});
+const marks = computed(() => buildSpellingMarks(segments.value));
 
 /**
  * המילה שמתחת לנקודה (בקואורדינטות `MouseEvent`), או `null`. זה מה שמאפשר
  * ל„הוסף למילון" בתפריט ההקשר לדעת על מה הוא מדבר — בלי hit-test על ה-DOM
- * של המנוע, שממילא אסור (tests/unit/engine-boundaries.test.ts).
- *
- * הפגיעה נבדקת מול מלבן המילה **המלא** ולא מול הקו הדק: המשתמש לוחץ ימנית
- * על המילה, לא על שלושת הפיקסלים שמתחתיה.
+ * של המנוע, שממילא אסור (tests/unit/engine-boundaries.test.ts). ההמרה
+ * לקואורדינטות השכבה כאן, וההכרעה עצמה ב-engine/spelling-layer.ts.
  */
 function wordAt(clientX: number, clientY: number): string | null {
   const root = rootRef.value;
   if (!root) return null;
   const box = root.getBoundingClientRect();
-  const x = clientX - box.left;
-  const y = clientY - box.top;
-
-  for (const segment of segments.value) {
-    for (const rect of segment.rects) {
-      if (
-        x >= rect.leftPx &&
-        x <= rect.leftPx + rect.widthPx &&
-        y >= rect.topPx &&
-        y <= rect.topPx + rect.heightPx
-      ) {
-        return segment.text;
-      }
-    }
-  }
-  return null;
+  return wordAtPoint(segments.value, clientX - box.left, clientY - box.top);
 }
 
 defineExpose({ wordAt });

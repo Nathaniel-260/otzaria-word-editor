@@ -889,25 +889,35 @@ export function measureAllPageTextRuns(
   return out;
 }
 
+/**
+ * שתי רשימות מלבנים גולמיים שקולות. חצי פיקסל הוא הרזולוציה שכל המדידות כאן
+ * עובדות בה — מתחתיה זו רעידה של `getClientRects` ולא תזוזה.
+ */
+function sameRawRects(a: readonly RawTextRect[], b: readonly RawTextRect[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i]!;
+    const y = b[i]!;
+    if (
+      Math.abs(x.leftPx - y.leftPx) >= 0.5 ||
+      Math.abs(x.topPx - y.topPx) >= 0.5 ||
+      Math.abs(x.widthPx - y.widthPx) >= 0.5 ||
+      Math.abs(x.heightPx - y.heightPx) >= 0.5
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
 /** כמו `sameContentRects`, על רשימת ריצות-טקסט שטוחה. */
 function sameTextRuns(a: readonly PageTextRun[], b: readonly PageTextRun[]): boolean {
   if (a.length !== b.length) return false;
   for (let i = 0; i < a.length; i++) {
     const x = a[i]!;
     const y = b[i]!;
-    if (x.text !== y.text || x.direction !== y.direction || x.rects.length !== y.rects.length) return false;
-    for (let j = 0; j < x.rects.length; j++) {
-      const rx = x.rects[j]!;
-      const ry = y.rects[j]!;
-      if (
-        Math.abs(rx.leftPx - ry.leftPx) >= 0.5 ||
-        Math.abs(rx.topPx - ry.topPx) >= 0.5 ||
-        Math.abs(rx.widthPx - ry.widthPx) >= 0.5 ||
-        Math.abs(rx.heightPx - ry.heightPx) >= 0.5
-      ) {
-        return false;
-      }
-    }
+    if (x.text !== y.text || x.direction !== y.direction) return false;
+    if (!sameRawRects(x.rects, y.rects)) return false;
   }
   return true;
 }
@@ -1111,7 +1121,13 @@ interface SegmentPart {
   readonly offset: number;
 }
 
-/** מקום בתוך קבוצה ⟵ (צומת, היסט בתוכו). `null` = ההיסט מחוץ לקבוצה. */
+/**
+ * מקום בתוך קבוצה ⟵ (צומת, היסט בתוכו). `null` = ההיסט מחוץ לקבוצה.
+ *
+ * `select` הוא קלט חיצוני, ולא כל מי שיכתוב אחד יחזיר טווחים בתוך הטקסט
+ * שנמסר לו. טווח שחורג פשוט מדולג — עדיף מ-`setEnd` שזורק ומפיל את מדידת
+ * כל שאר העמוד.
+ */
 function locate(parts: readonly SegmentPart[], offset: number): { node: Text; at: number } | null {
   for (let i = parts.length - 1; i >= 0; i--) {
     const part = parts[i]!;
@@ -1126,7 +1142,7 @@ function locate(parts: readonly SegmentPart[], offset: number): { node: Text; at
 /** הטווחים שנבחרו בעמוד אחד, ביחס ל-`reference`. */
 function measurePageTextSegments(
   pageEl: HTMLElement,
-  reference: HTMLElement,
+  referenceBox: DOMRect,
   select: (text: string) => readonly TextSegment[],
   out: MeasuredSegment[],
   limit: number,
@@ -1138,7 +1154,6 @@ function measurePageTextSegments(
     return;
   }
 
-  const referenceBox = reference.getBoundingClientRect();
   let parts: SegmentPart[] = [];
   let text = '';
   let group: Element | null = null;
@@ -1220,6 +1235,9 @@ export function measureAllPageTextSegments(
   const top = viewport.top - margin;
   const bottom = viewport.bottom + margin;
 
+  // פעם אחת למעבר ולא פעם לכל עמוד: `getBoundingClientRect` על אלמנט שלא
+  // נגע בו כלום הוא עדיין קריאה שמכריחה פריסה, והמעבר הזה רץ בכל גלילה.
+  const referenceBox = reference.getBoundingClientRect();
   const out: MeasuredSegment[] = [];
 
   const ordered = Array.from(pages)
@@ -1232,7 +1250,7 @@ export function measureAllPageTextSegments(
     if (out.length >= limit) break;
     const box = el.getBoundingClientRect();
     if (box.bottom < top || box.top > bottom) continue;
-    measurePageTextSegments(el, reference, select, out, limit);
+    measurePageTextSegments(el, referenceBox, select, out, limit);
   }
 
   return out;
@@ -1244,19 +1262,7 @@ export function sameTextSegments(a: readonly MeasuredSegment[], b: readonly Meas
   for (let i = 0; i < a.length; i++) {
     const x = a[i]!;
     const y = b[i]!;
-    if (x.text !== y.text || x.rects.length !== y.rects.length) return false;
-    for (let j = 0; j < x.rects.length; j++) {
-      const rx = x.rects[j]!;
-      const ry = y.rects[j]!;
-      if (
-        Math.abs(rx.leftPx - ry.leftPx) >= 0.5 ||
-        Math.abs(rx.topPx - ry.topPx) >= 0.5 ||
-        Math.abs(rx.widthPx - ry.widthPx) >= 0.5 ||
-        Math.abs(rx.heightPx - ry.heightPx) >= 0.5
-      ) {
-        return false;
-      }
-    }
+    if (x.text !== y.text || !sameRawRects(x.rects, y.rects)) return false;
   }
   return true;
 }

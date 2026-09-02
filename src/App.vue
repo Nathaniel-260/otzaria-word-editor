@@ -1086,9 +1086,11 @@ function createOpenEditorForSession(session: DocumentSession): OpenEditor {
         session.pageBorders?.noteDocumentChanged();
         session.lineNumbers?.noteDocumentChanged();
         session.formattingMarks?.noteDocumentChanged();
-        // המילון משותף לכל הטאבים, ולכן זה מונה אחד ולא שדה של ה-session:
-        // מדידה חוזרת שנגרמה מעריכה בטאב אחר עולה כלום — `sameTextSegments`
-        // מזהה שהמסמך שעל המסך לא זז, ואין ציור מחדש.
+        // המילון משותף לכל הטאבים, ולכן זה מונה אחד ולא שדה של ה-session.
+        // המחיר: עריכה בטאב **ברקע** מריצה מדידה על המסמך שעל המסך. היא לא
+        // תצייר כלום (`sameTextSegments` מזהה שדבר לא זז), אבל היא כן נמדדת
+        // — ‎~1.2ms לעמוד גלוי, בהשקטה של 400ms. זה זול מספיק מכדי להצדיק
+        // מונה לכל טאב, וזה נאמר כאן כדי שלא ייקרא כאילו הוא חינם.
         noteSpellcheckChanged();
         session.keeper.noteChange();
       },

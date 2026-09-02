@@ -19,10 +19,13 @@
  * | `new Set(text.split('\n'))` | 5.66MB **בנוסף** למחרוזת | 15.6ms | 0.8ms |
  * | מחרוזת ממוינת + חיפוש בינארי | 1.43MB (המחרוזת עצמה) | 0ms | 6.5ms |
  *
- * כלומר: רבע מהזיכרון, בלי שלב בנייה בכלל — ובתמורה 0.3µs לשאילתה במקום
- * 0.04µs. השאילתה היא לא הצוואר כאן (המדידה של הסימון בעורך גדולה ממנה בשני
- * סדרי גודל, ראו `measureAllPageTextSegments` ב-engine/page-ruler.ts), ובעורך
- * שכבר פורס 16MB בעלייה רבע מהזיכרון הוא ההפרש שכן נראה.
+ * כלומר: רבע מהזיכרון, בלי שלב בנייה בכלל — ובתמורה 0.3µs לשאילתה שנמצאת
+ * במקום 0.04µs. מילה ש**אינה** במילון יקרה בהרבה, ‎~10µs, כי היא עוברת את כל
+ * 27 החיפושים (המילה עצמה, שמונה תחיליות מודבקות, ופעמיים אותו דבר על שורש
+ * חתוך) — וזה בדיוק המסלול של המילים שהבדיקה מסמנת. גם הוא אינו הצוואר: הן
+ * ‎~5% מהטקסט, המטמון עונה עליהן פעם אחת, והמדידה של הסימון בעורך גדולה
+ * מהחיפוש בשני סדרי גודל (ראו `measureAllPageTextSegments` ב-page-ruler.ts).
+ * בעורך שכבר פורס 16MB בעלייה, רבע מהזיכרון הוא ההפרש שכן נראה.
  *
  * אין כאן מערך היסטים (`Int32Array`, עוד 410KB): כל צעד בחיפוש קופץ לאמצע
  * המחרוזת וחוזר אחורה ל-`\n` הקודם — לכל היותר 12 תווים, האורך המרבי בקובץ.
@@ -41,8 +44,20 @@
  * עמוד”, „מספרי שורות” ו„סימני עיצוב”.
  */
 
-/** מפריד הערכים במחרוזת הארוזה. */
-export const PACKED_SEPARATOR = '\n';
+/** מפריד הערכים במחרוזת הארוזה. פרט פנימי של הייצוג — לא חלק מהחוזה. */
+const PACKED_SEPARATOR = '\n';
+
+/**
+ * שם הנכס שהמילון נארז אליו, והשם שהוא מציב על `window`.
+ *
+ * כאן ולא בשני הצדדים בנפרד: תוסף הבנייה (vite.config.ts) כותב אותם, וטוען
+ * זמן הריצה (engine/spellcheck-dictionary.ts) קורא אותם — ושני עותקים היו
+ * מאפשרים לשנות אחד מהם ולהשאיר את ה-typecheck ואת כל הבדיקות ירוקים,
+ * בעוד שהמילון פשוט לא נטען אצל המשתמש. המודול הזה נבחר מפני שהוא היחיד
+ * בשרשרת בלי שום import — כלומר גם `vite.config.ts` יכול לייבא אותו.
+ */
+export const TORAH_DICTIONARY_FILE = 'assets/torah-dictionary.js';
+export const TORAH_DICTIONARY_GLOBAL = '__OTZARIA_TORAH_DICTIONARY__';
 
 /**
  * תחיליות דקדוקיות. **זו לא אופטימיזציה — בלעדיה הבדיקה חסרת ערך.**
@@ -73,19 +88,35 @@ const MAX_STRIPPED_PREFIXES = 2;
  */
 const MIN_STEM_LENGTH = 3;
 
-/** ניקוד וטעמים. מוסרים לפני ההשוואה — המילון אינו מנוקד. */
-const DIACRITICS = /[֑-ׇ]/g;
+/**
+ * ניקוד, טעמים וסימני קריאה. מוסרים לפני ההשוואה — המילון אינו מנוקד.
+ *
+ * הטווח **אינו** U+0591–U+05C7 השלם, וזו לא קפדנות: בתוכו יושבים גם סימני
+ * פיסוק — מקף U+05BE, פסק U+05C0, סוף פסוק U+05C3 ונון הפוכה U+05C6. טווח
+ * מלא היה מוחק את המקף ומדביק את שני צדדיו למילה אחת: „על־פי” הפך למחרוזת
+ * „עלפי” שאינה במילון, כלומר סימון אחד שמכסה שתי מילים תקינות (נמדד).
+ */
+const DIACRITIC_CHARS = '\u0591-\u05BD\u05BF\u05C1\u05C2\u05C4\u05C5\u05C7';
+const DIACRITICS = new RegExp(`[${DIACRITIC_CHARS}]`, 'g');
 
 /**
  * מילה עברית: אות עברית ואחריה אותיות, ניקוד, גרשיים וגרש.
  *
  * הגרשיים הם חלק מהמילה ולא גבול שלה — „רש״י” היא מילה אחת, וביטוי שמפצל
- * עליה היה מסמן שתי שגיאות במקום ערך מוכר אחד.
+ * עליה היה מסמן שתי שגיאות במקום ערך מוכר אחד. גרשיים **בסוף** מילה הם
+ * סיפור אחר, וטופלים ב-`findMisspellings`.
  */
-const HEBREW_WORD = /[א-ת][א-ת֑-ׇ'"׳״‍]*/g;
+const HEBREW_WORD = new RegExp(`[א-ת][א-ת${DIACRITIC_CHARS}'"׳״\u200D]*`, 'g');
 
 /** מה ש-`normalizeWord` צריכה לגעת בו. מבחן זול שחוסך שתי החלפות על הרוב. */
-const NEEDS_NORMALIZING = /[֑-ׇ׳״]/;
+const NEEDS_NORMALIZING = new RegExp(`[${DIACRITIC_CHARS}׳״]`);
+
+/**
+ * גרשיים סוגרים בסוף מילה. אינם נחתכים תמיד: 1,368 ערכים במילון **מסתיימים**
+ * בגרש (ראשי תיבות כמו „אאלק'”), ואף ערך אינו מסתיים בגרשיים כפולים. לכן
+ * החיתוך נעשה רק אחרי שהצורה המלאה לא נמצאה — ראו `findMisspellings`.
+ */
+const TRAILING_QUOTES = /['"׳״]+$/;
 
 /** טווח של מילה שלא נמצאה במילון, ביחס לתחילת הטקסט שנמסר. */
 export interface Misspelling {
@@ -143,23 +174,33 @@ function compareLine(packed: string, start: number, end: number, word: string): 
   return lineLength - word.length;
 }
 
-/** חיפוש בינארי על המחרוזת הארוזה. ראו הערת הראש — אין מערך היסטים. */
+/**
+ * חיפוש בינארי על המחרוזת הארוזה. ראו הערת הראש — אין מערך היסטים.
+ *
+ * **החיפוש מ-`mid - 1`, ולא מ-`mid`, וזה מה שמבטיח סיום.** גרסה קודמת חיפשה
+ * `lastIndexOf(sep, mid)`; כש-`mid` נחת בדיוק על מפריד, `start` יצא `mid + 1`
+ * — כלומר השורה **הבאה**, שיכולה להיות `hi` עצמו — ואז `hi = start` לא הזיז
+ * דבר, והלולאה רצה לנצח. עם מסמך פתוח זה לא סימון חסר אלא טאב קפוא, כי
+ * המדידה רצה בתוך `requestAnimationFrame`. עם `mid - 1` מתקיים תמיד
+ * `start <= mid < hi`, ולכן `hi = start` מקטין ממש; ובענף השני
+ * `end >= start >= lo` ולכן `lo = end + 1` מגדיל ממש. נמדד: המקרה שנתקע היה
+ * `packWords(['א','בב']).has('אב')`.
+ *
+ * `lo` הוא תמיד תחילת שורה (‏0, או האיבר שאחרי מפריד), ולכן החיפוש אחורה
+ * מ-`mid - 1` לעולם אינו חוצה אותו.
+ */
 function packedHas(packed: string, word: string): boolean {
   let lo = 0;
   let hi = packed.length;
 
   while (lo < hi) {
     const mid = (lo + hi) >> 1;
-    // תחילת השורה שבתוכה נפל `mid`. `lo` הוא תמיד תחילת שורה, ולכן קפיצה
-    // אחורה שחצתה אותו פשוט נעצרת בו.
-    let start = packed.lastIndexOf(PACKED_SEPARATOR, mid) + 1;
-    if (start < lo) start = lo;
+    const start = packed.lastIndexOf(PACKED_SEPARATOR, mid - 1) + 1;
     let end = packed.indexOf(PACKED_SEPARATOR, start);
     if (end < 0) end = packed.length;
 
     const cmp = compareLine(packed, start, end, word);
     if (cmp === 0) return true;
-    // כל צעד מזיז ממש אחד מהגבולות: `end + 1 > lo` ו-`start < hi` תמיד.
     if (cmp < 0) lo = end + 1;
     else hi = start;
   }
@@ -221,10 +262,17 @@ export function createDictionary(packed: string, user: Iterable<string> = []): D
     return false;
   };
 
+  // ספירה עצלה: `size` משמש הודעת מצב אחת ובדיקות, והסריקה על 1.3MB נמדדה
+  // ‎~2ms — מחיר שאין סיבה לשלם בבנייה של מילון שאולי לא יישאל עליו כלל.
+  // ספירה ולא `split`: פיצול היה מקצה 102,465 מחרוזות, בדיוק מה שהייצוג
+  // הזה קיים כדי להימנע ממנו.
+  let counted: number | null = null;
+
   return {
-    // ספירה ולא `split`: פיצול היה מקצה כאן 102,465 מחרוזות — בדיוק מה
-    // שהייצוג הזה קיים כדי להימנע ממנו.
-    size: countWords(packed),
+    get size(): number {
+      if (counted === null) counted = countWords(packed);
+      return counted;
+    },
 
     has(word) {
       const cached = cache.get(word);
@@ -261,8 +309,15 @@ export function findMisspellings(text: string, dictionary: Dictionary): Misspell
   HEBREW_WORD.lastIndex = 0;
 
   for (let match = HEBREW_WORD.exec(text); match !== null; match = HEBREW_WORD.exec(text)) {
-    const word = match[0];
-    if (dictionary.has(word)) continue;
+    const raw = match[0];
+    if (dictionary.has(raw)) continue;
+
+    // המילה לא נמצאה כפי שהיא — ואולי מה שנכשל הוא הגרשיים שסוגרים ציטוט
+    // ולא המילה עצמה: „אמר "שלום" לכולם” נתן `שלום"`, ערך שאינו במילון.
+    // החיתוך אחרי הבדיקה הראשונה ולא לפניה, כדי ש„אאלק'” יימצא כפי שהוא.
+    const word = raw.replace(TRAILING_QUOTES, '');
+    if (word.length === 0 || dictionary.has(word)) continue;
+
     found.push({ word, start: match.index, end: match.index + word.length });
   }
   return found;

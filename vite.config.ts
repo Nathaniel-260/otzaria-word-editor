@@ -2,6 +2,7 @@ import { defineConfig, type Plugin } from 'vite';
 import vue from '@vitejs/plugin-vue';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { TORAH_DICTIONARY_FILE, TORAH_DICTIONARY_GLOBAL } from './src/engine/spellcheck';
 
 /**
  * ל-WebView2 של Windows אין תמיכה ב-<script type="module"> מ-file:// ,
@@ -197,26 +198,57 @@ function inlineEngineWorkers(): Plugin {
  * הפלט הוא ליטרל תבנית (backtick) ולא `JSON.parse`: המילון הוא עברית, גרש
  * וגרשיים בלבד — 29 תווים שאף אחד מהם אינו דורש escaping בליטרל תבנית —
  * ולכן `\n` נשאר תו אחד במקום ארבעה בתים של `\\n`. ההפרש נמדד: 1.31MB מול
- * 1.55MB לאותם נתונים בדיוק. `assertPackable` מוודא שההנחה הזאת מחזיקה, כי
- * תו בודד שיברח (backtick, `$`, לוכסן הפוך) היה מייצר קובץ JS פגום — כלומר
- * תוסף שנפרס ונשבר, ולא בנייה שנכשלת.
+ * 1.55MB לאותם נתונים בדיוק. `build` מוודא שההנחה מחזיקה, כי תו בודד שיברח
+ * (backtick, `$`, לוכסן הפוך) היה מייצר קובץ JS פגום — כלומר תוסף שנפרס
+ * ונשבר, ולא בנייה שנכשלת — ובאותה הזדמנות גם את המיון ואת אורך הערכים,
+ * שני דברים ש-`createDictionary` מניח ואיש אינו בודק.
  */
 function torahDictionaryAsset(): Plugin {
-  const FILE_NAME = 'assets/torah-dictionary.js';
   const SOURCE = fileURLToPath(new URL('./src/data/torah-dictionary.txt', import.meta.url));
-  const GLOBAL = '__OTZARIA_TORAH_DICTIONARY__';
   /** עברית, גרש וגרשיים ישרים, ומפריד השורות. שום דבר אחר. */
   const PACKABLE = /^[\u05D0-\u05EA"'\n]+$/;
+  /** הערך הקצר ביותר שמותר. ערך בן תו אחד היה מכשיר כמעט כל מחרוזת. */
+  const MIN_LENGTH = 2;
 
+  /**
+   * שלוש טענות על קובץ הנתונים, ולא רק זו שנוגעת לאריזה.
+   *
+   * ה-`PACKABLE` בלבד שומר על **בטיחות ליטרל התבנית** — שתו בורח לא ייצר
+   * קובץ JS פגום. אבל `createDictionary` מניח שתי הנחות נוספות שאיש לא בדק:
+   * שהרשימה **ממוינת לפי יחידות UTF-16** (בלי זה החיפוש הבינארי פשוט לא
+   * מוצא חלק מהערכים, בשקט), ושאין בה שורות ריקות או ערכים בני תו אחד.
+   * הקובץ הוא נתונים שנערכים ביד — מילה שתתווסף במקום הלא נכון היא בדיוק
+   * הדבר שיישאר ירוק בכל בדיקה אחרת.
+   */
   function build(): string {
     const packed = readFileSync(SOURCE, 'utf8').replace(/\r\n?/g, '\n').trim();
+
     if (!PACKABLE.test(packed)) {
       throw new Error(
-        `${FILE_NAME}: המילון מכיל תו שאינו עברית/גרש/גרשיים — ליטרל תבנית אינו בטוח עבורו. ` +
+        `${TORAH_DICTIONARY_FILE}: המילון מכיל תו שאינו עברית/גרש/גרשיים — ליטרל תבנית אינו בטוח עבורו. ` +
           'בדקו את src/data/torah-dictionary.txt.',
       );
     }
-    return `window.${GLOBAL} = \`${packed}\`;\n`;
+
+    const words = packed.split('\n');
+    for (let i = 0; i < words.length; i++) {
+      const word = words[i]!;
+      if (word.length < MIN_LENGTH) {
+        throw new Error(
+          `${TORAH_DICTIONARY_FILE}: שורה ${i + 1} קצרה מ-${MIN_LENGTH} תווים (${JSON.stringify(word)}). ` +
+            'ערך בן תו אחד או שורה ריקה מכשירים כמעט כל מחרוזת.',
+        );
+      }
+      if (i > 0 && !(words[i - 1]! < word)) {
+        throw new Error(
+          `${TORAH_DICTIONARY_FILE}: שורות ${i} ו-${i + 1} אינן בסדר עולה ` +
+            `(${JSON.stringify(words[i - 1])} ואז ${JSON.stringify(word)}). ` +
+            'החיפוש הבינארי מניח מיון לפי יחידות UTF-16, וללא מיון הוא מפספס ערכים בשקט.',
+        );
+      }
+    }
+
+    return `window.${TORAH_DICTIONARY_GLOBAL} = \`${packed}\`;\n`;
   }
 
   return {
@@ -226,7 +258,7 @@ function torahDictionaryAsset(): Plugin {
     // שהמסלול שנבדק ידנית יהיה המסלול שנארז.
     configureServer(server) {
       server.middlewares.use((req, res, next) => {
-        if (!req.url || req.url.split('?')[0] !== `/${FILE_NAME}`) return next();
+        if (!req.url || req.url.split('?')[0] !== `/${TORAH_DICTIONARY_FILE}`) return next();
         res.setHeader('Content-Type', 'text/javascript; charset=utf-8');
         res.end(build());
       });
@@ -234,7 +266,7 @@ function torahDictionaryAsset(): Plugin {
 
     // `generateBundle` רץ ב-build בלבד; ב-dev ה-middleware שמעל הוא המסלול.
     generateBundle() {
-      this.emitFile({ type: 'asset', fileName: FILE_NAME, source: build() });
+      this.emitFile({ type: 'asset', fileName: TORAH_DICTIONARY_FILE, source: build() });
     },
   };
 }

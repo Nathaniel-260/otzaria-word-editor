@@ -23,20 +23,22 @@
  * נכס חסר או פגום מחזיר `null`, והמתג ברצועה מדווח „טעינת המילון נכשלה”
  * ונשאר כבוי. עורך שנופל בגלל בדיקת איות הוא גרוע יותר מעורך בלי בדיקת איות.
  */
-import { createDictionary, type Dictionary } from './spellcheck';
+import {
+  createDictionary,
+  TORAH_DICTIONARY_FILE,
+  TORAH_DICTIONARY_GLOBAL,
+  type Dictionary,
+} from './spellcheck';
 import { loadSpellcheckWords, saveSpellcheckWords } from '../host/settings';
 
-/** הנכס שהתוסף מייצר. יחסי — הדף נטען מ-`file://`. */
-export const TORAH_DICTIONARY_ASSET = './assets/torah-dictionary.js';
-
-/** השם שהנכס מציב על `window`. חייב להתאים לתוסף הבנייה. */
-export const TORAH_DICTIONARY_GLOBAL = '__OTZARIA_TORAH_DICTIONARY__';
+/** יחסי לדף — הוא נטען מ-`file://`. השם עצמו משותף עם תוסף הבנייה. */
+const DICTIONARY_SRC = `./${TORAH_DICTIONARY_FILE}`;
 
 /** כמה להמתין לנכס לפני שמוותרים. */
-export const DICTIONARY_LOAD_TIMEOUT_MS = 20_000;
+const LOAD_TIMEOUT_MS = 20_000;
 
 /** הזרקת הנכס. מוחלף בבדיקות — אין `<script>` אמיתי ב-jsdom. */
-export type PackedLoader = () => Promise<string | null>;
+type PackedLoader = () => Promise<string | null>;
 
 function packedFromWindow(): string | null {
   const value = (globalThis as Record<string, unknown>)[TORAH_DICTIONARY_GLOBAL];
@@ -67,11 +69,11 @@ function injectDictionaryScript(): Promise<string | null> {
       resolve(value);
     };
 
-    const timer = setTimeout(() => finish(null), DICTIONARY_LOAD_TIMEOUT_MS);
+    const timer = setTimeout(() => finish(null), LOAD_TIMEOUT_MS);
 
     const script = document.createElement('script');
     script.async = false;
-    script.src = TORAH_DICTIONARY_ASSET;
+    script.src = DICTIONARY_SRC;
     script.addEventListener('load', () => finish(packedFromWindow()));
     script.addEventListener('error', () => finish(null));
     document.head.appendChild(script);

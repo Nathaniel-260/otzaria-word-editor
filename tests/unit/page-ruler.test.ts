@@ -651,6 +651,45 @@ describe('measureAllPageTextSegments', () => {
     expect(seen).toEqual([]);
   });
 
+  it('גם עמוד שנגלל מעל החלון אינו נסרק', () => {
+    // הענף השני של הסינון. בלעדיו מסמך שנגללו בו עשרה עמודים היה ממשיך
+    // למדוד את כולם בכל פריים.
+    const { host, page } = pageHost();
+    withRect(page, 120, 794, -5_000, 1_000);
+    const div = document.createElement('div');
+    div.textContent = 'למעלה';
+    page.appendChild(div);
+    const root = withRect(document.createElement('div'), 0, 900);
+    document.body.appendChild(root);
+
+    const seen: string[] = [];
+    measureAllPageTextSegments(host, root, (text) => {
+      seen.push(text);
+      return [];
+    });
+    expect(seen).toEqual([]);
+  });
+
+  it('יש תקרה גם בלי `limit` מפורש', () => {
+    const { host, root } = pageWithRuns(['א'.repeat(1_000)]);
+    const found = measureAllPageTextSegments(host, root, (text) =>
+      [...text].map((_, index) => ({ start: index, end: index + 1 })),
+    );
+    expect(found.length).toBeLessThan(1_000);
+    expect(found.length).toBeGreaterThan(0);
+  });
+
+  it('טווח שחורג מהטקסט מדולג, ואינו מפיל את שאר המדידה', () => {
+    // `select` הוא קוד חיצוני. `Range.setEnd` על היסט מחוץ לצומת זורק, וזריקה
+    // כאן הייתה מבטלת את המדידה של כל שאר העמוד — לא רק של הטווח הפגום.
+    const { host, root } = pageWithRuns(['אבגד']);
+    const found = measureAllPageTextSegments(host, root, () => [
+      { start: 0, end: 99 },
+      { start: 0, end: 2 },
+    ]);
+    expect(found.map((item) => item.text)).toEqual(['אב']);
+  });
+
   it('`limit` חוסם מסמך פתולוגי', () => {
     const { host, root } = pageWithRuns(['אבגדהוזחט']);
     const found = measureAllPageTextSegments(
