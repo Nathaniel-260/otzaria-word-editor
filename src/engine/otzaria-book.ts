@@ -17,13 +17,22 @@
  *    `startsWith('<h1'..'<h6')` — כותרת עטופה במשהו אחר אינה כותרת.
  * 3. **טקסט חופשי חייב escaping.** `<` גולמי בטקסט המסמך היה נקרא שם כתג.
  *
- * ## מיפוי הרמות — בהיסט, כמו אוצריא עצמה
+ * ## מיפוי הרמות — בדיוק כמו ממיר ה-DOCX של אוצריא, בלי היסט
  *
- * `Title` → `<h1>`, ‏`Heading1` → `<h2>` וכן הלאה עד תקרה ב-`<h6>`. זו אותה
- * הזזה שהממירים של אוצריא עצמה עושים (HTML/EPUB: ‏h1→h2, מטריצת ההמרה הערה ⁵):
- * `<h1>` שמור לשם הספר, שהוא שורש יחיד בעץ הניווט. מסמך בלי פסקת `Title`
- * מקבל את שם המסמך כשורת `<h1>` ראשונה — אחרת הכותרות היו מתחילות מ-`<h2>`
- * ואוצריא הייתה מקדמת את כולן ליתומים-בשורש.
+ * `Title` → `<h1>`, ‏`Heading N` → `<h(N)>`, עד תקרה ב-`<h6>`; ושורת `<h1>`
+ * עם שם המסמך נכתבת **תמיד** ראשונה.
+ *
+ * זה אינו עניין של טעם: `docx_to_otzaria.dart` הוא המימוש הייחוסי לאותו
+ * פורמט בדיוק, והוא עושה בדיוק את זה — `_headingLevelFromStyleName` מחזיר
+ * `title`→1 ו-`heading N`→N, `ooxmlWordArchiveToText` פותח את הפלט ב-
+ * `<h1>שם הספר</h1>`, ומטריצת ההמרה מסמנת ל-DOCX ‏`Heading 1`→`<h1>` (ההיסט
+ * בהערה ⁵ הוא של HTML/EPUB, שם `<h1>` שבמסמך הוא שם המסמך). גרסה קודמת של
+ * המודול הזה הזיזה רמה: אותו קובץ היה מקבל עץ ניווט אחר לפי המסלול שבו נכנס
+ * לספרייה, ו-`Heading 5` ו-`Heading 6` נמחצו שניהם ל-`<h6>` בגלל התקרה —
+ * רמה שהייבוא של אוצריא שומר.
+ *
+ * `headingLevel` של המנוע קודם ל-`styleId`, כמו ש-`w:outlineLvl` קודם שם לשם
+ * הסגנון. הוא 1-בסיסי (‏`Heading 1` = 1), ולכן נכנס כמות שהוא.
  *
  * ## מה מושמט, במפורש
  *
@@ -36,6 +45,7 @@
 import type { SuperDoc } from 'superdoc';
 import type { MaybePromise } from './document-api';
 import { thrownText } from './document-api';
+import { stripWordExtension } from './export';
 import { NO_DOCUMENT_TEXT } from './shulchan/shulchan-doc';
 
 /** מה שנצרך מ-`blocks.list` — כמו ב-shulchan-doc.ts, בתוספת שדות הכותרת. */
@@ -75,7 +85,7 @@ export interface OtzariaBookResult {
   text: string;
   lineCount: number;
   headingCount: number;
-  /** האם שם המסמך הוזרק כ-`<h1>` כי אין פסקת Title. */
+  /** האם שורת `<h1>` עם שם המסמך נכתבה (כלומר: שם המסמך אינו ריק). */
   titleAdded: boolean;
 }
 
@@ -86,25 +96,31 @@ export type OtzariaBookOutcome =
 const FAILED_ACTION = 'הייצוא לספר אוצריא נכשל';
 
 /**
- * רמת הכותרת של בלוק, אחרי ההיסט, או `null` לפסקת גוף.
+ * רמת הכותרת של בלוק, או `null` לפסקת גוף.
  *
- * `headingLevel` מהמנוע קודם ל-`styleId`: הוא מגיע מ-outline level אמיתי.
- * `styleId` הוא הגיבוי — מסמכים שהכותרות בהם הן סגנון בלי outline. הנרמול
- * (`heading 1` → `heading1`) מאותה סיבה שב-style-gallery.ts: תבניות Word
- * אינן עקביות ברישיות וברווחים.
+ * `headingLevel` מהמנוע קודם ל-`styleId` — הוא מגיע מ-outline level אמיתי,
+ * וזה גם סדר העדיפות ב-`docx_to_otzaria.dart`. `styleId` הוא הגיבוי:
+ * מסמכים שהכותרות בהם הן סגנון בלי outline.
+ *
+ * הנרמול (`heading 1` / `Heading-1` → `heading1`) הוא זה של `styleKey` ב-
+ * style-gallery.ts, ומאותה סיבה: תבניות Word אינן עקביות ברישיות, ברווחים
+ * ובמקפים. גם השם העברי מזוהה, כמו שהממיר של אוצריא מזהה `כותרת\s*([1-6])` —
+ * תבנית עברית יכולה לתת לסגנון מזהה עברי.
  */
 export function otzariaHeadingLevel(
   styleId: string | null | undefined,
   headingLevel: number | undefined,
 ): number | null {
-  const key = typeof styleId === 'string' ? styleId.trim().toLowerCase().replace(/\s+/g, '') : '';
-  if (key === 'title') return 1;
   if (typeof headingLevel === 'number' && Number.isInteger(headingLevel) && headingLevel >= 1) {
-    return Math.min(headingLevel + 1, MAX_HEADING);
+    return Math.min(headingLevel, MAX_HEADING);
   }
-  const match = /^heading([1-9])$/.exec(key);
-  if (match) return Math.min(Number(match[1]) + 1, MAX_HEADING);
-  return null;
+
+  const key =
+    typeof styleId === 'string' ? styleId.trim().toLowerCase().replace(/[\s_-]+/g, '') : '';
+  if (key === 'title') return 1;
+
+  const match = /^(?:heading|כותרת)([1-9])$/.exec(key);
+  return match ? Math.min(Number(match[1]), MAX_HEADING) : null;
 }
 
 /** escaping לטקסט חופשי — `<` גולמי היה נקרא באוצריא כתג. הסדר קובע: `&` ראשון. */
@@ -114,15 +130,24 @@ function escapeText(value: string): string {
 
 /**
  * שורת אוצריא אחת מתוך בלוק: escaping, ואז `\n` פנימי (שבירה רכה) ל-`<br>` —
- * אחרי ה-escaping, כדי שה-`<br>` שנוצר לא יימלט בעצמו.
+ * אחרי ה-escaping, כדי שה-`<br>` שנוצר לא יימלט בעצמו. גם `\r` נאסף: מפיק
+ * שכותב `\r\n` היה משאיר `\r` תלוש בתוך השורה.
+ *
+ * מחזירה `''` לפסקה שאין בה טקסט גלוי — גם כשהיא רק שבירה רכה. בלי הבדיקה
+ * הזאת פסקה כזאת הייתה מייצרת שורת `<br>` בודדת, כלומר בדיוק אותה
+ * שורת-כתובת ריקה שהמודול מדלג עליה.
  */
 function lineText(raw: string): string {
-  return escapeText(raw).replace(/\n/g, '<br>').trim();
+  const line = escapeText(raw).replace(/[\r\n]+/g, '<br>').trim();
+  return line.replace(/<br>/g, '').trim() === '' ? '' : line;
 }
 
-/** שם קובץ מוצע: אותו ניקוי כמו `documentFileName`, עם סיומת `txt`. */
+/**
+ * שם קובץ מוצע: אותו ניקוי כמו `documentFileName` — כולל קילוף סיומת Word,
+ * שאחרת „ספר.docx” היה מוצע כ„ספר.docx.txt” — עם סיומת `txt`.
+ */
 export function otzariaBookFileName(title: string): string {
-  const clean = title.replace(/[\\/:*?"<>|]/g, '').trim() || 'ספר';
+  const clean = stripWordExtension(title.replace(/[\\/:*?"<>|]/g, '').trim()) || 'ספר';
   return `${clean}.txt`;
 }
 
@@ -131,7 +156,9 @@ export function otzariaBookFileName(title: string): string {
  *
  * לעולם אינה מחזירה כיסוי חלקי: קריאת בלוקים שנכשלה באמצע היא `ok: false`,
  * לא ספר קטוע — ספר חסר-סוף שנקלט לספרייה גרוע מכשל גלוי (אותו שיקול כמו
- * ב-search.ts).
+ * ב-search.ts). וגם תקרת הדפדוף היא כשל ולא קטיעה: כאן, בשונה מהחיפוש,
+ * התוצאה נכתבת לקובץ שנקלט לספרייה, וקישורים וסימניות ננעלים על מספרי
+ * השורות שלו — ספר שנגמר באמצע הוא נזק שקט וקשה לאיתור.
  */
 export async function buildOtzariaBook(
   host: OtzariaBookTarget,
@@ -144,7 +171,7 @@ export async function buildOtzariaBook(
 
   const lines: string[] = [];
   let headingCount = 0;
-  let hasBookTitle = false;
+  let complete = false;
 
   let offset = 0;
   try {
@@ -164,26 +191,39 @@ export async function buildOtzariaBook(
         } else {
           lines.push(`<h${level}>${text}</h${level}>`);
           headingCount += 1;
-          if (level === 1) hasBookTitle = true;
         }
       }
-      if (entries.length < BLOCKS_PAGE_SIZE) break;
+      // עמוד שאינו מלא הוא סוף המסמך; עמוד מלא בסבב האחרון פירושו שנשאר עוד.
+      if (entries.length < BLOCKS_PAGE_SIZE) {
+        complete = true;
+        break;
+      }
       offset += entries.length;
     }
   } catch (error) {
     return { ok: false, message: thrownText(FAILED_ACTION, error), reason: 'threw' };
   }
 
+  if (!complete) {
+    return {
+      ok: false,
+      message: `${FAILED_ACTION}: המסמך גדול מ-${BLOCKS_PAGE_SIZE * BLOCKS_MAX_PAGES} פסקאות`,
+      reason: 'too-large',
+    };
+  }
+
   if (lines.length === 0) {
     return { ok: false, message: 'המסמך ריק — אין מה לייצא לספר', reason: 'empty' };
   }
 
-  let titleAdded = false;
+  // שורת שם הספר ראשונה, תמיד — כמו `ooxmlWordArchiveToText`, וגם כשיש
+  // במסמך פסקת `Title`: היא שורש עץ הניווט, ו„תלוי אם המסמך מכיל כותרת”
+  // היה נותן לאותו ספר שני מבנים אפשריים.
   const bookTitle = escapeText(documentTitle.trim());
-  if (!hasBookTitle && bookTitle) {
+  const titleAdded = bookTitle !== '';
+  if (titleAdded) {
     lines.unshift(`<h1>${bookTitle}</h1>`);
     headingCount += 1;
-    titleAdded = true;
   }
 
   return { ok: true, text: lines.join('\n'), lineCount: lines.length, headingCount, titleAdded };
