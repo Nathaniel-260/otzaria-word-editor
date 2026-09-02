@@ -16,7 +16,7 @@ import {
 } from '../../src/composables/window-fullscreen';
 
 /** מאחז מדומה. `flavour` בוחר איזה שם ל-API הוא חושף. */
-function fakeOwner(flavour: 'standard' | 'webkit' | 'none'): FullscreenOwner & {
+function fakeOwner(flavour: 'standard' | 'webkit' | 'both' | 'none'): FullscreenOwner & {
   calls: string[];
   listeners: Map<string, Array<() => void>>;
   fire: (event: string) => void;
@@ -27,8 +27,9 @@ function fakeOwner(flavour: 'standard' | 'webkit' | 'none'): FullscreenOwner & {
     calls,
     listeners,
     fullscreenElement: null as Element | null,
+    webkitFullscreenElement: null as Element | null,
     documentElement: {
-      ...(flavour === 'standard'
+      ...(flavour === 'standard' || flavour === 'both'
         ? {
             requestFullscreen: async () => {
               calls.push('request');
@@ -36,7 +37,7 @@ function fakeOwner(flavour: 'standard' | 'webkit' | 'none'): FullscreenOwner & {
             },
           }
         : {}),
-      ...(flavour === 'webkit'
+      ...(flavour === 'webkit' || flavour === 'both'
         ? {
             webkitRequestFullscreen: () => {
               calls.push('webkitRequest');
@@ -46,14 +47,14 @@ function fakeOwner(flavour: 'standard' | 'webkit' | 'none'): FullscreenOwner & {
         : {}),
     },
     exitFullscreen:
-      flavour === 'standard'
+      flavour === 'standard' || flavour === 'both'
         ? async () => {
             calls.push('exit');
             owner.fullscreenElement = null;
           }
         : undefined,
     webkitExitFullscreen:
-      flavour === 'webkit'
+      flavour === 'webkit' || flavour === 'both'
         ? () => {
             calls.push('webkitExit');
             owner.fullscreenElement = null;
@@ -130,8 +131,43 @@ describe('watchFullscreen', () => {
     const owner = fakeOwner('webkit');
     const onChange = vi.fn();
     watchFullscreen(onChange, owner);
+    owner.webkitFullscreenElement = {} as Element;
     owner.fire('webkitfullscreenchange');
+    expect(onChange).toHaveBeenCalledWith(true);
     expect(onChange).toHaveBeenCalledTimes(1);
+  });
+
+  it('מאחז שיורה את שני שמות האירוע נחשב למעבר אחד', () => {
+    // הקורא במעטפת הוא `closeTopmostLayer`, והוא סוגר שכבה בכל קריאה: יציאה
+    // אחת ממסך מלא הייתה סוגרת גם את הדיאלוג וגם את מצב המיקוד. זו הבדיקה
+    // שההערה ב-`CHANGE_EVENTS` נשענה עליה בלי שהיא הייתה קיימת.
+    const owner = fakeOwner('both');
+    const seen: boolean[] = [];
+    watchFullscreen((fullscreen) => seen.push(fullscreen), owner);
+
+    owner.fullscreenElement = {} as Element;
+    owner.webkitFullscreenElement = {} as Element;
+    owner.fire('fullscreenchange');
+    owner.fire('webkitfullscreenchange');
+
+    owner.fullscreenElement = null;
+    owner.webkitFullscreenElement = null;
+    owner.fire('webkitfullscreenchange');
+    owner.fire('fullscreenchange');
+
+    expect(seen).toEqual([true, false]);
+  });
+
+  it('מי שנרשם כשהחלון כבר במסך מלא אינו מקבל „נכנסת”', () => {
+    // המצב ההתחלתי נקרא ולא מונח `false`: אירוע שאינו משנה דבר אינו מעבר,
+    // וגם לא הראשון.
+    const owner = fakeOwner('standard');
+    owner.fullscreenElement = {} as Element;
+    const onChange = vi.fn();
+    watchFullscreen(onChange, owner);
+
+    owner.fire('fullscreenchange');
+    expect(onChange).not.toHaveBeenCalled();
   });
 
   it('מאחז בלי האזנה מחזיר פירוק שאינו זורק', () => {

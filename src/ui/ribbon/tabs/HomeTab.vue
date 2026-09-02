@@ -696,7 +696,8 @@ const superdoc = inject(ACTIVE_SUPERDOC, shallowRef<SuperDoc | null>(null));
  *    „חוזר לכתב הקודם”.
  *
  * נקרא מ-`@done`, שנפלט לפני `update:model-value` — ראו RibbonCombo.vue.
- * נמדד ב-`scripts/qa/font-focus-probe.mjs`.
+ * נמדד ב-`scripts/qa/context-font-focus-probe.mjs`, שמודד את שני המקומות —
+ * הרצועה והכרטיס — מפני שסדר הפליטה הפוך ביניהם.
  */
 function returnFocusToDocument(): void {
   focusDocument(superdoc.value);

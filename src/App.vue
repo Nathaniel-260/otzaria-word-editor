@@ -1582,7 +1582,7 @@ function liveDocumentCount(): number {
 
 /**
  * מה שידוע על הטאב, בצורה שההחלטה מבינה. ההחלטה עצמה ב-sessions/sleep-policy.ts
- * ולא כאן — היא קובעת אם עבודה של המשתנה נמחקת מהזיכרון, וקוד כזה חייב
+ * ולא כאן — היא קובעת אם עבודה של המשתמש נמחקת מהזיכרון, וקוד כזה חייב
  * להיבדק.
  */
 function sleepCandidate(session: DocumentSession, hasUnwrittenWork: boolean): SleepCandidate {
@@ -2406,6 +2406,12 @@ async function restoreDocumentView(
 
 async function onSave(forceSaveAs = false): Promise<void> {
   if (!swap?.current || !save) return;
+  // כמו כל שאר מתחילי הפעולה בקובץ (`onPickAndOpen`, `onNewDocument`,
+  // `onDocumentTabSelect`): בזמן פתיחה `swap.current` הוא עדיין המסמך
+  // **הקודם**, ושמירה כאן הייתה מייצאת אותו — ועל מסמך חדש היא גם פותחת
+  // „שמור בשם” על מה שעומד להימחק בעוד רגע. אין כאן „לחיצה שנבלעת”: מסך
+  // הטעינה על המסך, והמשתמש רואה שהתוסף עסוק.
+  if (isOpenBusy()) return;
   // ההצעה נושאת את הסיומת: זה מה שהמשתמש רואה בדיאלוג „שמור בשם”, וכאן נקבע
   // אם מסמך המאקרו שלו יישאר `.docm`.
   const outcome = await save.saveNow({

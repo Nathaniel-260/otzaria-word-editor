@@ -12,6 +12,7 @@
  * עימוד, אין `@page` ואין הדפסה.
  */
 import { describe, expect, it, vi, afterEach } from 'vitest';
+import { PENDING_CLASS } from '../../src/sessions/editor-swap';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import {
@@ -121,13 +122,32 @@ describe('גלון ההדפסה', () => {
   });
 
   it('מיכל הגלילה משוחרר — אחרת נדפס גובה חלון אחד', () => {
-    for (const selector of ['.editor-stack {', '.editor-stack__host {']) {
+    for (const selector of [
+      '.editor-stack {',
+      // עם ה-`:not` — ה-host הממתין נשאר מחוץ לזרימה בכוונה, ראו הבדיקה מתחת.
+      `.editor-stack__host:not(.${PENDING_CLASS}) {`,
+    ]) {
       // תחילת בלוק ולא הופעה כלשהי: `:not(.editor-stack)` הוא הופעה אחרת
       // לגמרי של אותו שם, ובדיקה עליה הייתה עוברת מהסיבה הלא נכונה.
       const at = PRINT_CSS.indexOf(selector);
       expect(at, selector).toBeGreaterThan(-1);
       expect(PRINT_CSS.slice(at, at + 220), selector).toContain('position: static !important');
     }
+  });
+
+  it('ה-host של פתיחה שעוד בדרך אינו חוזר לזרימה — ואינו מוסתר ב-display', () => {
+    // בזמן פתיחה יושבים בפאנל **שניים**: הפעיל, והמועמד שנבנה. לשניהם
+    // `HOST_CLASS`, ולכן שחרור מיכל הגלילה החזיר לזרימה גם את המועמד —
+    // `visibility: hidden` מונע ממנו להיצבע אבל לא מלתפוס שטח, כלומר עמוד
+    // אחרי עמוד של לבן באורך המסמך שהוא בונה.
+    const at = PRINT_CSS.indexOf(`.editor-stack__host:not(.${PENDING_CLASS})`);
+    expect(at, 'שחרור המיכל פוסח על ה-host הממתין').toBeGreaterThan(-1);
+    expect(PRINT_CSS.slice(at, at + 200)).toContain('position: static !important');
+    // ו**לא** `display: none` עליו: styles/shell.css קובע שם במפורש של-host
+    // שנטען חייב להיות box אמיתי, אחרת המנוע מודד עימוד באלמנט בגודל אפס.
+    expect(PRINT_CSS).not.toContain(`.${PENDING_CLASS} {`);
+    // מול הקבוע ולא מול מחרוזת: הכלל שווה כלום אם ה-swap ישנה את השם.
+    expect(PENDING_CLASS).toBe('editor-stack__host--pending');
   });
 
   it('ה-transform של הזום מבוטל — אחרת הדפסה ב-50% יוצאת מוקטנת', () => {

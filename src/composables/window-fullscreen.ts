@@ -36,9 +36,14 @@ export interface FullscreenOwner {
 }
 
 /**
- * שני שמות לאותו אירוע. הלא-מקודם קיים ב-WebView2, המקודם ב-WKWebView, ומאחז
- * שיורה את שניהם רק יקרא לקריאה החוזרת פעמיים עם אותו ערך — ולכן ההאזנה
- * לשניהם בטוחה.
+ * שני שמות לאותו אירוע. הלא-מקודם קיים ב-WebView2, המקודם ב-WKWebView, ולכן
+ * ההאזנה היא לשניהם.
+ *
+ * **מאחז יכול לירות את שניהם על אותו מעבר**, וזה מה שהופך את הסינון
+ * ב-`watchFullscreen` לחובה ולא לניקיון: הקורא במעטפת הוא `closeTopmostLayer`,
+ * והוא **אינו** אידמפוטנטי — קריאה שנייה סוגרת שכבה שנייה. יציאה אחת ממסך
+ * מלא הייתה סוגרת גם את דיאלוג החיפוש וגם את מצב המיקוד, כלומר בדיוק היפוך
+ * סדר השכבות שהמאזין הזה נכתב כדי לתקן.
  */
 const CHANGE_EVENTS = ['fullscreenchange', 'webkitfullscreenchange'] as const;
 
@@ -112,6 +117,9 @@ export async function exitFullscreen(owner?: FullscreenOwner | null): Promise<bo
 /**
  * האזנה ליציאה שלא באה מאיתנו — `Escape` של הדפדפן, או `F11` שלו.
  *
+ * **מדווחת רק על שינוי בפועל.** ראו `CHANGE_EVENTS`: שני שמות האירוע יכולים
+ * לירות שניהם על אותו מעבר, והקורא סוגר שכבה בכל קריאה.
+ *
  * בלעדיה נשארת מעטפת בלי פסים בתוך חלון רגיל: המשתמש יצא ממסך מלא, וממצב
  * המיקוד לא. מחזירה פונקציית פירוק.
  *
@@ -129,7 +137,15 @@ export function watchFullscreen(
   const host = ownerOf(owner);
   if (!host?.addEventListener) return () => {};
 
-  const listener = (): void => onChange(isFullscreen(host));
+  // מצב אחרון שדווח, כדי ששני שמות האירוע לא ייחשבו לשני מעברים. `isFullscreen`
+  // ולא `false`: מי שנרשם בזמן שהחלון כבר במסך מלא אינו אמור לקבל „נכנסת”.
+  let last = isFullscreen(host);
+  const listener = (): void => {
+    const now = isFullscreen(host);
+    if (now === last) return;
+    last = now;
+    onChange(now);
+  };
   for (const event of CHANGE_EVENTS) host.addEventListener(event, listener);
 
   return () => {

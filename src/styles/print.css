@@ -104,7 +104,18 @@
     height: auto !important;
   }
 
-  .editor-stack__host {
+  /* **חוץ מה-host של פתיחה שעוד בדרך.** בזמן פתיחה יושבים בפאנל שניים —
+     הפעיל, והמועמד שנבנה (`PENDING_CLASS` ב-sessions/editor-swap.ts) — ולשניהם
+     `.editor-stack__host`, ולכן הכלל הזה החזיר לזרימה גם את המועמד. הוא
+     `visibility: hidden` (styles/shell.css) ולכן אינו **נצבע**, אבל שטח הוא כן
+     תופס: עמוד אחרי עמוד של לבן, באורך המסמך שהוא בונה.
+
+     `:not(...)` ולא `display: none` עליו: shell.css קובע במפורש „ל-host שנטען
+     חייב להיות box אמיתי, אחרת המנוע מודד עימוד באלמנט בגודל אפס”, והדפסה
+     אפשרית בדיוק בזמן פתיחה — `onPrint` בודק `swap.current`, שבפתיחה במקום הוא
+     עדיין המסמך הישן. כך המועמד נשאר `position: absolute` של shell.css: מחוץ
+     לזרימה, בלי גיליונות, ועם קופסה. */
+  .editor-stack__host:not(.editor-stack__host--pending) {
     position: static !important;
     height: auto !important;
     overflow: visible !important;

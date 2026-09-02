@@ -375,7 +375,19 @@ export function createSaveCoordinator(deps: SaveCoordinatorDeps): SaveCoordinato
     const isClean = dirtyRevision === savedRevision;
     // „שמור בשם” על מסמך נקי הוא בקשה לגיטימית להעתק, והוא מייצא בלי לשנות
     // revision: הגדלה מלאכותית שרדה ביטול של הדיאלוג וסימנה מסמך נקי כמלוכלך.
-    if (isClean && !options.forceSaveAs) {
+    //
+    // ו-`targetToken` הוא התנאי השני, ולא קוסמטיקה: מסמך שלא נכתב לדיסק
+    // מעולם **אינו** „נקי”, הוא „אין לו עותק בשום מקום”. בלי התנאי הזה „שמור”
+    // על מסמך חדש שלא נגעו בו חזר `clean` ולא עשה דבר — לא דיאלוג ולא הודעה —
+    // כלומר לחיצה שנבלעת בלי שום סימן. `saveLoop` שולח commit בלי
+    // `targetToken` כש-`!target`, ולכן המאחז פותח „שמור בשם”, וזו ההתנהגות
+    // של Word.
+    //
+    // אין לזה מסלול אחר שנפגע. שאר הקוראים הם שניים: הענף „לשמור קודם” של
+    // `decideDocumentSwitch`, שמקצר על `!isDirty()`; ו-`scheduleAutosave`,
+    // שיוצא על `!targetToken` עוד לפני שהוא מגיע לכאן. כלומר מסמך נקי בלי יעד
+    // מגיע לכאן אך ורק מלחיצה מפורשת של המשתמש.
+    if (isClean && !options.forceSaveAs && targetToken !== null) {
       return Promise.resolve({ status: 'clean' });
     }
 

@@ -676,7 +676,24 @@ describe('מצב מיקוד', () => {
    * שהמעטפת מקבלת הוא האירוע הזה. לכן הדימוי כאן הוא `fullscreenchange`
    * ולא מקש: אחרת הטענה נבדקת במסלול שאינו קיים.
    */
+  /**
+   * ל-jsdom אין מסך מלא כלל — `document.fullscreenElement` אינו קיים אפילו
+   * כתכונה — ולכן „יציאה” חייבת לבוא אחרי „כניסה”: `watchFullscreen` מדווח על
+   * **מעבר** ולא על אירוע, מפני ששני שמות האירוע יכולים לירות שניהם על אותה
+   * יציאה אחת והקורא סוגר שכבה בכל קריאה (ראו composables/window-fullscreen.ts).
+   * דימוי שיורה „יצאנו” בלי שנכנסנו מודד מסלול שאין לו מקבילה בדפדפן.
+   */
+  function setFullscreenElement(value: Element | null): void {
+    Object.defineProperty(document, 'fullscreenElement', { configurable: true, value });
+  }
+
+  function enterFullscreenFromOutside(): void {
+    setFullscreenElement(document.documentElement);
+    document.dispatchEvent(new Event('fullscreenchange'));
+  }
+
   function exitFullscreenFromOutside(): void {
+    setFullscreenElement(null);
     document.dispatchEvent(new Event('fullscreenchange'));
   }
 
@@ -693,6 +710,8 @@ describe('מצב מיקוד', () => {
     // הפוקוס שלמטה הייתה מתקיימת מאליה.
     superdoc.reset();
 
+    enterFullscreenFromOutside();
+    await settle();
     exitFullscreenFromOutside();
     await settle();
 
@@ -714,10 +733,35 @@ describe('מצב מיקוד', () => {
     await settle();
     expect(wrapper.find('.word-app-shell').classes()).toContain('focus-mode');
 
+    enterFullscreenFromOutside();
+    await settle();
     exitFullscreenFromOutside();
     await settle();
 
     expect(wrapper.find('.word-app-shell').classes()).not.toContain('focus-mode');
+  });
+
+  it('שני שמות האירוע על אותה יציאה סוגרים שכבה אחת, לא שתיים', async () => {
+    // מאחז יכול לחשוף גם `fullscreenchange` וגם `webkitfullscreenchange`
+    // ולירות את שניהם. הקורא הוא `closeTopmostLayer`, כלומר קריאה שנייה
+    // הייתה סוגרת גם את מצב המיקוד — היפוך סדר השכבות שהמאזין נכתב לתקן.
+    const wrapper = await mountShell();
+    press({ code: 'F11' });
+    press({ code: 'KeyF', ctrlKey: true });
+    await settle();
+    enterFullscreenFromOutside();
+    await settle();
+
+    setFullscreenElement(null);
+    document.dispatchEvent(new Event('fullscreenchange'));
+    document.dispatchEvent(new Event('webkitfullscreenchange'));
+    await settle();
+
+    expect(wrapper.find('.find-replace-dialog').exists(), 'החיפוש נסגר').toBe(false);
+    expect(
+      wrapper.find('.word-app-shell').classes(),
+      'ומצב המיקוד שרד — האירוע השני אינו מעבר',
+    ).toContain('focus-mode');
   });
 
   /**

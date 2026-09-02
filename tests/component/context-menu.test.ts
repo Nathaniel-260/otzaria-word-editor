@@ -482,6 +482,43 @@ describe('כרטיס שנפתח למעלה', () => {
   });
 
   /**
+   * ההיפוך לבדו דוחף אל **מתחת לקו** בדיוק את מה שהוא נועד לקרב.
+   *
+   * לכרטיס יש `max-height` שנגזר מהמקום שמעל הנקודה, ו-`overflow-y: auto`.
+   * מה שצמוד לסמן יושב אחרי ההיפוך בסוף ה-DOM, ו-`scrollTop: 0` מראה את הקצה
+   * הרחוק. נמדד ב-Chrome על ה-dist בחלון 756×413: `scrollHeight: 326` מול
+   * `clientHeight: 268`, ו„הוסף למילון” — הפריט היחיד בכרטיס שנוגע במילה
+   * שנלחצה — נחתך לגמרי; לחיצה לפי המלבן שלו נחתה על המסמך
+   * (`scripts/qa/spellcheck-qa.mjs` ירד ל-11/12).
+   *
+   * ב-jsdom אין פריסה, ולכן `scrollHeight` מוזרק: מה שנמדד כאן הוא ההשמה
+   * עצמה, כלומר שהכרטיס נגלל אל הקצה ולא נשאר על אפס.
+   */
+  it('כרטיס שנגלל נפתח על הקצה הצמוד לסמן, ולא על הרחוק', async () => {
+    const up = open(sections(), { props: { point: { x: 400, y: window.innerHeight - 3 } } });
+    const card = up.wrapper.find('[role="menu"]').element as HTMLElement;
+    Object.defineProperty(card, 'scrollHeight', { configurable: true, value: 326 });
+    Object.defineProperty(card, 'clientHeight', { configurable: true, value: 268 });
+
+    // המדידה קובעת את הצד, וההיפוך נכנס ל-DOM אחריה; הגלילה באה אחרי שניהם.
+    await nextTick();
+    await nextTick();
+
+    expect(card.scrollTop, 'הקצה שצמוד לסמן הוא מה שנראה').toBe(326);
+  });
+
+  it('בפתיחה למטה הכרטיס נשאר בראש — שם הקצה הצמוד לסמן הוא הראשון', async () => {
+    const down = open(sections(), { props: { point: { x: 400, y: 200 } } });
+    const card = down.wrapper.find('[role="menu"]').element as HTMLElement;
+    Object.defineProperty(card, 'scrollHeight', { configurable: true, value: 326 });
+
+    await nextTick();
+    await nextTick();
+
+    expect(card.scrollTop).toBe(0);
+  });
+
+  /**
    * החץ למטה חייב להזיז מיקוד למה שנמצא למטה **על המסך**, ולא למה שהמודל בנה
    * אחריו — אחרת בכרטיס שהתהפך הוא מזיז אותו למעלה.
    */

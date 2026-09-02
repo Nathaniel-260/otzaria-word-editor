@@ -121,11 +121,28 @@ afterEach(() => {
 });
 
 describe('saveNow', () => {
-  it('מסמך נקי אינו נשמר', async () => {
+  it('מסמך נקי שכבר נשמר לקובץ אינו נשמר שוב', async () => {
     const h = harness();
+    // היעד הוא חצי מההגדרה של „נקי”: מסמך בלי `targetToken` אינו נקי אלא
+    // חסר עותק בדיסק. ראו הבדיקה שמתחת.
+    h.coordinator.reset({ token: 'tok', name: 'חידושים.docx' });
 
     await expect(h.coordinator.saveNow()).resolves.toEqual({ status: 'clean' });
     expect(h.exportCount()).toBe(0);
+  });
+
+  it('„שמור” על מסמך שלא נכתב לדיסק מעולם פותח „שמור בשם”, גם כשאין בו עריכה', async () => {
+    // הלחיצה שנבלעה: מסמך חדש ונקי החזיר `clean` ולא עשה **דבר** — לא דיאלוג
+    // ולא הודעה. מסמך בלי `targetToken` אינו „נקי”, הוא „אין לו עותק בשום
+    // מקום”, ולכן הוא כן עובר סבב — וה-commit יוצא בלי `targetToken`, כלומר
+    // המאחז פותח את הדיאלוג.
+    const h = harness();
+
+    const outcome = await h.coordinator.saveNow({ suggestedName: 'מסמך חדש.docx' });
+
+    expect(outcome).toEqual({ status: 'saved', token: 'token-new', name: 'חידושים.docx', size: 4 });
+    expect(h.exportCount()).toBe(1);
+    expect(h.commits[0]?.targetToken, 'בלי יעד — כלומר „שמור בשם”').toBeUndefined();
   });
 
   it('שמירה ראשונה בלי יעד עוברת דרך „שמור בשם” ומאמצת את ה-token', async () => {
