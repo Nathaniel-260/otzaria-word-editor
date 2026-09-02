@@ -37,6 +37,8 @@ const stub = vi.hoisted(() => ({
   confirmAnswer: false,
   /** כמה פעמים מצב השמירה אופס — כלומר מסמך חדש נפתח. */
   resets: 0,
+  /** רשומת ההפעלה שהעלייה תמצא. `null` = הפעלה ראשונה. */
+  sessionRecord: null as unknown,
 }));
 
 vi.mock('../../src/engine/create-editor', () => ({
@@ -141,7 +143,7 @@ vi.mock('../../src/host/settings', () => ({
   loadLastDocument: async () => null,
   forgetLastDocument: async () => {},
   loadAutosaveEnabled: async () => true,
-  loadSessionRecord: async () => null,
+  loadSessionRecord: async () => stub.sessionRecord,
   saveSessionRecord: async () => {},
   saveAutosaveEnabled: async () => {},
   loadRulerVisible: async () => false,
@@ -174,6 +176,7 @@ import {
   shortcutsByGroup,
   type Shortcut,
 } from '../../src/ui/shortcuts/registry';
+import { emptySession } from '../../src/sessions/session-state';
 
 const { default: App } = await import('../../src/App.vue');
 
@@ -202,6 +205,7 @@ beforeEach(() => {
   stub.resets = 0;
   stub.isDirty = false;
   stub.confirmAnswer = false;
+  stub.sessionRecord = null;
   adapter = createCommandDouble();
   superdoc = createSuperdocDouble();
   stub.adapter = adapter;
@@ -552,12 +556,63 @@ describe('מצב מיקוד', () => {
     const exit = wrapper.find('.focus-exit');
     expect(exit.exists(), 'במצב מיקוד').toBe(true);
     expect(exit.attributes('aria-label')).toBe('יציאה ממצב מיקוד');
+    // „יציאה ממצב מיקוד, לחוץ” — זה מה שקורא מסך היה מכריז. `aria-pressed`
+    // מתאר מתג, והכפתור הזה אינו מתג אלא פעולה חד-כיוונית.
+    expect(exit.attributes('aria-pressed'), 'אינו מוכרז כלחוץ').toBeUndefined();
 
     await exit.trigger('click');
     await settle();
 
     expect(wrapper.find('.word-app-shell').classes()).not.toContain('focus-mode');
     expect(wrapper.find('.focus-exit').exists(), 'אחרי היציאה').toBe(false);
+  });
+
+  it('מעבר טאב במצב מיקוד מחזיר את ההקלדה למסמך', async () => {
+    // נמדד: הפוקוס נשאר על כפתור הטאב, והלוח נסגר מיד אחרי הלחיצה —
+    // `visibility: hidden` מבריח אותו ל-`<body>` (`active: BODY`) וההקלדה
+    // נעלמת בלי סימן.
+    const wrapper = await mountShell();
+    await wrapper.find('.word-doctabs-new').trigger('click');
+    await settle(12);
+    expect(wrapper.findAll('.word-doctab').length, 'שני טאבים').toBe(2);
+
+    press({ code: 'F11' });
+    await settle();
+    superdoc.reset();
+
+    await wrapper.findAll('.word-doctab')[0]!.trigger('click');
+    await settle();
+
+    expect(superdoc.ops(), 'המסמך קיבל את הפוקוס').toContain('focus');
+  });
+
+  it('מחוץ למצב מיקוד מעבר טאב אינו חוטף את הפוקוס', async () => {
+    // הבקרה, ולא סתם: שם רצועת הטאבים נשארת על המסך, ופוקוס שממשיך לשבת על
+    // הטאב שנלחץ הוא ההתנהגות הנכונה — וגם מה שמאפשר לעבור טאבים בחצים.
+    const wrapper = await mountShell();
+    await wrapper.find('.word-doctabs-new').trigger('click');
+    await settle(12);
+    superdoc.reset();
+
+    await wrapper.findAll('.word-doctab')[0]!.trigger('click');
+    await settle();
+
+    expect(superdoc.ops()).not.toContain('focus');
+  });
+
+  it('מצב מיקוד ששוחזר מהפעלה קודמת מתחיל עם הלוח פתוח', async () => {
+    // `toggleFocusMode` מציב `revealed = 'top'` בכניסה, ו-
+    // `applyShellPreferences` לא — כלומר עלייה עם ההעדפה דלוקה נתנה בדיוק את
+    // מה שהכניסה הידנית הוגדרה כתקלה: כל הפקדים נעלמים בבת אחת.
+    const record = emptySession();
+    record.view.focusMode = true;
+    stub.sessionRecord = record;
+
+    const wrapper = await mountShell();
+
+    const classes = wrapper.find('.word-app-shell').classes();
+    expect(classes, 'מצב מיקוד שוחזר').toContain('focus-mode');
+    expect(classes, 'והלוח פתוח, כמו בכניסה הידנית').toContain('reveal-top');
   });
 
   it('Escape יוצא ממצב מיקוד', async () => {
@@ -612,6 +667,70 @@ describe('מצב מיקוד', () => {
     expect(wrapper.find('.word-app-shell').classes(), 'מצב המיקוד נשאר').toContain('focus-mode');
   });
 
+  /**
+   * ואותה טענה בדיוק, במסלול שבאמת קורה בדפדפן.
+   *
+   * הבדיקה שמעל עוברת ב-jsdom **ושקרית בכרום**: ל-jsdom אין מסך מלא, ולכן
+   * ה-`keydown` שלה מגיע לדף. בכרום אמיתי `Escape` שמשמש ליציאה ממסך מלא
+   * **נבלע** — נמדד `keys: []` ורק `fullscreenchange: [false]` — וכל מה
+   * שהמעטפת מקבלת הוא האירוע הזה. לכן הדימוי כאן הוא `fullscreenchange`
+   * ולא מקש: אחרת הטענה נבדקת במסלול שאינו קיים.
+   */
+  function exitFullscreenFromOutside(): void {
+    document.dispatchEvent(new Event('fullscreenchange'));
+  }
+
+  it('יציאה ממסך מלא עם דיאלוג פתוח סוגרת את הדיאלוג ומשאירה את מצב המיקוד', async () => {
+    // נמדד לפני התיקון: `Ctrl+F` ואחריו `Escape` אחד נתנו
+    // `{focus:false, fs:false, find:true}` — הדיאלוג נשאר פתוח ומצב המיקוד
+    // כבה, בדיוק ההיפך משתי הבדיקות שמעל.
+    const wrapper = await mountShell();
+    press({ code: 'F11' });
+    press({ code: 'KeyF', ctrlKey: true });
+    await settle();
+    expect(wrapper.find('.find-replace-dialog').exists(), 'החיפוש נפתח').toBe(true);
+    // אחרי הכניסה למצב מיקוד, שגם היא ממקדת את המסמך: בלי האיפוס הטענה על
+    // הפוקוס שלמטה הייתה מתקיימת מאליה.
+    superdoc.reset();
+
+    exitFullscreenFromOutside();
+    await settle();
+
+    expect(wrapper.find('.find-replace-dialog').exists(), 'החיפוש נסגר').toBe(false);
+    expect(
+      wrapper.find('.word-app-shell').classes(),
+      'ומצב המיקוד נשאר — מיקוד בלי מסך מלא הוא מצב נתמך',
+    ).toContain('focus-mode');
+    // ושדה החיפוש שהוסר לא לקח איתו את ההקלדה: בלי זה הפוקוס נשאר על
+    // ה-`<body>` (נמדד `active: BODY`), ומצב מיקוד שאי אפשר להקליד בו.
+    expect(superdoc.ops(), 'הפוקוס חזר למסמך').toContain('focus');
+  });
+
+  it('יציאה ממסך מלא בלי שכבה פתוחה כן מכבה את מצב המיקוד', async () => {
+    // הבקרה: בלעדיה התיקון שמעל היה יכול לנטרל את המאזין לגמרי, ולהשאיר
+    // מעטפת בלי פסים בתוך חלון רגיל אחרי `F11` של הדפדפן.
+    const wrapper = await mountShell();
+    press({ code: 'F11' });
+    await settle();
+    expect(wrapper.find('.word-app-shell').classes()).toContain('focus-mode');
+
+    exitFullscreenFromOutside();
+    await settle();
+
+    expect(wrapper.find('.word-app-shell').classes()).not.toContain('focus-mode');
+  });
+
+  /**
+   * סוגר את הלוח שהכניסה למצב מיקוד פותחת.
+   *
+   * `pointerleave` על השורש — בדיוק מה שקורה כשהמצביע יוצא מהחלון — ולא השמה
+   * ל-state פנימי: מה שנבדק הוא ההתנהגות של המעטפת, וזו הדרך שיש למשתמש.
+   */
+  async function hideRevealed(wrapper: ReturnType<typeof mount>): Promise<void> {
+    await wrapper.find('.word-app-shell').trigger('pointerleave');
+    await settle();
+  }
+
   it('F6 במצב מיקוד אינו ממקד פקד בלתי נראה', async () => {
     // הרצועה ושורת המצב יוצאות מהזרימה ומוזזות אל מחוץ למסך — הן עדיין בעץ.
     // בלי סימון הזמינות המשתמש היה מקבל טבעת מיקוד על פס שאינו על המסך,
@@ -621,6 +740,9 @@ describe('מצב מיקוד', () => {
     typing.focus();
     press({ code: 'F11' });
     await settle();
+    // הכניסה מתחילה עם הלוח פתוח, ופס פתוח **הוא** זמין (ראו הבדיקה למטה).
+    // מה שנבדק כאן הוא המצב שאחרי שהוא נסגר.
+    await hideRevealed(wrapper);
 
     press({ code: 'F6' });
     await settle();
@@ -631,18 +753,42 @@ describe('מצב מיקוד', () => {
     expect(statusbar.contains(document.activeElement), 'שורת המצב').toBe(false);
   });
 
-  it('F6 במצב מיקוד אינו נבלע — אין לאן לעבור', async () => {
-    // שלושת פסי המעטפת אינם זמינים, והפוקוס כבר במסמך. בליעת המקש הייתה
-    // לוקחת מהמשתמש את F6 של הדפדפן בלי לתת לו כלום בתמורה.
+  it('F6 במצב מיקוד מגיע לכפתור היציאה — הפקד היחיד שעל המסך', async () => {
+    // המנוע בולע `Tab`, ולכן בלי הכפתור כאזור במעגל אין אליו שום דרך מהמקלדת
+    // (נמדד בדפדפן), וכלל ה-`:focus-visible` שלו היה קוד מת.
     const wrapper = await mountShell();
     surface(wrapper).focus();
     press({ code: 'F11' });
     await settle();
+    await hideRevealed(wrapper);
 
     const event = press({ code: 'F6' });
     await settle();
 
-    expect(event.defaultPrevented).toBe(false);
+    expect(document.activeElement, 'הפוקוס על הכפתור').toBe(wrapper.find('.focus-exit').element);
+    expect(event.defaultPrevented, 'ולכן המקש כן נבלע — יש לאן לעבור').toBe(true);
+  });
+
+  it('פס שנחשף חוזר להיות נגיש ל-F6', async () => {
+    // מה ש-`FocusRegion.isAvailable` מבטיח בתיעוד שלו. נמדד לפני התיקון:
+    // רצועה פרושה על כל המסך (הכניסה מתחילה ב-`reveal-top`) לא הייתה נגישה
+    // כלל — הפוקוס נשאר במשטח ההקלדה של המנוע.
+    const wrapper = await mountShell();
+    surface(wrapper).focus();
+    press({ code: 'F11' });
+    await settle();
+    expect(wrapper.find('.word-app-shell').classes(), 'הלוח פתוח').toContain('reveal-top');
+
+    // מסמך → כפתור היציאה → (שורת המצב מדולגת, היא אינה חשופה) → סרגל הכותרת.
+    press({ code: 'F6' });
+    await settle();
+    press({ code: 'F6' });
+    await settle();
+
+    expect(
+      wrapper.find('.word-titlebar').element.contains(document.activeElement),
+      'סרגל הכותרת שנחשף',
+    ).toBe(true);
   });
 
   it('מחוץ למצב מיקוד F6 כן מגיע לרצועה', async () => {

@@ -3,9 +3,11 @@
  *
  * ## מה נשמר כאן
  *
- * שני כללים, וההבדל ביניהם הוא כל התוכן של המודול: „החזר את מה שנשמר”
- * (מעבר טאב — המיכל נולד מחדש, מה שנשמר הוא האמת היחידה) מול „תקן רק אם
- * אבד” (חזרה מהרקע — המיכל אולי לא איבד דבר, וכתיבה גורפת שם היא קפיצה).
+ * שלושה כללים, וההבדל ביניהם הוא כל התוכן של המודול: „החזר את מה שנשמר”
+ * (מעבר טאב — מה שנשמר הוא האמת היחידה), „תקן רק אם אבד” (חזרה מהרקע —
+ * המיכל אולי לא איבד דבר, וכתיבה גורפת שם היא קפיצה), ו„חכה לגלילה הראשונה”
+ * (`guardPaneScroll` — המנוע כותב אפס מתוך הגלגלת של המשתמש, אחרי שכל השמה
+ * שלנו כבר קרתה).
  *
  * מוטציה שמחליפה את `repairPaneScroll` ב-`applyPaneScroll` נראית תמימה
  * לחלוטין, ובפועל היא זו שגורמת למסמך לקפוץ ממקום שהמשתמש בחר. הבדיקות כאן
@@ -14,16 +16,51 @@
 import { describe, it, expect } from 'vitest';
 import {
   applyPaneScroll,
+  guardPaneScroll,
   PANE_SCROLL_ORIGIN,
   readPaneScroll,
   repairPaneScroll,
   samePaneScroll,
   type ScrollPane,
+  type WatchableScrollPane,
 } from '../../src/sessions/pane-scroll';
+
+/** דלת אחורית לבדיקת הקיפאון בלבד: `Readonly` אינו קיים בזמן ריצה. */
+type PaneScrollWritable = { top: number; left: number };
 
 /** מיכל גלילה מזויף — שני מספרים, וזה כל מה שהמודול נוגע בו. */
 function pane(top = 0, left = 0): ScrollPane {
   return { scrollTop: top, scrollLeft: left };
+}
+
+/**
+ * מיכל שאפשר גם להאזין לו, ולירות בו `scroll` ביד.
+ *
+ * `scroll` אמיתי נורה אסינכרונית ואי אפשר לחכות לו בבדיקה. מה שנבדק כאן אינו
+ * מתי הדפדפן יורה אלא **מה השומר עושה עם האירוע** — ולכן הירי ידני.
+ */
+function watchable(top = 0, left = 0): WatchableScrollPane & {
+  fire: () => void;
+  listeners: number;
+} {
+  const listeners: Array<() => void> = [];
+  return {
+    scrollTop: top,
+    scrollLeft: left,
+    addEventListener: (_type: 'scroll', listener: () => void) => {
+      listeners.push(listener);
+    },
+    removeEventListener: (_type: 'scroll', listener: () => void) => {
+      const at = listeners.indexOf(listener);
+      if (at >= 0) listeners.splice(at, 1);
+    },
+    fire: () => {
+      for (const listener of [...listeners]) listener();
+    },
+    get listeners() {
+      return listeners.length;
+    },
+  };
 }
 
 describe('readPaneScroll', () => {
@@ -38,8 +75,15 @@ describe('readPaneScroll', () => {
   });
 
   it('ערך פגום נקרא כאפס ולא נשמר כפי שהוא', () => {
-    // מספר שלילי או NaN שנשמר היה חוזר אחר כך כהשמה ל-`scrollTop`.
-    expect(readPaneScroll({ scrollTop: -5, scrollLeft: Number.NaN })).toEqual(PANE_SCROLL_ORIGIN);
+    // `NaN` או אינסוף שנשמרו היו חוזרים אחר כך כהשמה ל-`scrollTop`.
+    expect(readPaneScroll({ scrollTop: Number.NaN, scrollLeft: Number.POSITIVE_INFINITY }))
+      .toEqual(PANE_SCROLL_ORIGIN);
+  });
+
+  it('שלילי הוא מיקום חוקי — כך כרום מדווח מיכל rtl', () => {
+    // נמדד בדפדפן: מיכל `direction: rtl` מדווח `scrollLeft` בטווח [-1000, 0].
+    // פסילה של שלילי הפכה כל מיקום אופקי כזה ל„תחילת השורה”.
+    expect(readPaneScroll({ scrollTop: 300, scrollLeft: -420 })).toEqual({ top: 300, left: -420 });
   });
 
   it('מחזירה עותק ולא הפניה לקבוע המשותף', () => {
@@ -47,6 +91,19 @@ describe('readPaneScroll', () => {
     read.top = 99;
 
     expect(PANE_SCROLL_ORIGIN.top, 'הקבוע נשאר ראש המסמך לכל הקוראים').toBe(0);
+  });
+
+  it('הקבוע קפוא — כתיבה אליו אינה מזיזה את ראש המסמך', () => {
+    // הוא נמסר כארגומנט ולכל ההשוואות כאן, וכתיבה בשוגג הייתה מזיזה אותו
+    // לכל הקוראים בבת אחת. `Object.freeze` ולא רק `Readonly` שנעלם בקומפילציה.
+    const origin = PANE_SCROLL_ORIGIN as PaneScrollWritable;
+    try {
+      origin.top = 500;
+    } catch {
+      /* מצב strict זורק, מצב רגיל מתעלם — שתי ההתנהגויות תקינות. */
+    }
+
+    expect(PANE_SCROLL_ORIGIN.top).toBe(0);
   });
 });
 
@@ -118,5 +175,81 @@ describe('samePaneScroll', () => {
   it('משווה את שני הצירים', () => {
     expect(samePaneScroll({ top: 1, left: 2 }, { top: 1, left: 2 })).toBe(true);
     expect(samePaneScroll({ top: 1, left: 2 }, { top: 1, left: 3 })).toBe(false);
+  });
+});
+
+describe('guardPaneScroll', () => {
+  it('האיפוס של המנוע בגלילה הראשונה מתוקן', () => {
+    // הבאג עצמו: `scrollTop` נמדד נכון בכל נקודות הזמן אחרי מעבר טאב, ואז
+    // גלגלת אחת → 0. הכתיבה היא של המנוע, מתוך הגלגלת, ואחרי כל השמה שלנו.
+    const host = watchable(720);
+    guardPaneScroll(host, { top: 720, left: 0 });
+
+    host.scrollTop = 0;
+    host.fire();
+
+    expect(host.scrollTop, 'המיקום הוחזר').toBe(720);
+  });
+
+  it('מתפרק אחרי שהוא רץ פעם אחת', () => {
+    // שומר שנשאר דרוך היה מחזיר את המשתמש למקום ההתחלה בכל פעם שהוא גולל
+    // בעצמו עד ראש המסמך — כלומר הופך תיקון חד-פעמי לנעילה.
+    const host = watchable(720);
+    guardPaneScroll(host, { top: 720, left: 0 });
+
+    host.scrollTop = 0;
+    host.fire();
+    expect(host.listeners, 'אין מאזין אחרי התיקון').toBe(0);
+
+    host.scrollTop = 0;
+    host.fire();
+    expect(host.scrollTop, 'הפעם המשתמש הוא הבעלים').toBe(0);
+  });
+
+  it('גלילה של המשתמש מכבה אותו בלי לכתוב', () => {
+    const host = watchable(720);
+    guardPaneScroll(host, { top: 720, left: 0 });
+
+    host.scrollTop = 1_100;
+    host.fire();
+
+    expect(host.scrollTop, 'המיקום שהמשתמש בחר נשאר').toBe(1_100);
+    expect(host.listeners).toBe(0);
+  });
+
+  it('ההד של השחזור שלנו אינו מכבה אותו', () => {
+    // השמה ל-`scrollTop` יורה `scroll` בעצמה. שומר שהיה מתפרק על ההד הזה
+    // היה מתפרק לפני שהמנוע כתב בכלל — כלומר לא היה שומר על שום דבר.
+    const host = watchable(720);
+    guardPaneScroll(host, { top: 720, left: 0 });
+
+    host.fire();
+    expect(host.listeners, 'עדיין דרוך').toBe(1);
+
+    host.scrollTop = 0;
+    host.fire();
+    expect(host.scrollTop).toBe(720);
+  });
+
+  it('הפירוק שהוחזר מסיר את המאזין, וקריאה חוזרת אינה זורקת', () => {
+    const host = watchable(720);
+    const stop = guardPaneScroll(host, { top: 720, left: 0 });
+
+    stop();
+    expect(host.listeners).toBe(0);
+    expect(() => stop()).not.toThrow();
+
+    host.scrollTop = 0;
+    host.fire();
+    expect(host.scrollTop, 'טאב שיצא — אין מי שיחזיר').toBe(0);
+  });
+
+  it('ראש המסמך אינו נשמר, ומיכל שאינו קיים אינו מפיל', () => {
+    // „זכרנו אפס” פירושו שאין מה לשמור: האיפוס מחזיר בדיוק אותו.
+    const host = watchable(0);
+    guardPaneScroll(host, PANE_SCROLL_ORIGIN);
+    expect(host.listeners).toBe(0);
+
+    expect(() => guardPaneScroll(null, { top: 10, left: 0 })()).not.toThrow();
   });
 });
