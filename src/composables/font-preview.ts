@@ -24,7 +24,20 @@
  * לחיצה במסמך, שגם מזיזה את הבחירה. בלי מונה סבבים הצביעה הייתה נוחתת אחרי
  * הסגירה, כלומר משנה גופן בלי שאיש עומד על שורה. כל מה שנפתח בסבב אחד נזרק
  * ברגע שהסבב נסגר; רק ההחזרה עצמה חסינה, מפני שהיא **של** הסבב שנסגר.
+ *
+ * ## והמפסק
+ *
+ * `enabled` היא התלות היחידה שיש לה ברירת מחדל שאינה מכאן:
+ * `FONT_PREVIEW_ENABLED` מ-`engine/font-preview.ts`, שהוא `false` — ושם כל
+ * ההנמקה (Undo שנשבר, „לא נשמר”, autosave, ו-`rFonts` מפורש שנשאר בקובץ).
+ * כשהוא כבוי `hover` אינו מתזמן דבר ו-`end` אינו מחזיר דבר, כלומר הריחוף
+ * אינו נוגע במסמך ואינו קורא לו.
+ *
+ * המכונה עצמה נשארת שלמה ובדוקה מול `enabled: () => true`: מה שחסר כדי
+ * להדליק הוא API במנוע, לא קוד כאן. הבדיקות ב-`tests/unit/font-preview.test.ts`
+ * מריצות את שני המצבים.
  */
+import { FONT_PREVIEW_ENABLED } from '../engine/font-preview';
 
 /**
  * ההשהיה מרגע שהסימון נח ועד הצביעה.
@@ -36,6 +49,11 @@
 export const FONT_PREVIEW_DELAY_MS = 300;
 
 export interface FontPreviewDeps {
+  /**
+   * האם התצוגה החיה קיימת בכלל. ברירת המחדל היא `FONT_PREVIEW_ENABLED` —
+   * כלומר כבוי. ראו „והמפסק” בהערת הראש.
+   */
+  enabled?: () => boolean;
   /**
    * האם מותר **להתחיל** תצוגה חיה כרגע: יש טווח מסומן, הקריאה התיישבה, ולקטע
    * גופן אחד ידוע. אינו נשאל שוב אחרי שהתצוגה התחילה — ראו `hover`.
@@ -67,6 +85,7 @@ export interface FontPreview {
 
 export function createFontPreview(deps: FontPreviewDeps): FontPreview {
   const delayMs = deps.delayMs ?? FONT_PREVIEW_DELAY_MS;
+  const enabled = deps.enabled ?? (() => FONT_PREVIEW_ENABLED);
 
   let timer: ReturnType<typeof setTimeout> | null = null;
   /** הסבב הפתוח. כל סגירה מקדמת אותו, וכל מה שהיה באוויר נזרק. */
@@ -113,6 +132,9 @@ export function createFontPreview(deps: FontPreviewDeps): FontPreview {
   }
 
   function hover(family: string | null): void {
+    // המפסק ראשון, לפני `clearTimer`: כשהוא כבוי לא נקבע טיימר מעולם, ואין
+    // גם מה לקרוא מהמנוע — `origin()` ו-`allowed()` נוגעים בבחירה.
+    if (!enabled()) return;
     clearTimer();
     // יציאה משורה אינה החזרה: הרשימה עוד פתוחה, והמשתמש בדרך לשורה הבאה.
     // ההחזרה קורית ב-`end` בלבד — אחרת כל תנועת עכבר בין שורות הייתה מייצרת
@@ -164,6 +186,9 @@ export function createFontPreview(deps: FontPreviewDeps): FontPreview {
   }
 
   function end(committed: boolean): void {
+    // אין מה להחזיר כשלא נצבע דבר. הבדיקה כאן ולא רק ב-`hover` מפני ש-`end`
+    // נקרא גם מרשת הביטחון של הפירוק, בלי שקדם לו ריחוף.
+    if (!enabled()) return;
     clearTimer();
 
     const painted = target;

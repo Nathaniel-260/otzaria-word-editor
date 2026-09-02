@@ -161,6 +161,38 @@ describe('mergeFontFamilies — המכסה על „אחרונים”', () => {
     expect(groupOf(merged, 'Doc19')).toBe(FONT_GROUP_ALL);
   });
 
+  it('עודף שמכסה עברית נוחת ב„עברית”, ולא ב„כל הגופנים”', () => {
+    // הדגל והדגימה היו נכונים גם קודם; הקבוצה הכריזה את ההפך ממה שהשורה
+    // מראה. המקור האחרון היה `[engine, FONT_GROUP_ALL]` בלי פיצול לפי כיסוי,
+    // בשונה מהמותקנים.
+    const engine = [...many(RECENT_FONT_LIMIT), { value: 'Narkisim', label: 'Narkisim' }];
+    const merged = mergeFontFamilies(engine, installed([]), (family) => family === 'Narkisim');
+
+    expect(groupOf(merged, 'Narkisim')).toBe(FONT_GROUP_HEBREW);
+    expect(inGroup(merged, FONT_GROUP_RECENT)).not.toContain('Narkisim');
+  });
+
+  it('ועודף שאינו מכסה נשאר ב„כל הגופנים”', () => {
+    const engine = [...many(RECENT_FONT_LIMIT), { value: 'Cambria', label: 'Cambria' }];
+    const merged = mergeFontFamilies(engine, installed([]), () => false);
+    expect(groupOf(merged, 'Cambria')).toBe(FONT_GROUP_ALL);
+  });
+
+  it('העודף העברי צמוד למותקנים העבריים — כותרת „עברית” אחת ולא שתיים', () => {
+    // `buildComboRows` פותח כותרת בכל **החלפה** של קבוצה, ולכן מקור עברי
+    // שנכנס אחרי „כל הגופנים” היה מייצר כותרת שנייה באמצע הרשימה.
+    const engine = [...many(RECENT_FONT_LIMIT), { value: 'Narkisim', label: 'Narkisim' }];
+    const merged = mergeFontFamilies(
+      engine,
+      installed(['Gisha', 'Bahnschrift'], ['Gisha']),
+      (family) => family === 'Narkisim',
+    );
+
+    const groups = merged.map((option) => option.group);
+    const starts = groups.filter((group, index) => group !== groups[index - 1]);
+    expect(starts.filter((group) => group === FONT_GROUP_HEBREW)).toHaveLength(1);
+  });
+
   it('המכסה סופרת מה שנוסף, לא מה שנסרק', () => {
     // מסמך שכתוב בגופנים שלנו: חמשת הראשונים ברשימת המנוע כבר בראש הבורר,
     // ומכסה שסופרת אותם הייתה מציגה קבוצה כמעט ריקה.

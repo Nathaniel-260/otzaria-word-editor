@@ -207,6 +207,21 @@ export const MIN_FONT_SIZE_PT = 1;
 export const MAX_FONT_SIZE_PT = 1638;
 
 /**
+ * מה שנחשב גודל שהוקלד: מספר, נקודה או פסיק עשרוני, ו-`pt` אופציונלי בסוף.
+ *
+ * למה רגקס ולא `Number.parseFloat`, שהיה כאן: הוא מקבל **פענוח חלקי** — כלומר
+ * „12px” הוא 12, „12abc” הוא 12, ו„1 2” הוא 1. שלושת אלה הם שגיאות הקלדה שאף
+ * אחד מהם אינו מזיק בפועל (הגודל שיצא הוא הספרות שהוקלדו), ואילו הרביעי כן:
+ * **„12,5” יצא 12 בשקט.** פסיק הוא סימן העשרוני של המקלדת העברית ושל חצי
+ * אירופה, ומי שהקליד 12,5 קיבל 12 בלי שום סימן שהחצי נבלע. מכאן שהמחרוזת
+ * כולה חייבת להיות מספר, והפסיק ממופה לנקודה.
+ *
+ * `\d` הוא ASCII בלבד ב-JavaScript, ולכן ספרות ערביות-הודיות („١٢”) נדחות
+ * כאן — אותה תשובה שהן קיבלו קודם מ-`parseFloat`, ובמפורש הפעם.
+ */
+const FONT_SIZE_INPUT = /^(\d+(?:[.,]\d*)?|[.,]\d+)\s*(?:pt)?$/i;
+
+/**
  * גודל שהמשתמש **הקליד** בתיבה, בדרך אל הפקודה. `null` = אין כאן מספר, ואין
  * מה להחיל — התיבה חוזרת לגודל שבמסמך.
  *
@@ -219,9 +234,12 @@ export const MAX_FONT_SIZE_PT = 1638;
  *    מציגה מיד 1638 — התשובה גלויה לעין, בלי דיאלוג השגיאה שנפתח ב-Word.
  * 3. **אפס ומטה נדחים.** בניגוד ל-5000, „0” או „-12” אינם כוונה שאפשר לכבד,
  *    והידוק שלהם ל-1 היה מחיל גודל שאיש לא ביקש.
+ * 4. **המחרוזת כולה, ולא רישא שלה.** ראו `FONT_SIZE_INPUT`.
  */
 export function parseFontSizeInput(text: string): number | null {
-  const parsed = parseFontSizePt(text);
+  const digits = FONT_SIZE_INPUT.exec(text.trim())?.[1];
+  if (digits === undefined) return null;
+  const parsed = parseFontSizePt(digits.replace(',', '.'));
   if (parsed === null) return null;
   const halves = Math.round(parsed * 2) / 2;
   return Math.min(MAX_FONT_SIZE_PT, Math.max(MIN_FONT_SIZE_PT, halves));
