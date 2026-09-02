@@ -734,62 +734,43 @@ function writeZip(entries: ZipEntry[]): Bytes {
   return out;
 }
 
-let crcTables: Uint32Array[] | null = null;
+let crcTable: Uint32Array | null = null;
 
 /**
- * ארבע טבלאות ה-CRC של „slice-by-4”. נבנות פעם אחת.
- *
- * הראשונה היא הטבלה הרגילה של הפולינום `0xEDB88320`; כל אחת אחריה היא
- * „הטבלה של בייט אחד קדימה”, ולכן ארבעה בייטים מתקדמים בשלב אחד במקום
- * בארבעה.
- */
-function buildCrcTables(): Uint32Array[] {
-  const base = new Uint32Array(256);
-  for (let i = 0; i < 256; i++) {
-    let value = i;
-    for (let bit = 0; bit < 8; bit++) {
-      value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
-    }
-    base[i] = value >>> 0;
-  }
-
-  const tables = [base];
-  for (let step = 1; step < 4; step++) {
-    const previous = tables[step - 1];
-    const next = new Uint32Array(256);
-    for (let i = 0; i < 256; i++) {
-      next[i] = (base[previous[i] & 0xff] ^ (previous[i] >>> 8)) >>> 0;
-    }
-    tables.push(next);
-  }
-  return tables;
-}
-
-/**
- * CRC32 כפי ש-ZIP מגדיר אותו.
+ * CRC32 כפי ש-ZIP מגדיר אותו. טבלה אחת, בייט אחר בייט.
  *
  * מיוצאת בשביל הבדיקה בלבד — אין לה קורא אחר מחוץ למודול. מה שהבדיקה שומרת
- * עליו הוא שוויון עם המימוש הפשוט: CRC שגוי הוא ארכיון שבור, וזה כשל שקט.
+ * עליו הוא שוויון עם מימוש ייחוס: CRC שגוי הוא ארכיון שבור, וזה כשל שקט.
  *
- * **למה לא הלולאה הפשוטה:** מאז שהתיקון השני נכנס, החלק שנכתב מחדש עשוי
- * להיות `document.xml` של ספר שלם. בייט-בבייט נמדדו 384ms על 5.6MB, בתוך
- * השלב היחיד בפתיחה שהמשתמש אינו יכול לקטוע. „slice-by-4” מוריד את זה בערך
- * פי ארבע באותה תשובה בדיוק.
+ * **„slice-by-4” נכתב כאן ונמדד איטי יותר, ולכן הוסר.** מאז שהתיקון השני
+ * נכנס החלק שנכתב מחדש עשוי להיות `document.xml` של ספר שלם, ולכן נראה
+ * שכדאי. נמדד ב-Node 24, שלוש הרצות, מינימום מתוך חמש חזרות בכל אחת:
+ *
+ *     גודל     בייט-בבייט     slice-by-4
+ *     5.6MB    33–50ms        77–127ms
+ *     64KB     0.31–0.63ms    0.81–1.05ms
+ *     512B     0.002ms        0.018–0.024ms
+ *
+ * גם הווריאנט בלי `>>> 0` בתוך הלולאה — כלומר בלי לייצר uint32 שיוצא מטווח
+ * ה-Smi בכל איטרציה — נשאר איטי מהפשוט בכל הגדלים. V8 מהדר את הלולאה הצרה
+ * הזאת טוב יותר ממה שארבע טבלאות (4KB במקום 1KB) מרוויחות. **לא לכתוב את
+ * זה שוב בלי למדוד.**
  */
 export function crc32(bytes: Bytes): number {
-  if (!crcTables) crcTables = buildCrcTables();
-  const [t0, t1, t2, t3] = crcTables;
+  if (!crcTable) {
+    crcTable = new Uint32Array(256);
+    for (let i = 0; i < 256; i++) {
+      let value = i;
+      for (let bit = 0; bit < 8; bit++) {
+        value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
+      }
+      crcTable[i] = value >>> 0;
+    }
+  }
 
   let crc = 0xffffffff;
-  let at = 0;
-  const wordLimit = bytes.byteLength - 3;
-  for (; at < wordLimit; at += 4) {
-    crc ^= bytes[at] | (bytes[at + 1] << 8) | (bytes[at + 2] << 16) | (bytes[at + 3] << 24);
-    crc =
-      (t3[crc & 0xff] ^ t2[(crc >>> 8) & 0xff] ^ t1[(crc >>> 16) & 0xff] ^ t0[crc >>> 24]) >>> 0;
-  }
-  for (; at < bytes.byteLength; at++) {
-    crc = t0[(crc ^ bytes[at]) & 0xff] ^ (crc >>> 8);
+  for (let i = 0; i < bytes.byteLength; i++) {
+    crc = crcTable[(crc ^ bytes[i]) & 0xff] ^ (crc >>> 8);
   }
   return (crc ^ 0xffffffff) >>> 0;
 }

@@ -24,7 +24,7 @@ import { deflateRawSync } from 'node:zlib';
 import {
   COMPLEX_SCRIPT_BOLD_NOTICE,
   CONTENT_PARTS,
-  crc32 as fastCrc32,
+  crc32 as moduleCrc32,
   DEFAULT_TAB_STOP_TWIPS,
   preflightDocx,
   preflightSource,
@@ -408,32 +408,36 @@ describe('repairComplexScriptBold', () => {
 });
 
 describe('crc32', () => {
-  // `crc32` המקומי בקובץ הזה הוא המימוש הפשוט בייט-בבייט — הוא ההגדרה, והמהיר
-  // שבמודול חייב להסכים איתו בדיוק. CRC שגוי הוא ארכיון שבור, וזה כשל שקט.
+  // `crc32` המקומי בקובץ הזה מחשב את הפולינום בכל בייט מחדש, בלי טבלה — ולכן
+  // הוא מימוש **בלתי תלוי** במה שבמודול, ולא העתקה שלו. CRC שגוי הוא ארכיון
+  // שבור, וזה כשל שקט.
+  //
+  // הבדיקות כאן נשארות גם אחרי ש-slice-by-4 הוסר מהמודול (הוא נמדד איטי
+  // יותר; ראו את ההערה שם). זה בדיוק מה שהן נועדו לתפוס: מי שיכתוב שוב
+  // מימוש „מהיר” ויטעה בשארית או בסדר הבייטים ייפול כאן.
 
   it('מסכימה עם וקטור הבדיקה המקובל', () => {
     // "123456789" → 0xCBF43926, הווקטור של CRC-32/ISO-HDLC.
-    expect(fastCrc32(bytesOf('123456789'))).toBe(0xcbf43926);
+    expect(moduleCrc32(bytesOf('123456789'))).toBe(0xcbf43926);
   });
 
-  it('מסכימה עם המימוש הפשוט בכל אורך שאינו כפולה של ארבע', () => {
-    // slice-by-4 מתקדם ארבעה בייטים בשלב, ולכן השארית היא המקום שבו
-    // אופטימיזציה כזאת נשברת.
+  it('מסכימה עם מימוש הייחוס בכל אורך, ובפרט באלה שאינם כפולה של ארבע', () => {
+    // מימוש שמתקדם יותר מבייט בשלב נשבר בשארית, ולכן כל אורך קצר נבדק.
     for (let length = 0; length <= 16; length++) {
       const bytes = new Uint8Array(length) as Uint8Array<ArrayBuffer>;
       for (let i = 0; i < length; i++) bytes[i] = (i * 31 + 7) & 0xff;
-      expect(fastCrc32(bytes)).toBe(crc32(bytes));
+      expect(moduleCrc32(bytes)).toBe(crc32(bytes));
     }
 
     const big = new Uint8Array(5_003) as Uint8Array<ArrayBuffer>;
     for (let i = 0; i < big.byteLength; i++) big[i] = (i * 131 + 17) & 0xff;
-    expect(fastCrc32(big)).toBe(crc32(big));
+    expect(moduleCrc32(big)).toBe(crc32(big));
   });
 
-  it('מסכימה עם המימוש הפשוט על טקסט עברי', () => {
+  it('מסכימה עם מימוש הייחוס על טקסט עברי', () => {
     // עברית היא שני בייטים לתו, ולכן גם הגושים וגם השארית נראים אחרת.
     const bytes = bytesOf('שבועת הדיינין, מודה במקצת');
-    expect(fastCrc32(bytes)).toBe(crc32(bytes));
+    expect(moduleCrc32(bytes)).toBe(crc32(bytes));
   });
 });
 
