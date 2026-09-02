@@ -182,17 +182,25 @@ export function mergeFontFamilies(
    * `false` מפורש לזנב („כל הגופנים”) ולא `undefined`: הוא סוּנן בדיוק לפי
    * `isHebrew`, ומאות מדידות חוזרות אינן צריכות לקרות שוב.
    *
-   * המקור האחרון הוא רשימת המנוע **בשנית**: מה שנחתך מהמכסה נכנס שם, אחרי
-   * הכול. הכפילות אינה תקלה — הלולאה מדלגת על מה שכבר נוסף — והיא מה שמבטיח
-   * שגופן של המסמך לא ייעלם מהבורר בגלל המכסה.
+   * שני המקורות האחרונים הם רשימת המנוע **בשנית**: מה שנחתך מהמכסה נכנס שם,
+   * אחרי הכול. הכפילות אינה תקלה — הלולאה מדלגת על מה שכבר נוסף — והיא מה
+   * שמבטיח שגופן של המסמך לא ייעלם מהבורר בגלל המכסה.
+   *
+   * ולמה **שניים**: העודף מפוצל לפי כיסוי בדיוק כמו המותקנים, אחרת גופן עברי
+   * שנחתך מהמכסה נחת ב„כל הגופנים” — הדגל שלו נכון והדגימה מוצגת, אבל הקבוצה
+   * מכריזה את ההפך ממה שהשורה מראה. השורה העברית נכנסת מיד אחרי המותקנים
+   * העבריים ולא בסוף, מפני ש-`buildComboRows` פותח כותרת בכל **החלפה** של
+   * קבוצה: מקור עברי אחרי „כל הגופנים” היה מייצר כותרת „עברית” שנייה.
    */
+  const engineHebrew = engine.filter(isHebrew);
   const sources: readonly (readonly [readonly FontFamilyOption[], string, boolean?, number?])[] = [
     [OTZARIA_FONT_FAMILIES, FONT_GROUP_TOP, true],
     [LATIN_FONT_FAMILIES, FONT_GROUP_TOP],
     [engine, FONT_GROUP_RECENT, undefined, RECENT_FONT_LIMIT],
     [installed.families.filter(isHebrew), FONT_GROUP_HEBREW, true],
+    [engineHebrew, FONT_GROUP_HEBREW, true],
     [installed.families.filter((option) => !isHebrew(option)), FONT_GROUP_ALL, false],
-    [engine, FONT_GROUP_ALL],
+    [engine, FONT_GROUP_ALL, false],
   ];
 
   const merged: FontFamilyChoice[] = [];

@@ -138,6 +138,36 @@ describe('הקפאת הרשימה בזמן שהיא פתוחה', () => {
     await open();
     expect(optionValues()).toEqual(next.map((option) => option.value));
   });
+
+  it('גם רשימה שנפתחה מהקלדה מוקפאת — לא רק מפתיחה', async () => {
+    // המסלול שנמדד: מיקוד בתיבה (נפתח ומוקפא) → לחיצה על החץ (סוגר ומאפס
+    // את ההקפאה, והמיקוד **נשאר** בתיבה) → תו אחד. `onInput` פתח את הרשימה
+    // בלי להקפיא, ומשם השורות זזות תחת העכבר — בדיוק הרגרסיה שההקפאה נוספה
+    // בשבילה.
+    await open();
+    await combo.find('.ribbon-combo-arrow').trigger('mousedown');
+    await nextTick();
+    expect(combo.find('[role="listbox"]').exists()).toBe(false);
+
+    await type('a');
+    expect(combo.find('[role="listbox"]').exists()).toBe(true);
+
+    await combo.setProps({
+      options: [{ value: 'Aharoni', label: 'Aharoni', group: '' }, ...OPTIONS],
+    });
+    // „a” תואם ל-Aharoni; רשימה לא מוקפאת הייתה מציגה אותו.
+    expect(optionValues()).not.toContain('Aharoni');
+  });
+
+  it('והקלדה נוספת אינה מאפסת את ההקפאה שכבר קיימת', async () => {
+    await open();
+    await type('a');
+    await combo.setProps({
+      options: [{ value: 'Aharoni', label: 'Aharoni', group: '' }, ...OPTIONS],
+    });
+    await type('ar');
+    expect(optionValues()).not.toContain('Aharoni');
+  });
 });
 
 describe('פליטות לתצוגה החיה', () => {

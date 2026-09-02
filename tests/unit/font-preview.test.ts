@@ -11,7 +11,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createFontPreview, FONT_PREVIEW_DELAY_MS, type FontPreviewDeps } from '../../src/composables/font-preview';
-import { captureRange, paintFamily } from '../../src/engine/font-preview';
+import { captureRange, paintFamily, FONT_PREVIEW_ENABLED } from '../../src/engine/font-preview';
 
 /** טווח מזויף. זהות בלבד — אף אחד מהצדדים אינו מסתכל בתוכו. */
 const RANGE = { range: 'selection-target' };
@@ -36,6 +36,11 @@ function harness(overrides: Partial<FontPreviewDeps> = {}): Harness {
   };
 
   const preview = createFontPreview({
+    // מפורש, ובעל כוונה: ברירת המחדל של המכונה היא `FONT_PREVIEW_ENABLED`,
+    // כלומר כבוי (ראו „המפסק” בסוף הקובץ). כל מה שנבדק מכאן ועד שם הוא
+    // המכונה **הדולקת** — היא נשארת שלמה ובדוקה, מפני שמה שחסר כדי להדליק
+    // אותה בפועל הוא API במנוע ולא קוד כאן.
+    enabled: () => true,
     allowed: () => state.allowed.value,
     origin: () => state.document.family,
     capture: async () => {
@@ -371,5 +376,85 @@ describe('paintFamily', () => {
   it('גרסה בלי `format.apply` אינה מפילה דבר', async () => {
     expect(await paintFamily(host({}), { id: 6 }, 'David')).toBe(false);
     expect(await paintFamily(host({ format: { apply: () => ({ success: true }) } }), null, 'David')).toBe(false);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* המפסק                                                              */
+/* ------------------------------------------------------------------ */
+
+/**
+ * התצוגה החיה כבויה, ומה שנבדק כאן הוא בדיוק זה: ריחוף אינו נוגע במסמך.
+ *
+ * ההנמקה כולה ב-`FONT_PREVIEW_ENABLED` (engine/font-preview.ts) — Undo שנשבר
+ * (ריחוף אחד = שתי דרגות, והראשונה מחזירה את גופן התצוגה), „לא נשמר”
+ * ו-autosave שכותב לקובץ, ו-`rFonts` מפורש שנשאר בריצה שירשה מהסגנון.
+ *
+ * הבדיקות כאן נשענות על **ברירת המחדל** של המכונה ולא על דגל שהן מזריקות:
+ * זו הדרך היחידה למדוד שהחיווט הממשי (use-font-controls, שאינו מעביר
+ * `enabled`) אכן יוצא כבוי.
+ */
+describe('המפסק — התצוגה החיה כבויה בברירת המחדל', () => {
+  /** אותו harness, בלי `enabled` — כלומר בדיוק מה שהחיווט הממשי מקבל. */
+  function dormant(): { preview: ReturnType<typeof createFontPreview>; painted: string[]; captures: number } {
+    const painted: string[] = [];
+    let captures = 0;
+    const preview = createFontPreview({
+      allowed: () => true,
+      origin: () => 'David',
+      capture: async () => {
+        captures += 1;
+        return RANGE;
+      },
+      paint: async (_target, family) => {
+        painted.push(family);
+        return true;
+      },
+    });
+    return {
+      preview,
+      painted,
+      get captures() {
+        return captures;
+      },
+    };
+  }
+
+  it('הדגל עצמו כבוי — וזה מה שהחיווט מקבל', () => {
+    expect(FONT_PREVIEW_ENABLED).toBe(false);
+  });
+
+  it('ריחוף שנח אינו צובע, אינו תופס טווח, ואינו מדווח „מוצג”', async () => {
+    const h = dormant();
+    h.preview.hover('Narkisim');
+    await vi.advanceTimersByTimeAsync(FONT_PREVIEW_DELAY_MS * 4);
+    await h.preview.idle();
+
+    expect(h.painted).toEqual([]);
+    expect(h.captures).toBe(0);
+    expect(h.preview.shown()).toBeNull();
+  });
+
+  it('סגירה בלי בחירה אינה מייצרת מוטציית „החזרה” — אין מה להחזיר', async () => {
+    const h = dormant();
+    h.preview.hover('Narkisim');
+    await vi.advanceTimersByTimeAsync(FONT_PREVIEW_DELAY_MS * 4);
+    h.preview.end(false);
+    await h.preview.idle();
+
+    expect(h.painted).toEqual([]);
+  });
+
+  it('גם מעבר על רשימה שלמה אינו מגיע למסמך אף פעם אחת', async () => {
+    const h = dormant();
+    for (const family of ['Narkisim', 'Gisha', 'Miriam', 'Rubik', 'Arial']) {
+      h.preview.hover(family);
+      await vi.advanceTimersByTimeAsync(FONT_PREVIEW_DELAY_MS * 2);
+    }
+    h.preview.end(false);
+    await h.preview.idle();
+
+    expect(h.painted).toEqual([]);
+    expect(h.captures).toBe(0);
   });
 });
