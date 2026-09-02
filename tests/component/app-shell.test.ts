@@ -39,6 +39,7 @@ import {
   type SuperdocDouble,
 } from './harness';
 import type { SaveCoordinatorDeps, SaveSnapshot } from '../../src/sessions/save-coordinator';
+import { COMMAND_REPORTER, STATUS_NOTIFIER, type CommandReporter } from '../../src/composables/keys';
 
 /**
  * המצב המשותף לכפילים. `vi.hoisted` נדרש: מפעלי ה-`vi.mock` מורמים אל מעל
@@ -796,5 +797,81 @@ describe('חזרה למה שהיה', () => {
 
     expect(stub.openSources).toEqual(['loopback://fresh']);
     expect(stub.forgotLastDocument, 'המפתח הישן נמחק כדי שלא יישאר מקור שני').toBe(true);
+  });
+});
+
+/**
+ * הצלחה שיש עליה מה לומר — `CommandOutcome.note`.
+ *
+ * הפקד ב-Ribbon אינו יודע לומר דבר: הוא מעביר את התוצאה ל-`COMMAND_REPORTER`
+ * שהמעטפת מספקת, וכל ההחלטה מה יופיע בפס היא של `reportCommand`. לכן נמדד
+ * כאן המדווח עצמו, בדיוק כפי שהפקד קורא לו.
+ */
+describe('הודעת-מידע על פקודה שהצליחה', () => {
+  const NOTE = 'העמודה הראשונה מצוירת בצד שמאל, וגם הסימון עובר שמאל→ימין. הקובץ יישמר נכון.';
+
+  function reporterOf(wrapper: Awaited<ReturnType<typeof mountShell>>): CommandReporter {
+    const provides = (wrapper.vm.$ as unknown as { provides: Record<symbol, unknown> }).provides;
+    const report = provides[COMMAND_REPORTER as unknown as symbol];
+    if (typeof report !== 'function') throw new Error('המעטפת לא סיפקה מדווח פקודות');
+    return report as CommandReporter;
+  }
+
+  const statusOf = (wrapper: Awaited<ReturnType<typeof mountShell>>): string =>
+    wrapper.find('.status-message').exists() ? wrapper.find('.status-message').text() : '';
+
+  it('ההודעה מגיעה לפס המצב', async () => {
+    const wrapper = await mountShell();
+
+    reporterOf(wrapper)({ ok: true, note: NOTE }, 'page-columns');
+    await settle();
+
+    expect(statusOf(wrapper)).toContain(NOTE);
+  });
+
+  it('הצלחה בלי הודעה מנקה הודעה שהפכה לשקר', async () => {
+    // „עמודות ← שתיים” ואז „עמודות ← אחת”. בלי הניקוי הפס היה ממשיך לתאר
+    // סדר טורים הפוך על מסמך שכבר אין בו טורים כלל.
+    const wrapper = await mountShell();
+    const report = reporterOf(wrapper);
+
+    report({ ok: true, note: NOTE }, 'page-columns');
+    await settle();
+    report({ ok: true }, 'page-columns');
+    await settle();
+
+    expect(statusOf(wrapper)).toBe('');
+  });
+
+  it('אינה מוחקת הודעה של ערוץ אחר שנכתבה בינתיים', async () => {
+    // הפס יש לו כותב שני: `STATUS_NOTIFIER`, שכלי הלשוניות מודיעים דרכו
+    // („בוצעו 3 תיקונים”). הניקוי מותנה בכך שההודעה שעל המסך היא **זו**
+    // שהוצגה, ובלי התנאי הזה כל פקודה מוצלחת הייתה מוחקת הודעה של הערוץ ההוא.
+    const wrapper = await mountShell();
+    const provides = (wrapper.vm.$ as unknown as { provides: Record<symbol, unknown> }).provides;
+    const notify = provides[STATUS_NOTIFIER as unknown as symbol] as (text: string) => void;
+    const report = reporterOf(wrapper);
+
+    report({ ok: true, note: NOTE }, 'page-columns');
+    await settle();
+    notify('בוצעו 3 תיקונים');
+    await settle();
+    report({ ok: true }, 'page-columns');
+    await settle();
+
+    expect(statusOf(wrapper)).toContain('בוצעו 3 תיקונים');
+  });
+
+  it('כשל דוחה את ההודעה ומסמן שגיאה', async () => {
+    const wrapper = await mountShell();
+    const report = reporterOf(wrapper);
+
+    report({ ok: true, note: NOTE }, 'page-columns');
+    await settle();
+    report({ ok: false, message: 'שינוי מספר העמודות ל-2 נכשל', reason: 'threw' }, 'page-columns');
+    await settle();
+
+    expect(statusOf(wrapper)).toContain('נכשל');
+    expect(wrapper.find('.status-message').classes()).toContain('error');
   });
 });

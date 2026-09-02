@@ -884,9 +884,22 @@ const saveStateMessage = computed(() => {
   return 'טרם נשמר';
 });
 
+/**
+ * ההודעה מ-`outcome.note` **כל עוד היא זו שעל המסך**, אחרת `null`.
+ *
+ * פקודה מוצלחת בלי הודעה מנקה את הקודמת: „עמודות ← אחת” אחרי „עמודות ←
+ * שתיים” חייבת להסיר הודעה שהפכה לשקר. אבל הפס יש לו כותבים נוספים —
+ * `STATUS_NOTIFIER` ומסלול פתיחת המסמך — ולכן הניקוי מותנה בכך שההודעה עדיין
+ * שם. את התנאי הזה אוכף `setStatus`, שמפקיע את המשתנה בכל כתיבה אחרת לפס.
+ */
+let lastCommandNote: string | null = null;
+
 function setStatus(text: string, isError = false): void {
   statusText.value = text;
   isStatusError.value = isError;
+  // כל כתיבה אחרת לפס מפקיעה את ההודעה. בלי זה `lastCommandNote` היה שורד
+  // גם ל-`setStatus('')` של פתיחת מסמך, ומצביע על טקסט שכבר איננו.
+  if (text !== lastCommandNote) lastCommandNote = null;
   if (isError) notifyError(text);
 }
 
@@ -904,6 +917,15 @@ function reportCommand(outcome: CommandOutcome, commandId: string): void {
   }
   // הצלחה מנקה שגיאה קודמת שנשארה על המסך, ולא דורסת הודעה תקינה.
   if (isStatusError.value) setStatus('');
+
+  // הצלחה שיש עליה מה לומר — ראו `CommandOutcome.note` ב-engine/command-adapter.ts.
+  if (outcome.note) {
+    setStatus(outcome.note);
+    lastCommandNote = outcome.note;
+  } else if (lastCommandNote !== null) {
+    // לא-null פירושו שההודעה עדיין על המסך — `setStatus` מפקיע אותו אחרת.
+    setStatus('');
+  }
 
   /**
    * „גבולות עמוד” — נמדד ב-QA: `applyPageBorders`/`clearPageBorders`

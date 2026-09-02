@@ -268,19 +268,21 @@ export interface ExportPdfReply {
 /**
  * ארגומנטי העימוד של `ui.exportPdf` (אוצריא 0.9.97, API_REFERENCE.md §ui.exportPdf).
  *
- * `pageSize` מתקבל שם או מפה, ואנחנו מוסרים את שניהם — ראו `pdfPageSizeArg`.
+ * `pageSize` **כמפה במ"מ ולא כשם קבוע**, גם כשהמסמך הוא A4 בדיוק. הגשר מקבל
+ * את שני הצדדים (`_parsePdfLayout`), אבל השם הוא גודל תקני — 210×297 —
+ * והמידות שנקראו מהמסמך עברו עיגול כלפי מעלה (210.04×297.03), *וגם* הוזרקו
+ * ל-`@page`. שם היה מוסר לאוצריא נייר צר בשבריר מתיבת העמוד שאותו קוד בדיוק
+ * הצהיר עליה — כלומר שתי השכבות סותרות, וזו הסתירה שהעיגול-כלפי-מעלה קיים
+ * כדי למנוע (עמוד שנשבר לשני גיליונות).
  *
  * `orientation` מושמט בכוונה: הרוחב והגובה כבר נושאים את הכיוון, ודגל נוסף
- * מסתכן במנוע שמסובב את המידות פעם שנייה — ואוצריא אף דוחה את השילוב.
+ * מסתכן במנוע שמסובב את המידות פעם שנייה.
  */
 export interface ExportPdfLayoutInput {
-  pageSize?: PdfPageSizeArg;
+  pageSize?: { widthMm: number; heightMm: number };
   marginMm?: number;
   printBackgrounds?: boolean;
 }
-
-/** מה שאוצריא מקבלת ב-`pageSize`: שם מוכר, או מידות מפורשות במ"מ. */
-export type PdfPageSizeArg = string | { widthMm: number; heightMm: number };
 
 const MM_PER_INCH = 25.4;
 
@@ -291,43 +293,6 @@ const MM_PER_INCH = 25.4;
 export function pdfPageSizeMm(size: PrintPageSize): { widthMm: number; heightMm: number } {
   const ceil2 = (value: number): number => Math.ceil(value * 100) / 100;
   return { widthMm: ceil2(size.widthIn * MM_PER_INCH), heightMm: ceil2(size.heightIn * MM_PER_INCH) };
-}
-
-/**
- * גדלי הנייר שיש להם שם באוצריא, במ"מ (רוחב, גובה) לאורך — העתק של
- * `_pdfPageSizesMm` ב-`plugin_bridge_adapter.dart`.
- */
-const NAMED_PAGE_SIZES_MM: ReadonlyArray<[string, number, number]> = [
-  ['a4', 210, 297],
-  ['a5', 148, 210],
-  ['letter', 215.9, 279.4],
-  ['legal', 215.9, 355.6],
-];
-
-/**
- * הסטייה שעוד נחשבת „אותו נייר”. מידות הדף עוברות טוויפס ואינצ'ים עם עיגול
- * כלפי מעלה בדרך (A4 יוצא 210.04×297.03 במ"מ), ולכן השוואה מדויקת לא הייתה
- * מזהה אף גודל שמי. מ"מ אחד בטוח: אין שני גדלים שמיים קרובים כל כך.
- */
-const NAMED_SIZE_TOLERANCE_MM = 1;
-
-/**
- * מה למסור ב-`pageSize`: **שם** כשמידות המסמך הן גודל נייר מוכר, ואחרת מפה.
- *
- * למה להעדיף את השם דווקא: הוא נותן לאוצריא את המידות התקניות המדויקות
- * (210×297 ולא 210.04×297.03), והוא הצורה שהיא הכירה מאז שהמתודה נוספה —
- * כלומר מסמך A4/Letter, שהוא הרוב המוחלט, מיוצא נכון גם מול Host שטרם קיבל
- * את תמיכת המפה. המפה נשמרת למה שאין לו שם: גודל דף מותאם אישית, וגם A4
- * לרוחב (297×210) — שהשם אינו יכול לתאר בלי `orientation`.
- */
-export function pdfPageSizeArg(size: PrintPageSize): PdfPageSizeArg {
-  const mm = pdfPageSizeMm(size);
-  const close = (a: number, b: number): boolean => Math.abs(a - b) <= NAMED_SIZE_TOLERANCE_MM;
-
-  for (const [name, widthMm, heightMm] of NAMED_PAGE_SIZES_MM) {
-    if (close(mm.widthMm, widthMm) && close(mm.heightMm, heightMm)) return name;
-  }
-  return mm;
 }
 
 export interface ExportPdfOptions {
@@ -427,7 +392,7 @@ export async function exportPdfDocument(
   try {
     reply = await exportPdf({
       ...base,
-      ...(size ? { pageSize: pdfPageSizeArg(size) } : {}),
+      ...(size ? { pageSize: pdfPageSizeMm(size) } : {}),
     });
   } catch (error) {
     // הקוד מגיע מאוצריא עם קידומת (`error.forbidden`), ומקצת המקומות בלעדיה

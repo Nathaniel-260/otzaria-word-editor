@@ -320,42 +320,39 @@ describe('exportPdfDocument', () => {
     expect(bare[0]).not.toHaveProperty('title');
   });
 
-  it('גודל נייר מוכר נמסר בשמו — הצורה שאוצריא מכירה מאז שהמתודה נוספה', async () => {
+  it('מוסרת לאוצריא את מידות הדף במ"מ, שוליים 0 ורקעים', async () => {
     const inputs: unknown[] = [];
     await exportPdfDocument(fakeHost(), async (input) => {
       inputs.push(input);
       return { saved: true, name: 'a.pdf' };
     }, { root: fakeRoot() });
 
-    // fakeHost מחזיר 8.269×11.694 אינץ' — A4 אחרי ceilTo3, כלומר
-    // 210.04×297.03 מ"מ: בתוך הסבילות של מ"מ אחד מ-210×297.
+    // fakeHost מחזיר 8.269×11.694 אינץ' (A4 אחרי ceilTo3); ההמרה מעוגלת
+    // כלפי מעלה לשתי ספרות — אותו כיוון כמו האינצ'ים, מאותה סיבה.
     expect(inputs[0]).toMatchObject({
-      pageSize: 'a4',
+      pageSize: { widthMm: 210.04, heightMm: 297.03 },
       marginMm: 0,
       printBackgrounds: true,
     });
   });
 
-  it('גודל שאין לו שם נמסר כמידות מפורשות במ"מ', async () => {
-    const inputs: unknown[] = [];
-    // 6.5×9.5 אינץ' — קונטרס, לא A4 ולא Letter.
-    await exportPdfDocument(
-      fakeHost({ items: [{ pageSetup: { width: 6.5, height: 9.5 } }] }),
-      async (input) => {
-        inputs.push(input);
-        return { saved: true, name: 'a.pdf' };
-      },
-      { root: fakeRoot() },
-    );
+  it('מידות ולא שם — גם ל-A4, כדי לא לסתור את ה-@page שהוזרק', async () => {
+    // הגשר מקבל גם `pageSize: 'a4'`, וזה נראה מדויק יותר — אבל הוא 210×297
+    // מ"מ, ותיבת העמוד שאותו קוד הזריק ל-@page היא 8.269in = 210.033 מ"מ.
+    // נייר צר מהתיבה בשבריר הוא בדיוק מה שהעיגול כלפי מעלה נועד למנוע.
+    const inputs: Array<Record<string, unknown>> = [];
+    await exportPdfDocument(fakeHost(), async (input) => {
+      inputs.push(input as Record<string, unknown>);
+      return { saved: true, name: 'a.pdf' };
+    }, { root: fakeRoot() });
 
-    expect(inputs[0]).toMatchObject({
-      pageSize: { widthMm: 165.1, heightMm: 241.3 },
-      marginMm: 0,
-      printBackgrounds: true,
-    });
+    expect(typeof inputs[0].pageSize).toBe('object');
+    const size = inputs[0].pageSize as { widthMm: number; heightMm: number };
+    expect(size.widthMm).toBeGreaterThanOrEqual(8.269 * 25.4);
+    expect(size.heightMm).toBeGreaterThanOrEqual(11.694 * 25.4);
   });
 
-  it('A4 לרוחב אינו „a4”: השם אינו יכול לתאר אותו בלי orientation', async () => {
+  it('דף לרוחב נמסר כמות שהוא, בלי להחליף רוחב וגובה', async () => {
     const inputs: unknown[] = [];
     await exportPdfDocument(
       fakeHost({ items: [{ pageSetup: { width: 11.694, height: 8.269 } }] }),
