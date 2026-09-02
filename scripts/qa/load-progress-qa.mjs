@@ -193,7 +193,31 @@ async function main() {
 
       const midway = await samples(app);
       const skipVisible = shown(midway).some((s) => s.skip);
-      const clicked = await app.clickSel('.status-load__skip', 0, { after: 1200 });
+      const clicked = await app.clickSel('.status-load__skip', 0, { after: 200 });
+
+      /*
+       * הפס נמדד בדגימה ולא בהשהיה עיוורת.
+       *
+       * קודם עמד כאן `after: 1200` ואחריו בדיקה חד-פעמית, וזה נשבר כשהפתיחה
+       * גדלה בשלב: `onSkipLoad` פותח מסמך ריק, ומאז `applyDocumentStartCaret`
+       * (‏engine/caret-anchor.ts) ושלב `arranging` יושבים **לפני**
+       * `attempt.finish()` — זה שמוריד את הפס — בכוונה, כי שחזור התצוגה הוא
+       * עוד המתנה שהמשתמש רואה. כלומר 1200ms חדל להיות תקציב נכון, ובדיקה
+       * חד-פעמית בקצהו מודדת את המכונה ולא את המוצר.
+       *
+       * הדגימה נותנת גם מספר: מתי הפס באמת ירד. סף נדיב ופעם אחת, כדי שמכונה
+       * איטית לא תצבע אדום על התנהגות תקינה.
+       */
+      const GONE_BUDGET_MS = 6000;
+      const startedAt = Date.now();
+      let goneAfterMs = null;
+      while (Date.now() - startedAt < GONE_BUDGET_MS) {
+        if (!(await app.exists('.status-load'))) {
+          goneAfterMs = Date.now() - startedAt;
+          break;
+        }
+        await sleep(100);
+      }
 
       const st = await app.status();
       const after = await titleNow(app);
@@ -213,7 +237,7 @@ async function main() {
         report.fail('„דלג” על המסך ונלחץ', `נראה=${skipVisible} נלחץ=${clicked}`);
       }
 
-      const gone = !(await app.exists('.status-load'));
+      const gone = goneAfterMs !== null;
       const tabs = await tabTitles(app);
       // „המסמך לא אבד” נמדד על הטאבים ולא על הכותרת הפעילה: „פתח קובץ” מפעיל
       // טאב חדש (App.vue, לפני `openDocument`), ולכן המסמך הקודם ממשיך
@@ -225,12 +249,12 @@ async function main() {
       if (gone && kept && said && quiet) {
         report.pass(
           '„דלג” מפסיק בלי לאבד את המסמך הפתוח',
-          `הפס ירד, „${before}” עדיין בטאב שלו (${tabs.join(' | ')}), ושורת המצב אמרה „${st.text}” בלי שגיאה`,
+          `הפס ירד תוך ${goneAfterMs}ms, „${before}” עדיין בטאב שלו (${tabs.join(' | ')}), ושורת המצב אמרה „${st.text}” בלי שגיאה`,
         );
       } else {
         report.fail(
           '„דלג” מפסיק בלי לאבד את המסמך הפתוח',
-          `פס ירד=${gone} מסמך נשמר=${kept} טאבים=${JSON.stringify(tabs)} כותרת=${after} הודעה=${JSON.stringify(st)}`,
+          `פס ירד=${gone} (עד ${GONE_BUDGET_MS}ms) מסמך נשמר=${kept} טאבים=${JSON.stringify(tabs)} כותרת=${after} הודעה=${JSON.stringify(st)}`,
         );
       }
 
