@@ -2,8 +2,8 @@
  * סקר: מה קובע את **הצד** שבו יושבות נקודות המוביל ומספר העמוד בתוכן עניינים.
  *
  * השאלה: בעברית שורת תוכן עניינים צריכה להיקרא „כותרת......5” כשהכותרת בימין
- * ומספר העמוד בשמאל. אם הפסקה שהמנוע כותב היא LTR, היא תיקרא הפוך — הכותרת
- * בשמאל — וזה מה שנראה על המסך.
+ * ומספר העמוד בשמאל. פסקה שכיוונה LTR תיקרא הפוך — הכותרת בשמאל. איזו שכבה
+ * נותנת לפסקה את כיוונה, ומה יוצא מזה על המסך, זה מה שנמדד כאן.
  *
  * זה **סקר ולא שער**: הוא מודד ומדפיס OOXML גולמי, ואינו קובע מה נכון. מה
  * שהוא צריך לענות עליו, לפי הסדר:
@@ -125,6 +125,16 @@ function describe(p) {
   return { style, bidi, jc, tabs };
 }
 
+/**
+ * כמה תווי טאב יש בגוף הריצות — `<w:tab/>` בלי מאפיינים, בדיוק כמו שהמנוע
+ * כותב אותו. נספר בנפרד מעצירות הטאב של `w:tabs`, ובכוונה: התו הוא הדחיפה,
+ * והעצירה היא מה שקובע לאן הוא נדחף ואם מציירים נקודות בדרך. תו שאין לו
+ * עצירה מוגדרת נופל על `w:defaultTabStop` — קפיצה אחת, ובלי נקודות.
+ */
+function bodyTabs(p) {
+  return p.split('<w:tab/>').length - 1;
+}
+
 const app = await openApp({ name: 'toc-direction', port: PORT });
 try {
   await widen(app);
@@ -166,28 +176,73 @@ try {
     const sectBidi = /<w:sectPr[\s\S]*?<w:bidi\b/.test(doc);
     log('sectPr bidi:', sectBidi, '| pgMar:', pgMar);
 
+    // כיוון של פסקה **נורש מהמקטע**, ולכן היעדר `<w:bidi/>` ב-pPr אינו LTR.
+    // באותה הרצה עצמה נמדד `sectPr bidi: true` לצד פסקאות TOC עם `bidi=false`,
+    // והכותרת בכל זאת יושבת מימין — כלומר ההיסק „אין bidi פסקתי ⟹ הכותרת
+    // בשמאל” הוכחש בפלט של המדידה. מה שנרשם כאן הוא **איזו שכבה** נושאת את
+    // הכיוון, והכשל נשמר למצב שבו אין אף אחת.
     const anyBidi = tocParas.some((p) => describe(p).bidi);
-    anyBidi
-      ? report.pass('כיוון שהמנוע כתב', 'פסקאות ה-TOC נושאות <w:bidi/> מעצמן')
-      : report.fail(
-          'כיוון שהמנוע כתב',
-          'אף פסקת TOC אינה נושאת <w:bidi/> — הן ייקראו משמאל לימין, כלומר הכותרת בשמאל'
-        );
+    if (anyBidi) {
+      report.pass('כיוון שהמנוע כתב', 'פסקאות ה-TOC נושאות <w:bidi/> מעצמן');
+    } else if (sectBidi) {
+      report.pass(
+        'כיוון שהמנוע כתב',
+        'אין <w:bidi/> ב-pPr של פסקאות ה-TOC, אבל ה-sectPr הוא bidi — הכיוון נורש ממנו'
+      );
+    } else {
+      report.fail(
+        'כיוון שהמנוע כתב',
+        'אין <w:bidi/> לא בפסקאות ה-TOC ולא ב-sectPr — אין שכבה שממנה יורש כיוון RTL'
+      );
+    }
 
     // 2 — שכבת הסגנון
+    const styleTabStops = []; // עצירות טאב שנמצאו בסגנונות — הצורה, לא המילה
+    const styleLayers = []; // מה נמצא בכל רמה, בשביל שורת הדוח
     for (const lvl of [1, 2]) {
       const st = styles.match(new RegExp(`<w:style[^>]*w:styleId="TOC${lvl}"[\\s\\S]*?</w:style>`))?.[0];
       if (!st) {
         log(`סגנון TOC${lvl}: אינו מוגדר ב-styles.xml`);
+        styleLayers.push(`TOC${lvl} אינו מוגדר`);
         continue;
       }
       const d = describe(st);
       log(`סגנון TOC${lvl}: bidi=${d.bidi} jc=${d.jc} tabs=[${d.tabs.join(' | ') || 'אין'}]`);
+      styleTabStops.push(...d.tabs);
+      styleLayers.push(`TOC${lvl}: ${d.tabs.join(' | ') || 'בלי w:tabs'}`);
+    }
+
+    const layoutBefore = await tocLayout(app);
+    log('פריסה לפני:', JSON.stringify(layoutBefore));
+
+    // 2ב — נקודות המוביל ועצירת הטאב: מה שסעיף 1 בכותרת מבטיח לענות עליו,
+    // והשורה שלא נרשמה כאן קודם למרות שהמדידה כן הדפיסה אותה.
+    //
+    // שלוש שכבות אפשריות, ואחת מהן צריכה לשאת עצירת טאב עם `w:leader="dot"`
+    // כדי שיהיו נקודות וכדי שמספר העמוד יידחף לשולי השורה: `w:tabs` ב-pPr של
+    // הפסקה, אותו `w:tabs` בסגנון `TOC1…TOC9`, או `w:defaultTabStop` — שאין בו
+    // leader כלל. לכן נמדד גם x של מספר העמוד: „עצירה בשולי השורה” ו„תו טאב
+    // בלי עצירה” נראים שונה על המסך, ולא רק ב-XML.
+    const paraTabStops = tocParas.flatMap((p) => describe(p).tabs);
+    const bodyTabCount = tocParas.reduce((sum, p) => sum + bodyTabs(p), 0);
+    const dotted = [...paraTabStops, ...styleTabStops].filter((t) => t.includes('leader=dot'));
+    const placed =
+      layoutBefore && layoutBefore.number !== null && layoutBefore.title !== null
+        ? `מספר העמוד ב-x=${layoutBefore.number} בשורה ברוחב ${layoutBefore.width} — ` +
+          `${layoutBefore.number}px מהשולי השמאלי של השורה, שאליו עצירה בשולי השורה הייתה דוחפת אותו, ` +
+          `ו-${layoutBefore.title - layoutBefore.number}px מתחילת הכותרת (x=${layoutBefore.title})`
+        : 'הפריסה על המסך לא נמדדה';
+    if (dotted.length) {
+      report.pass('עצירת טאב עם leader="dot"', `${dotted.join(' | ')} | ${placed}`);
+    } else {
+      report.fail(
+        'אין עצירת טאב עם leader="dot" בשום שכבה',
+        `ב-pPr: ${paraTabStops.join(' | ') || 'אין w:tabs'}; ב-styles.xml: ${styleLayers.join('; ') || 'לא נבדק'}; ` +
+          `בגוף הריצות ${bodyTabCount}×<w:tab/> בלי w:leader ובלי w:pos — ${placed}`
+      );
     }
 
     // 3 — הבדיקה המכריעה: האם setDirection עובד על פסקת TOC
-    const layoutBefore = await tocLayout(app);
-    log('פריסה לפני:', JSON.stringify(layoutBefore));
     const before = paragraphs(doc).filter((p) => /w:val="TOC1"/.test(p)).map(describe);
     // `blocks` ולא `items` — זו הצורה שהמנוע מחזיר; ראו BlockEntry ב-engine/toc.ts.
     const blocks = await docApi(
@@ -218,18 +273,31 @@ try {
 
       const layoutAfter = await tocLayout(app);
       log('פריסה אחרי:', JSON.stringify(layoutAfter));
-      const moved =
-        layoutBefore &&
-        layoutAfter &&
-        layoutBefore.title !== null &&
-        layoutAfter.title !== null &&
-        layoutBefore.title < layoutBefore.number !== layoutAfter.title < layoutAfter.number;
-      moved
-        ? report.pass('הפריסה על המסך', 'הכותרת ומספר העמוד החליפו צדדים — השורה נקראת עברית')
-        : report.fail(
-            'הפריסה על המסך',
-            `הצדדים לא התחלפו: לפני ${JSON.stringify(layoutBefore)} אחרי ${JSON.stringify(layoutAfter)}`
-          );
+      /**
+       * מה שנמדד: הכותרת ב-x=535 ומספר העמוד ב-x=497, בשורה ברוחב 602 — כלומר
+       * הכותרת **מימין** למספר, שזה סדר הקריאה העברי. לכן הטענה היא ש-
+       * `title > number` **נשמר**, ולא שהצדדים יתחלפו: היפוך היה מציב את
+       * מספר העמוד מימין ואת הכותרת בשמאל, ושובר שורה שהייתה תקינה. כלומר
+       * `setDirection` שאינו מזיז כאן דבר הוא התוצאה הנכונה.
+       */
+      const hebrewOrder = (l) =>
+        Boolean(l) && l.title !== null && l.number !== null && l.title > l.number;
+      if (!hebrewOrder(layoutBefore)) {
+        report.fail(
+          'הפריסה על המסך — `title > number`',
+          `הכותרת אינה מימין למספר עוד לפני setDirection: ${JSON.stringify(layoutBefore)}`
+        );
+      } else if (hebrewOrder(layoutAfter)) {
+        report.pass(
+          'הפריסה על המסך — `title > number` נשמר',
+          `הכותרת נשארה מימין למספר: לפני ${JSON.stringify(layoutBefore)} אחרי ${JSON.stringify(layoutAfter)}`
+        );
+      } else {
+        report.fail(
+          'הפריסה על המסך — `title > number` נשבר',
+          `setDirection הפך את הסדר: לפני ${JSON.stringify(layoutBefore)} אחרי ${JSON.stringify(layoutAfter)}`
+        );
+      }
 
       const gained = after.some((d) => d.bidi) && !before.some((d) => d.bidi);
       const tabsChanged = JSON.stringify(before.map((d) => d.tabs)) !== JSON.stringify(after.map((d) => d.tabs));
