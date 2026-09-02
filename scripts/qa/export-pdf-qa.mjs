@@ -39,9 +39,22 @@ try {
     ? report.pass('נשלחה קריאה אחת', JSON.stringify(calls[0]))
     : report.fail('קריאות', JSON.stringify(calls));
 
+  /* ---------- העימוד שנמסר לאוצריא ----------
+   *
+   * החוזה נמדד מול מה שאוצריא **באמת** מקבלת (`_parsePdfLayout` ב-
+   * plugin_bridge_adapter.dart): `pageSize` הוא שם מוכן מרשימה סגורה, או מפה
+   * `{widthMm, heightMm}`. השער כאן לא יכול לאמת את הצד השני — ה-Host הוא
+   * כפיל — ולכן הוא לפחות לא מאשר צורה שאוצריא הייתה דוחה.
+   */
+  const NAMED_SIZES = ['a4', 'a5', 'letter', 'legal'];
   const layout = calls[0] ?? {};
-  layout.pageSize?.widthMm > 0 && layout.pageSize?.heightMm > 0 && layout.marginMm === 0
-    ? report.pass('מידות הדף במ"מ ושוליים 0 נמסרו לאוצריא', JSON.stringify(layout.pageSize))
+  const size = layout.pageSize;
+  const sizeOk =
+    typeof size === 'string'
+      ? NAMED_SIZES.includes(size)
+      : size?.widthMm > 0 && size?.heightMm > 0;
+  sizeOk && layout.marginMm === 0 && layout.printBackgrounds === true
+    ? report.pass('גודל דף בצורה שאוצריא מקבלת, שוליים 0 ורקעים', JSON.stringify(size))
     : report.fail('עימוד', JSON.stringify(layout));
 
   const pageStyle = await app.js(
