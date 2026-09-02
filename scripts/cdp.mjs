@@ -10,27 +10,58 @@
  * בדיקה שמביא איתו עץ תלויות הוא כלי שיירקב.
  */
 import { spawn } from 'node:child_process';
-import { existsSync, realpathSync, rmSync } from 'node:fs';
+import { existsSync, readdirSync, realpathSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { tmpdir } from 'node:os';
 
-function defaultChromePath() {
-  if (process.env.CHROME) return process.env.CHROME;
+/**
+ * ברירת המחדל לפי מערכת ההפעלה, ולא נתיב macOS קבוע: ב-Windows בלי `CHROME`
+ * כל 11 שערי ה-CDP של `verify` מתו בצעד הראשון, ו-`&&` דילג על השאר בשקט —
+ * `verify` „עבר” אחרי שלוש בדיקות סטטיות בלבד. `CHROME=<נתיב>` עדיין גובר.
+ */
+function defaultChrome() {
   if (process.platform === 'win32') {
     const candidates = [
-      'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-      'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
-      process.env.LOCALAPPDATA ? join(process.env.LOCALAPPDATA, 'Google', 'Chrome', 'Application', 'chrome.exe') : '',
-    ].filter(Boolean);
-    for (const c of candidates) {
-      if (existsSync(c)) return c;
-    }
+      join(process.env.ProgramFiles ?? 'C:\\Program Files', 'Google', 'Chrome', 'Application', 'chrome.exe'),
+      join(process.env['ProgramFiles(x86)'] ?? 'C:\\Program Files (x86)', 'Google', 'Chrome', 'Application', 'chrome.exe'),
+      join(process.env.LOCALAPPDATA ?? '', 'Google', 'Chrome', 'Application', 'chrome.exe'),
+    ];
+    return candidates.find((path) => existsSync(path)) ?? candidates[0];
   }
   return '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 }
 
-export const CHROME = defaultChromePath();
+export const CHROME = process.env.CHROME ?? defaultChrome();
+
+/** איך הורגים דפדפן שנשאר מריצה קודמת — לפי מערכת ההפעלה. מופיע בהודעות הכשל. */
+const KILL_HINT =
+  process.platform === 'win32'
+    ? 'הריצו ב-PowerShell: Get-CimInstance Win32_Process | ? { $_.CommandLine -match "otzaria-word-cdp" } | % { Stop-Process -Id $_.ProcessId -Force }'
+    : 'הריצו `pkill -f otzaria-word-cdp`';
+
+/**
+ * מה לסגור אם המשתמש קוטע באמצע.
+ *
+ * Ctrl+C באמצע שער הוא מקור מתועד (למטה, ב-`openPage`) לדפדפן שנשאר ומחזיק את
+ * היציאה — והשער הבא מודד dist ישן. בלי מאזין, Node יוצא מיד ואף `close()` לא
+ * רץ. המאזין מריץ את כל הניקויים שנרשמו ואז יוצא בקוד המקובל לקטיעה.
+ */
+const interruptCleanups = new Set();
+export function onInterrupt(cleanup) {
+  interruptCleanups.add(cleanup);
+  return () => interruptCleanups.delete(cleanup);
+}
+process.once('SIGINT', () => {
+  for (const cleanup of interruptCleanups) {
+    try {
+      cleanup();
+    } catch {
+      /* ניקוי שנכשל אינו סיבה לא להריץ את השאר */
+    }
+  }
+  process.exit(130);
+});
 
 export const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -47,6 +78,39 @@ export function requireChrome() {
   if (existsSync(CHROME)) return;
   console.error(`לא נמצא דפדפן ב-${CHROME}. הגדירו CHROME=<נתיב>`);
   process.exit(1);
+}
+
+const PROFILE_PREFIX = 'otzaria-word-cdp-';
+
+/**
+ * פרופילים שנשארו מריצות קודמות — של תוויות **אחרות**.
+ *
+ * `discard(profile)` ב-`close()` נכשל ב-Windows בשקט: מיד אחרי `kill()` משהו
+ * עדיין מחזיק את התיקייה, וגם 52 שניות של ניסיונות חוזרים לא הספיקו — כמה
+ * דקות אחר כך אותה מחיקה מצליחה (נמדד; לא ReadOnly, ולא תהליך Chrome שנשאר).
+ * ריצה חוזרת של אותה תווית מנקה את הפרופיל שלה ב-`openPage`, ולכן הדליפה
+ * חסומה לפרופיל אחד לכל תווית — אבל תוויות מתחלפות: נמדדו 209 תיקיות, 9.3GB.
+ *
+ * יממה ולא דקות: שער תקוע יכול לרוץ זמן רב, ופרופיל חי שנמחק מתחתיו הוא כשל
+ * שנראה כמו באג במוצר. מה שבן יום ודאי אינו חי.
+ */
+function sweepStaleProfiles() {
+  const dayAgo = Date.now() - 24 * 60 * 60 * 1000;
+  let entries;
+  try {
+    entries = readdirSync(tmpdir(), { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !entry.name.startsWith(PROFILE_PREFIX)) continue;
+    const path = join(tmpdir(), entry.name);
+    try {
+      if (statSync(path).mtimeMs < dayAgo) discard(path);
+    } catch {
+      /* נעלם בינתיים, או שעדיין מוחזק — הריצה הבאה תנסה שוב */
+    }
+  }
 }
 
 async function connect(url) {
@@ -117,8 +181,9 @@ async function portHolder(port) {
 }
 
 export async function openPage(fileUrl, { port = Number(process.env.CDP_PORT ?? 9333), label = '0' } = {}) {
-  const profile = join(tmpdir(), `otzaria-word-cdp-${label}`);
+  const profile = join(tmpdir(), `${PROFILE_PREFIX}${label}`);
   discard(profile);
+  sweepStaleProfiles();
 
   /*
    * היציאה חייבת להיות פנויה **לפני** שמריצים, וזה לא הידור.
@@ -136,7 +201,7 @@ export async function openPage(fileUrl, { port = Number(process.env.CDP_PORT ?? 
     if (i === 11) {
       throw new Error(
         `CDP: יציאה ${port} תפוסה בידי דפדפן אחר — כנראה נשאר מריצה קודמת. ` +
-          'הריצו `pkill -f otzaria-word-cdp`, או הגדירו CDP_PORT אחר.',
+          `${KILL_HINT}, או הגדירו CDP_PORT אחר.`,
       );
     }
     await sleep(250);
@@ -203,9 +268,11 @@ export async function openPage(fileUrl, { port = Number(process.env.CDP_PORT ?? 
   );
 
   const close = () => {
+    forget();
     chrome.kill('SIGKILL');
     discard(profile);
   };
+  const forget = onInterrupt(close);
 
   try {
     /*
@@ -266,7 +333,7 @@ export async function openPage(fileUrl, { port = Number(process.env.CDP_PORT ?? 
         strangers > 0
           ? `CDP: ביציאה ${port} יש דפדפן אחר עם ${strangers} דפים, ואין בו ` +
             `${[...accepted].join(' / ')}. ` +
-            'כנראה נשאר מריצה קודמת — `pkill -f otzaria-word-cdp`, או CDP_PORT אחר.'
+            `כנראה נשאר מריצה קודמת — ${KILL_HINT}, או CDP_PORT אחר.`
           : 'CDP לא נפתח',
       );
     }

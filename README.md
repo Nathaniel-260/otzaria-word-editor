@@ -279,7 +279,7 @@ const resolved = resolution.status === "uniform" ? resolution.value : void 0;
 - `src/sessions/` — פתיחת מסמכים, החלפת עורך, רכז השמירה, וזוכר ההפעלה.
 - `src/ui/` — הרצועה, המעטפת, הדיאלוגים והאייקונים.
 
-`public/` הוא מה שנארז כמו שהוא, ובראשו ה‑manifest. `scripts/` הם שערי הבנייה — `check:dist` ואחיו — ש‑`npm run verify` וה‑CI מריצים. `tests/` מחולק ל‑unit, contract ו‑component, לצד `support/` (כפילים משותפים). ב‑`docs/` המסמך שנקרא ראשון הוא [engine-gaps.md](docs/engine-gaps.md) — כל פער שנמדד במנוע ומה לא נשלח בגללו, כדי שאיש לא יחקור שוב את מה שכבר נמדד; לצדו מסמכי ה‑spike, מסמכי התוכנית, ו‑[word-plugin-brief.md](docs/word-plugin-brief.md), תמצית ההחלטות התשתיתיות והרישוי.
+`public/` הוא מה שנארז כמו שהוא, ובראשו ה‑manifest. `scripts/` הם שערי הבנייה — `check:dist` ואחיו. ה‑CI מריץ מהם את `check:dist` בלבד (לצד typecheck, test ו‑build — זהו `npm run verify:fast`); שערי ה‑CDP רצים מקומית: `npm run verify` לכולם, `npm run verify:boundary` לקבוצה המכוונת שמכסה את מעטפת המסמך, ו‑`npm run verify:qa` לשערי הפקדים. `npm run golden:capture` שומר תמונת‑מצב של שערי הפקדים (ב‑`.qa-golden/`, מקומי), ו‑`golden:compare` מתריע על כל שורה שהוורדיקט שלה השתנה מאז — כך שסטייה שכבר נמדדה אינה מפילה, ורק שינוי מפיל. `tests/` מחולק ל‑unit, contract ו‑component, לצד `support/` (כפילים משותפים). ב‑`docs/` המסמך שנקרא ראשון הוא [engine-gaps.md](docs/engine-gaps.md) — כל פער שנמדד במנוע ומה לא נשלח בגללו, כדי שאיש לא יחקור שוב את מה שכבר נמדד; לצדו מסמכי ה‑spike, מסמכי התוכנית, ו‑[word-plugin-brief.md](docs/word-plugin-brief.md), תמצית ההחלטות התשתיתיות והרישוי.
 
 ## רישיון
 
