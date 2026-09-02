@@ -2187,6 +2187,12 @@ async function onExportPdf(): Promise<void> {
  * לתיקייה אישית רשומה, הספר נקלט מיד; אחרת הסריקה פשוט לא תמצא דבר,
  * וההודעה אומרת מה אפשר לעשות. הרענון הוא best-effort (`tryCall`) —
  * היעדר ההרשאה או Host ישן אינם כשל של הייצוא, שכבר הצליח.
+ *
+ * **ולא בהמתנה.** הרענון סורק מחדש את כל התיקיות האישיות ומרענן את קטלוג
+ * הספרייה, ולאוצריא יש עליו timeout של 15 דקות (`_userBooksRefreshTimeout`).
+ * המתנה לו לפני ההודעה הייתה משאירה את המשתמש בלי שום אישור על קובץ שכבר
+ * נכתב לדיסק — כמה זמן שהסריקה תימשך. לכן: „נשמר” מיד, והתוצאה מעדכנת את
+ * השורה כשהיא חוזרת — ורק אם בינתיים לא נאמר שם משהו חדש יותר.
  */
 async function onExportOtzaria(): Promise<void> {
   if (!swap?.current) {
@@ -2219,16 +2225,24 @@ async function onExportOtzaria(): Promise<void> {
     }
 
     const name = result.name ?? 'הספר';
-    const refreshed = await tryCall<{ addedBooks?: number; updatedBooks?: number }>(
+    const saved = `${name} נשמר — מרענן את ספריית אוצריא…`;
+    setStatus(saved);
+
+    void tryCall<{ addedBooks?: number; updatedBooks?: number }>(
       'library.refreshUserBooks',
       {},
-    );
-    const landed = (refreshed?.addedBooks ?? 0) + (refreshed?.updatedBooks ?? 0) > 0;
-    setStatus(
-      landed
-        ? `${name} נשמר ונקלט בספריית אוצריא`
-        : `${name} נשמר — כדי שיופיע בספרייה, שמרו לתיקייה אישית הרשומה בהגדרות אוצריא`,
-    );
+    ).then((refreshed) => {
+      // השורה מעודכנת רק אם היא עוד שלנו: בזמן הסריקה המשתמש המשיך לעבוד,
+      // ודריסת „נשמר” או הודעת שגיאה חדשה בתוצאה של רענון היא בדיוק ההפתעה
+      // שאסור לייצר.
+      if (statusText.value !== saved) return;
+      const landed = (refreshed?.addedBooks ?? 0) + (refreshed?.updatedBooks ?? 0) > 0;
+      setStatus(
+        landed
+          ? `${name} נשמר ונקלט בספריית אוצריא`
+          : `${name} נשמר — כדי שיופיע בספרייה, שמרו לתיקייה אישית הרשומה בהגדרות אוצריא`,
+      );
+    });
   } catch (error) {
     if (ticket) void abortBinaryWrite(ticket.writeToken);
     setStatus(
