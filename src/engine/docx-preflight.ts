@@ -173,7 +173,7 @@ export function repairSettings(xml: string): string | null {
  * ו-`word/settings.xml`, שיש לו תיקון משלו.
  */
 export const CONTENT_PARTS =
-  /^word\/(document|styles|numbering|footnotes|endnotes|comments|header\d+|footer\d+)\.xml$/;
+  /^word\/(?:document\d*|styles\d*|numbering|footnotes|endnotes|comments|header\d*|footer\d*)\.xml$/i;
 
 /**
  * ערכי `ST_OnOff` שמשמעותם „כבוי”. כל ערך אחר — ובכלל זה היעדר `w:val` — דולק,
@@ -181,27 +181,59 @@ export const CONTENT_PARTS =
  */
 const OFF_VALUES = new Set(['0', 'false', 'off']);
 
+/**
+ * `w:val` של דגל `ST_OnOff`.
+ *
+ * שני סוגי המרכאות, ולא רק כפולות: XML מתיר את שניהם, ו-`w:val='0'` שנקרא
+ * כדולק היה הופך „לא מודגש” שנכתב במפורש למודגש — כלומר שינוי במסמך, בדיוק מה
+ * שהמודול הזה מבטיח לא לעשות. הקידומת אופציונלית מאותו טעם שהסורק אינו נעול
+ * על `w:` (ראו TOKEN_SOURCE).
+ *
+ * מה שכן נשאר לא-מטופל: ישות מספרית (`w:val="&#48;"`). היא חוקית, ואף כלי
+ * מציאותי אינו כותב אותה.
+ */
+const ON_OFF_VALUE = /\b(?:[\w.-]+:)?val\s*=\s*(?:"([^"]*)"|'([^']*)')/;
+
 /** האם דגל `ST_OnOff` דולק, לפי מאפייני התג. */
 function isOn(attributes: string): boolean {
-  const value = /\bw:val\s*=\s*"([^"]*)"/.exec(attributes);
-  return !value || !OFF_VALUES.has(value[1].trim().toLowerCase());
+  const match = ON_OFF_VALUE.exec(attributes);
+  const value = match ? (match[1] ?? match[2]) : null;
+  return value === null || !OFF_VALUES.has(value.trim().toLowerCase());
 }
 
 /**
- * סורק תגים בסדר הופעתם. `[^>]*?` על המאפיינים מסתמך על כך ש-Word מקודד `>`
- * בתוך ערך מאפיין כ-`&gt;` — וכשמדובר בכלי שאינו עושה כך, התג פשוט אינו נתפס
- * והתיקון מדלג עליו. זה בדיוק מה שאמור לקרות: „לתקן, ולא לחסום”.
+ * הסורק: תג, פתיחת הערה, או פתיחת CDATA — לפי סדר הופעתם.
+ *
+ * **המאפיינים מודעים למרכאות** (`[^>"']` או מחרוזת מצוטטת), ולא `[^>]*`. זה
+ * אינו הידור: `<w:rPrChange w:author="a>b">` הוא XML חוקי לגמרי, ורגקס שנעצר
+ * על ה-`>` הראשון היה קורא אותו כתג אחר לגמרי.
+ *
+ * הקידומת נלכדת ואינה נעולה על `w`: החבילה רשאית לקשור את מרחב השמות של
+ * WordprocessingML לכל קידומת. מי שנעול על `w:` גם מפספס מסמך כזה לגמרי, וגם —
+ * גרוע יותר — אינו רואה `ns0:b` קיימת ומוסיף `w:b` שנייה לצדה.
+ *
+ * הערות ו-CDATA נבלעות שלמות. הן נראות לרגקס בדיוק כמו תגים (`<!-- <w:rPr>
+ * <w:bCs/></w:rPr> -->`), והתיקון בתוכן היה עריכה של טקסט המשתמש ולא של
+ * העיצוב.
  */
-const TAG = /<(\/?)w:([A-Za-z0-9._-]+)([^>]*?)(\/?)>/g;
+const TOKEN_SOURCE = /<!--|<!\[CDATA\[|<(\/?)([\w.-]+):([\w.-]+)((?:[^>"']|"[^"]*"|'[^']*')*)>/;
 
-/** מה שנאסף על `rPr` אחת בזמן הסריקה. */
+/** הכנסה אחת: המקום, והקידומת שבה לכתוב. */
+interface BoldInsert {
+  at: number;
+  prefix: string;
+}
+
+/** מה שנאסף על ה-`rPr` החיה בזמן הסריקה. */
 interface RunPropsScope {
-  /** האם `w:b` מופיע בה — בכל צורה, גם מכובה. */
+  /** האם `b` מופיעה בה — בכל קידומת ובכל צורה, גם מכובה. */
   hasBold: boolean;
-  /** מקום התג `w:bCs`, או `null` כשאינו שם. */
+  /** מקום התג `bCs`, או `null` כשאינו שם. */
   boldCsAt: number | null;
   /** האם ה-`bCs` שנמצא דולק. */
   boldCsOn: boolean;
+  /** הקידומת של ה-`bCs` שנמצא. */
+  prefix: string;
 }
 
 /**
@@ -215,70 +247,102 @@ interface RunPropsScope {
  * מודד את התכונות של השינוי המסומן במקום של הריצה — ובדיוק במסמכים שיש בהם
  * מעקב שינויים, שהם המסמכים שאין רשות לשבור.
  *
- * ולכן גם: כל מה שבתוך `w:rPrChange` **מדולג**. זה העיצוב שהיה *לפני* השינוי,
- * היסטוריה שהמנוע אינו מרנדר, ולכתוב בה זה לשקר על מה שהיה.
+ * ## מה מוגן, ואיך — הכלל שקובע
+ *
+ * **`rPr` שיושבת בתוך `rPr` אחרת אינה עיצוב חי, ומדולגת.** ב-`CT_RPr` האיבר
+ * היחיד שמכיל `rPr` הוא `w:rPrChange`, ולכן קינון **הוא** ההגדרה של „זו
+ * היסטוריה”. אין כאן זיהוי של `rPrChange` בשמו, ובכוונה: הניסיון הראשון ספר
+ * `<w:rPrChange>` פתוחות מול סגורות, ומונה כזה נשבר משלוש דרכים שנמדדו — שם
+ * מחבר שיש בו `>`, קידומת שאינה `w`, וסגירה תלושה שהורידה אותו מתחת לאפס ואז
+ * כתבה **לתוך** ההיסטוריה הבאה. הגרועה מכולן: מונה שנתקע על 1 מכבה את התיקון
+ * מאותו בייט ועד סוף החלק, בשקט.
+ *
+ * המחיר של הכלל הצר: `rPr` שיושבת בתוך `w:pPrChange` אינה מוגנת. `CT_PPrBase`
+ * — ה-`pPr` שבתוך `pPrChange` — אינו מכיל `rPr` כלל, ולכן Word אינו יכול
+ * לכתוב שם אחת. זה מה שהכלל מכסה ומה שאינו, בלי להבטיח יותר.
  *
  * ## סדר האלמנטים
  *
- * `<w:b/>` נכתב **מיד לפני** `<w:bCs/>`, וזה אינו נוי: `CT_RPr` היא רצף
- * (`xsd:sequence`) שבו `b` בא לפני `bCs`, ומאפיין שנכתב מחוץ לסדר הופך את
- * החלק לפסול בעיני הסכימה של Word.
+ * `<w:b/>` נכתב **מיד לפני** `<w:bCs/>`. `CT_RPr` היא רצף (`xsd:sequence`) ובו
+ * `b` באה לפני `bCs`; נמדד גם על קורפוס: ב-10,855 `rPr` שנכתבו בידי Word ויש
+ * בהן את שתיהן, `b` קדמה ב-100%, ו-0 בסדר ההפוך. סכימת OOXML לא נמצאה במכונה
+ * (נסרקו ה-node_modules, הרפו, ושתי התקנות Office), ולכן זו עדות ולא הוכחה.
  */
 export function repairComplexScriptBold(xml: string): string | null {
   // חיפוש מחרוזת אחד לפני הסריקה. `document.xml` של ספר הוא מגה-בייטים, ורובם
   // המכריע של המסמכים אינם נוגעים לזה בכלל.
   if (!xml.includes('bCs')) return null;
 
-  const stack: RunPropsScope[] = [];
-  const inserts: number[] = [];
-  /** עומק בתוך `w:rPrChange` — כל מה שבתוכו מדולג. */
-  let history = 0;
+  const inserts: BoldInsert[] = [];
+  /** עומק ה-`rPr`. 1 = העיצוב החי; 2 ומעלה = היסטוריה של שינוי מסומן. */
+  let depth = 0;
+  let scope: RunPropsScope | null = null;
 
-  TAG.lastIndex = 0;
-  for (let match = TAG.exec(xml); match; match = TAG.exec(xml)) {
-    const [, closing, name, attributes, selfClosing] = match;
-
-    if (name === 'rPrChange') {
-      if (!selfClosing) history += closing ? -1 : 1;
+  // רגקס חדש לכל קריאה, ולא אחד גלובלי שמאפסים לו `lastIndex`: `lastIndex` הוא
+  // מצב, ומצב משותף בין קריאות הוא מלכודת שמחכה למי שיקרא מכאן פעמיים. המחיר
+  // זניח — נקרא לכל היותר פעם אחת לחלק.
+  const token = new RegExp(TOKEN_SOURCE.source, 'g');
+  for (let match = token.exec(xml); match; match = token.exec(xml)) {
+    if (match[0] === '<!--' || match[0] === '<![CDATA[') {
+      const closer = match[0] === '<!--' ? '-->' : ']]>';
+      const end = xml.indexOf(closer, token.lastIndex);
+      // הערה שאינה נסגרת: אין יותר תגים שאפשר לסמוך עליהם, וחצי סריקה גרועה
+      // מלא-סריקה. מה שנאסף עד כאן מוחל, וזה בטוח — הוא כולו מלפני ההערה.
+      if (end < 0) break;
+      token.lastIndex = end + closer.length;
       continue;
     }
-    if (history > 0) continue;
+
+    const [, closing, prefix, name, attributes] = match;
+    const selfClosing = attributes.endsWith('/');
 
     if (name === 'rPr') {
       if (selfClosing) continue;
-      if (closing) {
-        const scope = stack.pop();
-        if (scope && scope.boldCsOn && scope.boldCsAt !== null && !scope.hasBold) {
-          inserts.push(scope.boldCsAt);
+      if (!closing) {
+        depth += 1;
+        if (depth === 1) {
+          scope = { hasBold: false, boldCsAt: null, boldCsOn: false, prefix };
         }
-      } else {
-        stack.push({ hasBold: false, boldCsAt: null, boldCsOn: false });
+        continue;
+      }
+      // סגירה בלי פתיחה — מסמך קטוע. מתעלמים, ולא יורדים מתחת לאפס.
+      if (depth === 0) continue;
+      depth -= 1;
+      if (depth === 0 && scope) {
+        if (scope.boldCsOn && scope.boldCsAt !== null && !scope.hasBold) {
+          inserts.push({ at: scope.boldCsAt, prefix: scope.prefix });
+        }
+        scope = null;
       }
       continue;
     }
 
-    const scope = stack[stack.length - 1];
-    if (!scope || closing) continue;
+    if (depth !== 1 || !scope || closing) continue;
     if (name === 'b') scope.hasBold = true;
     else if (name === 'bCs') {
       scope.boldCsAt = match.index;
       scope.boldCsOn = isOn(attributes);
+      scope.prefix = prefix;
     }
   }
 
   if (inserts.length === 0) return null;
 
-  // הסריקה קדימה ו-`rPr` שאינה מקננת נותנות סדר עולה ממילא; המיון הוא כדי שמי
-  // שקורא לא יידרש להוכיח את זה שוב.
-  inserts.sort((a, b) => a - b);
-
-  let out = '';
+  // הפיצול מניח סדר עולה, וזה מובטח מבנית: הכנסה נרשמת רק כשה-`rPr` **החיצונית**
+  // נסגרת, והבאה אחריה נפתחת אחריה. הבדיקה „אינה משנה דבר מלבד ה-b שהוסיפה”
+  // היא מה ששומר על ההנחה הזאת.
+  //
+  // מערך ו-`join` ולא `+=`: על ספר עברי שההדגשה בו ישירה ולא בסגנון נמדדו
+  // 28,400 הכנסות בקובץ אחד, וזה הגודל שבו שרשור בלולאה מתחיל להיות מה
+  // שנמדד.
+  const parts: string[] = [];
   let at = 0;
-  for (const index of inserts) {
-    out += xml.slice(at, index) + '<w:b/>';
-    at = index;
+  for (const insert of inserts) {
+    parts.push(xml.slice(at, insert.at), `<${insert.prefix}:b/>`);
+    at = insert.at;
   }
-  return out + xml.slice(at);
+  parts.push(xml.slice(at));
+  return parts.join('');
 }
 
 /** תיקון אחד: על אילו חלקים הוא חל, מה הוא עושה, ומה נרשם ביומן כשעשה. */
@@ -321,7 +385,27 @@ export interface PreflightResult {
    * הפתיחה, לא לזמן שבו המשתמש יחשוב לחפש אותה.
    */
   vba: DocumentVba;
+  /**
+   * הודעה למשתמש כשהמסמך תוקן, או `null` כשלא נגענו בו.
+   *
+   * **למה זה יוצא מכאן ולא נשאר ב-`console`:** התיקון השני נכתב לתוך המסמך,
+   * וממילא ייצא איתו בשמירה. משתמש שהמסמך שלו שונה זכאי לדעת שהוא שונה, וזה
+   * אינו מידע שאפשר להשאיר ביומן שאיש אינו פותח. אותו מסלול בדיוק שבו
+   * `vba.status` מגיע לשורת המצב (App.vue).
+   *
+   * `notes` המפורטים נשארים ביומן: שורת מצב אינה המקום לשמות חלקים.
+   */
+  notice: string | null;
 }
+
+/**
+ * מה שנאמר למשתמש כשהדגשת כתב מורכב הושלמה.
+ *
+ * מנוסח כמצב ולא כשגיאה, ואומר גם את מה שיקרה אחר כך — השמירה תכתוב את
+ * ההשלמה לקובץ, וזה החלק שהמשתמש אינו יכול לנחש.
+ */
+export const COMPLEX_SCRIPT_BOLD_NOTICE =
+  'הדגשה שמוצגת ב-Word ולא הוצגה כאן הושלמה במסמך — שמירה תכתוב אותה לקובץ';
 
 /**
  * מקור המסמך, אחרי תיקון. מחזירה את המקור עצמו כשאין מה לתקן — כולל כשהבדיקה
@@ -337,7 +421,7 @@ export interface PreflightResult {
 export async function preflightSource(
   source: string | File | Blob | undefined,
 ): Promise<PreflightResult> {
-  if (source === undefined) return { source, fontTable: null, vba: NO_VBA };
+  if (source === undefined) return { source, fontTable: null, vba: NO_VBA, notice: null };
 
   let bytes: Bytes;
   try {
@@ -347,7 +431,7 @@ export async function preflightSource(
         : new Uint8Array(await source.arrayBuffer());
   } catch (error) {
     console.warn('[otzaria-word] הבדיקה המקדימה לא קראה את המסמך', error);
-    return { source, fontTable: null, vba: NO_VBA };
+    return { source, fontTable: null, vba: NO_VBA, notice: null };
   }
 
   const fontTable = await readDocxPart(bytes, FONT_TABLE_PART);
@@ -355,12 +439,20 @@ export async function preflightSource(
   // והסגנונות, ואין טעם לקרוא את המאקרו מעותק שנכתב מחדש.
   const vba = await readDocumentVba(bytes);
   const repaired = await preflightDocx(bytes);
-  if (!repaired) return { source, fontTable, vba };
+  if (!repaired) return { source, fontTable, vba, notice: null };
 
   // כל תיקון נרשם בנפרד: מי שיקרא את היומן על מסמך שהתנהג במפתיע צריך לדעת
   // **מה** שונה בו, ולא רק שנגענו.
   for (const note of repaired.notes) console.warn(`[otzaria-word] ${note}`);
-  return { source: new Blob([repaired.bytes], { type: DOCX_MIME }), fontTable, vba };
+  // רק התיקון שנכתב לתוך המסמך מגיע למשתמש. `defaultTabStop` אינו נראה לו
+  // בשום צורה — הוא רק ההפרש בין מסמך שנפתח למסמך שקופא — ושורת מצב שמדווחת
+  // על כל דבר היא שורת מצב שאיש אינו קורא.
+  return {
+    source: new Blob([repaired.bytes], { type: DOCX_MIME }),
+    fontTable,
+    vba,
+    notice: repaired.notes.some((note) => note.includes('w:bCs')) ? COMPLEX_SCRIPT_BOLD_NOTICE : null,
+  };
 }
 
 /**
@@ -644,8 +736,27 @@ function writeZip(entries: ZipEntry[]): Bytes {
 
 let crcTable: Uint32Array | null = null;
 
-/** CRC32 כפי ש-ZIP מגדיר אותו. נבנה פעם אחת, בפעם הראשונה שצריך אותו. */
-function crc32(bytes: Bytes): number {
+/**
+ * CRC32 כפי ש-ZIP מגדיר אותו. טבלה אחת, בייט אחר בייט.
+ *
+ * מיוצאת בשביל הבדיקה בלבד — אין לה קורא אחר מחוץ למודול. מה שהבדיקה שומרת
+ * עליו הוא שוויון עם מימוש ייחוס: CRC שגוי הוא ארכיון שבור, וזה כשל שקט.
+ *
+ * **„slice-by-4” נכתב כאן ונמדד איטי יותר, ולכן הוסר.** מאז שהתיקון השני
+ * נכנס החלק שנכתב מחדש עשוי להיות `document.xml` של ספר שלם, ולכן נראה
+ * שכדאי. נמדד ב-Node 24, שלוש הרצות, מינימום מתוך חמש חזרות בכל אחת:
+ *
+ *     גודל     בייט-בבייט     slice-by-4
+ *     5.6MB    33–50ms        77–127ms
+ *     64KB     0.31–0.63ms    0.81–1.05ms
+ *     512B     0.002ms        0.018–0.024ms
+ *
+ * גם הווריאנט בלי `>>> 0` בתוך הלולאה — כלומר בלי לייצר uint32 שיוצא מטווח
+ * ה-Smi בכל איטרציה — נשאר איטי מהפשוט בכל הגדלים. V8 מהדר את הלולאה הצרה
+ * הזאת טוב יותר ממה שארבע טבלאות (4KB במקום 1KB) מרוויחות. **לא לכתוב את
+ * זה שוב בלי למדוד.**
+ */
+export function crc32(bytes: Bytes): number {
   if (!crcTable) {
     crcTable = new Uint32Array(256);
     for (let i = 0; i < 256; i++) {

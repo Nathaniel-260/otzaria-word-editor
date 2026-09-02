@@ -22,7 +22,9 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { deflateRawSync } from 'node:zlib';
 import {
+  COMPLEX_SCRIPT_BOLD_NOTICE,
   CONTENT_PARTS,
+  crc32 as moduleCrc32,
   DEFAULT_TAB_STOP_TWIPS,
   preflightDocx,
   preflightSource,
@@ -269,6 +271,173 @@ describe('repairComplexScriptBold', () => {
 
   it('אינה מתקנת `rPr` ריקה או סוגרת-עצמה', () => {
     expect(repairComplexScriptBold('<w:r><w:rPr/><w:t>שלום</w:t></w:r>')).toBeNull();
+    expect(repairComplexScriptBold('<w:r><w:rPr />' + '<w:t>שלום</w:t></w:r>')).toBeNull();
+  });
+
+  /* ---------------- מה שהתיקון אסור לו לגעת בו ---------------- */
+
+  it('אינה כותבת בתוך הערת XML', () => {
+    // ההערה נראית לרגקס בדיוק כמו תגים, וכתיבה בתוכה היא עריכה של טקסט ולא
+    // של עיצוב.
+    const commented = `<w:body><!-- ${runProps('<w:bCs/>')} --></w:body>`;
+    expect(repairComplexScriptBold(commented)).toBeNull();
+  });
+
+  it('אינה כותבת בתוך CDATA', () => {
+    const cdata = `<w:r><w:rPr><w:i/></w:rPr><w:t><![CDATA[${runProps('<w:bCs/>')}]]></w:t></w:r>`;
+    expect(repairComplexScriptBold(cdata)).toBeNull();
+  });
+
+  it('הערה או CDATA אינן מכבות תיקון אמיתי שאחריהן', () => {
+    // המקרה שקבר את הגרסה הקודמת בצורה אחרת: `</w:rPr>` שיושבת בתוך הערה
+    // הוציאה מהמחסנית את ה-scope החי, והתיקון האמיתי נעלם.
+    const mixed = `<w:body><!-- </w:rPr> -->${runProps('<w:bCs/>')}</w:body>`;
+    expect(repairComplexScriptBold(mixed)).toContain('<w:b/><w:bCs/>');
+  });
+
+  it('`>` בתוך ערך מאפיין אינו מבלבל את הסורק', () => {
+    // XML חוקי לגמרי. רגקס שנעצר על ה-`>` הראשון קרא כאן תג אחר לגמרי.
+    const odd =
+      '<w:r><w:rPr><w:rStyle w:val="a>b"/><w:bCs/></w:rPr><w:t>שלום</w:t></w:r>';
+    expect(repairComplexScriptBold(odd)).toContain('<w:b/><w:bCs/>');
+  });
+
+  it('`rPrChange` שאינו נקרא כמצופה אינו מכבה את שאר החלק', () => {
+    // ההתנהגות שהייתה הגרועה מכולן: מונה `rPrChange` שנתקע על 1 והשתיק את
+    // התיקון מאותו בייט ועד סוף הקובץ, בשקט. הכלל היום הוא קינון, ולכן
+    // ה-`rPr` שבתוך ההיסטוריה מדולגת בזכות עומקה ולא בזכות שם התג.
+    const brokenName =
+      '<w:body><w:r><w:rPr><w:rPrChange w:id="1" w:author="a>b">' +
+      '<w:rPr><w:bCs/></w:rPr></w:rPrChange></w:rPr></w:r>' +
+      runProps('<w:bCs/>') +
+      '</w:body>';
+    const repaired = repairComplexScriptBold(brokenName);
+    expect(repaired).toContain('<w:b/><w:bCs/>');
+    // ההיסטוריה עצמה נשארה כפי שהייתה.
+    expect(repaired).toContain('<w:rPrChange w:id="1" w:author="a>b"><w:rPr><w:bCs/></w:rPr>');
+  });
+
+  it('סגירת `rPr` תלושה אינה מפילה את המונה מתחת לאפס', () => {
+    // וזה מה שהיה מרשה ל-`rPrChange` **האמיתי** הבא להיכתב לתוכו.
+    const stray =
+      '</w:rPr><w:r><w:rPr><w:rPrChange w:id="2" w:author="x">' +
+      '<w:rPr><w:bCs/></w:rPr></w:rPrChange></w:rPr></w:r>';
+    expect(repairComplexScriptBold(stray)).toBeNull();
+  });
+
+  it('`rPr` שאינה נסגרת מאבדת רק את עצמה', () => {
+    const truncated = `<w:body>${runProps('<w:bCs/>')}<w:r><w:rPr><w:bCs/>`;
+    const repaired = repairComplexScriptBold(truncated);
+    expect(repaired!.match(/<w:b\/>/g)).toHaveLength(1);
+  });
+
+  /* ---------------- קידומות ---------------- */
+
+  it('מתקנת גם כשמרחב השמות קשור לקידומת אחרת, ובאותה קידומת', () => {
+    // החבילה רשאית לקשור את WordprocessingML לכל קידומת. `w:b` שנכתבת לתוך
+    // מסמך כזה שייכת למרחב שמות אחר לגמרי — כלומר לא הדגשה.
+    const other = '<ns0:r><ns0:rPr><ns0:bCs/></ns0:rPr><ns0:t>שלום</ns0:t></ns0:r>';
+    expect(repairComplexScriptBold(other)).toContain('<ns0:b/><ns0:bCs/>');
+  });
+
+  it('אינה מוסיפה `b` שנייה כשהקיימת נושאת קידומת אחרת', () => {
+    // שתי `b` באותה `rPr` הן `CT_RPr` פסולה.
+    expect(repairComplexScriptBold('<w:rPr><ns0:b/><w:bCs/></w:rPr>')).toBeNull();
+  });
+
+  /* ---------------- ערכי ST_OnOff ---------------- */
+
+  it('קוראת `w:val` גם במרכאות בודדות', () => {
+    // אחרת „לא מודגש” שנכתב במפורש היה נהפך למודגש — שינוי במסמך.
+    expect(repairComplexScriptBold(runProps("<w:bCs w:val='0'/>"))).toBeNull();
+    expect(repairComplexScriptBold(runProps("<w:bCs w:val='1'/>"))).toContain('<w:b/>');
+    expect(repairComplexScriptBold(runProps("<w:b w:val='0'/><w:bCs/>"))).toBeNull();
+  });
+
+  it('שתי `bCs` באותה rPr — האחרונה קובעת', () => {
+    expect(repairComplexScriptBold(runProps('<w:bCs w:val="0"/><w:bCs/>'))).toContain('<w:b/>');
+    expect(repairComplexScriptBold(runProps('<w:bCs/><w:bCs w:val="0"/>'))).toBeNull();
+  });
+
+  /* ---------------- אינווריאנטים ---------------- */
+
+  it('אינה משנה דבר מלבד ה-`b` שהוסיפה', () => {
+    // `toContain` אינו יכול לתפוס פלט שכל השאר בו נהרס. זה כן.
+    const source =
+      '<w:body>' +
+      runProps('<w:rFonts w:cs="David"/><w:bCs/><w:szCs w:val="28"/>') +
+      runProps('<w:b/><w:bCs/>') +
+      '<w:p><w:pPr><w:rPr><w:bCs/></w:rPr></w:pPr></w:p>' +
+      '</w:body>';
+    const repaired = repairComplexScriptBold(source)!;
+    const strip = (text: string) => text.split('<w:b/>').join('');
+    expect(strip(repaired)).toBe(strip(source));
+  });
+
+  it('מעבר שני אינו מוצא מה לתקן', () => {
+    const once = repairComplexScriptBold(runProps('<w:bCs/>') + runProps('<w:bCs/>'))!;
+    expect(repairComplexScriptBold(once)).toBeNull();
+  });
+
+  it('סורקת בזמן לינארי, גם על חלק בגודל של ספר', () => {
+    // המודול הזה קיים מפני שחסימה של החוט הראשי אינה נתפסת אחר כך. סריקה
+    // ריבועית כאן הייתה בדיוק אותו כשל, במסלול חדש.
+    const unit = runProps('<w:bCs/>');
+    const small = unit.repeat(2_000);
+    const large = unit.repeat(8_000);
+
+    const time = (xml: string): number => {
+      const started = performance.now();
+      expect(repairComplexScriptBold(xml)).not.toBeNull();
+      return performance.now() - started;
+    };
+    time(small); // חימום, שלא נמדוד את ההידור הראשון
+    const smallMs = Math.max(time(small), 1);
+    const largeMs = time(large);
+
+    // פי ארבעה קלט. סף רחב בכוונה — זה שער נגד ריבועיות, לא מדידת ביצועים.
+    expect(largeMs / smallMs).toBeLessThan(12);
+  });
+
+  it('הפלט הוא XML תקין', () => {
+    const source = `<w:document xmlns:w="ns"><w:body>${runProps('<w:bCs/>')}</w:body></w:document>`;
+    const repaired = repairComplexScriptBold(source)!;
+    const parsed = new DOMParser().parseFromString(repaired, 'application/xml');
+    expect(parsed.querySelector('parsererror')).toBeNull();
+  });
+});
+
+describe('crc32', () => {
+  // `crc32` המקומי בקובץ הזה מחשב את הפולינום בכל בייט מחדש, בלי טבלה — ולכן
+  // הוא מימוש **בלתי תלוי** במה שבמודול, ולא העתקה שלו. CRC שגוי הוא ארכיון
+  // שבור, וזה כשל שקט.
+  //
+  // הבדיקות כאן נשארות גם אחרי ש-slice-by-4 הוסר מהמודול (הוא נמדד איטי
+  // יותר; ראו את ההערה שם). זה בדיוק מה שהן נועדו לתפוס: מי שיכתוב שוב
+  // מימוש „מהיר” ויטעה בשארית או בסדר הבייטים ייפול כאן.
+
+  it('מסכימה עם וקטור הבדיקה המקובל', () => {
+    // "123456789" → 0xCBF43926, הווקטור של CRC-32/ISO-HDLC.
+    expect(moduleCrc32(bytesOf('123456789'))).toBe(0xcbf43926);
+  });
+
+  it('מסכימה עם מימוש הייחוס בכל אורך, ובפרט באלה שאינם כפולה של ארבע', () => {
+    // מימוש שמתקדם יותר מבייט בשלב נשבר בשארית, ולכן כל אורך קצר נבדק.
+    for (let length = 0; length <= 16; length++) {
+      const bytes = new Uint8Array(length) as Uint8Array<ArrayBuffer>;
+      for (let i = 0; i < length; i++) bytes[i] = (i * 31 + 7) & 0xff;
+      expect(moduleCrc32(bytes)).toBe(crc32(bytes));
+    }
+
+    const big = new Uint8Array(5_003) as Uint8Array<ArrayBuffer>;
+    for (let i = 0; i < big.byteLength; i++) big[i] = (i * 131 + 17) & 0xff;
+    expect(moduleCrc32(big)).toBe(crc32(big));
+  });
+
+  it('מסכימה עם מימוש הייחוס על טקסט עברי', () => {
+    // עברית היא שני בייטים לתו, ולכן גם הגושים וגם השארית נראים אחרת.
+    const bytes = bytesOf('שבועת הדיינין, מודה במקצת');
+    expect(moduleCrc32(bytes)).toBe(crc32(bytes));
   });
 });
 
@@ -283,6 +452,12 @@ describe('CONTENT_PARTS', () => {
       'word/comments.xml',
       'word/header1.xml',
       'word/footer3.xml',
+      // שמות שאינם מה ש-Word כותב אבל חוקיים ב-OPC: הוא נפתר דרך ה-rels ואינו
+      // מחייב ספרה, ושמות חלקים אינם תלויי רישיות.
+      'word/header.xml',
+      'word/footer.xml',
+      'word/document2.xml',
+      'Word/Document.xml',
     ]) {
       expect(CONTENT_PARTS.test(name)).toBe(true);
     }
@@ -399,6 +574,7 @@ describe('preflightSource', () => {
       source: undefined,
       fontTable: null,
       vba: NO_VBA,
+      notice: null,
     });
   });
 
@@ -414,6 +590,35 @@ describe('preflightSource', () => {
     // כאן: מסמך רגיל אינו אמור להיות נשמר כ-`.docm`.
     expect(vba.hasMacroPart).toBe(false);
     expect(vba.status).toBeNull();
+  });
+
+  it('מסמך שההדגשה בו הושלמה מדווח על כך למשתמש', async () => {
+    const withBoldCs = buildZip([
+      { name: SETTINGS_PART, content: SETTINGS_WITH_ZERO.replace('"0"', '"720"') },
+      {
+        name: 'word/styles.xml',
+        content: '<w:styles xmlns:w="ns"><w:style><w:rPr><w:bCs/></w:rPr></w:style></w:styles>',
+      },
+    ]);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(withBoldCs)),
+    );
+
+    const { notice } = await preflightSource('http://127.0.0.1:1/doc.docx');
+    expect(notice).toBe(COMPLEX_SCRIPT_BOLD_NOTICE);
+  });
+
+  it('תיקון שאינו נראה למשתמש אינו מדווח לו', async () => {
+    // `defaultTabStop` הוא ההפרש בין מסמך שנפתח למסמך שקופא, ואינו משנה דבר
+    // במסמך עצמו. שורת מצב שמדווחת על כל דבר היא שורת מצב שאיש אינו קורא.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(buildZip([{ name: SETTINGS_PART, content: SETTINGS_WITH_ZERO }]))),
+    );
+
+    const { notice } = await preflightSource('http://127.0.0.1:1/doc.docx');
+    expect(notice).toBeNull();
   });
 
   it('קריאה שנכשלה אינה מדווחת על מאקרו שלא נבדקו', async () => {

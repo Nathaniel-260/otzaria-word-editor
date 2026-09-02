@@ -44,7 +44,16 @@ vi.mock('../../src/engine/create-editor', () => ({
   OPEN_TIMEOUT_MS: 1_000,
 }));
 
-vi.mock('../../src/sessions/editor-swap', () => ({
+/**
+ * פריסה של המודול המקורי ודריסה של `createEditorSwap` בלבד — ולא factory
+ * שמחזיר תת-קבוצה של הייצואים. מוק חלקי נשבר בכל פעם שהמעטפת מתחילה להשתמש
+ * בייצוא נוסף מאותו מודול; כאן זה קרה כש-`documentScrollHost` התחיל לקרוא
+ * `HOST_CLASS`/`PENDING_CLASS`. והכשל שהוא מייצר אינו נראה כמו „חסר ייצוא”
+ * אלא כמו באג במוצר: הזריקה מבטלת את `onMounted` לפני שהסשן נפתח, ושלושים
+ * בדיקות נופלות על מיקוד. זו הסיבה שהתבנית אחידה בכל קבצי ההרכבה.
+ */
+vi.mock('../../src/sessions/editor-swap', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/sessions/editor-swap')>()),
   createEditorSwap: () => ({
     get current() {
       return stub.session;
