@@ -1,5 +1,7 @@
 import { defineConfig, type Plugin } from 'vite';
 import vue from '@vitejs/plugin-vue';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 /**
  * ל-WebView2 של Windows אין תמיכה ב-<script type="module"> מ-file:// ,
@@ -182,9 +184,64 @@ function inlineEngineWorkers(): Plugin {
   };
 }
 
+/**
+ * המילון התורני יוצא כנכס נפרד — לא לתוך `assets/app.js`.
+ *
+ * ה-build הוא IIFE אחד עם `inlineDynamicImports: true`, ולכן כל צורת `import`
+ * של הנתונים — כולל `await import()` — הייתה נבלעת לבאנדל הראשי: 1.3MB שכל
+ * משתמש פורס בעלייה בשביל תכונה שברירת המחדל שלה כבויה. הנכס הזה נטען
+ * בהזרקת `<script>` בזמן ריצה, ורק כשהמשתמש מדליק את הבדיקה — ראו
+ * `src/engine/spellcheck-dictionary.ts`, שם גם ההסבר למה `<script>` ולא
+ * `fetch` (‏`file://` עם origin opaque).
+ *
+ * הפלט הוא ליטרל תבנית (backtick) ולא `JSON.parse`: המילון הוא עברית, גרש
+ * וגרשיים בלבד — 29 תווים שאף אחד מהם אינו דורש escaping בליטרל תבנית —
+ * ולכן `\n` נשאר תו אחד במקום ארבעה בתים של `\\n`. ההפרש נמדד: 1.31MB מול
+ * 1.55MB לאותם נתונים בדיוק. `assertPackable` מוודא שההנחה הזאת מחזיקה, כי
+ * תו בודד שיברח (backtick, `$`, לוכסן הפוך) היה מייצר קובץ JS פגום — כלומר
+ * תוסף שנפרס ונשבר, ולא בנייה שנכשלת.
+ */
+function torahDictionaryAsset(): Plugin {
+  const FILE_NAME = 'assets/torah-dictionary.js';
+  const SOURCE = fileURLToPath(new URL('./src/data/torah-dictionary.txt', import.meta.url));
+  const GLOBAL = '__OTZARIA_TORAH_DICTIONARY__';
+  /** עברית, גרש וגרשיים ישרים, ומפריד השורות. שום דבר אחר. */
+  const PACKABLE = /^[\u05D0-\u05EA"'\n]+$/;
+
+  function build(): string {
+    const packed = readFileSync(SOURCE, 'utf8').replace(/\r\n?/g, '\n').trim();
+    if (!PACKABLE.test(packed)) {
+      throw new Error(
+        `${FILE_NAME}: המילון מכיל תו שאינו עברית/גרש/גרשיים — ליטרל תבנית אינו בטוח עבורו. ` +
+          'בדקו את src/data/torah-dictionary.txt.',
+      );
+    }
+    return `window.${GLOBAL} = \`${packed}\`;\n`;
+  }
+
+  return {
+    name: 'otzaria-torah-dictionary',
+
+    // בפיתוח אין `emitFile`, ולכן אותו תוכן בדיוק מוגש מהזיכרון — כדי
+    // שהמסלול שנבדק ידנית יהיה המסלול שנארז.
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        if (!req.url || req.url.split('?')[0] !== `/${FILE_NAME}`) return next();
+        res.setHeader('Content-Type', 'text/javascript; charset=utf-8');
+        res.end(build());
+      });
+    },
+
+    // `generateBundle` רץ ב-build בלבד; ב-dev ה-middleware שמעל הוא המסלול.
+    generateBundle() {
+      this.emitFile({ type: 'asset', fileName: FILE_NAME, source: build() });
+    },
+  };
+}
+
 export default defineConfig({
   base: './',
-  plugins: [vue(), inlineEngineWorkers(), deferredEntry()],
+  plugins: [vue(), torahDictionaryAsset(), inlineEngineWorkers(), deferredEntry()],
   worker: { format: 'iife' },
 
   // ברירת המחדל של Vite ב-build היא legalComments: 'none', והיא מוחקת את באנר
