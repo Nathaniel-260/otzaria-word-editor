@@ -31,8 +31,8 @@ autoUnmount();
 /**
  * מה שהבורר מציג בפועל ב-DOM.
  *
- * דרך `pickerValue` ולא דרך `<select>` ישירות: בורר הגופן הוא בורר חיפוש
- * (`input[role="combobox"]`) ושני האחרים נשארו `<select>` — וההבחנה הזאת
+ * דרך `pickerValue` ולא דרך `<select>` ישירות: בוררי הגופן והגודל הם
+ * `input[role="combobox"]` ומרווח השורות נשאר `<select>` — וההבחנה הזאת
  * אינה מה שהבדיקות כאן מודדות.
  */
 function shown(harness: ReturnType<typeof mountUi>, title: string): string {
@@ -113,6 +113,66 @@ describe('מסמך שדוחה את הפקודה', () => {
 
     expect(adapter.payloads('font-size')).toEqual([11, 11, 11]);
     expect(shown(harness, 'גודל גופן')).toBe('12');
+  });
+});
+
+/**
+ * Y-PLONI#14 סעיף א: „כאשר אני משנה כתב הסמן לא כותב, ולאחר שתי לחיצות על
+ * העכבר הוא חוזר לכתב הקודם ומאפשר לכתוב.”
+ *
+ * שני חצאי המשפט הם אותו גורם: תיבות הגופן הן `input`, הן לוקחות את המיקוד,
+ * ואיש לא החזיר אותו. ההקלדה הבאה נכנסה לרצועה („לא כותב”), והחזרה למסמך
+ * בלחיצת עכבר קבעה בחירה חדשה שמוחקת עיצוב שהוחל על סמן מכווץ („חוזר לכתב
+ * הקודם”).
+ *
+ * `focus({restoreSelection:true})` הוא מה שמכסה את שניהם, והוא נמדד כאן ולא
+ * מונח: כפיל המסמך מתעד את הקריאה ואת מה שהועבר לה.
+ */
+describe('המיקוד חוזר למסמך', () => {
+  it('אחרי בחירת גודל מהתיבה', async () => {
+    const harness = mountUi(HomeTab);
+    await settle();
+
+    await setPicker(harness.wrapper, 'גודל גופן', '13');
+    await settle();
+
+    expect(harness.superdoc.ops()).toContain('focus');
+    expect(harness.superdoc.inputs('focus')).toEqual([{ restoreSelection: true }]);
+  });
+
+  it('אחרי בחירת גופן מהתיבה', async () => {
+    const harness = mountUi(HomeTab);
+    await settle();
+
+    await setPicker(harness.wrapper, 'גופן', 'TaameyDavidCLM');
+    await settle();
+
+    expect(harness.superdoc.inputs('focus')).toEqual([{ restoreSelection: true }]);
+  });
+
+  it('וגם אחרי Escape בתיבה, בלי שהוחל דבר', async () => {
+    const harness = mountUi(HomeTab);
+    await settle();
+
+    const box = harness.wrapper.find('input[role="combobox"][data-tip-title="גודל גופן"]');
+    await box.trigger('focus');
+    await box.trigger('keydown', { key: 'Escape' });
+    await settle();
+
+    expect(harness.superdoc.ops()).toContain('focus');
+    expect(harness.adapter.payloads('font-size')).toEqual([]);
+  });
+
+  it('יציאה מהתיבה אינה מחזירה מיקוד — המשתמש כבר בחר לאן ללכת', async () => {
+    const harness = mountUi(HomeTab);
+    await settle();
+
+    const box = harness.wrapper.find('input[role="combobox"][data-tip-title="גודל גופן"]');
+    await box.trigger('focus');
+    await box.trigger('blur');
+    await settle();
+
+    expect(harness.superdoc.ops()).not.toContain('focus');
   });
 });
 

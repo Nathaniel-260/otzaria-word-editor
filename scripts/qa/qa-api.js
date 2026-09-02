@@ -131,7 +131,9 @@
       disabled: !!el.disabled,
       active: el.classList.contains('active'),
       pressed: el.getAttribute('aria-pressed'),
-      value: el.tagName === 'SELECT' ? el.value : undefined,
+      // גם INPUT: בוררי הגופן והגודל הם `input[role="combobox"]`, ושער
+      // שמדווח `undefined` על התיבה שלהם אינו יכול לאמת מה היא מציגה.
+      value: el.tagName === 'SELECT' || el.tagName === 'INPUT' ? el.value : undefined,
       rect: Q.rectOf(el),
       visible: !!Q.rectOf(el),
     };

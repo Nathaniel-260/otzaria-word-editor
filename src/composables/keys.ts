@@ -10,6 +10,7 @@ import type { CommandAdapter, CommandOutcome } from '../engine/command-adapter';
 import type { FontOptions } from '../engine/font-options';
 import type { StyleGalleryState } from '../engine/style-gallery';
 import type { ReadoutSelection } from '../engine/readout-hold';
+import type { FontMemory } from './use-font-controls';
 
 /** האדפטר של ה-session הפעיל. `null` עד שיש מסמך פתוח. */
 export const COMMAND_ADAPTER: InjectionKey<Ref<CommandAdapter | null>> = Symbol('commandAdapter');
@@ -50,6 +51,16 @@ export const FONT_OPTIONS: InjectionKey<Ref<FontOptions>> = Symbol('fontOptions'
  * מתי להירשם ומתי לשחרר. הקומפוננטה רואה מצב קריא בלבד.
  */
 export const STYLE_GALLERY: InjectionKey<Ref<StyleGalleryState>> = Symbol('styleGallery');
+
+/**
+ * הזיכרון של בוררי הגופן — „האחרון שהמנוע דיווח” ו„מה שנבחר וטרם נענה”.
+ *
+ * מפתח ולא מצב בתוך הפקד, מפני שאותם שני בוררים מופיעים בשני מקומות: הרצועה
+ * ותפריט הלחצן הימני. עותק פרטי לכל אחד מהם פירושו שברגע שהמנוע אינו מדווח
+ * ערך — כלומר מיד אחרי שהתפריט הזיז את הסמן — התפריט מציג ברירת מחדל בזמן
+ * שהרצועה מציגה את גופן המסמך. ראו use-font-controls.ts.
+ */
+export const FONT_MEMORY: InjectionKey<FontMemory> = Symbol('fontMemory');
 
 /**
  * מצב הבחירה כפי שהחזקת החיווי צריכה אותו (`ui.selection` דרך
