@@ -62,6 +62,7 @@
           :model-value="fonts.family.value"
           :options="fonts.familyOptions.value"
           :disabled="!fonts.familyEnabled.value"
+          :sample="fonts.sampleText.value"
           width="130px"
           title="גופן"
           @done="returnFocusToDocument"

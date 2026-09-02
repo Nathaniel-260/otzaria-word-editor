@@ -51,6 +51,7 @@
       :id="listId"
       ref="listRef"
       class="ribbon-combo-list"
+      :class="{ 'has-sample': showSample }"
       role="listbox"
       :style="[popoverStyle, { minWidth: listMinWidth }]"
     >
@@ -92,6 +93,21 @@
         role="presentation"
       >
         {{ menuString(emptyText) }}
+      </li>
+      <!--
+        פס הדגימה. `role="presentation"` ו-`aria-hidden` כמו `ribbon-combo-group`
+        ו-`ribbon-combo-empty` שמעליו: הוא חוזר על טקסט שהמשתמש עצמו סימן, ואין
+        בו מה להכריז. `dir="auto"` ולא ירושה — ראו ההסבר ב-CSS.
+      -->
+      <li
+        v-if="showSample"
+        class="ribbon-combo-sample"
+        role="presentation"
+        aria-hidden="true"
+        dir="auto"
+        :style="sampleFamily ? { fontFamily: sampleFamily } : undefined"
+      >
+        {{ sample }}
       </li>
     </ul>
   </div>
@@ -179,6 +195,14 @@ const props = withDefaults(
      * Medium” אינו נכנס ברוחב התיבה); רשימת מספרים אינה זקוקה לו.
      */
     listMinWidth?: string;
+    /**
+     * טקסט לפס הדגימה בתחתית הרשימה, בגופן שהסימון עומד עליו. `''` = אין פס.
+     *
+     * הפקד אינו יודע מאין הטקסט בא — בבורר הגופן זה הטקסט שהמשתמש סימן
+     * במסמך (`use-font-controls`), ובבורר הגודל אין פס כלל, מפני שאין מה
+     * להראות: „13” אינו נראה אחרת ב-13 נקודות.
+     */
+    sample?: string;
   }>(),
   {
     modelValue: '',
@@ -188,6 +212,7 @@ const props = withDefaults(
     normalize: undefined,
     emptyText: 'אין גופן בשם הזה',
     listMinWidth: '150px',
+    sample: '',
   },
 );
 
@@ -285,6 +310,24 @@ const highlighted = computed<string | null>(() => {
 });
 
 watch(highlighted, (value) => emit('preview', value));
+
+/**
+ * הגופן שפס הדגימה מצייר בו: מה שהסימון עומד עליו, ובהיעדר סימון — הגופן
+ * הנבחר, כדי שהפס לא יופיע ריק ברגע הפתיחה.
+ *
+ * `undefined` כשלאפשרות אין `preview` (כלומר בכל בורר שאינו גופנים) — ואז הפס
+ * פשוט מצייר בגופן הרגיל, ולא ב-`font-family: 13`.
+ */
+const sampleFamily = computed<string | undefined>(() => {
+  const value = highlighted.value ?? props.modelValue;
+  return props.options.find((option) => option.value === value)?.preview;
+});
+
+/**
+ * הפס מוצג רק כשיש גם טקסט וגם רשימה. על „אין גופן בשם הזה” אין לו מה לעשות:
+ * אין אפשרות מסומנת, ולכן אין גופן שהוא מדגים.
+ */
+const showSample = computed(() => props.sample !== '' && built.value.count > 0);
 
 /** התיבה מציגה את הגופן הנבחר בגופן שלו — כמו ב-Word. לא בזמן הקלדה. */
 const previewStyle = computed(() => {
@@ -604,5 +647,71 @@ watch(activeIndex, async (index) => {
   font-family: var(--font-main);
   font-size: 11px;
   color: var(--color-on-surface-variant);
+}
+
+/*
+  פס הדגימה — הטקסט שהמשתמש סימן במסמך, בגופן שהסימון עומד עליו.
+
+  ## למה `sticky` ולא שורה אחרונה
+
+  הרשימה נגללת (`overflow-y: auto`) ובתפריט ההקשר היא מגיעה עד קצה החלון. שורה
+  בסוף רשימה נגללת היא שורה שהמשתמש לא רואה מעולם — ודגימה שאינה נראית אינה
+  דגימה. `sticky` משאיר אותה במסך בלי מעטפת חדשה: ה-`<ul>` הזה הוא **עצמו**
+  אלמנט הפופאובר ש-`usePopoverPosition` ממקם ומודד, ומעטפת הייתה מחייבת להזיז
+  את ה-`ref` ואת המידות יחד איתה.
+
+  ## למה `dir="auto"` על האלמנט, ולא ירושה מהמעטפת
+
+  הדגימה היא הטקסט של המשתמש, והעורך הזה מחזיק גם ציטוטים לטיניים בתוך מסמך
+  עברי. במעטפת RTL, מחרוזת כמו „Hello world.” מקבלת את הנקודה **בקצה השמאלי**
+  של המחרוזת — כלומר הפיסוק בצד הלא נכון. `dir="auto"` פותר כל דגימה לפי
+  התו הראשון בעל כיווניות חזקה, ומשאיר עברית `rtl` כפי שהיא.
+
+  הקטיעה בשלוש נקודות היא הגיבוי לתקרת האורך שב-`use-font-controls`: היא חוסמת
+  פרק שלם, וזו חוסמת שורה אחת ארוכה.
+*/
+.ribbon-combo-sample {
+  position: sticky;
+  inset-block-end: 0;
+  /*
+    גובה מוצהר, ולא „מה שייצא”: הוא חייב להיות שווה ל-`scroll-padding-block-end`
+    למטה, ושני מספרים שנגזרים מגופן ומ-padding אינם שווים בשום מקום שאפשר
+    לבדוק. `nowrap` מבטיח שורה אחת, ולכן הגובה קבוע בפועל ולא רק בהצהרה.
+  */
+  box-sizing: border-box;
+  height: 34px;
+  padding: 6px 8px;
+  font-size: 14px;
+  color: var(--color-on-surface);
+  background: var(--color-surface-container-high);
+  border-block-start: 1px solid var(--word-group-border);
+  text-align: start;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/*
+  שני מספרים, ושני פגמים שנמדדו בכרום — לא הוסקו.
+
+  ## `padding-block-end: 0` — רצועת ארבעת הפיקסלים
+
+  ל-`.ribbon-combo-list` יש `padding: 4px 0`, ו-`sticky; inset-block-end: 0`
+  נצמד לתחתית **תיבת התוכן** ולא לתחתית ה-scrollport. נמדד: הפס נגמר ב-937
+  בזמן שהתחתית הפנימית היא 941, ובאותם 4 פיקסלים **הציצה שורה נגללת**
+  (‏`Arial Narrow`). איפוס המרווח כשיש פס מזיז את התחתית אליו, ומשאיר את
+  המרווח העליון — שם אין פס — כפי שהיה.
+
+  ## `scroll-padding-block-end` — השורה הפעילה מאחורי הפס
+
+  ה-`scrollIntoView({ block: 'nearest' })` שרודף אחרי הסימון (ה-`watch` על
+  `activeIndex`) מחנה את השורה הפעילה מתחת לפס: מבחינת הדפדפן היא „נראית”,
+  ומבחינת המשתמש היא מוסתרת. נמדד עם 30px — אחרי 31 חצים תחתית השורה הפעילה
+  ב-911 והפס מתחיל ב-903, כלומר 8 פיקסלים מאחוריו. הערך חייב להיות **גובה הפס
+  המלא**, ומכאן ההצהרה המשותפת.
+*/
+.ribbon-combo-list.has-sample {
+  padding-block-end: 0;
+  scroll-padding-block-end: 34px;
 }
 </style>

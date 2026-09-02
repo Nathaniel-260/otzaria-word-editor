@@ -87,21 +87,48 @@ import type { DocReceipt, MaybePromise } from './document-api';
  * שלה, כולל דגימת אותיות עבריות (`RibbonCombo`) — כלומר מה שהתצוגה החיה
  * הוסיפה הוא „בטקסט שלי”, לא „איך הגופן נראה”.
  *
- * ## מה יידרש כדי להדליק בחזרה
+ * ## ומה שנמדד אחר כך: גם כשמסלול חסר-היסטוריה נמצא, זה לא הספיק
  *
- * שני אלה יחד, ושניהם בצד המנוע:
- *   1. אפשרות מתועדת ב-`MutationOptions` שאינה רושמת צעד היסטוריה;
- *   2. דרך להסיר `fontFamily` מהריצה (החזרה לירושה), ולא רק לקבוע ערך.
+ * שלוש הנקודות למעלה נכונות ל-`format.apply`, אבל הן **אינן** הסיפור המלא:
+ * ל-superdoc 2 יש משטח הרחבות ציבורי עם ספק דקורציות render-only
+ * (`ctx.visuals.highlight`), ודרכו נמדדו אפס דרגות undo, אפס `onEditorUpdate`
+ * ו-docx **זהה בייט-בבייט** — כלומר כל מה שהרג את המסלול הזה נפתר שם.
  *
- * עד אז המודולים כאן נשארים במקומם ובדוקים: מה שחסר הוא ה-API, לא הקוד.
+ * ובכל זאת אינו נשלח, משתי סיבות שאין להן גידור בצד שלנו:
+ *   1. **המנוע אינו זורם מחדש.** הריצה גדלה במקום, השורה מתארכת מעבר לטור
+ *      ומה שלא נכנס נחתך בקצה העמוד — נמדד 237px גלישה ו-141px מחוץ לעמוד.
+ *   2. **הצביעה גסה מן הבחירה.** בחירה של 9 תווים בתוך ריצה של 23 צובעת את כל
+ *      23, בזמן שהלחיצה תשנה 9. תצוגה שמראה שינוי רחב פי שניים וחצי ממה
+ *      שיקרה היא הטעיה, וזה גרוע מאין תצוגה.
+ *
+ * הרשומה המלאה, כולל מה ש-`::highlight()` אינו יכול לעשות ומה שנשלל בכרום
+ * 152, ב-`docs/engine-gaps.md` („תצוגה חיה של גופן”).
+ *
+ * ## מה נשלח במקום
+ *
+ * תצוגה שאינה במסמך: פס דגימה בתחתית רשימת הגופנים, שמציג את הטקסט הנבחר של
+ * המשתמש בגופן שמרחפים עליו. הוא נאמן מפני שאין בו עימוד לשקר עליו, והוא נשען
+ * על `readSelectionText` כאן — קריאה טהורה, בלי מגע במסמך.
+ *
+ * המודולים של המסלול הכבוי נשארים במקומם ובדוקים, כתיעוד מדוד של מה שנשלל.
  * המפסק נבדק ב-`tests/unit/font-preview.test.ts` („המפסק”).
  */
 export const FONT_PREVIEW_ENABLED = false;
 
-/** מה שנקרא מ-`doc.selection.current()`. שני השדות אופציונליים — מגיע מהמנוע. */
+/** מה שנקרא מ-`doc.selection.current()`. הכול אופציונלי — מגיע מהמנוע. */
 interface SelectionInfoLike {
   empty?: boolean;
   selectionTarget?: unknown;
+  /** מגיע רק עם `includeText: true` — ראו `readSelectionText`. */
+  text?: string;
+}
+
+/**
+ * `includeText` הוא opt-in של המנוע, ולא ברירת מחדל, מטעמי ביצועים. הפרמטר
+ * אופציונלי כאן מפני ש-`captureRange` קורא בלעדיו — הוא צריך כתובת, לא טקסט.
+ */
+interface SelectionQuery {
+  includeText?: boolean;
 }
 
 /**
@@ -110,7 +137,7 @@ interface SelectionInfoLike {
  */
 export interface FontPreviewDocumentApi {
   selection?: {
-    current?: () => MaybePromise<SelectionInfoLike | undefined>;
+    current?: (query?: SelectionQuery) => MaybePromise<SelectionInfoLike | undefined>;
   };
   format?: {
     apply?: (input: { target: unknown; inline: Record<string, unknown> }) => MaybePromise<DocReceipt>;
@@ -145,6 +172,37 @@ export async function captureRange(host: FontPreviewTarget): Promise<unknown | n
   } catch (error) {
     console.warn('[otzaria-word] תפיסת הטווח לתצוגה החיה של הגופן נכשלה', error);
     return null;
+  }
+}
+
+/**
+ * הטקסט שהמשתמש סימן, לפס הדגימה שבתחתית רשימת הגופנים.
+ *
+ * ## למה זה בטוח, ולמה זה מה שנשלח
+ *
+ * `selection.current` היא הקריאה היחידה כאן, והיא **קריאה בלבד** — נמדד
+ * בכרום אמיתי: 1ms, ו-`history.get()` זהה לפניה ואחריה. זה ההבדל היחיד, וגם
+ * המכריע, בין הפס לבין המסלול הכבוי שמעליו: אותה שאלה („איך הטקסט שלי ייראה
+ * בגופן הזה”), בלי מוטציה, בלי דרגת undo ובלי שמירה מתוזמנת.
+ *
+ * ⚠️ `includeText: true` הוא חובה ולא אופטימיזציה. בלעדיו המנוע אינו מחזיר
+ * `text` כלל — הוא חוסך את האיסוף בכוונה — וההיעדר נראה בדיוק כמו „הבחירה
+ * ריקה”.
+ *
+ * `''` בכל כשל, ולא `null`: הקורא מציג ממילא משפט ברירת מחדל כשאין טקסט
+ * מסומן, ושתי צורות של „אין” היו שני מסלולים לאותה תצוגה אחת.
+ */
+export async function readSelectionText(host: FontPreviewTarget): Promise<string> {
+  const current = docOf(host)?.selection?.current;
+  if (typeof current !== 'function') return '';
+
+  try {
+    const info = await current({ includeText: true });
+    if (!info || info.empty === true) return '';
+    return typeof info.text === 'string' ? info.text : '';
+  } catch (error) {
+    console.warn('[otzaria-word] קריאת הטקסט המסומן לפס הדגימה נכשלה', error);
+    return '';
   }
 }
 

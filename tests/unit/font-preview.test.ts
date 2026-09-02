@@ -11,7 +11,12 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createFontPreview, FONT_PREVIEW_DELAY_MS, type FontPreviewDeps } from '../../src/composables/font-preview';
-import { captureRange, paintFamily, FONT_PREVIEW_ENABLED } from '../../src/engine/font-preview';
+import {
+  captureRange,
+  paintFamily,
+  readSelectionText,
+  FONT_PREVIEW_ENABLED,
+} from '../../src/engine/font-preview';
 
 /** טווח מזויף. זהות בלבד — אף אחד מהצדדים אינו מסתכל בתוכו. */
 const RANGE = { range: 'selection-target' };
@@ -273,7 +278,11 @@ describe('התצוגה החיה — סגירה', () => {
 /* ------------------------------------------------------------------ */
 
 interface FakeDoc {
-  selection?: { current?: () => { empty?: boolean; selectionTarget?: unknown } | undefined };
+  selection?: {
+    current?: (query?: { includeText?: boolean }) =>
+      | { empty?: boolean; selectionTarget?: unknown; text?: string }
+      | undefined;
+  };
   format?: {
     apply?: (input: { target: unknown; inline: Record<string, unknown> }) => {
       success?: boolean;
@@ -314,6 +323,66 @@ describe('captureRange', () => {
       }),
     );
     expect(got).toBeNull();
+    warn.mockRestore();
+  });
+});
+
+/**
+ * הקריאה שפס הדגימה נשען עליה — ומה שמפריד אותה מכל השאר בקובץ הזה: היא
+ * **קריאה**. אין לה מסלול שנוגע במסמך, ולכן אין לה מה להחזיר ואין לה מה לשבור.
+ */
+describe('readSelectionText', () => {
+  it('מחזירה את הטקסט המסומן', async () => {
+    const got = await readSelectionText(
+      host({ selection: { current: () => ({ empty: false, text: 'בראשית ברא' }) } }),
+    );
+    expect(got).toBe('בראשית ברא');
+  });
+
+  /**
+   * ⚠️ הדגל אינו אופטימיזציה. בלעדיו המנוע חוסך את איסוף הטקסט ואינו מחזיר
+   * `text` כלל — וההיעדר נראה בדיוק כמו „הבחירה ריקה”, כלומר פס שמציג לנצח את
+   * משפט ברירת המחדל בזמן שיש בחירה.
+   */
+  it('מבקשת `includeText` במפורש', async () => {
+    const current = vi.fn(() => ({ empty: false, text: 'שלום' }));
+    await readSelectionText(host({ selection: { current } }));
+    expect(current).toHaveBeenCalledWith({ includeText: true });
+  });
+
+  it('סמן מכווץ — מחרוזת ריקה', async () => {
+    const got = await readSelectionText(
+      host({ selection: { current: () => ({ empty: true, text: 'לא אמור לחזור' }) } }),
+    );
+    expect(got).toBe('');
+  });
+
+  it('מנוע שמתעלם מהדגל ואינו מחזיר `text` — מחרוזת ריקה, ולא נפילה', async () => {
+    const got = await readSelectionText(
+      host({ selection: { current: () => ({ empty: false, selectionTarget: {} }) } }),
+    );
+    expect(got).toBe('');
+  });
+
+  it('גרסה בלי `selection.current` אינה מפילה דבר', async () => {
+    expect(await readSelectionText(host({}))).toBe('');
+    expect(await readSelectionText(host(null))).toBe('');
+    expect(await readSelectionText(null)).toBe('');
+  });
+
+  it('קריאה שנפלה — מחרוזת ריקה, והכשל נרשם ואינו מתפשט', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const got = await readSelectionText(
+      host({
+        selection: {
+          current: () => {
+            throw new Error('המנוע נפל');
+          },
+        },
+      }),
+    );
+    expect(got).toBe('');
+    expect(warn).toHaveBeenCalled();
     warn.mockRestore();
   });
 });

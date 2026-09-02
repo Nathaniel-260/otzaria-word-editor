@@ -39,9 +39,10 @@ import { DOCUMENT_GENERATION, FONT_MEMORY, READOUT_SELECTION } from './keys';
 import { useCommand } from './useCommand';
 import { useFontOptions } from './useFontOptions';
 import { createFontPreview } from './font-preview';
+import { createFontSample } from './font-sample';
 import { applyOptimistically, withCurrent, type PickerOption } from './picker-value';
 import { ACTIVE_SUPERDOC } from '../engine/document-api';
-import { captureRange, paintFamily } from '../engine/font-preview';
+import { captureRange, paintFamily, readSelectionText } from '../engine/font-preview';
 import { UNSETTLED_SELECTION } from '../engine/readout-hold';
 import {
   DEFAULT_FONT_SIZE_PT,
@@ -111,6 +112,15 @@ export interface FontControls {
   hoverFamily: (family: string | null) => void;
   /** רשימת הגופנים נסגרה. `committed` = נבחר גופן, ולכן אין מה להחזיר. */
   endHoverFamily: (committed: boolean) => void;
+  /**
+   * מה שפס הדגימה בתחתית רשימת הגופנים מציג — הטקסט המסומן של המשתמש, או
+   * משפט ברירת מחדל כשאין בחירה.
+   *
+   * זו התצוגה **שכן נשלחת**, בשונה מ-`hoverFamily` שמעליה: היא עונה על אותה
+   * שאלה („איך זה ייראה בטקסט שלי”) בלי לגעת במסמך. ההנמקה המלאה, כולל מה
+   * שנמדד ונשלל בצביעה במסמך, ב-`engine/font-preview.ts`.
+   */
+  sampleText: ComputedRef<string>;
 }
 
 export function useFontControls(): FontControls {
@@ -271,6 +281,25 @@ export function useFontControls(): FontControls {
    */
   onUnmounted(() => preview.end(false));
 
+  /**
+   * פס הדגימה. שני האותות שמזיזים אותו הם בדיוק אלה שמזיזים את התצוגה החיה
+   * הכבויה — הסימון זז, והרשימה נסגרה — ולכן הם עוברים דרך אותן שתי פונקציות.
+   *
+   * הפרדה מלאה הייתה מחייבת את הפקד לפלוט „נפתחתי” בנפרד, וזו פליטה שלישית
+   * לאותו מידע. ראו `composables/font-sample.ts`.
+   */
+  const sample = createFontSample({ read: () => readSelectionText(host.value) });
+
+  function hoverFamily(family: string | null): void {
+    if (family !== null) sample.begin();
+    preview.hover(family);
+  }
+
+  function endHoverFamily(committed: boolean): void {
+    sample.end();
+    preview.end(committed);
+  }
+
   return {
     familyOptions,
     sizeOptions,
@@ -283,7 +312,8 @@ export function useFontControls(): FontControls {
     normalizeSize,
     grow: () => applySize(grownFontSize(sizePt.value)),
     shrink: () => applySize(shrunkFontSize(sizePt.value)),
-    hoverFamily: preview.hover,
-    endHoverFamily: preview.end,
+    hoverFamily,
+    endHoverFamily,
+    sampleText: sample.text,
   };
 }
