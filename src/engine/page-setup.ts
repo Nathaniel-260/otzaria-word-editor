@@ -384,6 +384,8 @@ async function applyToSections(
   pick: (sections: Sections) => ((section: SectionItem, target: unknown) => MaybePromise<DocReceipt>) | null,
   /** בדיקה לפני הכתיבה. מחרוזת = סירוב, עם הנימוק שיוצג למשתמש. */
   guard?: (section: SectionItem) => string | null,
+  /** הודעת-מידע על הצלחה, נגזרת מהמקטעים שנכתבו בפועל. */
+  note?: (sections: readonly SectionItem[]) => string | undefined,
 ): Promise<CommandOutcome> {
   const doc = (host as PageSetupHost | null | undefined)?.activeEditor?.doc;
   if (!doc) return unavailable(failedAction, 'המסמך עדיין נטען', 'document-api-unavailable');
@@ -427,7 +429,8 @@ async function applyToSections(
     }
   }
 
-  return { ok: true };
+  const info = note?.(targets);
+  return info ? { ok: true, note: info } : { ok: true };
 }
 
 export function findMarginPreset(id: string): MarginPreset | undefined {
@@ -792,6 +795,37 @@ export function applyPaperSize(
   );
 }
 
+/**
+ * מה שצריך לומר למשתמש כששתי עמודות ומעלה נפתחות במקטע עברי.
+ *
+ * המנוע ממלא את הטורים שמאל→ימין גם כשב-`sectPr` יש `w:bidi`, בעוד
+ * ECMA-376 §17.6.1 קובע ש-`w:bidi` הוא שמכריע את סידור הטורים — כלומר
+ * שהעמודה הראשונה שייכת לצד **ימין**. הפער נמדד ב-QA
+ * (`scripts/qa/column-selection-probe.mjs`): שורה 01 נוחתת בטור השמאלי,
+ * וגרירה בסדר הקריאה — מימין ואז שמאלה — מוחקת את מה שכבר סומן, מפני
+ * שהטור הימני הוא השני בסדר המסמך והגרירה שמאלה הולכת אחורה.
+ *
+ * הנזק הוא בתצוגה ובאינטראקציה בלבד. הייצוא נכון, ונמדד: ה-`sectPr` יוצא
+ * עם `w:bidi` ועם `<w:cols w:num="2"/>`, כך שהקובץ נפתח נכון ב-Word. לכן
+ * הפעולה מצליחה ומלווה בהודעה, ולא נחסמת — חסימה הייתה מונעת מהמשתמש
+ * לייצר מסמך תקין בגלל באג בציור.
+ *
+ * `undefined` כשאין מה לומר: עמודה אחת אינה מסודרת בטורים כלל, ומקטע LTR
+ * מצויר נכון כמו שהוא.
+ *
+ * מיוצאת מפני שהניסוח הוא העיקר כאן, והוא נבדק בלי מנוע.
+ *
+ * להסרה כשהתיקון במנוע יגיע לגרסה שהתוסף נועל — ראו `docs/engine-gaps.md`.
+ */
+export function rtlColumnNote(
+  count: number,
+  sections: readonly Pick<SectionItem, 'sectionDirection'>[],
+): string | undefined {
+  if (count < 2) return undefined;
+  if (!sections.some((section) => section.sectionDirection === 'rtl')) return undefined;
+  return 'העמודה הראשונה מצוירת בצד שמאל, וגם הסימון עובר שמאל→ימין. הקובץ נשמר נכון.';
+}
+
 export function applyColumns(
   host: PageSetupTarget,
   count: number,
@@ -814,7 +848,9 @@ export function applyColumns(
         gap: twipsToInches(COLUMN_GAP_TWIPS),
         equalWidth: true,
       });
-  });
+  },
+  undefined,
+  (sections) => rtlColumnNote(count, sections));
 }
 
 /* ------------------------------------------------------------------ */

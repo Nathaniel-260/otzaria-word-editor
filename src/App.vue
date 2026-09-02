@@ -891,6 +891,15 @@ function setStatus(text: string, isError = false): void {
 }
 
 /**
+ * ההודעה האחרונה שהוצגה מ-`outcome.note`, כדי שאפשר יהיה לנקות אותה.
+ *
+ * פקודה מוצלחת בלי הודעה מנקה אותה — אבל **רק אם היא עדיין זו שעל המסך**.
+ * „עמודות ← אחת” אחרי „עמודות ← שתיים” חייבת להסיר הודעה שהפכה לשקר, ובלי
+ * ההשוואה הזאת הייתה מוחקת גם הודעה תקינה שמישהו אחר כתב בינתיים.
+ */
+let lastCommandNote: string | null = null;
+
+/**
  * כל פקד ב-Ribbon מדווח לכאן דרך useCommand. עד עכשיו הפקדים עשו
  * `void cmd.run()` וזרקו את התוצאה, ולכן „יש למקם את הסמן במסמך” או „הפעולה
  * אינה נתמכת בגרסה הזאת של המנוע” לא הגיעו למשתמש אף פעם — הכפתור פשוט נראה
@@ -904,6 +913,15 @@ function reportCommand(outcome: CommandOutcome, commandId: string): void {
   }
   // הצלחה מנקה שגיאה קודמת שנשארה על המסך, ולא דורסת הודעה תקינה.
   if (isStatusError.value) setStatus('');
+
+  // הצלחה שיש עליה מה לומר — ראו `CommandOutcome.note` ב-engine/command-adapter.ts.
+  if (outcome.note) {
+    setStatus(outcome.note);
+    lastCommandNote = outcome.note;
+  } else if (lastCommandNote !== null && statusText.value === lastCommandNote) {
+    setStatus('');
+    lastCommandNote = null;
+  }
 
   /**
    * „גבולות עמוד” — נמדד ב-QA: `applyPageBorders`/`clearPageBorders`
