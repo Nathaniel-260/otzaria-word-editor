@@ -52,7 +52,7 @@
       ref="listRef"
       class="ribbon-combo-list"
       role="listbox"
-      :style="popoverStyle"
+      :style="[popoverStyle, { minWidth: listMinWidth }]"
     >
       <template
         v-for="(row, i) in built.rows"
@@ -69,11 +69,16 @@
           v-else
           :id="optionId(row.index)"
           class="ribbon-combo-option"
-          :class="{ active: row.index === activeIndex, chosen: row.option.value === modelValue }"
+          :class="{
+            active: row.index === activeIndex,
+            chosen: row.option.value === modelValue,
+            hebrew: row.option.hebrew === true,
+          }"
           role="option"
           :aria-selected="row.option.value === modelValue"
           :data-value="row.option.value"
           :data-group="row.option.group ?? ''"
+          :aria-label="row.option.hebrew ? menuString(row.option.label) : undefined"
           :style="row.option.preview ? { fontFamily: row.option.preview } : undefined"
           @mousedown.prevent="choose(row.option.value)"
           @mousemove="activeIndex = row.index"
@@ -86,7 +91,7 @@
         class="ribbon-combo-empty"
         role="presentation"
       >
-        {{ menuString('אין גופן בשם הזה') }}
+        {{ menuString(emptyText) }}
       </li>
     </ul>
   </div>
@@ -111,8 +116,39 @@
  *
  * ההכרעות שאינן חיווט — מה נחשב התאמה, מה מדורג לפני מה, ומה Enter מחיל —
  * יושבות ב-`../font-search.ts` ונבדקות שם ישירות.
+ *
+ * ## שני מצבים: „בחר מהרשימה” ו„הקלד ערך”
+ *
+ * בבורר הגופן הרשימה היא **המלאי**: שם שאינו בה הוא כמעט תמיד שגיאת הקלדה,
+ * ולכן Enter מחיל את ההתאמה המדורגת ראשונה. בבורר הגודל הרשימה היא **הצעה**:
+ * 13pt הוא גודל לגיטימי לגמרי שפשוט אינו בסולם של Word, ומי שהקליד אותו
+ * מתכוון אליו ולא ל-10 (ההתאמה הראשונה ל„1”).
+ *
+ * `normalize` הוא מה שמפריד ביניהם — פקד שמקבל אותו מחיל את מה שהוקלד, אחרי
+ * שהקורא נרמל אותו (טווח, עיגול). בלעדיו ההתנהגות היא בורר השמות שהייתה כאן
+ * מלכתחילה.
+ *
+ * ## הדגימה העברית, ולמה היא פסאודו-אלמנט
+ *
+ * שם לטיני של גופן עברי אינו מראה דבר: „Narkisim” ב-Narkisim ו„Gisha” ב-Gisha
+ * נראים שניהם כמו אנגלית, ומי שמחפש כתב לספר עברי בוחר לפי שם. לכן שורה של
+ * גופן שמכסה עברית (`option.hebrew`, נקבע ב-engine/font-options.ts) מקבלת לפני
+ * השם כמה אותיות עבריות **בגופן של השורה עצמה**.
+ *
+ * הדגימה היא `::before` בגיליון ולא `<span>` בתבנית, וזה עניין של מחיר: הרשימה
+ * מגיעה למאות שורות, ו-`<span>` היה מוסיף לכל אחת מהן צומת DOM, קישור מחרוזת
+ * ו-patch של Vue. כאן אין אף אחד מהשלושה — התבנית מוסיפה מחלקה אחת, וכל השאר
+ * הוא כלל CSS יחיד עם טקסט קבוע.
+ *
+ * ומה שאין בה גם כן במחיר: הגופן של השורה **כבר** נפתר בשביל השם, ולכן ארבע
+ * אותיות נוספות ממנו אינן טעינה חדשה אלא רסטור של ארבעה גליפים. זו גם הסיבה
+ * שהדגימה מותנית בכיסוי: בגופן שאין בו עברית היא הייתה נופלת ל-fallback —
+ * כלומר מציגה את האותיות של גופן אחר תחת השם הזה, וזה גרוע מכלום.
+ *
+ * `aria-label` על השורה העברית: Chrome מכליל תוכן של `::before` בשם הנגיש,
+ * וקורא מסך היה מכריז „אבגד Narkisim”. הדגימה היא מראה בלבד, והשם הוא השם.
  */
-import { computed, nextTick, ref, watch } from 'vue';
+import { computed, nextTick, ref, shallowRef, watch } from 'vue';
 import { usePopoverPosition } from '../../../composables/popover-position';
 import SvgIcon from '../../icons/SvgIcon.vue';
 import { menuString } from '../i18n';
@@ -131,17 +167,59 @@ const props = withDefaults(
     width?: string;
     disabled?: boolean;
     title?: string;
+    /**
+     * הופך את הפקד לתיבת **ערך**: מה שהוקלד מוחל אחרי שהפונקציה נרמלה אותו,
+     * ו-`null` ממנה = אין מה להחיל, התיבה חוזרת לערך שהיה. ראו `commitValue`.
+     */
+    normalize?: (typed: string) => string | null;
+    /** מה שמוצג כשלשאילתה אין אף התאמה. */
+    emptyText?: string;
+    /**
+     * רוחב מזערי לרשימה. ברירת המחדל היא רוחב שם גופן („Franklin Gothic
+     * Medium” אינו נכנס ברוחב התיבה); רשימת מספרים אינה זקוקה לו.
+     */
+    listMinWidth?: string;
   }>(),
   {
     modelValue: '',
     width: 'auto',
     disabled: false,
     title: '',
+    normalize: undefined,
+    emptyText: 'אין גופן בשם הזה',
+    listMinWidth: '150px',
   },
 );
 
 const emit = defineEmits<{
   (e: 'update:modelValue', val: string): void;
+  /**
+   * הסימון ברשימה עבר לאפשרות הזאת. `null` = אין סימון, או שהרשימה נסגרה.
+   *
+   * הפקד אינו יודע מה עושים עם זה — בבורר הגופן זו התצוגה החיה על המסמך
+   * (composables/font-preview.ts), ובבורר הגודל אין מאזין בכלל. פקד שהיה מחיל
+   * בעצמו היה גם צריך לדעת מה להחזיר, וזה כבר לא חיווט.
+   */
+  (e: 'preview', val: string | null): void;
+  /** הרשימה נסגרה. `true` = נבחרה אפשרות, ולכן אין מה להחזיר. */
+  (e: 'previewEnd', committed: boolean): void;
+  /**
+   * המשתמש סיים עם הפקד — אישר ערך, או ויתר ב-Escape.
+   *
+   * למה זה קיים: הפקד הזה הוא `input`, ולכן בניגוד לכפתורי הרצועה (שמונעים
+   * את ברירת המחדל ב-`pointerdown` ולעולם אינם לוקחים מיקוד) הוא **חייב**
+   * לקחת אותו. מי שמרכיב אותו צריך להחזיר אותו למסמך; בלי זה ההקלדה הבאה
+   * נכנסת לתיבה שברצועה ולא לטקסט — „הסמן לא כותב” שדווח ב-Y-PLONI#14 סעיף א.
+   *
+   * נפלט **לפני** `update:modelValue`, כדי שההחלה תרוץ על מסמך שכבר ממוקד —
+   * אותו סדר של `use-context-menu.ts` (`run()`). מה שנמדד, ובניגוד למה
+   * שהיה כתוב כאן: הסדר עצמו **אינו** מה שמציל את העיצוב. תיבת הגודל שבתפריט
+   * ההקשר מחילה לפני שהמיקוד חוזר, והעיצוב שורד גם שם
+   * (`scripts/qa/context-font-focus-probe.mjs`). הקריטי הוא שהמיקוד יחזור
+   * **בכלל**: בלעדיו החזרה למסמך היא לחיצת העכבר של המשתמש, ולחיצה קובעת
+   * בחירה חדשה — וזו מה שמוחקת עיצוב שהוחל על סמן מכווץ.
+   */
+  (e: 'done'): void;
 }>();
 
 const rootRef = ref<HTMLElement | null>(null);
@@ -177,7 +255,36 @@ const listId = `${uid}-list`;
 const optionId = (index: number) => `${uid}-opt-${index}`;
 
 const shown = computed(() => query.value ?? props.modelValue);
-const built = computed(() => buildComboRows(props.options, query.value ?? ''));
+
+/**
+ * האפשרויות כפי שהיו ברגע הפתיחה — והרשימה אינה מסתכלת על אחרות עד שתיסגר.
+ *
+ * זו רגרסיה שנצפתה, ולא זהירות: המנוע מרכיב את קבוצת „אחרונים” מהגופנים
+ * שהמסמך משתמש בהם, והתצוגה החיה משנה בדיוק את זה. כלומר כל שורה שרוחפים
+ * מעליה קופצת אחרי רגע לראש הרשימה — והשורה שמתחת לעכבר מתחלפת באמצע התנועה.
+ * מי שרצה את השורה השלישית לחץ על משהו אחר לגמרי.
+ *
+ * ההקפאה נכונה גם בלי התצוגה החיה: רשימה נפתחת שמשנה סדר תחת היד היא רשימה
+ * שאי אפשר לכוון אליה. מנייה שנוחתת בזמן שהיא פתוחה תיראה בפתיחה הבאה.
+ */
+const frozen = shallowRef<readonly ComboOption[] | null>(null);
+const built = computed(() => buildComboRows(frozen.value ?? props.options, query.value ?? ''));
+
+/**
+ * מה שהסימון עומד עליו, כל עוד הרשימה פתוחה.
+ *
+ * `computed` ולא פליטה מכל אתר שמזיז את הסימון, ואלה חמישה: פתיחה, חץ, עכבר,
+ * הקלדה וסגירה. חמש פליטות היו חמש הזדמנויות לשכוח אחת.
+ */
+const highlighted = computed<string | null>(() => {
+  if (!open.value) return null;
+  for (const row of built.value.rows) {
+    if (row.type === 'option' && row.index === activeIndex.value) return row.option.value;
+  }
+  return null;
+});
+
+watch(highlighted, (value) => emit('preview', value));
 
 /** התיבה מציגה את הגופן הנבחר בגופן שלו — כמו ב-Word. לא בזמן הקלדה. */
 const previewStyle = computed(() => {
@@ -196,16 +303,24 @@ function indexOfCurrent(): number {
 
 function openList(): void {
   if (props.disabled) return;
+  frozen.value = props.options;
   open.value = true;
   // נפתח על הגופן הנוכחי ולא על ראש הרשימה: זה מה שמאפשר לפתוח, ללחוץ חץ
   // פעם אחת ולקבל את השכן — במקום לקפוץ ל-Assistant מכל מקום.
   activeIndex.value = indexOfCurrent();
 }
 
-function closeList(): void {
+/**
+ * `committed` הוא ההבדל בין „בחרתי” לבין „יצאתי”: הראשון משאיר את מה שהוחל,
+ * והשני מחזיר את מה שהיה. ברירת המחדל היא היציאה — Esc, `blur`, ולחיצה על
+ * החץ — מפני שהיא הרוב, ומפני שהיא גם הצד שבו טעות עולה במסמך.
+ */
+function closeList(committed = false): void {
   open.value = false;
   activeIndex.value = -1;
   query.value = null;
+  frozen.value = null;
+  emit('previewEnd', committed);
 }
 
 function toggle(): void {
@@ -230,7 +345,8 @@ function onArrowClick(event: MouseEvent): void {
 }
 
 function choose(value: string): void {
-  closeList();
+  closeList(true);
+  emit('done');
   if (value !== props.modelValue) emit('update:modelValue', value);
 }
 
@@ -252,7 +368,11 @@ function onInput(event: Event): void {
   open.value = true;
   // ראש התוצאות ולא „אין סימון”: אחרי הקלדה ההתאמה הראשונה היא מה שמדורג
   // הכי גבוה, ו-Enter אמור להחיל אותה בלי חץ נוסף.
-  activeIndex.value = built.value.count > 0 ? 0 : -1;
+  //
+  // בתיבת ערך (`normalize`) זה הפוך בדיוק: סימון אוטומטי היה גורם ל-Enter
+  // להחיל את „10” על מי שהקליד „13”. שם הרשימה נשארת הצעה בלבד עד שבוחרים
+  // בה בחץ או בעכבר.
+  activeIndex.value = props.normalize ? -1 : built.value.count > 0 ? 0 : -1;
 }
 
 function onKeydown(event: KeyboardEvent): void {
@@ -263,13 +383,15 @@ function onKeydown(event: KeyboardEvent): void {
     event.stopPropagation();
     event.preventDefault();
     closeList();
+    // גם ויתור הוא סיום: מי שלחץ Escape רוצה לחזור לכתוב, לא להישאר בתיבה.
+    emit('done');
     return;
   }
 
   if (event.key === 'Enter') {
     if (!open.value) return;
     event.preventDefault();
-    const value = commitValue(built.value, activeIndex.value, query.value ?? '');
+    const value = commitValue(built.value, activeIndex.value, query.value ?? '', props.normalize);
     if (value !== null) choose(value);
     else closeList();
     return;
@@ -371,7 +493,7 @@ watch(activeIndex, async (index) => {
   padding: 4px 0;
   /* רחב מהתיבה בכוונה: „Franklin Gothic Medium” אינו נכנס ב-130 פיקסלים. */
   width: max-content;
-  min-width: 150px;
+  /* `min-width` מגיע מ-`listMinWidth` — רשימת גדלים צרה מרשימת שמות. */
   max-width: 260px;
   overflow-y: auto;
   list-style: none;
@@ -394,16 +516,74 @@ watch(activeIndex, async (index) => {
   border-block-start: none;
 }
 
+/*
+  גובה קבוע, ו-flex — שניהם בשביל הדגימה.
+
+  הדגימה גדולה מהשם, ובזרימת שורה רגילה הגובה נגזר מהגליפים: הבסיס של קופסה
+  פנימית גבוהה נדחף כלפי מטה, וכל שורה יוצאת בגובה מעט אחר לפי הגופן שלה
+  (נמדד: 28, 29 ו-30 פיקסלים באותה רשימה). רשימה שנעה בפיקסל בין שורה לשורה
+  נראית רועדת בגלילה.
+
+  `align-items: baseline` הוא מה ששומר על ההיגיון החזותי: הדגימה והשם יושבים
+  על אותו קו בסיס, בדיוק כמו בזרימת טקסט — רק בלי שהגובה תלוי בהם.
+
+  `box-sizing: border-box` גלובלי (styles/shell.css), ולכן הגובה בולע את הריפוד.
+*/
 .ribbon-combo-option {
+  display: flex;
+  align-items: baseline;
+  height: 28px;
   padding: 3px 8px;
   font-size: 12px;
+  line-height: 22px;
   color: var(--color-on-surface);
   cursor: pointer;
   white-space: nowrap;
 }
 
+/*
+  הגופן שמוחל כרגע — בצבע, ולא במשקל.
+
+  `font-weight: 600` היה כאן, וזה מה שדווח: התצוגה החיה משנה את הגופן שהמנוע
+  מדווח, כלומר הסימון הזה נודד לשורה שרוחפים מעליה — ומשקל שמתחלף משנה רוחב,
+  כלומר השורות קופצות תחת העכבר. צבע נושא בדיוק את אותה ידיעה בלי לגעת
+  בפריסה.
+*/
 .ribbon-combo-option.chosen {
-  font-weight: 600;
+  color: var(--word-blue);
+}
+
+/*
+  הדגימה העברית — ההסבר למה היא כאן ולא בתבנית בראש הקומפוננטה.
+
+  התוכן במרכאות כפולות ובכוונה: מחרוזת עברית בגרשיים בתוך `src/ui/ribbon`
+  נסרקת בידי tests/unit/menu-locale-coverage.test.ts כמחרוזת תפריט שחייבת
+  תרגום, וזו אינה כזו — דגימת גליפים עבריים נשארת עברית גם בממשק האנגלי, שכן
+  מי שבוחר גופן לספר עברי צריך לראות את האותיות ולא את שפת הכפתורים.
+
+  ## הגודל
+
+  18px, ולא גודל השם (12px). דגימה בגודל השם נמדדה כבלתי קריאה — ובגופן עברי
+  ההבדל בין David לבין Frank Ruhl הוא בעובי המשיכה ובזווית הראש, וזה בדיוק מה
+  שנעלם בגליף של 12 פיקסלים. הדגימה **היא** התוכן כאן; השם הוא התווית.
+
+  הגובה אינו קופץ מזה: `line-height` של השורה קבוע (למעלה), ולכן שורה עם דגימה
+  ושורה בלעדיה שוות גובה בדיוק.
+
+  `min-width`: השמות מתחילים באותו קו לאורך הקבוצה, במקום לרקוד לפי רוחב
+  הדגימה בכל גופן. `em` ולא פיקסלים — היחידה נגזרת מ-18px של הדגימה עצמה,
+  ולכן שינוי הגודל אינו מחייב לחשב מחדש את העמודה.
+
+  `flex-shrink: 0`: השורה היא flex, ורשימה צרה הייתה מכווצת דווקא את הדגימה —
+  כלומר מוחקת את מה שהיא קיימת בשבילו.
+*/
+.ribbon-combo-option.hebrew::before {
+  content: "אבגד";
+  min-width: 3em;
+  margin-inline-end: 8px;
+  flex-shrink: 0;
+  font-size: 18px;
+  line-height: inherit;
 }
 
 .ribbon-combo-option.active {

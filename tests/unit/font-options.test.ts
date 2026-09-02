@@ -11,7 +11,9 @@ import type { FontFamilyOption } from 'superdoc/ui';
 import {
   FONT_GROUP_ALL,
   FONT_GROUP_HEBREW,
+  FONT_GROUP_RECENT,
   FONT_GROUP_TOP,
+  RECENT_FONT_LIMIT,
   LATIN_FONT_FAMILIES,
   OTZARIA_FONT_FAMILIES,
   composeFontOptions,
@@ -49,10 +51,13 @@ describe('mergeFontFamilies', () => {
     expect(values(merged)).toContain('Verdana');
   });
 
-  it('גופני המסמך מגיעים מהמנוע, אחרי שלנו ולפני זנב הלטינית', () => {
-    const merged = values(mergeFontFamilies([{ value: 'Cambria', label: 'Cambria' }]));
-    expect(merged.indexOf('Cambria')).toBeGreaterThan(merged.indexOf('Assistant'));
-    expect(merged.indexOf('Cambria')).toBeLessThan(merged.indexOf('Arial'));
+  it('גופני המסמך מגיעים מהמנוע, בקבוצה משלהם אחרי הקבועים', () => {
+    // הקבועים — שלנו וזנב הלטינית — הם „מה שתמיד שם”, ולכן הם קבוצה אחת בראש
+    // ולא שתיים שהמנוע חוצץ ביניהן. גופני המסמך מקבלים כותרת משלהם.
+    const merged = mergeFontFamilies([{ value: 'Cambria', label: 'Cambria' }]);
+    const names = values(merged);
+    expect(names.indexOf('Cambria')).toBeGreaterThan(names.indexOf('Arial'));
+    expect(groupOf(merged, 'Cambria')).toBe(FONT_GROUP_RECENT);
   });
 
   it('אין כפילות, וההשוואה חסרת רגישות לאותיות כמו במנוע', () => {
@@ -109,7 +114,7 @@ describe('mergeFontFamilies — מה שמותקן במכונה', () => {
 
   it('הרשימה הקבועה כולה בקבוצה העליונה, בלי כותרת', () => {
     const merged = mergeFontFamilies([{ value: 'Cambria', label: 'Cambria' }], installed(['Narkisim']));
-    for (const name of ['Assistant', 'Cambria', 'Arial']) {
+    for (const name of ['Assistant', 'Arial']) {
       expect(groupOf(merged, name)).toBe(FONT_GROUP_TOP);
     }
   });
@@ -127,8 +132,107 @@ describe('mergeFontFamilies — מה שמותקן במכונה', () => {
     // רגרסיה: המנייה נוחתת אחרי האתחול, וכל עוד היא לא נחתה הבורר חייב להיראות
     // בדיוק כמו קודם.
     expect(values(mergeFontFamilies([{ value: 'Cambria', label: 'Cambria' }]))).toEqual(
-      values([...OTZARIA_FONT_FAMILIES, { value: 'Cambria' }, ...LATIN_FONT_FAMILIES]),
+      values([...OTZARIA_FONT_FAMILIES, ...LATIN_FONT_FAMILIES, { value: 'Cambria' }]),
     );
+  });
+});
+
+/**
+ * המכסה על „אחרונים”. מה שנבדק כאן הוא הצד שקל לשבור בלי לשים לב: לא שהקבוצה
+ * מתקצרת — זה הקל — אלא שמה שנחתך ממנה **עדיין נבחר**. גופן שהמסמך נכתב בו
+ * ואינו מותקן במכונה קיים בבורר רק דרך רשימת המנוע, ומכסה שמוחקת אותו מוחקת
+ * את היכולת לבחור בו בכלל.
+ */
+describe('mergeFontFamilies — המכסה על „אחרונים”', () => {
+  const many = (count: number) =>
+    Array.from({ length: count }, (_, index) => ({ value: `Doc${index}`, label: `Doc${index}` }));
+
+  const inGroup = (options: readonly { value: string; group: string }[], group: string) =>
+    options.filter((option) => option.group === group).map((option) => option.value);
+
+  it('הקבוצה מציגה עד המכסה, ולא עשרים שם', () => {
+    const merged = mergeFontFamilies(many(20));
+    expect(inGroup(merged, FONT_GROUP_RECENT)).toHaveLength(RECENT_FONT_LIMIT);
+  });
+
+  it('מה שנחתך אינו נעלם — הוא נבחר מ„כל הגופנים”', () => {
+    const merged = mergeFontFamilies(many(20));
+    expect(values(merged)).toContain('Doc19');
+    expect(groupOf(merged, 'Doc19')).toBe(FONT_GROUP_ALL);
+  });
+
+  it('המכסה סופרת מה שנוסף, לא מה שנסרק', () => {
+    // מסמך שכתוב בגופנים שלנו: חמשת הראשונים ברשימת המנוע כבר בראש הבורר,
+    // ומכסה שסופרת אותם הייתה מציגה קבוצה כמעט ריקה.
+    const engine = [
+      ...OTZARIA_FONT_FAMILIES.map((font) => ({ value: font.value, label: font.label })),
+      ...many(RECENT_FONT_LIMIT),
+    ];
+    expect(inGroup(mergeFontFamilies(engine), FONT_GROUP_RECENT)).toHaveLength(RECENT_FONT_LIMIT);
+  });
+});
+
+/**
+ * הדגל שהבורר מצייר לפיו דגימה של אותיות עבריות. מה שנבדק כאן הוא בדיוק מה
+ * שאי אפשר לגזור מהקבוצה: שש המשפחות שלנו יושבות ב-`FONT_GROUP_TOP` יחד עם
+ * הלטינית, וגופן שמכסה עברית יכול לשבת שם גם הוא (Arial).
+ */
+describe('mergeFontFamilies — כיסוי עברית', () => {
+  const hebrewOf = (options: readonly { value: string; hebrew: boolean }[], value: string) =>
+    options.find((option) => option.value === value)?.hebrew;
+
+  it('שש המשפחות שלנו מסומנות עבריות גם בלי מנייה', () => {
+    // הן מוזרקות אחרי שהמנייה רצה, ודגימה שנעלמת לשנייה ואז חוזרת גרועה משתי
+    // האפשרויות — לכן הן אינן נשאלות בכלל.
+    const merged = mergeFontFamilies(undefined);
+    for (const font of OTZARIA_FONT_FAMILIES) {
+      expect(hebrewOf(merged, font.value)).toBe(true);
+    }
+  });
+
+  it('מה שבקבוצת „עברית” מסומן, ומה שבזנב אינו', () => {
+    const merged = mergeFontFamilies(undefined, installed(['Bahnschrift', 'Narkisim'], ['Narkisim']));
+    expect(hebrewOf(merged, 'Narkisim')).toBe(true);
+    expect(hebrewOf(merged, 'Bahnschrift')).toBe(false);
+  });
+
+  it('גופן בראש הרשימה מסומן לפי המנייה ולא לפי הקבוצה', () => {
+    // Arial בזנב הלטינית ובקבוצה העליונה, אבל הוא באמת מכסה עברית — ודגימה בו
+    // אמיתית בדיוק כמו ב-Frank Ruhl. Aptos, שאינו מכסה, נשאר בלי.
+    const merged = mergeFontFamilies(undefined, installed(['Aptos', 'Arial'], ['Arial']));
+    expect(groupOf(merged, 'Arial')).toBe(FONT_GROUP_TOP);
+    expect(hebrewOf(merged, 'Arial')).toBe(true);
+    expect(hebrewOf(merged, 'Aptos')).toBe(false);
+  });
+
+  it('גופן שהמסמך משתמש בו מסומן לפי המנייה', () => {
+    const engine = [{ value: 'Narkisim', label: 'Narkisim' }, { value: 'Cambria', label: 'Cambria' }];
+    const merged = mergeFontFamilies(engine, installed(['Narkisim'], ['Narkisim']));
+    expect(hebrewOf(merged, 'Narkisim')).toBe(true);
+    expect(hebrewOf(merged, 'Cambria')).toBe(false);
+  });
+
+  it('בלי מנייה ובלי מדידה גופן לטיני אינו מסומן — דגימה שנופלת ל-fallback היא שקר', () => {
+    const merged = mergeFontFamilies([{ value: 'Cambria', label: 'Cambria' }]);
+    expect(hebrewOf(merged, 'Cambria')).toBe(false);
+    expect(hebrewOf(merged, 'Aptos')).toBe(false);
+  });
+
+  it('מדידה מסמנת גם גופן שהמנייה אינה מכירה', () => {
+    // התקלה שדווחה: „יש גופנים עם עברית שאינם מוצגים ככאלה”. המנייה יודעת רק
+    // על מה שכתוב ברשימת המועמדים שלה; המדידה עונה על כל שם.
+    const merged = mergeFontFamilies(
+      [{ value: 'Gisha', label: 'Gisha' }],
+      installed([]),
+      (family) => family === 'Gisha',
+    );
+    expect(hebrewOf(merged, 'Gisha')).toBe(true);
+  });
+
+  it('מדידה קובעת גם את הקבוצה, לא רק את הדגימה', () => {
+    const merged = mergeFontFamilies(undefined, installed(['Gisha', 'Bahnschrift']), (family) => family === 'Gisha');
+    expect(groupOf(merged, 'Gisha')).toBe(FONT_GROUP_HEBREW);
+    expect(groupOf(merged, 'Bahnschrift')).toBe(FONT_GROUP_ALL);
   });
 });
 

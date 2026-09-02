@@ -16,6 +16,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   FONT_ALIAS_STYLE_ID,
   installDocumentFontAliases,
+  coversHebrew,
   isFamilyAvailable,
   parseFontTable,
   planFontAliases,
@@ -178,6 +179,16 @@ describe('substitutesFor', () => {
     // FrankRuhlCLM הוא הגופן שאוצריא אורזת, וזה מה שהופך אותו לתחליף שאפשר
     // לקבל את הבייטים שלו גם במכונה ריקה.
     expect(substitutesFor(hebrewFont({ family: 'roman' }))).toContain('FrankRuhlCLM');
+  });
+});
+
+describe('coversHebrew', () => {
+  it('בלי canvas אינו מבטיח כיסוי — ההפך מ-isFamilyAvailable, ובכוונה', () => {
+    // שם שהדפדפן פותר אינו בהכרח שם שיש בו אות עברית. הבורר מצייר דגימה של
+    // אותיות עבריות לפי התשובה הזאת, ודגימה שלא נמדדה היא דגימה שעלולה
+    // להיות של גופן אחר לגמרי — לכן כאן „בלי מדידה” פירושו „לא מבטיחים”.
+    expect(coversHebrew('David')).toBe(false);
+    expect(coversHebrew('גופן שאינו קיים בשום מקום')).toBe(false);
   });
 });
 

@@ -18,6 +18,7 @@ import {
   normalizeLinkHref,
   parseColor,
   parseFontFamily,
+  parseFontSizeInput,
   parseFontSizePt,
   parseLineHeight,
   shrunkFontSize,
@@ -125,6 +126,34 @@ describe('סולם הגדלים של Word', () => {
   it('הסולם הוא של Word, וברירת המחדל עליו', () => {
     expect(WORD_FONT_SIZES).toEqual([8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 36, 48, 72]);
     expect(WORD_FONT_SIZES).toContain(DEFAULT_FONT_SIZE_PT);
+  });
+});
+
+describe('parseFontSizeInput — גודל שהוקלד בתיבה', () => {
+  it('גודל שאינו בסולם מתקבל כמות שהוא — זה כל מה שההקלדה נועדה לה', () => {
+    expect(parseFontSizeInput('13')).toBe(13);
+    expect(parseFontSizeInput('15')).toBe(15);
+    expect(parseFontSizeInput('10.5')).toBe(10.5);
+    expect(parseFontSizeInput('13pt')).toBe(13);
+  });
+
+  it('מעוגל לחצי נקודה — `w:sz` הוא חצאי נקודות, ותיבה לא תציג מה שלא נכתב', () => {
+    expect(parseFontSizeInput('12.3')).toBe(12.5);
+    expect(parseFontSizeInput('12.1')).toBe(12);
+    expect(parseFontSizeInput('0.2')).toBe(1);
+  });
+
+  it('מהודק לטווח של המסמך במקום דיאלוג שגיאה', () => {
+    expect(parseFontSizeInput('5000')).toBe(1638);
+    expect(parseFontSizeInput('1638')).toBe(1638);
+    expect(parseFontSizeInput('1')).toBe(1);
+  });
+
+  it('מה שאינו גודל אינו מוחל — התיבה חוזרת למסמך', () => {
+    expect(parseFontSizeInput('')).toBeNull();
+    expect(parseFontSizeInput('גדול')).toBeNull();
+    expect(parseFontSizeInput('0')).toBeNull();
+    expect(parseFontSizeInput('-12')).toBeNull();
   });
 });
 
