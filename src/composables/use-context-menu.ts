@@ -51,9 +51,8 @@ type Surface =
   /** אזור המסמך — התפריט שלנו, והסמן זז ללחיצה. */
   | 'document'
   /**
-   * התפריט נפתח, אבל **הסמן אינו זז**: הרצועה המוסתרת במצב מיקוד. שם אין
-   * טקסט למקם בו סמן, ולחיצה מסונתזת הייתה נוחתת על כפתור של הרצועה ומפעילה
-   * אותו — „מסמך חדש” שרץ מלחיצה ימנית הוא מסמך פתוח שנעלם.
+   * התפריט נפתח, אבל **הסמן אינו זז**: אין נקודה שנלחצה. זה המסלול של פתיחה
+   * מהמקלדת (`openAtCaret`), שם העוגן הוא מלבן הסמן ולא לחיצה.
    */
   | 'menu-only'
   /**
@@ -69,9 +68,6 @@ export interface ContextMenuDeps {
   superdoc: Ref<SuperDoc | null>;
   /** האם היעד בתוך אזור המסמך. אותה פונקציה שהקיצורים משתמשים בה. */
   isDocumentSurface: (target: EventTarget | null) => boolean;
-  /** שורש המעטפת — נדרש למצב מיקוד, ראו `surfaceOf`. */
-  shell: Ref<HTMLElement | null>;
-  isFocusMode: Ref<boolean>;
   isModalOpen: () => boolean;
   runAction: (action: ShellAction) => boolean;
   report: CommandReporter;
@@ -234,14 +230,11 @@ export function useContextMenu(deps: ContextMenuDeps): ContextMenuController {
     if (deps.isDocumentSurface(target)) return 'document';
     if (isTextEntryTarget(target)) return 'native';
 
-    // במצב מיקוד הפסים מוסתרים (`opacity:0; pointer-events:none`) אך שומרים על
-    // הפריסה, ולכן הרצועה העליונה נקראת למשתמש כמסמך. התפריט כן נפתח שם — אבל
-    // `menu-only`, כלומר בלי להזיז את הסמן: מתחת לנקודה יושבת הרצועה, ולא
-    // טקסט. הרצועה גם חוזרת ל-`pointer-events: auto` ברגע שהיא נחשפת בריחוף.
-    if (deps.isFocusMode.value) {
-      const shell = deps.shell.value;
-      if (shell && target instanceof Node && shell.contains(target)) return 'menu-only';
-    }
+    /* היה כאן ענף למצב מיקוד: הפסים הוסתרו ב-`opacity` ושמרו על מקומם, ולכן
+       הרצועה המוסתרת נקראה למשתמש כמסמך — ולחיצה ימנית שם קיבלה תפריט בלי
+       הזזת סמן. מאז הפסים יוצאים מהזרימה (App.vue, „מצב מיקוד” ב-`<style>`),
+       הרצועה הזאת **היא** אזור המסמך, והשאלה נענית שורה אחת למעלה. פס שנחשף
+       בריחוף חוזר להיות מה שהוא בכל מצב אחר: רצועה, ובה אין תפריט. */
     return 'blocked';
   }
 
