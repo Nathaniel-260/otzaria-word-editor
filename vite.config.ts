@@ -98,10 +98,22 @@ function deferredEntry(): Plugin {
               if (!sources || !sources.document || typeof Worker !== 'function') return;
               var url = URL.createObjectURL(new Blob([sources.document], { type: 'text/javascript' }));
               window.__otzariaDocWorkerUrl = url;
+              // Worker קלאסי, ובמכוון — אל תוסיפו כאן type: 'module'.
+              //
+              // ה-code cache ממופתח גם בסוג הסקריפט, ולכן probe מסוג אחר
+              // מזה שהמנוע יוצר לא היה מחמם דבר. מה המנוע יוצר בפועל נמדד
+              // (עטיפת window.Worker לפני העלייה, על ה-dist הארוז מ-file://):
+              // Worker **קלאסי** בשם superdoc-v2-edit, על אותו URL בדיוק.
+              // ובאותה מדידה: Worker מסוג module על blob URL טרי נכשל כאן
+              // מיד (‏~10ms, גם על סקריפט של 14 בתים) — module workers מ-blob
+              // חסומים ב-origin האטום של file://. כלומר probe כזה היה מת
+              // בשקט, ומבטל את החימום כולו.
               var probe = new Worker(url);
               function drop() { try { probe.terminate(); } catch (ignored) {} }
               probe.addEventListener('message', drop, { once: true });
               probe.addEventListener('error', drop, { once: true });
+              // רשת ביטחון בלבד: ‏ה-worker מודיע מיוזמתו תוך ~70ms (נמדד),
+              // ואז הוא נזרק שם. הקומפילציה נשמרת ב-cache גם אחרי שהוא מת.
               setTimeout(drop, 10000);
             } catch (ignored) { /* חימום הוא קיצור, לא תנאי */ }
           }

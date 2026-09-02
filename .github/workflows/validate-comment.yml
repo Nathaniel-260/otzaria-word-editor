@@ -29,7 +29,12 @@ permissions:
 jobs:
   comment:
     name: תגובת הוולידטור על ה-PR
-    if: github.event.workflow_run.event == 'pull_request'
+    # רק PR מ-fork: ב-PR מאותו מאגר ה-action עצמו כבר פרסם (`pr-comment`),
+    # וריצה כאן הייתה מוחקת את התגובה הטרייה שלו ומפרסמת אותה מחדש —
+    # התראה נוספת לכל הנרשמים, והתגובה נודדת לתחתית השרשור בכל דחיפה.
+    if: >-
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.head_repository.full_name != github.repository
     runs-on: ubuntu-latest
 
     steps:
