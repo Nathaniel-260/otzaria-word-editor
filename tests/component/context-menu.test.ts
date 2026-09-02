@@ -14,7 +14,17 @@ import {
   type ContextMenuSection,
   type ContextMenuSnapshot,
 } from '../../src/ui/menu/context-menu-model';
-import { autoUnmount, mountUi, type Harness } from './harness';
+import HomeTab from '../../src/ui/ribbon/tabs/HomeTab.vue';
+import { createFontMemory } from '../../src/composables/use-font-controls';
+import {
+  autoUnmount,
+  createCommandDouble,
+  mountUi,
+  pickerValue,
+  setPicker,
+  settle,
+  type Harness,
+} from './harness';
 
 autoUnmount();
 
@@ -59,8 +69,9 @@ describe('ContextMenu', () => {
 
   it('מצייר את המקטעים כתפריט נגיש', () => {
     expect(harness.wrapper.attributes('role')).toBe('menu');
-    expect(harness.wrapper.findAll('[role="group"]')).toHaveLength(5);
-    expect(harness.wrapper.findAll('[role="separator"]')).toHaveLength(4);
+    // שישה: לוח, גופן, עיצוב, הוספה, אוצריא, עריכה.
+    expect(harness.wrapper.findAll('[role="group"]')).toHaveLength(6);
+    expect(harness.wrapper.findAll('[role="separator"]')).toHaveLength(5);
   });
 
   it('מתג מדווח menuitemcheckbox, ופעולה מדווחת menuitem', async () => {
@@ -204,5 +215,132 @@ describe('ContextMenu', () => {
 
     expect(shortcut.attributes('dir')).toBe('ltr');
     expect(shortcut.text()).toBe('Ctrl+K');
+  });
+});
+
+/**
+ * שורת הגופן.
+ *
+ * מה שנמדד כאן הוא הדבר שבגללו היא נבנתה כך ולא אחרת: הערך שהיא מציגה אינו
+ * שלה. `FONT_MEMORY` מסופק מהמעטפת (App.vue) לרצועה ולתפריט גם יחד, ובדיקה
+ * שמוסרת אותו זיכרון לשתי ההרכבות היא הבדיקה היחידה שיכולה לתפוס חזרה לעותק
+ * פרטי — מצב שבו התפריט מציג „Assistant 12” בזמן שהרצועה מציגה את גופן המסמך.
+ */
+describe('שורת הגופן בתפריט ההקשר', () => {
+  it('מציגה את מה שהמנוע מדווח על הבחירה', async () => {
+    const adapter = createCommandDouble();
+    adapter.setState('font-family', { value: 'TaameyDavidCLM' });
+    adapter.setState('font-size', { value: 20 });
+
+    const menu = open(sections(), { adapter });
+    await settle();
+
+    expect(pickerValue(menu.wrapper, 'גופן')).toBe('TaameyDavidCLM');
+    expect(pickerValue(menu.wrapper, 'גודל גופן')).toBe('20');
+  });
+
+  it('בחירת גופן מגיעה למנוע עם payload שהוא מאשר, וסוגרת את הכרטיס', async () => {
+    const menu = open();
+    await settle();
+
+    await setPicker(menu.wrapper, 'גופן', 'TaameyDavidCLM');
+    await settle();
+
+    expect(menu.adapter.payloads('font-family')).toEqual(['TaameyDavidCLM']);
+    expect(menu.adapter.rejected).toEqual([]);
+    expect(menu.wrapper.emitted('close')).toHaveLength(1);
+  });
+
+  /**
+   * גודל שאינו בסולם של Word הוא הסיבה שהתיבה היא תיבת ערך ולא בורר סגור,
+   * וההתנהגות הזאת חייבת להיות זהות לזו שברצועה — היא מגיעה מאותו `normalize`.
+   */
+  it('גודל שהוקלד ואינו ברשימה מוחל, ואינו נעלם לטובת ההתאמה הראשונה', async () => {
+    const menu = open();
+    await settle();
+
+    await setPicker(menu.wrapper, 'גודל גופן', '13');
+    await settle();
+
+    expect(menu.adapter.payloads('font-size')).toEqual([13]);
+  });
+
+  it('מה שהרצועה מציגה הוא מה שהתפריט מציג — זיכרון אחד לשניהם', async () => {
+    const fontMemory = createFontMemory();
+    const adapter = createCommandDouble();
+
+    const ribbon = mountUi(HomeTab, { adapter, fontMemory });
+    await settle();
+    await setPicker(ribbon.wrapper, 'גופן', 'TaameyDavidCLM');
+    await settle();
+    expect(pickerValue(ribbon.wrapper, 'גופן')).toBe('TaameyDavidCLM');
+
+    // המנוע אינו מדווח ערך (כמו מיד אחרי שהתפריט הזיז את הסמן), ולכן זה בדיוק
+    // המצב שבו עותק פרטי היה נופל לברירת המחדל.
+    const menu = open(sections(), { adapter, fontMemory });
+    await settle();
+
+    expect(pickerValue(menu.wrapper, 'גופן')).toBe('TaameyDavidCLM');
+  });
+
+  it('גופן שהוחל מהתפריט מופיע ברצועה מיד', async () => {
+    const fontMemory = createFontMemory();
+    const adapter = createCommandDouble();
+
+    const ribbon = mountUi(HomeTab, { adapter, fontMemory });
+    const menu = open(sections(), { adapter, fontMemory });
+    await settle();
+
+    await setPicker(menu.wrapper, 'גופן', 'TaameyDavidCLM');
+    await settle();
+
+    expect(pickerValue(ribbon.wrapper, 'גופן')).toBe('TaameyDavidCLM');
+  });
+});
+
+/**
+ * כרטיס שנפתח למעלה.
+ *
+ * לחיצה בתחתית החלון — סוף הטקסט, כלומר המקום הנפוץ ביותר — אינה מותירה מקום
+ * מתחתיה, והכרטיס מתהפך: הקצה **התחתון** שלו נוגע בסמן. בסדר הרגיל זה מרחיק
+ * מהסמן בדיוק את מה שצמוד אליו בפתיחה למטה — שורת הלוח, שורת הגופן ושורת
+ * העיצוב — ומחייב לחזור עם העכבר לאורך כל הכרטיס.
+ */
+describe('כרטיס שנפתח למעלה', () => {
+  /** רק שמות המקטעים, בסדר שבו הם מצוירים. */
+  function groups(harness: Harness): (string | undefined)[] {
+    return harness.wrapper.findAll('[role="group"]').map((group) => group.attributes('aria-label'));
+  }
+
+  it('בפתיחה למטה הסדר הוא זה של הדגם', async () => {
+    const down = open(sections(), { props: { point: { x: 400, y: 200 } } });
+    await nextTick();
+
+    expect(groups(down)[0]).toBe('לוח');
+    expect(groups(down)[1]).toBe('גופן');
+  });
+
+  it('בפתיחה למעלה סדר המקטעים מתהפך, והאייקונים יורדים ליד הסמן', async () => {
+    const up = open(sections(), { props: { point: { x: 400, y: window.innerHeight - 3 } } });
+    await nextTick();
+
+    const order = groups(up);
+    expect(order[order.length - 1]).toBe('לוח');
+    expect(order[order.length - 2]).toBe('גופן');
+    expect(order[0]).toBe('עריכה');
+  });
+
+  /**
+   * החץ למטה חייב להזיז מיקוד למה שנמצא למטה **על המסך**, ולא למה שהמודל בנה
+   * אחריו — אחרת בכרטיס שהתהפך הוא מזיז אותו למעלה.
+   */
+  it('החצים עוברים בסדר שעל המסך, ולא בסדר הדגם', async () => {
+    const up = open(sections(), { props: { point: { x: 400, y: window.innerHeight - 3 } } });
+    // המדידה קובעת את הצד, והחץ אחריה: לפניה הכרטיס עדיין מצויר בסדר הרגיל.
+    await nextTick();
+    await up.wrapper.trigger('keydown', { key: 'ArrowDown' });
+    await nextTick();
+
+    expect(document.activeElement).toBe(buttonById(up, 'find').element);
   });
 });

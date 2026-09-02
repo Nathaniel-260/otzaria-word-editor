@@ -49,12 +49,14 @@ import {
   COMMAND_ADAPTER,
   COMMAND_REPORTER,
   DOCUMENT_GENERATION,
+  FONT_MEMORY,
   FONT_OPTIONS,
   READOUT_SELECTION,
   SPELLCHECK,
   STYLE_GALLERY,
   type SpellcheckHandle,
 } from '../../src/composables/keys';
+import { createFontMemory, type FontMemory } from '../../src/composables/use-font-controls';
 import { ACTIVE_SUPERDOC } from '../../src/engine/document-api';
 import { ACTIVE_MACROS, type MacrosHandle } from '../../src/engine/macros';
 import { readTip, type TipContent } from '../../src/ui/tooltip/tooltip-content';
@@ -1204,6 +1206,12 @@ export interface HarnessOptions {
   /** ברירת המחדל: כפיל מופע עם כל היכולות. `null` = אין מסמך פתוח. */
   superdoc?: SuperdocDouble | null;
   fontOptions?: FontOptions;
+  /**
+   * הזיכרון של בוררי הגופן. ברירת המחדל היא זיכרון חדש לכל הרכבה — כמו
+   * ברירת המחדל של ה-inject עצמו. בדיקה שמוסרת **אותו** זיכרון לשתי הרכבות
+   * מודדת בדיוק את מה שהמעטפת עושה: רצועה ותפריט הקשר שחולקים מצב.
+   */
+  fontMemory?: FontMemory;
   styleGallery?: StyleGalleryState;
   /**
    * מצב הבחירה שהחזקת החיווי נשענת עליו. ברירת המחדל היא סמן שהתיישב —
@@ -1254,6 +1262,7 @@ export function mountUi(component: Component, options: HarnessOptions = {}): Har
     reports.push({ outcome, commandId });
   };
   provide[FONT_OPTIONS as unknown as symbol] = ref(options.fontOptions ?? fallbackFontOptions());
+  provide[FONT_MEMORY as unknown as symbol] = options.fontMemory ?? createFontMemory();
   provide[STYLE_GALLERY as unknown as symbol] = shallowRef(
     options.styleGallery ?? fallbackStyleGallery(),
   );
@@ -1394,8 +1403,9 @@ export function tipStartsSelector(prefix: string, tag = 'button'): string {
 /**
  * הבוררים ברצועה, בלי לדעת מאיזה סוג הם.
  *
- * שני מימושים חיים זה לצד זה: `<select>` נייטיב (גודל גופן, מרווח שורות),
- * ובורר חיפוש שהוא `<input role="combobox">` (גופן — ראו RibbonCombo.vue).
+ * שני מימושים חיים זה לצד זה: `<select>` נייטיב (מרווח שורות), ובורר
+ * שאפשר להקליד בו — `<input role="combobox">` (גופן וגודל גופן; ראו
+ * RibbonCombo.vue).
  * לבדיקה שמודדת „מה הבורר מציג” ו„מה קורה כשבוחרים” ההבדל בין השניים אינו
  * העניין, ובלי העטיפה הזאת כל מעבר בין המימושים היה מפיל אותה מחדש.
  */

@@ -63,13 +63,25 @@ export interface ContextMenuEntry {
   readonly toggle?: boolean;
 }
 
+/**
+ * פקד רציף בכרטיס — לא כפתור, ולכן לא `ContextMenuEntry`.
+ *
+ * שני אלה הם בוררים במלוא מובן המילה: יש להם ערך מוצג, רשימה, והקלדה. הם
+ * **אינם** מקבלים `disabled` מהמודל ואינם מקבלים `run`, מאותו טעם שפקודת
+ * מנוע אינה מקבלת: המצב שלהם חי, ומגיע מ-`useFontControls` — אותו מצב בדיוק
+ * שהרצועה מציגה. הרשימה סגורה, כמו `ContextMenuRun`.
+ */
+export type ContextMenuControl = 'font-family' | 'font-size';
+
 export interface ContextMenuSection {
   readonly id: string;
-  /** שורת אייקונים דחוסה, או שורות כתיבה. */
-  readonly layout: 'icons' | 'items';
+  /** שורת אייקונים דחוסה, שורות כתיבה, או שורת בוררים. */
+  readonly layout: 'icons' | 'items' | 'fonts';
   /** שם נגיש למקטע. אינו מוצג — הכרטיס נקי מכותרות. */
   readonly label: string;
   readonly entries: readonly ContextMenuEntry[];
+  /** רק ב-`layout: 'fonts'`. מקטע לעולם אינו מערבב כפתורים ובוררים. */
+  readonly controls?: readonly ContextMenuControl[];
 }
 
 /** מה שנקרא ברגע הפתיחה. שלוש שאלות, ולא ה-slice של המנוע. */
@@ -119,6 +131,29 @@ function clipboardSection(snapshot: ContextMenuSnapshot): ContextMenuSection {
 }
 
 /**
+ * גופן וגודל.
+ *
+ * למה כאן ולא רק ברצועה: זה הפקד שהמשתמש מבקש הכי הרבה בלחיצה ימנית על מילה,
+ * והדרך אליו ברצועה עוברת בלשונית שאולי אינה הפעילה. ומה שחשוב לא פחות —
+ * המצב שהוא מציג **אינו** משלו: `FONT_MEMORY` מסופק מהמעטפת, ולכן מה שהרצועה
+ * מציגה הוא מה שהתפריט מציג, וגופן שהוחל מכאן מופיע שם מיד. ראו
+ * composables/use-font-controls.ts.
+ *
+ * המקטע אינו מותנה בבחירה ואינו מותנה ב-`storyType`: גופן חל גם על סמן מכווץ
+ * (הוא קובע את מה שיוקלד) וגם בכותרת עליונה. מה שכן מנטרל אותו הוא המנוע
+ * עצמו, דרך `CommandState` של הפקד — כמו ברצועה.
+ */
+function fontsSection(): ContextMenuSection {
+  return {
+    id: 'fonts',
+    layout: 'fonts',
+    label: 'גופן',
+    entries: [],
+    controls: ['font-family', 'font-size'],
+  };
+}
+
+/**
  * שורת העיצוב. שבעה אייקונים — כולם פקודות מנוע, כלומר המצב שלהם חי ואינו
  * מנוחש כאן. צבע גופן וצבע הדגשה אינם כאן בכוונה: ברצועה הם פופאובר, ופופאובר
  * בתוך תפריט הקשר הוא החלטה נפרדת (גל 3).
@@ -136,11 +171,10 @@ function formatSection(): ContextMenuSection {
       { id: 'clear-formatting', label: 'ניקוי עיצוב', icon: 'clearFormatting', shortcutId: 'clear-formatting', run: { kind: 'command', command: 'clear-formatting' } },
       { id: 'bullet-list', label: 'רשימת תבליטים', icon: 'bulletList', run: { kind: 'command', command: 'bullet-list' }, toggle: true },
       { id: 'numbered-list', label: 'רשימה ממוספרת', icon: 'numberList', run: { kind: 'command', command: 'numbered-list' }, toggle: true },
-      // כיווניות הפסקה היא הפקד שמשתמש עברי מגיע אליו הכי הרבה במסמך מעורב,
-      // והיא זולה כאן: שתי פקודות שכבר קיימות, עם וריאנטי RTL משלהן בסט
-      // האייקונים. היא נכנסה אחרי שביקורת על הגל הראשון הצביעה על היעדרה.
-      { id: 'direction-rtl', label: 'פסקה מימין לשמאל', icon: 'dirRtl', shortcutId: 'direction-rtl', run: { kind: 'command', command: 'direction-rtl' }, toggle: true },
-      { id: 'direction-ltr', label: 'פסקה משמאל לימין', icon: 'dirLtr', shortcutId: 'direction-ltr', run: { kind: 'command', command: 'direction-ltr' }, toggle: true },
+      // כיווניות הפסקה **אינה** כאן, אף שהייתה: היא נשארת ברצועה (Ctrl+Shift+X
+      // / Ctrl+Shift+Y ברג'יסטרי הקיצורים), ובכרטיס הזה היא תפסה שני אייקונים
+      // בשורה שאמורה להיות שורת העיצוב של הטקסט המסומן — בזמן שהיא מדברת על
+      // הפסקה כולה. הוסרה לבקשת המשתמש.
     ],
   };
 }
@@ -259,18 +293,38 @@ export function contextMenuModel(snapshot: ContextMenuSnapshot): readonly Contex
   const sections = [
     ...(snapshot.misspelledWord ? [dictionarySection(snapshot.misspelledWord)] : []),
     clipboardSection(snapshot),
+    fontsSection(),
     formatSection(),
     insertSection(snapshot),
     otzariaSection(snapshot),
     editSection(snapshot),
   ];
 
-  return sections.filter((section) => section.entries.length > 0);
+  // מקטע ריק אינו מצויר, וזה נמדד לפי **מה שיש בו**: שורת הגופן אינה מחזיקה
+  // פריטים כלל, ומקטע פריטים אינו מחזיק בוררים.
+  return sections.filter(
+    (section) => section.entries.length > 0 || (section.controls?.length ?? 0) > 0,
+  );
 }
 
-/** כל הפריטים ברצף — מה שניווט המקלדת עובר עליו. */
+/** כל הפריטים ברצף. */
 export function contextMenuEntries(
   sections: readonly ContextMenuSection[],
 ): readonly ContextMenuEntry[] {
   return sections.flatMap((section) => section.entries);
+}
+
+/**
+ * מזהי כל מה שמקבל מיקוד, בסדר שבו החצים עוברים עליו — פריטים **ובוררים**.
+ *
+ * למה הבוררים בפנים: בכרטיס הזה Tab סוגר (ContextMenu.vue), כלומר החצים הם
+ * הדרך היחידה להגיע לפקד. בורר שאינו ברשימה הזאת הוא בורר שקיים לעכבר בלבד.
+ */
+export function contextMenuFocusOrder(
+  sections: readonly ContextMenuSection[],
+): readonly string[] {
+  return sections.flatMap((section) => [
+    ...section.entries.map((entry) => entry.id),
+    ...(section.controls ?? []),
+  ]);
 }

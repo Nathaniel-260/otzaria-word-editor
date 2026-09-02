@@ -243,6 +243,7 @@ import {
   COMMAND_REPORTER,
   STATUS_NOTIFIER,
   DOCUMENT_GENERATION,
+  FONT_MEMORY,
   FONT_OPTIONS,
   READOUT_SELECTION,
   SPELLCHECK,
@@ -436,6 +437,7 @@ import {
 import { toggleVertAlign } from './engine/vert-align';
 import { insertNote } from './engine/footnotes';
 import { startParagraphOnNewPage, pageBreakTracker } from './engine/page-break';
+import { createFontMemory } from './composables/use-font-controls';
 import { createLinkDialog } from './composables/use-link-dialog';
 import { createShellActionRunner } from './ui/shortcuts/actions';
 import { useContextMenu } from './composables/use-context-menu';
@@ -463,6 +465,13 @@ provide(COMMAND_ADAPTER, commandAdapter);
  */
 const fontOptions = shallowRef<FontOptions>(fallbackFontOptions());
 provide(FONT_OPTIONS, fontOptions);
+
+/**
+ * הזיכרון של בוררי הגופן. מסופק מכאן ולא נוצר בפקד, מפני שאותם שני בוררים
+ * מופיעים בשני מקומות — הרצועה ותפריט הלחצן הימני — וזיכרון פרטי לכל אחד מהם
+ * פירושו שהם מציגים ערכים שונים באותו רגע. ראו composables/use-font-controls.ts.
+ */
+provide(FONT_MEMORY, createFontMemory());
 
 /**
  * שני המקורות שמרכיבים את הבורר, ולמה הם נפרדים.

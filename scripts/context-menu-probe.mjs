@@ -600,6 +600,89 @@ try {
   await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
   await sleep(300);
 
+  // ── ש14: שורת הגופן בכרטיס, והרשימה שנפתחת מתוכה ─────────────────────────
+  //
+  // שני דברים שאין דרך למדוד ב-jsdom, ושניהם שקטים כשהם נשברים:
+  //
+  //   1. **הרשימה של הבורר.** היא `position: fixed` בתוך כרטיס שהוא
+  //      `overflow-y: auto`. jsdom אינו מחשב פריסה ואינו חותך כלום, ולכן רשימה
+  //      שנחתכת נראית שם תקינה לחלוטין. מה שנמדד כאן הוא מה שהמשתמש רואה: האם
+  //      נקודה שבתוך הרשימה **פוגעת** בה.
+  //   2. **שני הבוררים מציגים אותו ערך.** זו כל הסיבה שהמצב יצא למעטפת
+  //      (`FONT_MEMORY`), וכאן הרצועה והתפריט חיים באותו דף באמת.
+  await click(points.near.x, points.near.y, 'right');
+  await sleep(900);
+
+  const fontPicker = await cdp.evaluate(`(() => {
+    const input = document.querySelector('[data-context-menu] [data-context-menu-control] input');
+    if (!input) return null;
+    const box = input.getBoundingClientRect();
+    const shown = [...document.querySelectorAll('input[data-tip-title="גופן"]')].map((node) => node.value);
+    return {
+      x: Math.round(box.left + box.width / 2),
+      y: Math.round(box.top + box.height / 2),
+      value: input.value,
+      shown,
+    };
+  })()`);
+
+  notes.push(`ש14 — בורר הגופן בכרטיס: ${fontPicker ? `„${fontPicker.value}”` : '«אין»'}`);
+
+  if (!fontPicker) {
+    errors.push('אין בורר גופן בתפריט ההקשר — שורת הגופן אינה מצוירת');
+  } else {
+    if (fontPicker.shown.length === 2 && fontPicker.shown[0] !== fontPicker.shown[1]) {
+      errors.push(
+        `בורר הגופן בתפריט מציג „${fontPicker.shown[1]}” בזמן שהרצועה מציגה ` +
+          `„${fontPicker.shown[0]}” — הזיכרון המשותף אינו מגיע לשניהם`,
+      );
+    }
+
+    await click(fontPicker.x, fontPicker.y, 'left');
+    await sleep(500);
+
+    const fontList = await cdp.evaluate(`(() => {
+      const list = document.querySelector('[data-context-menu] [role="listbox"]');
+      if (!list) return { open: false };
+      const box = list.getBoundingClientRect();
+      const x = Math.round(box.left + box.width / 2);
+      const y = Math.round(box.top + 8);
+      const hit = document.elementFromPoint(x, y);
+      return {
+        open: true,
+        height: Math.round(box.height),
+        inViewport: box.top >= -1 && box.bottom <= window.innerHeight + 1,
+        hits: !!(hit && (list === hit || list.contains(hit))),
+        hitAt: hit ? hit.className || hit.tagName : null,
+      };
+    })()`);
+
+    notes.push(
+      `ש14 — רשימת הגופנים מתוך הכרטיס: ${
+        fontList.open
+          ? `${fontList.height}px, בחלון=${fontList.inViewport}, נפגעת=${fontList.hits} (${fontList.hitAt})`
+          : '«לא נפתחה»'
+      }`,
+    );
+
+    if (!fontList.open) {
+      errors.push('לחיצה על בורר הגופן בתפריט אינה פותחת רשימה — הפקד אינו שמיש');
+    } else if (!fontList.hits || !fontList.inViewport || fontList.height < 24) {
+      errors.push(
+        'רשימת הגופנים שנפתחת מתוך תפריט ההקשר נחתכת: היא ב-DOM אבל הנקודה ' +
+          'שבתוכה אינה פוגעת בה — כלומר הכרטיס חותך אותה',
+      );
+    }
+
+    await cdp.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+    await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+    await sleep(200);
+  }
+
+  await cdp.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+  await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+  await sleep(300);
+
   // ── ש6: מה יושב ב-story ──────────────────────────────────────────────────
   const story = await cdp.evaluate(STORY);
   notes.push(`ש6 — story בגוף המסמך: טיפוס ${story.type}, ערך ${story.value}`);
