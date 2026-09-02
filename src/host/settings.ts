@@ -99,3 +99,40 @@ export async function saveRulerVisible(visible: boolean): Promise<void> {
 export async function setSetting(key: string, value: unknown): Promise<void> {
   await call('storage.set', { key, value });
 }
+
+const SPELLCHECK_KEY = 'spellcheck-enabled';
+
+/**
+ * האם בדיקת האיות התורנית דלוקה. ברירת המחדל **כבויה**, ולא במקרה: הדלקה
+ * מושכת את המילון (1.3MB בנכס נפרד, engine/spellcheck-dictionary.ts), ומשתמש
+ * שלא ביקש אותה לא אמור לשלם עליו.
+ *
+ * העדפה של התוכנה ולא תכונה של המסמך — כמו הסרגל שמעל, ומאותה סיבה: המצב
+ * חי על שכבת התצוגה שלנו, ומסמך חדש היה מכבה אותה בכל פתיחה.
+ */
+export async function loadSpellcheckEnabled(): Promise<boolean> {
+  return (await tryCall<unknown>('storage.get', { key: SPELLCHECK_KEY })) === true;
+}
+
+export async function saveSpellcheckEnabled(enabled: boolean): Promise<void> {
+  await tryCall('storage.set', { key: SPELLCHECK_KEY, value: enabled });
+}
+
+const SPELLCHECK_WORDS_KEY = 'spellcheck-user-words';
+
+/**
+ * מילון המשתמש — מה שנוסף דרך „הוסף למילון” בתפריט ההקשר.
+ *
+ * נשמר לבד, ולא כעותק של המילון הקבוע: 102,465 הערכים אינם עוברים ב-`storage`
+ * לעולם. ערך פגום נקרא כרשימה ריקה — מילון משתמש שאבד אינו סיבה להיכשל
+ * בעלייה, והמשתמש פשוט יוסיף שוב.
+ */
+export async function loadSpellcheckWords(): Promise<string[]> {
+  const raw = await tryCall<unknown>('storage.get', { key: SPELLCHECK_WORDS_KEY });
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((word): word is string => typeof word === 'string' && word.length > 0);
+}
+
+export async function saveSpellcheckWords(words: readonly string[]): Promise<void> {
+  await tryCall('storage.set', { key: SPELLCHECK_WORDS_KEY, value: [...words] });
+}
