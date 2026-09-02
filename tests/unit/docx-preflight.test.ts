@@ -354,6 +354,14 @@ describe('repairComplexScriptBold', () => {
     expect(repairComplexScriptBold(runProps("<w:b w:val='0'/><w:bCs/>"))).toBeNull();
   });
 
+  it('שתי `bCs` באותה rPr — ההוספה לפני הראשונה, מפני ה-`xsd:sequence`', () => {
+    // קלט פסול מלכתחילה, אבל התוצאה אסור לה להיות פסולה **יותר**: `<w:b/>`
+    // שנכתב אחרי ה-`bCs` הראשונה יוצא מהרצף. המצב עדיין נלקח מהאחרונה.
+    expect(repairComplexScriptBold(runProps('<w:bCs w:val="0"/><w:bCs/>'))).toContain(
+      '<w:rPr><w:b/><w:bCs w:val="0"/><w:bCs/></w:rPr>',
+    );
+  });
+
   it('שתי `bCs` באותה rPr — האחרונה קובעת', () => {
     expect(repairComplexScriptBold(runProps('<w:bCs w:val="0"/><w:bCs/>'))).toContain('<w:b/>');
     expect(repairComplexScriptBold(runProps('<w:bCs/><w:bCs w:val="0"/>'))).toBeNull();
@@ -480,6 +488,18 @@ describe('CONTENT_PARTS', () => {
 });
 
 describe('preflightDocx', () => {
+  it('BOM של חלק שתוקן אינו נמחק', async () => {
+    // ההבטחה בכותרת היא „זהה למקור בכל מה שאינו התיקון עצמו”. ברירת המחדל של
+    // `TextDecoder` פושטת U+FEFF ו-`TextEncoder` אינו מחזיר אותו, ולכן חלק
+    // שהתחיל ב-BOM היה חוזר בלעדיו — שינוי שאיש לא ביקש.
+    const withBom = `﻿${SETTINGS_WITH_ZERO}`;
+    const repaired = await preflightDocx(
+      buildZip([{ name: SETTINGS_PART, content: withBom, deflate: false }]),
+    );
+    expect(repaired).not.toBeNull();
+    expect(contains(repaired!.bytes, bytesOf('﻿<?xml'))).toBe(true);
+  });
+
   it('מתקנת את ההגדרות ומשאירה את שאר החלקים כפי שהיו', async () => {
     const original = buildZip([
       { name: '[Content_Types].xml', content: '<Types/>' },

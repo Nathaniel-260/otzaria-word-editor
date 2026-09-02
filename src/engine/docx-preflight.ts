@@ -25,7 +25,13 @@
  * `bCs`; המנוע מרנדר אותה מ-`w:b` בלבד. התוצאה היא מסמך שכותרותיו מודגשות
  * ב-Word ומגיעות אלינו דקות.
  *
- * נמדד ב-superdoc 2.10.0 (engine 0.9.0), על הקובץ שדווח, ב-Chrome אמיתי:
+ * נמדד ב-superdoc 2.10.0 (engine 0.9.0) **וגם** ב-2.11.0 (engine 0.10.0) — הגרסה
+ * שהתוסף עומד עליה — ואומת שוב אחרי השדרוג בצורה שהשלב המקדים מסרב לגעת בה,
+ * ולכן מודדת את המנוע ולא אותנו: `<w:b w:val="0"/>` לצד `<w:bCs/>` נצבע 400,
+ * מול 700 בבקרה. הפער לא נסגר. `w:iCs`, `w:szCs` ו-`w:rPrDefault` — אותו
+ * מנגנון, ומה שנמדד בהם מתועד ב-docs/engine-gaps.md.
+ *
+ * המדידה המקורית, על הקובץ שדווח, ב-Chrome אמיתי:
  * עשר הכותרות נצבעו `font-weight: 400`; אותו קובץ בדיוק עם `<w:b/>` שהושלם
  * לצד כל `<w:bCs/>` — כולן 700. ראו scripts/qa/bold-cs-qa.mjs.
  *
@@ -320,7 +326,11 @@ export function repairComplexScriptBold(xml: string): string | null {
     if (depth !== 1 || !scope || closing) continue;
     if (name === 'b') scope.hasBold = true;
     else if (name === 'bCs') {
-      scope.boldCsAt = match.index;
+      // המקום מהראשונה, המצב מהאחרונה — ושני חצאי ההחלטה שונים בכוונה. `rPr`
+      // עם שתי `bCs` פסולה מלכתחילה, אבל התוצאה אסור לה להיות פסולה **יותר**:
+      // הוספה אחרי ה-`bCs` הראשונה יוצאת מה-`xsd:sequence`, ולכן המקום נלקח
+      // ממנה; המצב נלקח מהאחרונה, כי בכפילות Word מכריע „האחרון קובע”.
+      if (scope.boldCsAt === null) scope.boldCsAt = match.index;
       scope.boldCsOn = isOn(attributes);
       scope.prefix = prefix;
     }
@@ -522,13 +532,24 @@ export async function preflightDocx(bytes: Bytes): Promise<DocxRepair | null> {
   return { bytes: writeZip(rewritten), notes };
 }
 
+/**
+ * פענוח XML של חלק, **בלי לפשוט את ה-BOM**.
+ *
+ * ברירת המחדל של `TextDecoder` מוחקת U+FEFF, ו-`TextEncoder` אינו מחזיר אותו,
+ * ולכן חלק שהתחיל ב-BOM היה חוזר בלעדיו. אין לזה נזק תפקודי — ההצהרה אומרת
+ * UTF-8 — אבל ההבטחה בכותרת היא „זהה למקור בכל מה שאינו התיקון עצמו”.
+ */
+function decodeXml(bytes: Bytes): string {
+  return new TextDecoder('utf-8', { ignoreBOM: true }).decode(bytes);
+}
+
 /** תוכן החלק כטקסט, או `null` כשאי אפשר לפרוס אותו. */
 async function readEntryText(entry: ZipEntry): Promise<string | null> {
-  if (entry.method === METHOD_STORED) return new TextDecoder().decode(entry.data);
+  if (entry.method === METHOD_STORED) return decodeXml(entry.data);
   if (entry.method !== METHOD_DEFLATE) return null;
 
   const inflated = await inflateRaw(entry.data);
-  return inflated && new TextDecoder().decode(inflated);
+  return inflated && decodeXml(inflated);
 }
 
 /**
