@@ -3109,11 +3109,19 @@ onMounted(async () => {
 
     // הבחירה נטענת לפני שנפתח מסמך: העריכה הראשונה עלולה להתחיל סבב autosave,
     // ואם ההעדפה עוד לא הגיעה הוא היה רץ לפי ברירת המחדל ולא לפי מה שהמשתמש
-    // בחר בהפעלה הקודמת.
-    autosaveEnabled.value = await loadAutosaveEnabled();
-
-    // גם ההעדפה של הסרגל, ומאותו טעם: היא חלה על המסמך שנפתח מיד אחרי כאן.
-    rulerPreference = await loadRulerVisible();
+    // בחר בהפעלה הקודמת. ההעדפה של הסרגל — מאותו טעם: היא חלה על המסמך שנפתח
+    // מיד אחרי כאן.
+    //
+    // שלוש הקריאות במקביל ולא בזו אחר זו: כל אחת היא סבב IPC מלא מול אוצריא,
+    // הן קוראות מפתחות שונים ואינן תלויות זו בזו — והן עומדות בין המשתמש לבין
+    // פתיחת המסמך הראשון.
+    const [storedAutosave, storedRuler, stored] = await Promise.all([
+      loadAutosaveEnabled(),
+      loadRulerVisible(),
+      loadPreviousSession(),
+    ]);
+    autosaveEnabled.value = storedAutosave;
+    rulerPreference = storedRuler;
 
     // בדיקת האיות — **לא** ב-await: משיכת המילון היא 1.3MB, והעלייה לא
     // תמתין לה. מי שהדליק בהפעלה הקודמת יקבל את הסימון כשהמילון יגיע.
@@ -3132,7 +3140,6 @@ onMounted(async () => {
     // כולל פתיחת קבצים מרובים בעלייה — נדחה לשלב הבא: `activeEntry` כבר
     // מחזירה רק את רשומת הטאב הפעיל, וזה בדיוק מה שמשוחזר כאן. משתמש עם טאב
     // יחיד (הרוב המוחלט היום) אינו מבחין בהבדל.
-    const stored = await loadPreviousSession();
     const restoredId = activeEntry(stored)?.id ?? createDocumentSessionId();
 
     // טיוטות של טאבים שלא שוחזרו (רק הפעיל משוחזר, ראו למעלה) לעולם לא

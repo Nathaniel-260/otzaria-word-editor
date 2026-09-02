@@ -81,9 +81,33 @@ function deferredEntry(): Plugin {
 
              בצורה הזאת כל תחנה מדווחת ברגע שהיא אכן נכונה: כאן הבאנדל של
              המנוע מתחיל לרדת, ובסיום שלו app.js מתחיל להיפרס. */
+          /* חימום worker המסמך, ברגע ש-engine-workers.js הציב את המקורות —
+             כלומר בזמן ש-app.js (12MB) עוד נפרס. ‏Worker זמני על ה-blob URL
+             מקמפל את ~4.6MB קוד ה-worker במקביל לפריסה הזאת, ומושלך ברגע
+             שאיתת שעלה; כשהמנוע יקים Worker על **אותו URL** הקומפילציה כבר
+             חמה (נמדד: ‏~210ms במקום ~325ms). לכן ה-URL נשמר על window,
+             ו-engine/workers.ts מאמץ אותו במקום לבנות URL חדש — blob אחר,
+             גם עם אותו תוכן, אינו פוגע ב-cache.
+
+             חימום שנכשל אינו נוגע בעלייה: ה-catch בולע, ו-workers.ts בונה
+             את ה-URL בעצמו כשהגלובל חסר. השם __otzariaDocWorkerUrl משותף
+             עם src/engine/workers.ts. */
+          function warm() {
+            try {
+              var sources = window.__SUPERDOC_WORKER_SOURCES__;
+              if (!sources || !sources.document || typeof Worker !== 'function') return;
+              var url = URL.createObjectURL(new Blob([sources.document], { type: 'text/javascript' }));
+              window.__otzariaDocWorkerUrl = url;
+              var probe = new Worker(url);
+              function drop() { try { probe.terminate(); } catch (ignored) {} }
+              probe.addEventListener('message', drop, { once: true });
+              probe.addEventListener('error', drop, { once: true });
+              setTimeout(drop, 10000);
+            } catch (ignored) { /* חימום הוא קיצור, לא תנאי */ }
+          }
           say({ at: 22, text: 'טוען את מנוע המסמכים…' });
           [
-            { src: '${WORKERS_SRC}', next: { at: 55, text: 'מרכיב את הממשק…' } },
+            { src: '${WORKERS_SRC}', next: { at: 55, text: 'מרכיב את הממשק…' }, warm: true },
             { src: '${match[1]}', next: null }
           ].forEach(function (step) {
             var script = document.createElement('script');
@@ -91,6 +115,7 @@ function deferredEntry(): Plugin {
             script.src = step.src;
             script.addEventListener('load', function () {
               say(step.next);
+              if (step.warm) warm();
             });
             script.addEventListener('error', function () {
               if (splash) splash.fail('טעינת קוד התוסף נכשלה');
