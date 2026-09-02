@@ -589,3 +589,79 @@ describe('flush', () => {
     expect(h.drafts).toHaveLength(0);
   });
 });
+
+/**
+ * `hasUnwrittenWork` — השער שמאפשר ל„טאב נרדם” להיות בטוח.
+ *
+ * ## למה הבדיקות האלה קיימות
+ *
+ * שחרור המנוע של טאב ברקע (App.vue, `sleepTab`) מוחק מהזיכרון את כל מה
+ * שהמסמך מחזיק. מה שמתיר אותו הוא התשובה `false` כאן — ההבטחה שכל מה שנמחק
+ * ניתן לקריאה בחזרה מהטיוטה או מהדיסק. ביקורת מדדה שמוטציה שמוחקת את השער
+ * הזה מ-`sleepTab` עוברת בירוק את כל בדיקות המעטפת, מפני שהכפיל של רכז
+ * השמירה שם לעולם אינו „מלוכלך”. לכן הן כאן, על הדבר עצמו.
+ *
+ * שלושת המסלולים הם שלוש התשובות האפשריות של כתיבת הטיוטה: נכתבה, לא נכתבה,
+ * ונכתבה אך העבודה המשיכה.
+ */
+describe('hasUnwrittenWork', () => {
+  it('מסמך נקי — אין עבודה באוויר', () => {
+    const h = harness();
+
+    expect(h.keeper.hasUnwrittenWork).toBe(false);
+  });
+
+  it('עריכה שטרם נכתבה לטיוטה — יש', async () => {
+    const h = harness();
+    h.dirty = true;
+    h.keeper.noteChange();
+
+    expect(h.keeper.hasUnwrittenWork, 'ההשהיה עוד לא הבשילה').toBe(true);
+  });
+
+  it('אחרי `flush` שכתב את הטיוטה — אין', async () => {
+    const h = harness();
+    h.dirty = true;
+    h.keeper.noteChange();
+
+    await h.keeper.flush();
+
+    expect(h.drafts.length, 'הטיוטה אכן נכתבה').toBe(1);
+    expect(h.keeper.hasUnwrittenWork).toBe(false);
+  });
+
+  it('טיוטה שלא נכתבה — נשאר „יש”, וזה מה שמונע שחרור מנוע', async () => {
+    // המסלול שמציל מסמך גדול מהמכסה: הוא לעולם לא יירדם, וישלם בזיכרון
+    // במקום בעבודה. אותה תשובה בדיוק גם לכשל גשר (`failed`).
+    for (const result of ['too-large', 'failed'] as const) {
+      const h = harness();
+      h.writeResult = result;
+      h.dirty = true;
+      h.keeper.noteChange();
+
+      await h.keeper.flush();
+
+      expect(h.keeper.hasUnwrittenWork, result).toBe(true);
+    }
+  });
+
+  it('עריכה נוספת אחרי טיוטה מוצלחת — חוזר ל„יש”', async () => {
+    const h = harness();
+    h.dirty = true;
+    h.keeper.noteChange();
+    await h.keeper.flush();
+
+    h.keeper.noteChange();
+
+    expect(h.keeper.hasUnwrittenWork).toBe(true);
+  });
+
+  it('מסמך שנשמר לדיסק — אין, גם אם משהו זז מאז', async () => {
+    // שני התנאים ולא אחד: מונה השינויים לבדו זז גם מתזוזת סמן במסמך שנשמר.
+    const h = harness();
+    h.dirty = false;
+    h.keeper.noteChange();
+
+    expect(h.keeper.hasUnwrittenWork).toBe(false);
+  });
+});

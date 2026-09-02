@@ -10,9 +10,11 @@
  * המיקוד, הכיווץ) שייכת למי שיושב מול המסך ואחת לכל ההפעלה. מכאן החלוקה:
  * `documents` הוא אוסף רשומות-מסמך, כל אחת נכתבת בבת אחת; `view` נפרד ומשותף.
  *
- * `documents` נכתב עם רשומה לכל טאב פתוח (App.vue, `persistCombinedSession`) —
- * אבל בעלייה משוחזר רק הטאב שהיה פעיל (`activeEntry`); שחזור **כל** הטאבים
- * שהיו פתוחים נדחה לשלב הבא, ראו את ההנמקה ב-App.vue, `onMounted`.
+ * `documents` נכתב עם רשומה לכל טאב פתוח (App.vue, `persistCombinedSession`),
+ * ובעלייה **כל** רשומה שבאוסף מקבלת טאב משלה (App.vue, `restoreTabs`). מה
+ * שנטען מיד הוא המסמך של `activeId` בלבד; שאר הטאבים נטענים ברגע שעוברים
+ * אליהם — ראו „טעינה עצלה” ב-App.vue, `restoreTabs`. לכן `sessionForEntry`:
+ * כל טאב מקבל את הרשומה **שלו** כמצב הפנימי של הזוכר שלו, ולא את האוסף כולו.
  *
  * ## הכלל השני: כל חלק מזדהה מול המסמך שנפתח בפועל
  *
@@ -114,7 +116,10 @@ export interface SessionDocumentEntry {
 
 export interface SessionState {
   version: number;
-  /** רשומות המסמכים הפתוחים. היום תמיד אחת — ראו את ההנמקה בראש הקובץ. */
+  /**
+   * רשומות המסמכים הפתוחים, בסדר הטאבים. מזהה חוזר אינו חוקי — הוא זהות של
+   * טאב, ו-`readDocuments` משמיטה כפילות במקום לתת לשני טאבים לחלוק אותה.
+   */
   documents: SessionDocumentEntry[];
   /** מי מ-`documents` פעיל כרגע. `null` רק כש-`documents` ריק. */
   activeId: DocumentSessionId | null;
@@ -152,6 +157,23 @@ export function emptySession(): SessionState {
 export function emptySessionWithId(id: DocumentSessionId): SessionState {
   const entry = emptyDocumentEntry(id);
   return { version: SESSION_VERSION, documents: [entry], activeId: entry.id, view: defaultView() };
+}
+
+/**
+ * רשומה שיש בה רשומת-מסמך אחת, והיא הפעילה — הצורה שכל טאב מחזיק לעצמו.
+ *
+ * זהו הגשר בין האוסף שב-storage לבין הזוכרים: ב-storage יושבת רשומה אחת עם
+ * כל הטאבים, אבל `SessionKeeper` הוא פר-טאב ויודע לכתוב רק את הרשומה שלו
+ * (`withActiveEntry`), והרכבת האוסף המלא חוזרת ב-`persistCombinedSession`
+ * (App.vue). לכן טאב שנוצר משחזור מאמץ **את הרשומה שלו בלבד** — אילו אימץ
+ * את האוסף כולו, כל טאב היה כותב עותק של כולם, וסגירת טאב לא הייתה מוחקת
+ * אותו מהרשומה: העותק שבזוכר של השכן היה מחזיר אותו בעלייה הבאה.
+ *
+ * `view` משותף לכל הטאבים (ראו „הכלל שקובע את הצורה” בראש הקובץ) ולכן הוא
+ * מועתק לכולם; מי שנכתב ל-storage בפועל הוא של הטאב הפעיל.
+ */
+export function sessionForEntry(entry: SessionDocumentEntry, view: SessionView): SessionState {
+  return { version: SESSION_VERSION, documents: [entry], activeId: entry.id, view: { ...view } };
 }
 
 /** רשומת המסמך הפעיל, או `null` כשאין אחת (רק כש-`documents` ריק). */
@@ -267,9 +289,17 @@ function readDocumentEntry(value: unknown): SessionDocumentEntry | null {
 function readDocuments(value: unknown): SessionDocumentEntry[] {
   if (!Array.isArray(value)) return [];
   const out: SessionDocumentEntry[] = [];
+  const seen = new Set<DocumentSessionId>();
   for (const item of value) {
     const entry = readDocumentEntry(item);
-    if (entry) out.push(entry);
+    if (!entry) continue;
+    // מזהה חוזר אינו רשומה נוספת אלא רשומה פגומה: המזהה הוא זהות הטאב, הוא
+    // קובע את נתיב הטיוטה (`draftPathFor`) והוא המפתח במפת הטאבים. שני טאבים
+    // עליו היו חולקים קובץ טיוטה אחד, והשני היה דורס את הראשון במפה ומשאיר
+    // אחריו פאנל יתום. הראשון נשמר, הכפילות נשמטת.
+    if (seen.has(entry.id)) continue;
+    seen.add(entry.id);
+    out.push(entry);
   }
   return out;
 }
@@ -279,8 +309,9 @@ function readDocuments(value: unknown): SessionDocumentEntry[] {
  * אובייקט, או שהיא בגרסה אחרת.
  *
  * שאר השדות נקראים בסלחנות — שדה פגום מתאפס ואינו פוסל את הרשומה כולה. רשומת
- * מסמך שאין לה `id` תקין נשמטת מהאוסף במקום לפסול את כל הרשומה; `activeId`
- * שלא מצביע לרשומה קיימת נופל לרשומה הראשונה שנשארה, ואם אין אף אחת — ל-`null`.
+ * מסמך שאין לה `id` תקין — או שהמזהה שלה כבר הופיע — נשמטת מהאוסף במקום לפסול
+ * את כל הרשומה; `activeId` שלא מצביע לרשומה קיימת נופל לרשומה הראשונה שנשארה,
+ * ואם אין אף אחת — ל-`null`.
  */
 export function normalizeSession(raw: unknown): SessionState | null {
   if (!raw || typeof raw !== 'object') return null;

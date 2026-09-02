@@ -136,6 +136,22 @@ export interface SetDocumentOptions {
 export interface SessionKeeper {
   /** הרשומה כפי שהיא בזיכרון. */
   readonly state: SessionState;
+  /**
+   * האם יש עבודה שאינה בדיסק **וגם** אינה בטיוטה — כלומר עבודה שקיימת רק
+   * בזיכרון של המנוע.
+   *
+   * זהו השער שלפני „טאב נרדם” (App.vue, `sleepTab`): שחרור מנוע של טאב ברקע
+   * הוא מחיקה של כל מה שיש בו בזיכרון, ולכן מותר רק כשכל מה שבו כבר נמצא
+   * במקום שאפשר לקרוא ממנו בחזרה. אחרי `flush()` התשובה היא `false` בכל
+   * מקרה שבו הטיוטה נכתבה בהצלחה; היא נשארת `true` בדיוק במקרים שבהם
+   * הכתיבה לא הצליחה — מסמך גדול מהמכסה, גשר שנפל — ואלה בדיוק המקרים שבהם
+   * אסור לשחרר.
+   *
+   * שני התנאים ולא אחד: `isDirty` לבדו נשאר דלוק גם מיד אחרי כתיבת טיוטה
+   * (הוא מדבר על הדיסק, לא על הטיוטה), ומונה השינויים לבדו זז גם מתזוזת סמן
+   * במסמך שנשמר כבר.
+   */
+  readonly hasUnwrittenWork: boolean;
   /** מאמצת רשומה שנקראה בעלייה, לפני שמשהו נכתב עליה. */
   adopt(state: SessionState | null): void;
   /** מסמך נפתח, נשמר בשם, או נסגר. מבטלת טיוטה של המסמך הקודם. */
@@ -340,6 +356,10 @@ export function createSessionKeeper(deps: SessionKeeperDeps): SessionKeeper {
   return {
     get state() {
       return state;
+    },
+
+    get hasUnwrittenWork() {
+      return deps.isDirty() && revision !== draftedRevision;
     },
 
     adopt(loaded) {

@@ -84,3 +84,35 @@ export async function decideDocumentSwitch(deps: SwitchDeps): Promise<SwitchDeci
   });
   return discard ? { action: 'switch' } : { action: 'cancel', reason: 'user' };
 }
+
+/**
+ * סגירת טאב ששוחזר ועוד לא נטען — ראו `DocumentSession.pendingRestore`.
+ *
+ * ## למה זו החלטה נפרדת מ-`decideDocumentSwitch`
+ *
+ * לטאב כזה אין מסמך פתוח: אין `isDirty` מהמנוע, ואין מה לייצא — כלומר
+ * „לשמור קודם” אינו קיים כאן, ושתי השאלות הרגילות היו מובילות למסלול שאינו
+ * יכול לרוץ. מה שכן יש לו הוא **מצביע לטיוטה** ברשומה, ובה עבודה שלא נשמרה
+ * מההפעלה הקודמת; סגירת הטאב מוחקת אותה (`destroy({ removeDraft: true })`).
+ *
+ * לכן שאלה אחת, ורק כשיש מה לאבד: בלעדיה לחיצה על „×” בטאב שהמשתמש עוד לא
+ * פתח הייתה מוחקת בשקט עבודה שהוא לא ראה מעולם — הכשל החמור ביותר שיש לתכונה
+ * הזאת, מפני שאין בו אפילו רגע שבו הוא יכול להבחין בו.
+ */
+export async function decidePendingTabClose(deps: {
+  /** האם לרשומה של הטאב יש טיוטה — כלומר עבודה שלא נשמרה. */
+  hasDraft: () => boolean;
+  confirm: (question: { title: string; content: string }) => Promise<boolean>;
+  documentName: () => string;
+}): Promise<SwitchDecision> {
+  if (!deps.hasDraft()) return { action: 'switch' };
+
+  const name = deps.documentName();
+  const discard = await deps.confirm({
+    title: WORDING['close-tab'].discardTitle,
+    content:
+      `ב${name} יש שינויים מההפעלה הקודמת שעדיין לא נפתחו.` +
+      ' סגירת הטאב תמחק אותם ואין דרך לשחזר אותם.',
+  });
+  return discard ? { action: 'switch' } : { action: 'cancel', reason: 'user' };
+}

@@ -17,8 +17,10 @@ import {
   documentViewFor,
   draftAgeLabel,
   draftPathFor,
+  emptyDocumentEntry,
   emptySession,
   normalizeSession,
+  sessionForEntry,
   sessionFromLastDocument,
   withActiveEntry,
   type SessionDraft,
@@ -85,6 +87,25 @@ describe('normalizeSession', () => {
     });
 
     expect(read?.documents).toHaveLength(1);
+    expect(read?.activeId).toBe('d2');
+  });
+
+  it('מזהה שחוזר פעמיים נשמט — טאב אינו יכול לחלוק זהות עם אחר', () => {
+    // המזהה קובע את נתיב הטיוטה ואת המקום במפת הטאבים: שני טאבים עליו היו
+    // דורסים זה את הטיוטה של זה, והשני היה מותיר פאנל יתום במסך.
+    const read = normalizeSession({
+      version: SESSION_VERSION,
+      documents: [
+        { id: 'd1', document: { token: 'א' } },
+        { id: 'd1', document: { token: 'ב' } },
+        { id: 'd2', document: { token: 'ג' } },
+      ],
+      activeId: 'd2',
+      view: defaultView(),
+    });
+
+    expect(read?.documents.map((entry) => entry.id)).toEqual(['d1', 'd2']);
+    expect(read?.documents[0]?.document?.token, 'הראשון נשמר, הכפילות נשמטת').toBe('א');
     expect(read?.activeId).toBe('d2');
   });
 
@@ -251,5 +272,28 @@ describe('activeEntry / withActiveEntry', () => {
 
   it('draftPathFor מייצרת נתיב שונה לכל מזהה מסמך', () => {
     expect(draftPathFor('a')).not.toBe(draftPathFor('b'));
+  });
+});
+
+describe('sessionForEntry', () => {
+  it('הרשומה שטאב מחזיק לעצמו היא הרשומה שלו בלבד, והיא הפעילה בה', () => {
+    // בלי זה כל טאב היה מחזיק עותק של האוסף כולו, וסגירת טאב לא הייתה מוחקת
+    // אותו: העותק שאצל השכן היה מחזיר אותו בעלייה הבאה.
+    const entry = { ...emptyDocumentEntry('doc-7'), document: { token: 't', name: 'ז.docx', writable: true } };
+    const state = sessionForEntry(entry, { ...defaultView(), zoom: 130 });
+
+    expect(state.documents).toEqual([entry]);
+    expect(state.activeId).toBe('doc-7');
+    expect(activeEntry(state)).toBe(entry);
+    expect(state.version).toBe(SESSION_VERSION);
+  });
+
+  it('מצב התצוגה מועתק ואינו משותף בין טאבים', () => {
+    const view = defaultView();
+    const state = sessionForEntry(emptyDocumentEntry('doc-1'), view);
+
+    state.view.zoom = 200;
+
+    expect(view.zoom, 'שינוי אצל טאב אחד אינו זולג לשני').toBeNull();
   });
 });

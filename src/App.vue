@@ -298,8 +298,25 @@ import {
   type SearchOutcome,
   type SearchState,
 } from './engine/search';
-import { createEditorSwap, type EditorSwap, type OpenEditor } from './sessions/editor-swap';
-import { createDocumentSession, type DocumentSession } from './sessions/document-session';
+import {
+  createEditorSwap,
+  HOST_CLASS,
+  PENDING_CLASS,
+  type EditorSwap,
+  type OpenEditor,
+} from './sessions/editor-swap';
+import {
+  applyPaneScroll,
+  readPaneScroll,
+  repairPaneScroll,
+  type PaneScroll,
+} from './sessions/pane-scroll';
+import {
+  createDocumentSession,
+  emptyUiSnapshot,
+  type DocumentSession,
+  type DocumentUiSnapshot,
+} from './sessions/document-session';
 import {
   createDocumentLoad,
   idleLoadSnapshot,
@@ -381,7 +398,8 @@ import {
   type UserFile,
   type WriteTicket,
 } from './host/files';
-import { decideDocumentSwitch } from './sessions/open-flow';
+import { decideDocumentSwitch, decidePendingTabClose } from './sessions/open-flow';
+import { decideSleep, type SleepCandidate } from './sessions/sleep-policy';
 import { call, confirm, isAvailable, notifyError, on, tryCall } from './host/otzaria-client';
 import { supportsPdfExport } from './host/host-capabilities';
 import { splashDone } from './host/splash';
@@ -401,14 +419,19 @@ import {
   activeEntry,
   createDocumentSessionId,
   decideDraftRecovery,
+  defaultView,
   documentViewFor,
   draftAgeLabel,
   draftPathFor,
+  emptyDocumentEntry,
   normalizeSession,
+  sessionForEntry,
   sessionFromLastDocument,
   SESSION_VERSION,
   type DocumentSessionId,
+  type SessionDocumentEntry,
   type SessionState,
+  type SessionView,
 } from './sessions/session-state';
 import { createSessionKeeper, type SessionKeeper } from './sessions/session-keeper';
 import {
@@ -622,7 +645,7 @@ const ribbonCollapsed = ref(false);
 // חצים, ולחיצה כפולה שמכווצת — ומטפל היה צריך להיקרא בכל אחד מהם. השינוי
 // עצמו הוא מה שמעניין, ולכן מאזינים לו ולא למי שגרם לו.
 watch([ribbonTab, ribbonCollapsed], ([tab, collapsed]) => {
-  keeper?.updateView({ ribbonTab: tab, ribbonCollapsed: collapsed });
+  updateShellView({ ribbonTab: tab, ribbonCollapsed: collapsed });
 });
 
 const isFindOpen = ref(false);
@@ -839,9 +862,72 @@ const saveSnapshot = ref<SaveSnapshot>({
 const sessions = shallowReactive(new Map<DocumentSessionId, DocumentSession>());
 const activeSession = shallowRef<DocumentSession | null>(null);
 
+/**
+ * כמה מסמכים מותר שיחזיקו מנוע חי בו-זמנית.
+ *
+ * ## למה יש תקרה בכלל
+ *
+ * כל מסמך פתוח הוא מופע SuperDoc מלא — חבילת מנוע, workers, ועותק מפורס של
+ * המסמך. עשרה טאבים פתוחים בלי תקרה הם עשרה מופעים כאלה בזיכרון, גם אם
+ * המשתמש נגע בשניים מהם בשעה האחרונה. מי שעובד על מכונה צנועה משלם על זה
+ * בכל התוסף, לא רק בטאב שהוא שכח.
+ *
+ * ## למה דווקא שלושה
+ *
+ * שלושה הם „זה שאני עליו, וזה שאני מדלג אליו וחוזר, ועוד אחד” — התרחיש
+ * שבגללו ריבוי המסמכים קיים (מצטטים ממאמר אחד לשני). כל טאב מעבר לזה כמעט
+ * תמיד ממתין דקות, ופתיחתו מחדש עולה פחות מלהחזיק אותו. משתמש עם שלושה
+ * טאבים או פחות — הרוב המוחלט — אינו פוגש את המנגנון הזה כלל.
+ *
+ * מה שקורה לטאב הרביעי מתואר ב-`sleepTab`, ובראשי תיבות: הוא הופך לבדיוק
+ * אותו „ממתין לטעינה” של טאב ששוחזר מהפעלה קודמת — אותו מסלול, אותה רשומה,
+ * אותה טיוטה — ונפתח מחדש כשחוזרים אליו.
+ */
+const MAX_LIVE_DOCUMENTS = 3;
+
+/**
+ * מזהי הטאבים לפי סדר השימוש, החדש בראש. זה מה שקובע מי נרדם ראשון, ולכן
+ * הוא מתעדכן ב-`activateTab` — הרגע היחיד שבו „מתי השתמשו בו” משתנה.
+ */
+const recentTabs: DocumentSessionId[] = [];
+
+/** סבב הרדמה אחד בכל רגע: הוא ממתין ל-`flush`, ושניים היו נכנסים זה בזה. */
+let trimming = false;
+
 /** ראו את ההסבר ליד `sessions`. עוטפת כתיבה שמקורה בטאב שעלול כבר להיות ברקע. */
 function guardIfActive(session: DocumentSession, run: () => void): void {
   if (activeSession.value === session) run();
+}
+
+/**
+ * מיכל הגלילה של הטאב — ה-host שה-swap יצר בתוך הפאנל שלו
+ * (sessions/editor-swap.ts). `null` כשאין מסמך פתוח בטאב, למשל טאב שממתין
+ * לטעינה או כזה שנרדם.
+ */
+function documentScrollHost(session: DocumentSession): HTMLElement | null {
+  // `:not(PENDING_CLASS)` ולא ה-host הראשון: בזמן פתיחה יושבים בפאנל שניים —
+  // הפעיל, והמועמד שעדיין נבנה (sessions/editor-swap.ts). מיקום גלילה שנקרא
+  // מהמועמד הוא תמיד אפס, וכתיבה אליו נמחקת כשהוא מוסר.
+  const host = session.pane.querySelector(`.${HOST_CLASS}:not(.${PENDING_CLASS})`);
+  return host instanceof HTMLElement ? host : null;
+}
+
+/**
+ * מחזירה לטאב שנכנס את מיקום הגלילה שנשמר בו.
+ *
+ * פעמיים, ולא פעם אחת: הפאנל בדיוק יצא מ-`display: none`, והדפדפן מחשב את
+ * גובה התוכן שלו מחדש. השמה שקורית לפני שהחישוב הזה הסתיים נחתכת לגובה
+ * שעדיין אינו נכון (`scrollTop` נצמד למקסימום האפשרי באותו רגע), ולכן
+ * החזרה השנייה בפריים הבא. שתיהן אידמפוטנטיות — ראו `applyPaneScroll`.
+ */
+function restorePaneScroll(session: DocumentSession, scroll: PaneScroll): void {
+  applyPaneScroll(documentScrollHost(session), scroll);
+  if (typeof requestAnimationFrame !== 'function') return;
+  requestAnimationFrame(() => {
+    // רק אם הוא עדיין הפעיל: מעבר טאב מהיר יותר מפריים היה מחזיר את הגלילה
+    // של הטאב הקודם לתוך זה שנכנס אחריו.
+    if (activeSession.value === session) applyPaneScroll(documentScrollHost(session), scroll);
+  });
 }
 
 let swap: EditorSwap | null = null;
@@ -881,7 +967,27 @@ let documentId: DocumentSessionId = createDocumentSessionId();
 const documentIdView = ref<DocumentSessionId>(documentId);
 /** מבטל את ההאזנה למעבר לרקע. */
 let hiddenListener: (() => void) | null = null;
+/** מבטל את ההאזנה לחזרה מהרקע. ראו `onPluginShown` ב-host/lifecycle.ts. */
+let shownListener: (() => void) | null = null;
+/**
+ * טאב שממתין לטעינה נפתח כרגע. ראו `openPendingTab` — הוא מכסה את החלון
+ * שלפני ש-`openDocument` מרימה את `isOpening` בעצמה.
+ */
+let pendingTabLoad = false;
+
+/**
+ * האם אסור להתחיל פתיחה או להחליף טאב כרגע.
+ *
+ * `openDocumentInto` כותב לטאב הפעיל לכל אורך ריצתו, ולכן כל מי שיכול להחליף
+ * את הטאב הפעיל או להתחיל פתיחה שנייה חייב לשאול כאן — לא את `isOpening`
+ * לבדו, שאינו מכסה את שלב ההכנה של `openPendingTab`.
+ */
+function isOpenBusy(): boolean {
+  return isOpening.value || pendingTabLoad;
+}
 let contextMenuListener: (() => void) | null = null;
+/** מבטל את ההאזנה ליציאה ממסך מלא שלא באה מאיתנו. */
+let fullscreenListener: (() => void) | null = null;
 
 const saveStateMessage = computed(() => {
   const state = saveSnapshot.value.state;
@@ -1059,10 +1165,13 @@ function initSessionKeeper(getSession: () => DocumentSession, id: DocumentSessio
 
 /**
  * הרשומה הנשמרת בין הפעלות היא של **כל** הטאבים הפתוחים, לא רק של מי שכתב —
- * כל `SessionKeeper` יודע לכתוב רק את הרשומה שלו (`withActiveEntry` על
- * `emptySession()`, ראו session-state.ts), ולכן כאן מרכיבים מחדש את המערך
- * המלא מכל הטאבים בכל פעם שאחד מהם משנה משהו. `activeId`/`view` הם תמיד
- * של הטאב הפעיל — ראו את ההחלטה על שחזור בדוח.
+ * כל `SessionKeeper` מחזיק את הרשומה שלו בלבד (`sessionForEntry`, ראו
+ * session-state.ts), ולכן כאן מרכיבים מחדש את המערך המלא מכל הטאבים בכל פעם
+ * שאחד מהם משנה משהו. זו גם הצורה שממנה `restoreTabs` בונה את הטאבים בעלייה
+ * הבאה, וזו הסיבה שהיא חייבת להיות שלמה: מה שאינו כאן פשוט לא ייפתח.
+ *
+ * `activeId` ו-`view` נלקחים מהטאב הפעיל. `view` משותף לכל הטאבים (ראו
+ * `updateShellView`), ולכן זו אינה בחירה שרירותית אלא קריאה של אותו ערך.
  */
 function persistCombinedSession(session: DocumentSession, state: SessionState): Promise<void> {
   const documents: SessionState['documents'] = [];
@@ -1082,6 +1191,25 @@ function persistCombinedSession(session: DocumentSession, state: SessionState): 
     view: active.keeper.state.view,
   };
   return saveSessionRecord(combined);
+}
+
+/**
+ * מצב המעטפת — הלשונית ברצועה, הכיווץ, מצב המיקוד — לכל הטאבים.
+ *
+ * ## למה לכולם ולא לפעיל בלבד
+ *
+ * ההפרדה שבראש sessions/session-state.ts אומרת ש-`view` שייך למי שיושב מול
+ * המסך ואחת לכל ההפעלה, בשונה מהמסמך והסמן ששייכים לטאב. אבל הזוכר הוא
+ * פר-טאב, וכל אחד מחזיק עותק משלו — ומה שנכתב ל-storage הוא של הטאב הפעיל
+ * (`persistCombinedSession`). כתיבה לפעיל בלבד פירושה שהעדפה שנבחרה בטאב א'
+ * נעלמת אם המשתמש סוגר את התוסף כשהוא עומד על טאב ב': ב' מעולם לא שמע עליה,
+ * והוא זה שכותב. נמדד בשער `check:session` — הלשונית „הפניות” חזרה כ„בית”.
+ *
+ * `zoom` **אינו** עובר כאן, ובכוונה: „150%” הוא משפט על מסמך מסוים (ראו
+ * `documentViewFor`), והוא מדווח פר-מסמך מהמנוע עצמו.
+ */
+function updateShellView(patch: Partial<SessionView>): void {
+  for (const session of sessions.values()) session.keeper.updateView(patch);
 }
 
 /**
@@ -1119,11 +1247,46 @@ function createOpenEditorForSession(session: DocumentSession): OpenEditor {
 }
 
 /**
+ * תמונת המצב שטאב ששוחזר מציג **לפני** שהמסמך שלו נטען.
+ *
+ * שלושת השדות הם בדיוק מה שרצועת הטאבים קוראת (`sessionDisplayTitle`,
+ * `sessionIsDirty`) ומה שהפס העליון יראה אם יעברו אליו לפני שהפתיחה הסתיימה.
+ * „לא נשמר” נגזר מקיום הטיוטה ברשומה, וזו אמת ולא קישוט: טיוטה פירושה עבודה
+ * שאינה בדיסק, בדיוק כמו הנקודה שמופיעה על טאב פתוח.
+ */
+function restoredUiSnapshot(entry: SessionDocumentEntry, fallbackTitle?: string): DocumentUiSnapshot {
+  const base = emptyUiSnapshot();
+  const remembered = entry.document;
+  return {
+    ...base,
+    title: remembered ? stripWordExtension(remembered.name) : (fallbackTitle ?? base.title),
+    saveSnapshot: {
+      ...base.saveSnapshot,
+      isDirty: entry.draft !== null,
+      targetToken: remembered?.writable ? remembered.token : null,
+      name: remembered?.name ?? null,
+    },
+  };
+}
+
+interface NewTabOptions {
+  /** ברירת המחדל: מזהה חדש. נמסר בפירוש כשהטאב נוצר מרשומה שמורה. */
+  id?: DocumentSessionId;
+  /**
+   * הרשומה שהטאב נוצר ממנה בשחזור ההפעלה, ומצב התצוגה המשותף שלצידה. נוכחותה
+   * היא שהופכת אותו ל„ממתין לטעינה” — ראו „טעינה עצלה” ב-`restoreTabs`.
+   */
+  restore?: { entry: SessionDocumentEntry; view: SessionView };
+}
+
+/**
  * טאב חדש, ריק — עדיין בלי מסמך פתוח בתוכו. `pane` נוצר מוסתר: `activateTab`
  * הוא מי שחושף אותו, ולא היצירה עצמה — טאב שנוצר ברקע (למשל בזמן שחזור
  * ההפעלה) אסור לו להבליח לרגע לפני שההחלטה מי פעיל נופלת.
  */
-function createNewDocumentSession(id: DocumentSessionId = createDocumentSessionId()): DocumentSession {
+function createNewDocumentSession(options: NewTabOptions = {}): DocumentSession {
+  const restore = options.restore;
+  const id = options.id ?? createDocumentSessionId();
   const pane = document.createElement('div');
   pane.className = 'document-pane';
   pane.style.display = 'none';
@@ -1142,7 +1305,23 @@ function createNewDocumentSession(id: DocumentSessionId = createDocumentSessionI
     ),
     save: initSaveCoordinator(getSession),
     keeper: initSessionKeeper(getSession, id),
+    pendingRestore: restore !== undefined,
+    ui: restore ? restoredUiSnapshot(restore.entry) : undefined,
   });
+  // הזוכר מאמץ את הרשומה **של הטאב הזה בלבד** — ההנמקה ליד `sessionForEntry`
+  // ב-session-state.ts. לפני `sessions.set`, כדי שהרשומה המשולבת שתיכתב
+  // בעקבות טאב אחר לא תתפוס אותו רגע אחד עם רשומה ריקה במקומו.
+  if (restore) session.keeper.adopt(sessionForEntry(restore.entry, restore.view));
+  // טאב חדש נולד עם `defaultView()`, ומרגע שהוא הפעיל **הוא** זה שכותב את
+  // `view` לרשומה (`persistCombinedSession`) — כלומר פתיחת טאב הייתה מוחקת
+  // מה-storage את הלשונית, הכיווץ ומצב המיקוד שהמשתמש בחר. ראו `updateShellView`.
+  else {
+    session.keeper.updateView({
+      ribbonTab: ribbonTab.value,
+      ribbonCollapsed: ribbonCollapsed.value,
+      focusMode: isFocusMode.value,
+    });
+  }
   session.save.setAutosaveEnabled(autosaveEnabled.value);
   sessions.set(session.id, session);
   // ידית QA: כל הטאבים הפתוחים, לפי מזהה — ראו התיוג הבודד ב-create-editor.ts
@@ -1183,6 +1362,9 @@ function stashActiveInto(session: DocumentSession): void {
     engineFontSlice: engineFontSlice.value,
     readoutSelection: readoutSelection.value,
     documentVba: documentVba.value,
+    // נקרא **לפני** ש-`activateTab` מסתיר את הפאנל: ברגע שהוא
+    // `display: none` המספר הזה כבר אבד. ראו sessions/pane-scroll.ts.
+    scroll: readPaneScroll(documentScrollHost(session)),
     saveExtension: saveExtension.value,
   };
   swap = null;
@@ -1198,7 +1380,11 @@ function stashActiveInto(session: DocumentSession): void {
 
 /**
  * טוענת לתוך הסינגלטונים ברמת המודול את מה שהטאב הזה מציג — ההופכי המדויק
- * של `stashActiveInto`.
+ * של `stashActiveInto`, בשדה אחד למעט: **מיקום הגלילה**.
+ *
+ * הוא נשמר ב-`stashActiveInto` אבל מוחזר ב-`activateTab` ולא כאן, ולא מטעמי
+ * נוחות: החזרה שלו חייבת לקרות **אחרי** ש-`display` של הפאנל חוזר, כי לפני
+ * כן אין לו קופסה שאפשר לגלול בה. ראו `restorePaneScroll`.
  */
 function restoreFromSession(session: DocumentSession): void {
   const ui = session.ui;
@@ -1262,6 +1448,139 @@ function activateTab(session: DocumentSession): void {
   session.pane.style.display = '';
   restoreFromSession(session);
   activeSession.value = session;
+  // אחרי החשיפה ואחרי ההשמה ל-`activeSession`: הראשונה מחזירה לפאנל קופסה
+  // שאפשר לגלול בה, והשנייה היא מה שהבדיקה שבפריים הבא נשענת עליה.
+  restorePaneScroll(session, session.ui.scroll);
+  noteTabUsed(session);
+  void trimLiveDocuments();
+
+  // „מי היה פעיל” הוא חלק מהרשומה, והוא משתנה בדיוק כאן. בלי הכתיבה הזאת
+  // הוא נשמר רק כשמשהו אחר גרם לכתיבה (עריכה, יציאה מסודרת), ומעבר טאב
+  // שלא לווה בעריכה היה חוזר בהפעלה הבאה לטאב הקודם.
+  //
+  // מיידית ולא מושהית, בשונה מ-`schedulePersist` של הזוכר: ההשהיה שם קיימת
+  // כדי לא לכתוב על כל תו שנקלד, וכאן המקור הוא מחווה בודדת של המשתמש —
+  // ואחריה עלול לבוא מיד המעבר שסוגר את התוסף. כתיבה אחת ל-storage, בלי
+  // ייצוא ובלי טיוטה (ראו „שני קצבים” ב-session-keeper.ts).
+  void persistCombinedSession(session, session.keeper.state).catch((error: unknown) => {
+    console.warn('[otzaria-word] שמירת הטאב הפעיל נכשלה', error);
+  });
+}
+
+/** מסמנת את הטאב כאחרון שהשתמשו בו. ראו `recentTabs`. */
+function noteTabUsed(session: DocumentSession): void {
+  const at = recentTabs.indexOf(session.id);
+  if (at >= 0) recentTabs.splice(at, 1);
+  recentTabs.unshift(session.id);
+}
+
+/** כמה טאבים מחזיקים כרגע מנוע חי. ראו `MAX_LIVE_DOCUMENTS`. */
+function liveDocumentCount(): number {
+  let live = 0;
+  for (const session of sessions.values()) if (session.swap.current) live += 1;
+  return live;
+}
+
+/**
+ * מה שידוע על הטאב, בצורה שההחלטה מבינה. ההחלטה עצמה ב-sessions/sleep-policy.ts
+ * ולא כאן — היא קובעת אם עבודה של המשתנה נמחקת מהזיכרון, וקוד כזה חייב
+ * להיבדק.
+ */
+function sleepCandidate(session: DocumentSession, hasUnwrittenWork: boolean): SleepCandidate {
+  return {
+    isActive: session === activeSession.value,
+    isPending: session.pendingRestore,
+    hasEngine: session.swap.current !== null,
+    isOpening: session.swap.isOpening,
+    isSaving: session.save.snapshot.isSaving === true,
+    hasFile: activeEntry(session.keeper.state)?.document != null,
+    hasUnwrittenWork,
+  };
+}
+
+/**
+ * סינון מוקדם, לפני שמשקיעים `flush` שלם.
+ *
+ * `hasUnwrittenWork: false` כאן אינו טענה אלא „עוד לא ידוע”: לפני ה-`flush`
+ * כל מסמך שנערך מדווח שיש בו עבודה שלא נכתבה, וזו בדיוק העבודה שה-`flush`
+ * הולך לכתוב. השאלה האמיתית נשאלת אחריו, ב-`sleepTab`.
+ */
+function canSleepTab(session: DocumentSession): boolean {
+  return decideSleep(sleepCandidate(session, false)).action === 'sleep';
+}
+
+/**
+ * „טאב נרדם”: משחררת את המנוע של טאב ברקע, ומשאירה אותו ברצועה בדיוק כפי
+ * שנראה טאב ששוחזר מהפעלה קודמת — שם, סימון „לא נשמר”, ורשומה מלאה.
+ *
+ * ## למה זה בטוח, ואיפה הגבול
+ *
+ * שחרור מנוע הוא מחיקה של כל מה שיש בו בזיכרון. מה שמאפשר אותה הוא שהכול
+ * כבר נמצא במקום שאפשר לקרוא ממנו בחזרה: הקובץ בדיסק, העבודה שלא נשמרה
+ * בטיוטה, והסמן והזום ברשומה. `flush()` הוא מה שמוודא שזה נכון **עכשיו**
+ * ולא „בעוד עשר שניות”, ו-`decideSleep` הוא מי שבודק שהוא הצליח.
+ *
+ * שני דברים **אינם** חוזרים לטאב שנרדם, וזה כל המחיר: **היסטוריית ה-Undo**
+ * ומיקום הגלילה המדויק — לשניהם אין ייצוג לא בקובץ ולא ברשומה (הסמן כן
+ * חוזר, וממילא מחזיר את התצוגה לאזור הנכון). לכן התקרה אינה 1 ולכן הסדר
+ * הוא לפי שימוש אחרון: הטאב שנרדם הוא זה שהמשתמש לא נגע בו הכי הרבה זמן,
+ * ולא זה שהוא הרגע עזב.
+ *
+ * ההחלטה נשאלת שוב אחרי ה-`flush` ולא רק לפניו: הוא `await`, והמצב עשוי
+ * להשתנות בתוכו — המשתמש עבר לטאב הזה, שמירה התחילה בו, או שהוא נסגר.
+ */
+async function sleepTab(session: DocumentSession): Promise<void> {
+  await session.keeper.flush();
+
+  const decision = decideSleep(sleepCandidate(session, session.keeper.hasUnwrittenWork));
+  if (decision.action === 'keep') {
+    // רק הסיבה הזאת ראויה לשורה בלוג: כל השאר הן „לא עכשיו”, וזו אומרת
+    // שרשת הביטחון של הטיוטה אינה פרושה על המסמך הזה.
+    if (decision.reason === 'unwritten-work') {
+      console.info(`[otzaria-word] ${session.ui.title} נשאר בזיכרון — יש בו עבודה שלא נכתבה`);
+    }
+    return;
+  }
+
+  const entry = activeEntry(session.keeper.state);
+  if (!entry) return;
+
+  const title = session.ui.title;
+  session.pendingRestore = true;
+  session.slept = true;
+  session.swap.close();
+  // אחרי `close` ולא לפניו: הפירוק עצמו כותב לתמונת המצב של הטאב (ראו
+  // `editor.onDispose` ב-openDocumentInto), וכאן היא נקבעת סופית — נקייה
+  // ובלי הפניות למנוע שכבר אינו קיים.
+  session.ui = restoredUiSnapshot(entry, title);
+}
+
+/**
+ * מרדימה טאבים מעבר לתקרה, מהוותיק שבהם. ראו `MAX_LIVE_DOCUMENTS`.
+ *
+ * נקראת אחרי מעבר טאב ואחרי פתיחת מסמך — שתי הנקודות שבהן מספר המנועים
+ * החיים או סדר השימוש משתנים. שקטה לחלוטין כשאין מה לעשות, וזה המצב אצל
+ * כמעט כל משתמש.
+ */
+async function trimLiveDocuments(): Promise<void> {
+  if (trimming) return;
+  trimming = true;
+  try {
+    // עותק, ולא המערך עצמו: `sleepTab` ממתין, ומעבר טאב באמצע ההמתנה מזיז
+    // איברים ב-`recentTabs` (`noteTabUsed`) — סריקה על המערך החי הייתה
+    // מדלגת על מועמד או סורקת אותו פעמיים. מי שכבר אינו במפה מדולג ממילא.
+    const candidates = [...recentTabs].reverse();
+    for (const id of candidates) {
+      if (liveDocumentCount() <= MAX_LIVE_DOCUMENTS) return;
+      const candidate = sessions.get(id);
+      if (candidate && canSleepTab(candidate)) await sleepTab(candidate);
+    }
+  } catch (error) {
+    // שחרור זיכרון הוא שיפור, לא תנאי לשום דבר: כשל כאן משאיר מסמך פתוח.
+    console.warn('[otzaria-word] שחרור מסמך שברקע נכשל', error);
+  } finally {
+    trimming = false;
+  }
 }
 
 /**
@@ -1347,6 +1666,9 @@ async function openDocument(file?: UserFile, options: OpenOptions = {}): Promise
     // נקרא מה-swap ולא נקבע ל-false, כדי שפתיחה חדשה יותר שכבר בדרך לא
     // תיראה כמי שהסתיימה.
     isOpening.value = swap?.isOpening ?? false;
+    // מנוע חי נוסף נולד כאן — הנקודה השנייה שבה התקרה יכולה להישבר (הראשונה
+    // היא מעבר טאב). ראו `MAX_LIVE_DOCUMENTS`.
+    void trimLiveDocuments();
   }
 }
 
@@ -1416,8 +1738,12 @@ async function openDocumentInto(
       activeSuperdoc.value = null;
       activeEditorContainer.value = null;
     }
-    // בלי האיפוס הרצועה הייתה ממשיכה להחזיק את הקריאה של המסמך שנסגר.
-    readoutSelection.value = UNSETTLED_SELECTION;
+    // בלי האיפוס הרצועה הייתה ממשיכה להחזיק את הקריאה של המסמך שנסגר. מותנה
+    // בטאב: פירוק יכול לקרות גם על טאב שברקע (סגירת טאב, טאב שנרדם — ראו
+    // „ריבוי מסמכים” ליד `sessions`), ואיפוס גורף היה מוחק את הקריאה של
+    // המסמך שהמשתמש מסתכל עליו דווקא.
+    if (session) session.ui.readoutSelection = UNSETTLED_SELECTION;
+    if (!session || session === activeSession.value) readoutSelection.value = UNSETTLED_SELECTION;
   });
 
   // החיפוש שייך ל-session: ה-handle הוא של ה-controller של המופע, ומסמך חדש
@@ -1520,7 +1846,11 @@ async function openDocumentInto(
     readPage: () => readPageMargins(editor.superdoc),
     readIndents: () => readParagraphIndents(editor.superdoc),
     onChange: (next) => {
-      rulerReading.value = next;
+      // מושהה (`RULER_*_DEBOUNCE_MS`) ולכן עשוי לנחות אחרי מעבר טאב — ראו
+      // „ריבוי מסמכים” ליד `sessions`. בלי ההגנה, הסרגל של הטאב שעל המסך
+      // היה מציג את השוליים של מסמך אחר, וגרירת ידית הייתה מחשבת מהם.
+      if (session) session.ui.rulerReading = next;
+      if (!session || session === activeSession.value) rulerReading.value = next;
     },
   });
   ruler = sessionRuler;
@@ -1571,7 +1901,10 @@ async function openDocumentInto(
   const sessionPageBorders = createPageBorderModel({
     read: () => readPageBorders(editor.superdoc),
     onChange: (next) => {
-      pageBorders.value = next;
+      // מושהה, כמו הסרגל — ומכאן אותה הגנה בדיוק. שכבת הציור היא מופע יחיד
+      // מעל הפאנל הפעיל, ולכן קריאה של מסמך אחר נראית מיד על המסך.
+      if (session) session.ui.pageBorders = next;
+      if (!session || session === activeSession.value) pageBorders.value = next;
     },
   });
   pageBorderModel = sessionPageBorders;
@@ -1579,6 +1912,10 @@ async function openDocumentInto(
   sessionPageBorders.refreshNow();
   editor.onDispose(() => {
     sessionPageBorders.dispose();
+    // גם השדה שב-session, ולא רק הסינגלטון: טאב שנרדם (`sleepTab`) היה
+    // ממשיך להחזיק דרכו מודל מפורק שסגירתו לוכדת את ה-SuperDoc ההרוס —
+    // כלומר בדיוק הזיכרון שהשחרור נועד לפנות.
+    if (session && session.pageBorders === sessionPageBorders) session.pageBorders = null;
     if (pageBorderModel === sessionPageBorders) {
       pageBorderModel = null;
       pageBorders.value = null;
@@ -1593,7 +1930,8 @@ async function openDocumentInto(
   const sessionLineNumbering = createLineNumberingModel({
     read: () => readLineNumbering(editor.superdoc),
     onChange: (next) => {
-      lineNumbering.value = next;
+      if (session) session.ui.lineNumbering = next;
+      if (!session || session === activeSession.value) lineNumbering.value = next;
     },
   });
   lineNumberModel = sessionLineNumbering;
@@ -1601,6 +1939,7 @@ async function openDocumentInto(
   sessionLineNumbering.refreshNow();
   editor.onDispose(() => {
     sessionLineNumbering.dispose();
+    if (session && session.lineNumbers === sessionLineNumbering) session.lineNumbers = null;
     if (lineNumberModel === sessionLineNumbering) {
       lineNumberModel = null;
       lineNumbering.value = null;
@@ -1617,13 +1956,15 @@ async function openDocumentInto(
   const sessionFormattingMarks = createFormattingMarksModel({
     read: () => readFormattingMarksBlocks(editor.superdoc),
     onChange: (next) => {
-      formattingMarksBlocks.value = next;
+      if (session) session.ui.formattingMarksBlocks = next;
+      if (!session || session === activeSession.value) formattingMarksBlocks.value = next;
     },
   });
   formattingMarksModel = sessionFormattingMarks;
   if (session) session.formattingMarks = sessionFormattingMarks;
   editor.onDispose(() => {
     sessionFormattingMarks.dispose();
+    if (session && session.formattingMarks === sessionFormattingMarks) session.formattingMarks = null;
     if (formattingMarksModel === sessionFormattingMarks) {
       formattingMarksModel = null;
       formattingMarksBlocks.value = null;
@@ -1667,8 +2008,15 @@ async function openDocumentInto(
     sessionRuler.setEnabled(active);
   };
 
-  /** ההחלפה הייתה בחירה של המשתמש, ולכן היא זו שנשמרת להפעלה הבאה. */
+  /**
+   * ההחלפה הייתה בחירה של המשתמש, ולכן היא זו שנשמרת להפעלה הבאה.
+   *
+   * רק כשהטאב הזה על המסך: `void adapter.run('ruler')` שמתחת אינו מומתן,
+   * והדיווח שלו עשוי לנחות אחרי שהמשתמש כבר עבר טאב. העדפה שנכתבת ממסמך
+   * שאינו מוצג היא בדיוק „כיביתי את הסרגל והוא חזר לבד”.
+   */
   const rememberRulerVisible = (active: boolean): void => {
+    if (session && session !== activeSession.value) return;
     if (rulerPreference === active) return;
     rulerPreference = active;
     void saveRulerVisible(active);
@@ -1707,7 +2055,10 @@ async function openDocumentInto(
     editor.ui.selection.observe(() => {
       sessionMetrics.noteSelectionChanged();
       sessionRuler.noteSelectionChanged();
-      keeper?.noteChange();
+      // הזוכר **של הטאב הזה**, בדיוק כמו ב-`observeZoom` שמתחת: הסינגלטון
+      // מתאפס למשך מעבר טאב (`stashActiveInto`), ובטאב שברקע הוא כבר של
+      // מסמך אחר — כלומר תזוזת הסמן הייתה נרשמת אצל השכן, או נבלעת.
+      (session?.keeper ?? keeper)?.noteChange();
     })
   );
 
@@ -1762,8 +2113,10 @@ async function openDocumentInto(
   searchState.value = sessionSearch.getState();
   editor.onDispose(
     sessionSearch.subscribe((state) => {
+      // „3 מתוך 12” של מסמך אחר הוא בדיוק מה שההערה ליד `searchState` מזהירה
+      // ממנו: החיפוש-בזמן-הקלדה מושהה, והדיווח עשוי לנחות אחרי מעבר טאב.
       if (session) session.ui.searchState = state;
-      searchState.value = state;
+      if (!session || session === activeSession.value) searchState.value = state;
     })
   );
   editor.onDispose(() => {
@@ -1989,7 +2342,7 @@ function ensureOpenTargetTab(): void {
 }
 
 async function onPickAndOpen(): Promise<void> {
-  if (isOpening.value) return;
+  if (isOpenBusy()) return;
   try {
     const file = await pickDocxFile();
     if (!file) return;
@@ -2041,7 +2394,7 @@ async function onNewDocument(): Promise<void> {
   // כמו שאר מתחילי הפתיחה (onPickAndOpen/onDocumentTab*): הכפתור ברצועה
   // מנוטרל בזמן isOpening, אבל Ctrl+N מגיע דרך runShellAction ועוקף אותו —
   // בלי הבדיקה הזאת הוא היה פותח מסמך שני לתוך אותו טאב באמצע פתיחה ראשונה.
-  if (isOpening.value) return;
+  if (isOpenBusy()) return;
   ensureOpenTargetTab();
   if (save && swap && save.snapshot.isDirty) {
     const decision = await decideDocumentSwitch({
@@ -2336,11 +2689,56 @@ const documentTabs = computed<DocumentTabItem[]>(() =>
 /**
  * מעבר טאב. חסום בזמן פתיחה: `openDocumentInto` כותב סינכרונית לתוך הטאב
  * הפעיל לכל אורך ריצתה (ראו ההערה שם), ומעבר באמצע היה כותב לטאב הלא נכון.
+ *
+ * טאב ששוחזר ועדיין לא נטען נפתח כאן, ברגע שעוברים אליו — זו „הטעינה
+ * העצלה” של `restoreTabs`, וזה הרגע היחיד שבה היא מתרחשת.
  */
 function onDocumentTabSelect(id: DocumentSessionId): void {
-  if (isOpening.value) return;
+  if (isOpenBusy()) return;
   const session = sessions.get(id);
-  if (session) activateTab(session);
+  if (!session) return;
+  activateTab(session);
+  if (session.pendingRestore) {
+    void openPendingTab(session).catch((error: unknown) => {
+      console.warn('[otzaria-word] טעינת הטאב נכשלה', error);
+    });
+  }
+}
+
+/**
+ * פותחת את המסמך של טאב ששוחזר, ברגע שעברו אליו.
+ *
+ * הדגל מכובה **לפני** ה-`await` הראשון ולא אחריו: הפתיחה מתחילה בפתירת
+ * ה-token, ורק אחריה `openDocument` מרימה את `isOpening` שחוסמת מעבר נוסף.
+ * בחלון שביניהן לחיצה חוזרת על אותו טאב הייתה מתחילה פתיחה שנייה של אותו
+ * מסמך לתוך אותו טאב.
+ *
+ * `keeper.state` הוא רשומת הטאב הזה בלבד (`sessionForEntry`, אומצה ביצירה),
+ * ולכן זו אותה פונקציה בדיוק שפותחת את הטאב הפעיל בעלייה — כולל שחזור
+ * הטיוטה, הסמן והזום, וכולל המסלול של קובץ שאינו נגיש יותר.
+ */
+async function openPendingTab(session: DocumentSession): Promise<void> {
+  session.pendingRestore = false;
+  /**
+   * הנעילה מורמת **לפני** ה-`await` הראשון, ולא נשענת על `isOpening` של
+   * `openDocument`.
+   *
+   * הפתיחה כאן מתחילה בשני סבבי גשר — פתירת ה-token וקריאת בייטי הטיוטה —
+   * ורק אחריהם `openDocument` מרימה את הדגל שלה. בחלון הזה שום דבר לא חסם
+   * מעבר טאב, ומעבר כזה מחליף את הסינגלטונים ברמת המודול (`restoreFromSession`):
+   * המסמך שנפתח היה נוחת בפאנל של הטאב **האחר**, מפרק את המסמך שהיה בו,
+   * ומצמיד את יעד השמירה שלו לקובץ הלא נכון. נמדד בביקורת; זה המסלול היחיד
+   * בקובץ שבו פתיחה מתחילה בלי שדבר מגן עליה.
+   */
+  pendingTabLoad = true;
+  try {
+    // `slept` ולא „ממתין”: טאב ששוחזר מהפעלה קודמת ונטען כאן לראשונה מקבל את
+    // הנוסח על ההפעלה הקודמת, וטאב שנרדם באותה הפעלה — את זה שמדבר על עכשיו.
+    await reopenPreviousSession(session.keeper.state, session.slept);
+    session.slept = false;
+  } finally {
+    pendingTabLoad = false;
+  }
 }
 
 /**
@@ -2349,18 +2747,42 @@ function onDocumentTabSelect(id: DocumentSessionId): void {
  * מחיקת טיוטה: „החלף”/„סגור” אחרי „לא לשמור” הוא אישור מפורש למחיקה.
  */
 async function onDocumentTabClose(id: DocumentSessionId): Promise<void> {
-  if (isOpening.value) return;
+  if (isOpenBusy()) return;
   const session = sessions.get(id);
   if (!session) return;
 
-  const hadUnsaved = session.save.snapshot.isDirty;
-  const decision = await decideDocumentSwitch({
-    isDirty: () => session.save.snapshot.isDirty,
-    isSaving: () => session.save.snapshot.isSaving,
-    confirm,
-    documentName: () => sessionDisplayTitle(session),
-    intent: 'close-tab',
-  });
+  /**
+   * שתי שאלות שונות, לפי מה שיש לטאב לאבד.
+   *
+   * המסלול הרגיל שואל את המנוע („יש שינויים שלא נשמרו?”), אבל יש שני מצבים
+   * שבהם אין מנוע שיענה, ובכל זאת **יש** עבודה: טאב ששוחזר ועוד לא נטען,
+   * וטאב שהטעינה שלו **נכשלה** ונפל לתוכו מסמך ריק (`remember: false`,
+   * `reopenPreviousSession`). השני הוא המסוכן: הוא נראה „נקי” לגמרי — המנוע
+   * שבתוכו באמת ריק — בעוד הרשומה שלו עדיין מחזיקה טיוטה עם העבודה שלא
+   * נשמרה, וסגירתו הייתה מוחקת אותה **בלי אף שאלה** (`destroy({removeDraft})`).
+   *
+   * לכן השאלה נגזרת מהרשומה ולא מהדגל: כל טאב שיש טיוטה ברשומה שלו והמנוע
+   * שבו אינו מציג אותה (כלומר אינו „מלוכלך”) נשאל לפני שמוחקים.
+   */
+  const recordDraft = activeEntry(session.keeper.state)?.draft != null;
+  const engineDirty = session.save.snapshot.isDirty;
+  const askFromRecord = recordDraft && !engineDirty;
+
+  const hadUnsaved = engineDirty || recordDraft;
+  const decision =
+    session.pendingRestore || askFromRecord
+      ? await decidePendingTabClose({
+          hasDraft: () => recordDraft,
+          confirm,
+          documentName: () => sessionDisplayTitle(session),
+        })
+      : await decideDocumentSwitch({
+          isDirty: () => session.save.snapshot.isDirty,
+          isSaving: () => session.save.snapshot.isSaving,
+          confirm,
+          documentName: () => sessionDisplayTitle(session),
+          intent: 'close-tab',
+        });
 
   if (hadUnsaved && decision.action === 'switch') await session.keeper.discardDraft();
 
@@ -2382,25 +2804,38 @@ async function onDocumentTabClose(id: DocumentSessionId): Promise<void> {
 
   const wasActive = session === activeSession.value;
   sessions.delete(session.id);
+  const recentAt = recentTabs.indexOf(session.id);
+  if (recentAt >= 0) recentTabs.splice(recentAt, 1);
   await session.destroy({ removeDraft: true });
 
+  // הרשומה עצמה אינה נכתבת כאן: `destroy({ removeDraft: true })` קורא
+  // ל-`keeper.discardDraft`, וזה כותב דרך `persistCombinedSession` — שמרכיבה
+  // את האוסף מהטאבים ש**נשארו** במפה (הטאב הזה כבר הוסר ממנה). כלומר טאב
+  // שנסגר יורד מהרשומה מיד, ואינו חוזר בעלייה הבאה.
   if (!wasActive) return;
 
-  // הטאב הפעיל נסגר: לבחור טאב אחר, או לפתוח טאב ריק חדש אם זה היה האחרון —
-  // בדיוק כמו VSCode/דפדפנים. `next()` על `Map.values()` היא הטאב הראשון
-  // שנשאר, לפי סדר הפתיחה.
-  const next = sessions.values().next().value ?? createNewDocumentSession();
-  activateTab(next);
-  // טאב שנבחר כבר יש בו מסמך (הוא היה פתוח); טאב חדש-לגמרי (המקרה „היה
-  // האחרון”) עדיין ריק — צריך לפתוח בו מסמך, בדיוק כמו „+”.
-  if (next.swap.current === null) await openDocument();
+  await activateAfterClose();
 }
 
 /** כפתור „+”: תמיד טאב ריק חדש — לא בודק „שינויים לא שמורים”, כי אין מה לאבד. */
 async function onDocumentTabNew(): Promise<void> {
-  if (isOpening.value) return;
+  if (isOpenBusy()) return;
   activateTab(createNewDocumentSession());
   await openDocument();
+}
+
+/**
+ * הטאב שעובר אליו מי שסגר את הפעיל. `next()` על `Map.values()` הוא הטאב
+ * הראשון שנשאר, לפי סדר הפתיחה — כמו ב-VSCode/דפדפנים.
+ */
+async function activateAfterClose(): Promise<void> {
+  const next = sessions.values().next().value ?? createNewDocumentSession();
+  activateTab(next);
+  // שלושה מצבים, ורק אחד מהם כבר מוכן: טאב שהיה פתוח (יש בו מסמך), טאב
+  // ששוחזר וטרם נטען (נטען עכשיו, בדיוק כמו מעבר רגיל אליו), וטאב חדש-לגמרי
+  // שנוצר כאן מפני שהאחרון נסגר — צריך לפתוח בו מסמך, בדיוק כמו „+”.
+  if (next.pendingRestore) await openPendingTab(next);
+  else if (next.swap.current === null) await openDocument();
 }
 
 /**
@@ -3157,45 +3592,46 @@ onMounted(async () => {
       });
     }
 
-    // הרשומה, לפני יצירת הטאב הראשון: נתיב הטיוטה של הזוכר תלוי במזהה הטאב,
-    // וזה חייב להיות מזהה המסמך **שנטען עכשיו** — לא מזהה חדש שאין לו קשר
-    // לטיוטה הקודמת של אותו מסמך.
+    // הרשומה, לפני יצירת הטאבים: נתיב הטיוטה של כל זוכר תלוי במזהה הטאב שלו,
+    // וזה חייב להיות המזהה **שברשומה** — לא מזהה חדש שאין לו קשר לטיוטה
+    // הקודמת של אותו מסמך. `stored` עצמו נטען למעלה, במקביל לשאר ההעדפות.
     //
-    // שחזור: רק הטאב שהיה פעיל בהפעלה הקודמת. הרשומה (`persistCombinedSession`
-    // למעלה) כן שומרת רשומה לכל טאב שהיה פתוח, אבל שחזור **כל** הטאבים —
-    // כולל פתיחת קבצים מרובים בעלייה — נדחה לשלב הבא: `activeEntry` כבר
-    // מחזירה רק את רשומת הטאב הפעיל, וזה בדיוק מה שמשוחזר כאן. משתמש עם טאב
-    // יחיד (הרוב המוחלט היום) אינו מבחין בהבדל.
-    const restoredId = activeEntry(stored)?.id ?? createDocumentSessionId();
-
-    // טיוטות של טאבים שלא שוחזרו (רק הפעיל משוחזר, ראו למעלה) לעולם לא
-    // ייקראו שוב — בלי המחיקה כאן הן נשארות במרחב הפרטי לצמיתות. Best-effort
-    // ואינו חוסם עלייה: כשל מחיקה משאיר קובץ יתום, לא נתון פגום.
-    if (stored) {
-      for (const entry of stored.documents) {
-        if (entry.id !== restoredId && entry.draft) void deleteWorkspaceEntry(entry.draft.path);
-      }
-    }
-
-    const firstSession = createNewDocumentSession(restoredId);
-    activateTab(firstSession);
-
-    keeper!.adopt(stored);
+    // ניקוי הטיוטות ה„יתומות” שהיה כאן **נמחק בכוונה**: הוא מחק את הטיוטה של
+    // כל טאב שלא שוחזר, ומהרגע שכל הטאבים חוזרים אין טאב כזה — הלולאה הזאת
+    // הייתה מוחקת בדיוק את העבודה שלא נשמרה, של כל טאב שאינו הפעיל.
+    const restored = restoreTabs(stored);
     applyShellPreferences(stored);
 
     // ההאזנה למעבר לרקע נרשמת כאן, אחרי שיש למי לדווח. שלושת המקורות
     // וההנמקה — ב-host/lifecycle.ts. `flush` על **כל** הטאבים הפתוחים —
     // לא רק הפעיל — כי לכולם יש עבודה שעלולה לא להיות בדיסק.
-    hiddenListener = onPluginHidden(() => void Promise.all(
-      Array.from(sessions.values()).map((s) => s.keeper.flush()),
-    ));
+    hiddenListener = onPluginHidden(() => {
+      // מיקום הגלילה נלכד כאן, בזמן שהמיכל עוד קיים ועוד יודע אותו. ראו
+      // sessions/pane-scroll.ts — במסלולים מסוימים המעבר לרקע מאפס אותו.
+      const active = activeSession.value;
+      if (active) active.ui.scroll = readPaneScroll(documentScrollHost(active));
+      void Promise.all(Array.from(sessions.values()).map((s) => s.keeper.flush()));
+    });
+
+    // והחזרה: תיקון בלבד, ורק למה שבאמת אבד — `repairPaneScroll` אינה נוגעת
+    // במיכל ששרד. בפריים הבא, כי המנוע עשוי לעמד מחדש בחזרה למסך.
+    shownListener = onPluginShown(() => {
+      const active = activeSession.value;
+      if (!active) return;
+      const remembered = active.ui.scroll;
+      const repair = (): void => {
+        if (activeSession.value === active) repairPaneScroll(documentScrollHost(active), remembered);
+      };
+      repair();
+      if (typeof requestAnimationFrame === 'function') requestAnimationFrame(repair);
+    });
 
     // טעינת מסמך אחרון או פתיחת מסמך ריק. תחנת „פותח את המסמך” מדווחת
     // מ-createEditor ולא מכאן: כאן היא הייתה מוקדמת בשנייה ויותר — הפתיחה
     // ממתינה קודם לחבילת המנוע, ומסך טעינה שאומר „פותח” בזמן שהוא מוריד
     // 9MB מתאר את השלב הלא נכון.
     try {
-      await reopenPreviousSession(stored);
+      await reopenPreviousSession(restored.keeper.state);
     } finally {
       // גם פתיחה שנכשלה מסירה את מסך הטעינה, ולא רק כדי „לא להיתקע”: הודעת
       // הכשל יושבת בשורת המצב שמתחת, ומסך טעינה שנשאר פרוש מסתיר בדיוק את
@@ -3266,6 +3702,56 @@ async function loadPreviousSession(): Promise<SessionState | null> {
 }
 
 /**
+ * בונה טאב לכל רשומת מסמך שהייתה פתוחה, ומחזירה את זה שיהיה פעיל.
+ *
+ * ## מה נפתח מיד ומה לא — „טעינה עצלה”
+ *
+ * עד כאן שוחזר טאב אחד בלבד — הפעיל — ושאר הטאבים שהמשתמש הותיר פתוחים פשוט
+ * נעלמו, וטיוטותיהם נמחקו. עכשיו **כל** רשומה שבאוסף מקבלת טאב, בסדר שהיה,
+ * עם השם שלה ועם הנקודה של „לא נשמר”; מה שנטען לתוך מנוע מיד הוא המסמך הפעיל
+ * בלבד, וכל טאב אחר נטען ברגע שעוברים אליו (`openPendingTab`).
+ *
+ * ההחלטה הזאת אינה קיצור דרך אלא מה שנכון גם לכשעצמו. כל מסמך פתוח הוא מופע
+ * SuperDoc מלא עם ה-workers שלו; פתיחת חמישה מסמכים בעלייה הייתה מכפילה פי
+ * חמישה את הזמן עד שהמשתמש רואה את המסמך שהוא באמת עובד עליו, ואת הזיכרון —
+ * בלי שביקש דבר. זה גם בדיוק מה ש-VSCode ודפדפנים עושים בשחזור לשוניות.
+ * המסמך שממתין אינו „פחות פתוח”: הרשומה שלו, הסמן שלו והטיוטה שלו יושבים
+ * בזוכר שלו מהרגע הראשון, נכתבים חזרה בסגירה, ואינם תלויים בכך שייטען.
+ *
+ * ## מה שאסור היה להישבר כאן
+ *
+ * המזהה של הטאב הוא המזהה שברשומה, ולא מזהה חדש: הוא מה שקושר את הטאב לקובץ
+ * הטיוטה שלו (`draftPathFor`) ולרשומה שלו. רשומה שאין בה מסמכים כלל, או
+ * שאין בה בכלל, נותנת טאב ריק אחד — בדיוק ההתנהגות של הפעלה ראשונה.
+ */
+function restoreTabs(stored: SessionState | null): DocumentSession {
+  const view = stored?.view ?? defaultView();
+  // רשומה ריקה (אין `documents`) אינה מצב חריג: זו כל הפעלה ראשונה, וגם
+  // רשומה שנפסלה בקריאה. טאב אחד, חדש, בדיוק כמו קודם.
+  const entries = stored && stored.documents.length > 0 ? stored.documents : [emptyDocumentEntry()];
+  const activeId = entries.some((entry) => entry.id === stored?.activeId)
+    ? stored!.activeId
+    : entries[0]!.id;
+
+  let active: DocumentSession | null = null;
+  for (const entry of entries) {
+    const tab = createNewDocumentSession({ id: entry.id, restore: { entry, view } });
+    if (entry.id === activeId) active = tab;
+  }
+
+  // ה-`!` בטוח: `activeId` נבחר מתוך `entries`, וכל רשומה שבו יצרה טאב.
+  const activeTab = active!;
+  activateTab(activeTab);
+  // הטאב הפעיל נפתח מיד (`reopenPreviousSession` ב-onMounted) ולכן אינו ממתין.
+  activeTab.pendingRestore = false;
+
+  // אין כאן ניקוי טיוטות יתומות, ובכוונה: כל רשומה שהגיעה לכאן קיבלה טאב.
+  // רשומה שנשמטה בקריאה (מזהה כפול, ראו `readDocuments`) כבר אינה ב-`stored`
+  // ואי אפשר לדעת עליה מכאן — וזו גם הסיבה שהיא נשמטת שם ולא כאן.
+  return activeTab;
+}
+
+/**
  * מצב המעטפת — מיקוד, לשונית, כיווץ — מוחל מיד ולא ממתין למסמך.
  *
  * זו העדפה של מי שיושב מול המסך ולא תכונה של המסמך (ראו `documentViewFor`),
@@ -3296,7 +3782,10 @@ function applyShellPreferences(session: SessionState | null): void {
  * הטיוטה נבדקת גם כשאין קובץ כלל: מסמך חדש שמעולם לא נשמר הוא בדיוק המקרה
  * שבו אין שום דבר אחר לחזור אליו.
  */
-async function reopenPreviousSession(session: SessionState | null): Promise<void> {
+async function reopenPreviousSession(
+  session: SessionState | null,
+  fromThisRun = false,
+): Promise<void> {
   const entry = activeEntry(session);
   const remembered = entry?.document ?? null;
   const file = remembered ? await resolveRememberedFile(remembered) : null;
@@ -3324,7 +3813,7 @@ async function reopenPreviousSession(session: SessionState | null): Promise<void
   const restore = documentViewFor(session, file?.token ?? null);
 
   if (await openDocument(file ?? undefined, { draft: draft ?? undefined, restore })) {
-    if (draft) setStatus(restoredDraftMessage(session));
+    if (draft) setStatus(restoredDraftMessage(session, fromThisRun));
     return;
   }
 
@@ -3343,8 +3832,13 @@ async function reopenPreviousSession(session: SessionState | null): Promise<void
  * הסגירה (ראו `draftAgeLabel`). המספר הוא מה שמאפשר למשתמש לדעת מיד אם
  * חסר לו משהו, במקום לגלות זאת מאוחר יותר.
  */
-function restoredDraftMessage(session: SessionState | null): string {
-  const base = 'שוחזרו שינויים שלא נשמרו מההפעלה הקודמת';
+function restoredDraftMessage(session: SessionState | null, fromThisRun = false): string {
+  // „מההפעלה הקודמת” אינו נכון לטאב שנרדם ונפתח מחדש באותה הפעלה (`sleepTab`)
+  // — שם השינויים הם של המשתמש מלפני דקה. משפט שאינו נכון בשורת המצב שוחק
+  // את האמון בכל השאר שנאמר בה.
+  const base = fromThisRun
+    ? 'שוחזרו השינויים שלא נשמרו'
+    : 'שוחזרו שינויים שלא נשמרו מההפעלה הקודמת';
   const draft = activeEntry(session)?.draft;
   const age = draft ? draftAgeLabel(draft.savedAt, Date.now()) : null;
   return age ? `${base} (נשמרו ${age})` : base;
