@@ -448,3 +448,47 @@ describe('createEditorSwap', () => {
     });
   });
 });
+
+describe('close', () => {
+  it('משחררת את המסמך הפתוח ומשאירה את ה-swap מוכן לפתיחה חדשה', async () => {
+    // זהו החוזה של „טאב נרדם” (App.vue, `sleepTab`): המנוע משוחרר, והטאב
+    // נפתח שוב מהרשומה שלו כשחוזרים אליו. בלי הבדיקה הזאת „close” ו„destroy”
+    // היו יכולים להיפרד בהתנהגות בלי שאיש ישים לב.
+    const { container, opens, swap } = setup();
+    const first = fakeSession('a');
+    const firstOpen = swap.open('a.docx');
+    opens[0].deferred.resolve(first);
+    await firstOpen;
+
+    swap.close();
+
+    expect(swap.current, 'המסמך שוחרר').toBeNull();
+    expect(first.destroy, 'והמנוע שלו פורק').toHaveBeenCalled();
+    expect(hosts(container), 'וה-host שלו הוסר').toHaveLength(0);
+
+    const second = fakeSession('b');
+    const secondOpen = swap.open('b.docx');
+    opens[1].deferred.resolve(second);
+
+    await expect(secondOpen).resolves.toEqual({ status: 'opened', session: second });
+    expect(swap.current, 'פתיחה חדשה על אותו container עובדת').toBe(second);
+    expect(hosts(container)).toHaveLength(1);
+  });
+
+  it('`destroy` הוא סופי — ורק בזה הוא נבדל מ-`close`', async () => {
+    // בלי הנעילה השתיים היו אותו קוד בדיוק, וההבחנה ביניהן הערה בלבד.
+    const { container, opens, swap } = setup();
+    const first = fakeSession('a');
+    const firstOpen = swap.open('a.docx');
+    opens[0].deferred.resolve(first);
+    await firstOpen;
+
+    swap.destroy();
+    const after = await swap.open('b.docx');
+
+    expect(after).toEqual({ status: 'superseded' });
+    expect(opens, 'לא נבנה מנוע לתוך container שכבר אינו במסמך').toHaveLength(1);
+    expect(hosts(container)).toHaveLength(0);
+    expect(swap.current).toBeNull();
+  });
+});

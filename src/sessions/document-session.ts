@@ -49,6 +49,7 @@ import { FALLBACK_ZOOM } from '../engine/zoom';
 import type { RulerUnit } from '../engine/ruler-geometry';
 import { NO_VBA, type DocumentVba } from '../engine/vba-import';
 import type { WordExtension } from '../engine/export';
+import { PANE_SCROLL_ORIGIN, type PaneScroll } from './pane-scroll';
 import type { SuperDoc } from 'superdoc';
 
 /**
@@ -84,6 +85,12 @@ export interface DocumentUiSnapshot {
   /** המאקרו של Word שבמסמך של הטאב הזה — לקריאה בלבד (engine/vba-import.ts). */
   documentVba: DocumentVba;
   /**
+   * איפה המסמך הזה גלול. חלק מתמונת המצב ולא נשאל מה-DOM בחזרה, מסיבה שאין
+   * לה מסלול עוקף: הפאנל של טאב שאינו פעיל מוסתר ב-`display: none`, וזה
+   * מוחק את מיקום הגלילה של מיכל הגלילה שבתוכו. ראו sessions/pane-scroll.ts.
+   */
+  scroll: PaneScroll;
+  /**
    * הסיומת שתחתיה הטאב הזה נשמר. פר-טאב ולא ברמת המעטפת: שמירה אוטומטית של
    * טאב ברקע חייבת לכתוב `.docm` אם **הוא** מסמך מאקרו, גם כשהמוצג אינו.
    */
@@ -94,6 +101,23 @@ export interface DocumentSession {
   readonly id: DocumentSessionId;
   /** ה-container הייעודי של הטאב הזה. ראו „פאנל” בראש הקובץ. */
   readonly pane: HTMLElement;
+  /**
+   * טאב שנוצר משחזור ההפעלה ועדיין לא נפתח בו המסמך — ראו „טעינה עצלה”
+   * ב-App.vue, `restoreTabs`. `false` לכל טאב אחר, ולטאב ששוחזר מרגע
+   * שנפתח בו המסמך.
+   *
+   * מה שהטאב הזה **כן** מחזיק כבר עכשיו הוא הרשומה שלו, בזוכר
+   * (`keeper.state`): הקובץ, הסמן והמצביע לטיוטה. לכן הוא נכתב חזרה לרשומה
+   * בסגירה גם אם המשתמש לא נגע בו, והטיוטה שלו אינה יתומה.
+   */
+  pendingRestore: boolean;
+  /**
+   * הטאב הזה נרדם **בהפעלה הנוכחית** (`sleepTab` ב-App.vue), ולא שוחזר
+   * מהפעלה קודמת. משנה משפט אחד: „שוחזרו שינויים מההפעלה הקודמת” אינו נכון
+   * על עבודה שנעשתה לפני דקה, ומשפט שאינו נכון בשורת המצב שוחק את האמון
+   * בכל השאר שנאמר בה. מתאפס ברגע שהטאב נפתח מחדש.
+   */
+  slept: boolean;
   readonly swap: EditorSwap;
   readonly save: SaveCoordinator;
   readonly keeper: SessionKeeper;
@@ -126,6 +150,14 @@ export interface DocumentSessionParts {
   swap: EditorSwap;
   save: SaveCoordinator;
   keeper: SessionKeeper;
+  /** ראו `DocumentSession.pendingRestore`. ברירת המחדל: `false`. */
+  pendingRestore?: boolean;
+  /**
+   * תמונת המצב ההתחלתית. מוגדרת לטאב ששוחזר: השם והנקודה של „לא נשמר”
+   * צריכים להופיע ברצועת הטאבים **לפני** שהמסמך נטען — טאב ששמו „מסמך חדש”
+   * עד שלוחצים עליו אינו שחזור אלא הבטחה.
+   */
+  ui?: DocumentUiSnapshot;
 }
 
 /** תמונת מצב ריקה — ברירת המחדל של טאב שעוד לא נפתח בו דבר. */
@@ -164,6 +196,7 @@ export function emptyUiSnapshot(): DocumentUiSnapshot {
     engineFontSlice: null,
     readoutSelection: UNSETTLED_SELECTION,
     documentVba: NO_VBA,
+    scroll: { ...PANE_SCROLL_ORIGIN },
     saveExtension: 'docx',
   };
 }
@@ -178,6 +211,8 @@ export function createDocumentSession(parts: DocumentSessionParts): DocumentSess
     swap: parts.swap,
     save: parts.save,
     keeper: parts.keeper,
+    pendingRestore: parts.pendingRestore ?? false,
+    slept: false,
     metrics: null,
     ruler: null,
     textCursor: null,
@@ -185,7 +220,7 @@ export function createDocumentSession(parts: DocumentSessionParts): DocumentSess
     lineNumbers: null,
     formattingMarks: null,
     searchAdapter: null,
-    ui: emptyUiSnapshot(),
+    ui: parts.ui ?? emptyUiSnapshot(),
     async destroy(options = {}) {
       session.swap.destroy();
       session.save.dispose();
