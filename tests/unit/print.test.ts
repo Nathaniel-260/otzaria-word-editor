@@ -19,6 +19,7 @@ import {
   ENGINE_PAGE_CLASS,
   PRINT_PAGE_STYLE_ID,
   applyPrintPageSize,
+  measurePrintPageSize,
   pageRule,
   pageSizeText,
   printDocument,
@@ -82,6 +83,32 @@ describe('גלון ההדפסה', () => {
     const at = PRINT_CSS.indexOf('.editor-area {');
     expect(at, 'יש בלוק משלו ל-.editor-area').toBeGreaterThan(-1);
     expect(PRINT_CSS.slice(at, at + 200)).toContain('display: block !important');
+  });
+
+  it('הכלל חל על **כל** רמה בשרשרת אל המסמך — שש, ולא שלוש', () => {
+    // שלוש רמות היו חסרות, וזה נמדד: „פאנל עתידי” של 120px שנשתל כילד נוסף
+    // בכל רמה הודפס ב-`#app`, ב-`.editor-stack` וב-`.document-pane` (ולא
+    // ב-`body`), ו-`body.scrollHeight` במדיית print עלה בדיוק ב-3×120.
+    //
+    // הרשימה כאן היא שרשרת ה-DOM המלאה. מי שמאמת שזו אכן שרשרת ההורות
+    // בפועל הוא tests/component/app-shell.test.ts — סריקת טקסט על CSS אינה
+    // יכולה לדעת מה מכיל את מה, וזו הסיבה שרגרסיית `.editor-area` נכנסה
+    // בירוק דרך כל הבדיקות שכאן.
+    for (const selector of [
+      'body > :not(#app)',
+      '#app > :not(.word-app-shell)',
+      '.word-app-shell > :not(.editor-area)',
+      '.editor-area > :not(.editor-stack)',
+      '.editor-stack > :not(.document-pane)',
+      '.document-pane > :not(.editor-stack__host)',
+    ]) {
+      expect(PRINT_CSS, selector).toContain(selector);
+    }
+
+    // `#app` היא הרמה היחידה שאין לה DOM בבדיקת ההרכבה (שם המעטפת מורכבת
+    // ישר ל-body), ולכן ההנחה עליה מקובעת במקור שלה: index.html ו-main.ts.
+    expect(readFileSync(join(process.cwd(), 'index.html'), 'utf8')).toContain('<div id="app">');
+    expect(readFileSync(join(process.cwd(), 'src/main.ts'), 'utf8')).toContain("mount('#app')");
   });
 
   it('פאנל הטאב חוזר לזרימה — אחרת כל השרשרת מעליו בגובה 0', () => {
@@ -182,6 +209,70 @@ describe('readPrintPageSize', () => {
   });
 });
 
+/**
+ * המקור השני לגודל הדף, כשהקריאה מהמנוע נכשלה.
+ *
+ * הבאג שהבדיקות כאן מקבעות: `@page` נשאר `margin: 0` **בלי** `size`, כלומר
+ * נייר ברירת המחדל של הדפדפן (Letter, 1056px) מול תיבת עמוד A4 (1122.53px) —
+ * ומסמך של עמוד אחד יצא שני גיליונות, השני ריק.
+ */
+describe('measurePrintPageSize', () => {
+  /**
+   * תיבת עמוד „מצוירת”. ל-jsdom אין פריסה ולכן `offsetWidth` שם הוא 0 תמיד,
+   * והמידות מוזרקות כתכונה על המופע — בדיוק מה שהדפדפן היה מחזיר.
+   */
+  function drawPage(root: Document, width: number, height: number): HTMLElement {
+    const layout = root.createElement('div');
+    layout.className = ENGINE_LAYOUT_CLASS;
+    const page = root.createElement('div');
+    page.className = ENGINE_PAGE_CLASS;
+    Object.defineProperty(page, 'offsetWidth', { value: width, configurable: true });
+    Object.defineProperty(page, 'offsetHeight', { value: height, configurable: true });
+    layout.appendChild(page);
+    root.body.appendChild(layout);
+    return page;
+  }
+
+  function emptyRoot(): Document {
+    return document.implementation.createHTMLDocument('t');
+  }
+
+  it('עמוד A4 מצויר נמדד כאינצ׳ים, ולא נגרר אחרי הזום', () => {
+    const root = emptyRoot();
+    // A4 הוא 793.733×1122.53, ו-`offset*` הן מספרים שלמים — 794×1123.
+    const page = drawPage(root, 794, 1123);
+
+    expect(measurePrintPageSize(root)).toEqual({ widthIn: 8.271, heightIn: 11.698 });
+
+    // 50% זום: `getBoundingClientRect` כולל את ה-transform, ומדידה דרכו
+    // הייתה מייצרת `@page` בחצי גודל הדף. `offset*` אינן רואות אותו.
+    page.getBoundingClientRect = () =>
+      ({
+        width: 397,
+        height: 561.5,
+        x: 0,
+        y: 0,
+        top: 0,
+        left: 0,
+        right: 397,
+        bottom: 561.5,
+      }) as DOMRect;
+    expect(measurePrintPageSize(root)).toEqual({ widthIn: 8.271, heightIn: 11.698 });
+  });
+
+  it('אין עמוד על המסך, או שאין לו מידה — `null` ולא `@page` מומצא', () => {
+    expect(measurePrintPageSize(emptyRoot())).toBeNull();
+
+    const undrawn = emptyRoot();
+    drawPage(undrawn, 0, 0);
+    expect(measurePrintPageSize(undrawn)).toBeNull();
+
+    const absurd = emptyRoot();
+    drawPage(absurd, 20, 40_000);
+    expect(measurePrintPageSize(absurd)).toBeNull();
+  });
+});
+
 describe('pageRule', () => {
   it('גודל שנקרא נכתב עם margin 0 — בלי שוליים כפולים', () => {
     expect(pageRule({ widthIn: 8.269, heightIn: 11.694 })).toBe(
@@ -256,6 +347,32 @@ describe('printDocument', () => {
     expect(printed).toBe(true);
     expect(outcome).toMatchObject({ ok: true, size: null });
     if (outcome.ok) expect(outcome.warning).toContain('גודל הדף');
+  });
+
+  it('גודל שלא נקרא נמדד מהעמוד המצויר — אחרת נדפס גיליון ריק על כל עמוד', async () => {
+    // הכשל שנשאר אחרי התיקון המקורי: `@page { margin: 0 }` בלי `size` פירושו
+    // הנייר של הדיאלוג (Letter, 1056px) מול תיבת עמוד A4 (1122.53px), ומסמך
+    // של עמוד אחד יצא שני גיליונות. המנוע כאן אינו עונה (`host` = null), אבל
+    // העמוד כן מצויר — ולכן יש מה למדוד.
+    const root = document.implementation.createHTMLDocument('t');
+    const page = root.createElement('div');
+    page.className = ENGINE_PAGE_CLASS;
+    Object.defineProperty(page, 'offsetWidth', { value: 794 });
+    Object.defineProperty(page, 'offsetHeight', { value: 1123 });
+    root.body.appendChild(page);
+
+    let ruleAtPrintTime: string | null = null;
+    const outcome = await printDocument(null, {
+      root,
+      print: () => {
+        ruleAtPrintTime = root.getElementById(PRINT_PAGE_STYLE_ID)?.textContent ?? null;
+      },
+    });
+
+    expect(ruleAtPrintTime).toBe('@page { size: 8.271in 11.698in; margin: 0; }');
+    // ויש גודל, ולכן גם אין אזהרה: „בדקו את גודל הנייר” על הדפסה שגודל
+    // הנייר שלה נכתב הוא הודעה שגויה.
+    expect(outcome).toEqual({ ok: true, size: { widthIn: 8.271, heightIn: 11.698 } });
   });
 
   it('דיאלוג הדפסה חסום מחזיר תוצאה מטופסת ולא זריקה', async () => {
@@ -490,6 +607,36 @@ describe('exportPdfDocument', () => {
     );
     expect(outcome).toMatchObject({ ok: true, saved: true, name: 'b.pdf', size: null });
     expect((outcome as { warning?: string }).warning).toBeTruthy();
+  });
+
+  it('גם הייצוא נופל על מדידת העמוד, ולא על נייר ברירת המחדל', async () => {
+    // אוצריא מייצרת את ה-PDF מדף התוסף עצמו, ולכן `@page` בלי `size` מייצר
+    // בו את אותו גיליון ריק על כל עמוד. שני המסלולים חייבים את שני המקורות.
+    const root = fakeRoot();
+    const page = root.createElement('div');
+    page.className = ENGINE_PAGE_CLASS;
+    Object.defineProperty(page, 'offsetWidth', { value: 816 });
+    Object.defineProperty(page, 'offsetHeight', { value: 1056 });
+    root.body.appendChild(page);
+
+    const seen: string[] = [];
+    const outcome = await exportPdfDocument(
+      fakeHost({ omitList: true }),
+      async () => {
+        seen.push(root.getElementById(PRINT_PAGE_STYLE_ID)?.textContent ?? '');
+        return { saved: true, name: 'b.pdf' };
+      },
+      { root },
+    );
+
+    // Letter: 816×1056 פיקסלים = 8.5×11 אינץ' בדיוק.
+    expect(seen[0]).toBe('@page { size: 8.5in 11in; margin: 0; }');
+    expect(outcome).toEqual({
+      ok: true,
+      saved: true,
+      name: 'b.pdf',
+      size: { widthIn: 8.5, heightIn: 11 },
+    });
   });
 
   it('תשובה בלי שם עדיין נחשבת שמורה, עם נוסח שאינו „undefined”', async () => {

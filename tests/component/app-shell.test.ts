@@ -412,6 +412,73 @@ describe('הרכבת המעטפת', () => {
   });
 });
 
+/**
+ * הקינון שגלון ההדפסה נשען עליו.
+ *
+ * ## הרגרסיה שהבדיקה הזאת הייתה תופסת
+ *
+ * `styles/print.css` מסתיר את המעטפת **לפי מקום בעץ ולא לפי שם**: בכל רמה
+ * בשרשרת אל המסמך שורד רק הילד שמוביל למסמך (`.editor-area > :not(.editor-stack)`
+ * וכן הלאה). כלומר כל כלל שם הוא טענה על עץ ה-DOM שהקובץ הזה מרכיב.
+ *
+ * הכלל נכתב כש-`.editor-stack` היה ילד ישיר של `.word-app-shell`. הוספת
+ * `.editor-area` ביניהם — עטיפה חדשה, שינוי תמים ב-App.vue — הפכה את הכלל
+ * למי שמסתיר את **המסמך**, ו„הדפסה” הוציאה גיליון ריק. אותה זריקה בדיוק
+ * נמדדה שוב מאוחר יותר: עטיפת `.editor-stack` בעוד `<div>` הפילה את הפלט
+ * לגיליון אחד בלי שום זרם תוכן.
+ *
+ * ## ולמה בדיקת טקסט על ה-CSS אינה יכולה
+ *
+ * `tests/unit/print.test.ts` מאמת שהסלקטורים קיימים בקובץ, ו-`css-hygiene`
+ * מאמת שהמחלקות שהם נוקבים בהן קיימות ב-`src`. שתיהן נשארות ירוקות אחרי
+ * הזריקה: הסלקטור לא השתנה, המחלקה לא נעלמה — רק **מי מכיל את מי** השתנה,
+ * וזה קיים אך ורק ב-DOM. שם היא נמדדת, כאן.
+ *
+ * הבדיקה גם אינה עוצרת ב„ההורה הנכון”: היא מאמתת שכל **שאר** הילדים באותה
+ * רמה הם מה שהכלל מצפה לו. ילד חדש שיתווסף ל-`.editor-stack` או ל-
+ * `.document-pane` לא ידפיס את עצמו ולא ייעלם בשקט — מישהו יצטרך להחליט.
+ *
+ * הרמה שאין לה DOM כאן היא `#app` (המעטפת מורכבת ישר ל-body), והיא מקובעת
+ * מול index.html ו-main.ts ב-`tests/unit/print.test.ts`.
+ */
+describe('הקינון שגלון ההדפסה נשען עליו', () => {
+  it('שרשרת ההורות אל המסמך היא בדיוק זו שכללי print.css נוקבים בה', async () => {
+    await mountShell();
+
+    const shell = document.querySelector('.word-app-shell');
+    const area = document.querySelector('.editor-area');
+    const stack = document.querySelector('.editor-stack');
+    const pane = document.querySelector('.document-pane');
+    const host = document.querySelector('.editor-stack__host');
+    for (const [name, element] of [
+      ['.word-app-shell', shell],
+      ['.editor-area', area],
+      ['.editor-stack', stack],
+      ['.document-pane', pane],
+      ['.editor-stack__host', host],
+    ] as const) {
+      expect(element, name).not.toBeNull();
+    }
+
+    // כל חוליה בנפרד, כי כל אחת מהן היא כלל אחר בגלון: עטיפה שתיכנס
+    // באמצע תשבור בדיוק את זו שמעליה.
+    expect(area!.parentElement, '.editor-area הוא ילד ישיר של המעטפת').toBe(shell);
+    expect(stack!.parentElement, '.editor-stack הוא ילד ישיר של .editor-area').toBe(area);
+    expect(pane!.parentElement, '.document-pane הוא ילד ישיר של .editor-stack').toBe(stack);
+    expect(host!.parentElement, 'מיכל המנוע יושב בתוך פאנל הטאב').toBe(pane);
+
+    // ומה ש-`:not()` מסתיר בשתי הרמות הפנימיות הוא באמת רק מה שהוא מתיים.
+    for (const child of stack!.children) {
+      expect(child.className, 'כל ילד של .editor-stack הוא פאנל טאב').toContain('document-pane');
+    }
+    for (const child of pane!.children) {
+      expect(child.className, 'כל ילד של .document-pane הוא מיכל מנוע').toContain(
+        'editor-stack__host',
+      );
+    }
+  });
+});
+
 describe('מתג השמירה האוטומטית', () => {
   it('לחיצה מגיעה לקואורדינטור — לא רק לצבע של הפיל', async () => {
     // זו המוטציה שחמקה: הסרת `save?.setAutosaveEnabled(...)` השאירה מתג שמזיז
