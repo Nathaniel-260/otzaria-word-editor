@@ -1252,3 +1252,204 @@ snapshot אחד”.
 ב-`visibility: hidden`. נכונות ההדפסה נשענת בדיוק על כך שה-`display: none`
 ה-inline שורד — `src/styles/print.css` אינו מצהיר `display` ל-`.document-pane`
 — ולכן החלפה כזאת הייתה מדפיסה את **שני** הטאבים.
+
+## תצוגה חיה של גופן — שלושה מסלולים, ואף אחד מהם אינו נאמן במסמך
+
+נמדד ב-superdoc 2.11.0 (docx-engine 0.10.0), Chrome 152.0.7977.75, על ה-dist
+הארוז. השאלה: המשתמש מרחף על שם גופן ברשימה, ואמור לראות מיד איך הטקסט הנבחר
+ייראה. המימוש הראשון עשה זאת בכתיבה למסמך, וזה נשלל במדידה; שני המסלולים
+האחרים אינם נוגעים במסמך כלל, ובכל זאת נשללו — מסיבה אחרת לגמרי.
+
+### נקודת הפתיחה: הכתיבה למסמך, ומה היא עולה
+
+`doc.format.apply({ target, inline: { fontFamily } })` מדווח `success: true`,
+ובאותה מדידה:
+
+| | לפני | אחרי |
+|---|---|---|
+| `undoDepth` | 7 | **8** |
+| `markDirty` | 39 | **40** |
+| `word/document.xml` | — | **שונה** |
+| `w:rFonts` בריצה | `[]` | `<w:rFonts w:ascii="Courier New" w:hAnsi="Courier New"/>` |
+
+כלומר ריחוף אחד — בלי לחיצה — מסמן את המסמך כנערך, מתזמן שמירה, וקונה דרגת
+undo. `Ctrl+Z` הראשון של המשתמש מבטל „גופן שהוא לא בחר”, ולא את מה שהקליד.
+זה מה שהוביל ל-`FONT_PREVIEW_ENABLED = false` ב-`src/engine/font-preview.ts`.
+
+### מה שהופרך: אין ProseMirror, ולכן אין `addToHistory: false`
+
+התיקון המתבקש לכתיבה שמלכלכת היסטוריה הוא טרנזקציה מסומנת
+`tr.setMeta('addToHistory', false)`. הוא אינו קיים כאן:
+
+| מה נבדק | מופעים |
+|---|---|
+| `prosemirror` ב-`node_modules/@superdoc/docx-engine/dist/docx-engine.es.js` (11MB) | **0** |
+| `setMeta` באותו באנדל | **0** |
+| `addToHistory` בכל עץ המקור `C:/tmp/superdoc-src` | **0** |
+| `prosemirror` ב-`THIRD_PARTY_NOTICES` של המנוע | **0** |
+
+וברמת המופע החי: `activeEditor.view`, `.state` ו-`.commands` הם `null`;
+`.chain`, `.extensionManager`, `.schema`, `.plugins` ו-`.registerPlugin` הם
+`undefined`. כל כיוון שמניח ProseMirror מתחת ל-superdoc 2 מבוזבז מראש.
+
+### מה שכן קיים, ועובד: ספק דקורציות ציבורי, render-only
+
+החוזה קיים ומתועד ב-2.11.0 המותקן:
+
+- `node_modules/superdoc/dist/superdoc/src/public/index.d.ts:180` — `defineSuperDocExtension`
+- `node_modules/superdoc/dist/superdoc/src/public/index.d.ts:198` — `SuperDocDecorationProvider`
+- `node_modules/superdoc/dist/superdoc/src/core/extensions/types.d.ts:172`, `:344`
+- `node_modules/superdoc/dist/superdoc/src/core/types/index.d.ts:4099` — `Config.extensions?: SuperDocExtension[]`
+- בעץ המקור: `packages/superdoc/src/core/extensions/types.ts:161`, `:357`, `:480`, `:521`, ודוגמה ב-`define.ts:37`
+
+הרישום **חייב להיות בבנאי** — אין רישום מאוחר. `activate` נקרא פעם אחת לכל
+מסמך, לפני `onReady`. `ctx.capabilities` שנמדד:
+`{ canRender: true, canUseShortcuts: false, canMutate: false }`, ו-`ctx.visuals`
+הוא `{ highlight, decorate, inlineBox }`. ידית `highlight` מדביקה class על
+הטקסט, ואת הגופן מחליפים במשתנה CSS.
+
+**השער שהרג את המסלול הראשון עובר כאן במלואו:**
+
+```
+הקלדה     → undoDepth 1
+צביעה     → undoDepth 1     ← לא זז
+Ctrl+Z אחד → ביטל את ההקלדה
+```
+
+בכל הגששים: `undoDepth` 0→0, `onEditorUpdate` 0→0, `onTransaction` 0→0,
+`diagnostics.getSnapshot()` = `[]`, ו-**כל 12 החלקים ב-docx זהים בייט-בבייט**
+לפני, בזמן ואחרי. אין `w:rFonts` כלל. ההחזרה מדויקת לפיקסל (רוחב 192 → 169 →
+192). והביצועים אינם השיקול: הצביעה הראשונה 17–35ms, וריחוף לגופן הבא הוא
+כתיבת משתנה CSS אחת — 200 החלפות ב-0ms, בלי קריאה למנוע. (המשמעות הנגזרת:
+השהיית ה-300ms ב-`src/composables/font-preview.ts` מיותרת לכל צביעה שאינה
+הראשונה בסבב.)
+
+**עמידות שנמדדה:** ה-class שורד עימוד מחדש בזום ושורד הקלדה בפסקה אחרת בזמן
+שהצביעה חיה, ו-`handle.dispose()` מותיר אפס class ואפס attribute. זה **מפל**,
+לא כתיבה לצומת — צמתים שנולדים מעימוד מחדש מקבלים את הכלל מעצמם. לשם השוואה,
+`Range.surroundContents` כן עובד (רוחב 473.83 → 494.75) אך **נמחק בהקלדה
+הראשונה באותה פסקה** (`wrappersLeft` 1 → 0).
+
+### ובכל זאת נשלל: המנוע אינו זורם מחדש, והתצוגה משקרת
+
+זה הפער האמיתי, והוא **משותף לכל מסלול חזותי** — הוא נובע מ-`position:
+absolute` ברוחב מחושב מראש, לא מהטכניקה שמחליפה את הגופן. החלפת גופן משנה רוחב
+תווים; המנוע אינו מודד מחדש; הריצה גדלה במקום.
+
+| מה נמדד | Arial (מקור) | בזמן הצביעה |
+|---|---|---|
+| רוחב הריצה | 389px | **518px** |
+| חריגה מעמודת הטקסט | 0 | **122px** |
+| `scrollWidth` של העמוד (מול `clientWidth: 794`) | 794 | **824** |
+| מספר שורות / עמודים | 3 / 1 | 3 / 1 — **ללא שינוי** |
+
+ומכיוון שהעמוד הוא `overflow: hidden`, 30 הפיקסלים האלה **נחתכים בפועל**. מה
+שהמשתמש רואה, מילה במילה מן הצילום:
+
+```
+לפני:      The quick brown fox jumps over the lazy dog while the BOLDRU…
+בריחוף:      e quick brown fox jumps over the lazy dog while the BOLDRU…
+```
+
+תחילת המשפט נעלמה מעבר לקצה.
+
+**המכניקה, ולא מה שנראה במבט ראשון:** העלים כן נמצאים בזרימת inline רגילה,
+ולכן ריצה שהתרחבה **דוחפת** את שכנתה ואינה נוחתת עליה — נמדד: השכנה זזה 1px עם
+Courier ו-‎29px עם Impact, וחפיפה אנכית **אפס בכל המקרים** (גובה השורה מקובע).
+מה שאין הוא **שבירת שורות מחדש**: השורה כולה מתארכת מעבר לטור, ומה שלא נכנס
+נחתך בקצה. על שורה שמילאה את הטור נמדד גרוע פי שניים מהטבלה למעלה — ריצה
+517 → **759px**, גלישה **237px** מתיבת הטקסט, **141px** מחוץ לעמוד ו-
+`scrollWidth` 794 → **939**, כלומר 145px גלילה אופקית שלא הייתה. במסלול החוק
+הגלובלי נמדד אותו דבר: ריצה 601 → 797px, **195px** מעבר לשוליים ו-**99px מעבר
+לקצה הנייר** — הטקסט על האפור שמסביב לדף.
+
+גופן **צר** נקי לגמרי (Impact: אפס גלישה, `scrollWidth` ללא שינוי). גופן רחב על
+שורה מלאה — מכוער, ובלי גידור אפשרי: איננו יודעים מראש אם הטור יספיק.
+
+**ופגם שני, שאין לו תיקון בצד שלנו:** פס הבחירה נשאר במקומו בזמן שהטקסט זז
+מתחתיו. נמדד בזרימה האמיתית (בוחרים, ואז מרחפים) — הפס ב-`462..993`, הטקסט עבר
+ל-`302..993`; פער של 160px ו-198px. הסימון הכחול והאותיות נפרדים על המסך.
+
+זרימה מחדש הייתה פותרת את שניהם, והיא מחייבת מדידה מחדש של הטקסט במנוע —
+כלומר בדיוק את מה ש-`canMutate: false` שולל, ואת מה שהצביעה החזותית נמנעת ממנו
+בכוונה. **התצוגה במסמך אינה יכולה להיות נאמנה, ותצוגה שמראה משהו אחר ממה
+שיקרה בפועל גרועה מאין תצוגה.**
+
+### פער שלישי: `scope: 'text'` אינו מדויק לתו, בניגוד לחוזה שלו
+
+`SuperDocVisualOptions.scope` מתועד כ„`'text'` paints exact visible text
+ranges”. נמדד אחרת: דקורציה על `BBBB` בפסקה `AAAA |BBBB| CCCC` צבעה את **כל
+עלה `BBBB`** — לא את הבלוק, אך גם לא את התווים המדויקים. האנקור עצמו כן פותר
+נכון (`segments()` = `[{ blockId, range: { start: 5, end: 9 } }]`), ולכן חוסר
+הדיוק הוא בצייר.
+
+בבאנדל הסגור (`docx-engine.es.js`, פונקציות `Wxn`/`Z2o`/`eBo`/`tBo`) יש שני
+מסלולים — מוכוון-טווח כשה-host מספק callback לצביעת טווח, ונפילה לכל הבלוק
+בלעדיו. שרץ הראשון, ולכן התוצאה היא עלה ולא בלוק.
+
+**וזה מה שמכריע את הפיצ'ר, יותר מן החיתוך.** נמדד מקצה לקצה, ריצה אחת:
+
+| | הטקסט |
+|---|---|
+| הריצה במסמך | `one two three four five` (23 תווים) |
+| מה שהמשתמש סימן | `‎ two thre` (9 תווים) |
+| מה שהריחוף צבע | `one two three four five` — **כל 23** |
+| מה שהלחיצה שינתה בפועל | `‎ two thre` בלבד — מאושר ב-OOXML |
+
+כלומר התצוגה מראה שינוי רחב פי שניים וחצי ממה שיקרה. הכתובת מדויקת והצביעה גסה,
+וזו הטעיה ולא אי-דיוק.
+
+הסתירה לחוזה מנוסחת בעץ הפתוח עצמו —
+`packages/superdoc/src/core/extensions/types.ts:497`: „paints exact visible text
+ranges … never silently paints the whole block”. מכיוון שהצייר סגור, מה שפתוח
+כאן הוא **דיווח באג**, לא PR.
+
+הצייר של `highlight` (התכונות `data-superdoc-extension-decoration` ו-`-classes`)
+נמצא **רק** בבאנדל הסגור — אפס מופעים בכל עץ המקור הפתוח, ולכן אין כאן PR.
+
+### שלוש חסימות נוספות שנמדדו, לחוסך למי שינסה שוב
+
+**`::highlight()` בכרום 152 אינו נושא `font-family`.** עם
+`background: yellow; color: red; font-family: "Courier New"; font-weight: 900`
+הצבעים כן נצבעו, אבל `Range.getBoundingClientRect().width` נשאר **46.31 →
+46.31**. גם עם `font-family` ו-`font-size: 32px` בלבד — רוחב 46.31, גובה 17.
+ה-Custom Highlight API הוא קבוצת תכונות צביעה, ואינו יכול להחליף גופן.
+
+**`window.getSelection()` אינו רואה את הבחירה.** עם בחירה חיה ומאומתת
+(`{ status: 'ready', empty: false }`, פס כחול על המסך): `rangeCount: 1`,
+`collapsed: true`, `textLen: 0`, `clientRects: 0`. ה-`activeElement` הוא
+`<textarea data-v2-ime-host>` בגודל 1px ובאטימות 0. המנוע אינו מניח את הבחירה
+ב-DOM, ולכן כל מסלול שנשען על `Range` מן הדפדפן חסום מהיסוד. גם למפות
+מודל→DOM בעצמנו אינו פתוח: ה-API נותן `{ blockId, offset }` וה-DOM נושא
+`data-pm-start`/`data-pm-end` במספור אחר (גלובלי מול מקומי, סטייה של אחד).
+
+**`!important` הוא חובה, לא סגנון.** המנוע כותב `font-family` **inline** על כל
+`span.superdoc-text-run`, ולכן כלל CSS על class — כולל class שידית דקורציה
+מדביקה — לא יתפוס בלעדיו. נמדד: כלל ירושה על המיכל נכשל לחלוטין
+(`computedFF` נשאר `Arial, __superdoc_core_symbols__, sans-serif`), ואותו כלל
+עם `!important` הצליח. מימוש בלי `!important` נכשל **בשקט**.
+
+### `paintInlineBoxes` מדלג על RTL לחלוטין — וזה פתוח ל-PR
+
+`C:/tmp/superdoc-src/packages/layout-engine/painters/dom/src/runs/inline-box.ts`
+פותח את `paintInlineBoxes` ב-`if (isRtl) return;`. החבילה
+(`@superdoc/painter-dom`) היא **קוד פתוח**, בשונה מצייר ה-`highlight`. אינו
+נדרש לתצוגת הגופן, ונרשם כאן מפני שהוא הפתח היחיד שנמצא במסלול הזה לתיקון
+במעלה הזרם.
+
+### מה שנשלח במקומו
+
+תצוגה שאינה במסמך: **פס דגימה בתחתית רשימת הגופנים**, שמציג את הטקסט הנבחר של
+המשתמש בגופן שמרחפים עליו. הוא נאמן — אין בו עימוד לשקר עליו — ואינו נוגע
+במסמך, בהיסטוריה או בשמירה. הטקסט מגיע מ-`doc.selection.current({ includeText:
+true })`, שנמדדה כקריאה טהורה: 1ms, ו-`history.get()` זהה לפניה ואחריה.
+
+**מלכודת מדידה שיש לרשום:** `doc.history.get()` מחזיר **Promise**. בלי `await`
+הוא נראה כאובייקט ריק `{}`, וכל שער undo שנשען עליו „עובר” בלי למדוד דבר. שתי
+מדידות ראשונות בסבב הזה נפלו בדיוק כך.
+
+**ומה שנשלל במפורש כפתרון:** להשתמש ב-`.superdoc-text-run` כסלקטור. היא מחלקה
+פנימית של המנוע, מאותה קטגוריה ש-`tests/unit/engine-boundaries.test.ts` אוסר
+ושנדחתה כבר ב-`src/engine/line-number-layer.ts`. נמדד ש-`.editor-stack__host *`
+— מחלקה שלנו (`src/sessions/editor-swap.ts`) — נותנת תוצאה זהה בדיוק, ולכן גם
+אילו המסלול החזותי היה נשלח, לא היה בו צורך בשם פנימי.

@@ -452,6 +452,107 @@ describe('רגרסיה: הרשימה נחתכה בגובה הרצועה', () => 
   });
 });
 
+/**
+ * פס הדגימה — הטקסט שהמשתמש סימן במסמך, בגופן שהסימון עומד עליו.
+ *
+ * זו התצוגה שנשלחת **במקום** צביעה של המסמך עצמו, אחרי שזו נמדדה כמטעה
+ * (`docs/engine-gaps.md`, „תצוגה חיה של גופן”). מה שנבדק כאן הוא מה שאי אפשר
+ * לראות בקריאת התבנית: שהפס עוקב אחרי הסימון גם במקלדת ולא רק בעכבר, שהוא
+ * אינו הופך לאפשרות שאפשר לבחור, ושבורר הגודל אינו מקבל אותו בכלל.
+ */
+describe('פס הדגימה', () => {
+  const SAMPLED: readonly ComboOption[] = [
+    { value: 'David', label: 'David', preview: 'David', hebrew: true },
+    { value: 'Narkisim', label: 'Narkisim', preview: 'Narkisim', hebrew: true },
+    { value: 'Rubik', label: 'Rubik', preview: 'Rubik', hebrew: true },
+  ];
+
+  const bar = () => combo.find('.ribbon-combo-sample');
+  const barFamily = () => (bar().element as HTMLElement).style.fontFamily;
+
+  it('בלי טקסט אין פס — וזה בורר הגודל, שאין לו מה להדגים', async () => {
+    await open();
+    expect(bar().exists()).toBe(false);
+    expect(combo.find('[role="listbox"]').classes()).not.toContain('has-sample');
+  });
+
+  it('עם טקסט — הפס מציג אותו כשהרשימה פתוחה, ולא לפני כן', async () => {
+    await combo.setProps({ sample: 'בראשית ברא' });
+    expect(bar().exists()).toBe(false);
+
+    await open();
+    expect(bar().text()).toBe('בראשית ברא');
+    expect(combo.find('[role="listbox"]').classes()).toContain('has-sample');
+  });
+
+  it('הפס מצייר בגופן שהסימון עומד עליו, ועוקב אחרי החצים', async () => {
+    // חץ ולא עכבר: `mousemove` הוא המסלול המובן מאליו, וניווט מקלדת הוא זה
+    // שנשבר בשקט אם הפס נשען על אירוע העכבר במקום על הסימון עצמו.
+    await combo.setProps({ options: SAMPLED, modelValue: 'David', sample: 'שלום' });
+    await open();
+    expect(barFamily()).toBe('David');
+
+    await key('ArrowDown');
+    await nextTick();
+    expect(barFamily()).toBe('Narkisim');
+
+    await key('ArrowUp');
+    await nextTick();
+    expect(barFamily()).toBe('David');
+  });
+
+  it('הפס נפתח על הגופן הנוכחי — ולא ריק עד התזוזה הראשונה', async () => {
+    await combo.setProps({ options: SAMPLED, modelValue: 'Rubik', sample: 'שלום' });
+    await open();
+    expect(barFamily()).toBe('Rubik');
+  });
+
+  it('גופן שאינו ברשימה — הפס מוצג בגופן הרגיל, ולא ב-`font-family` מומצא', async () => {
+    await combo.setProps({ options: SAMPLED, modelValue: 'אין כזה', sample: 'שלום' });
+    await open();
+    expect(bar().exists()).toBe(true);
+    expect(barFamily()).toBe('');
+  });
+
+  it('חיפוש בלי התאמות אינו מציג פס — אין אפשרות מסומנת שהוא מדגים', async () => {
+    await combo.setProps({ sample: 'בראשית ברא' });
+    await open();
+    await type('אין גופן כזה בעולם');
+    expect(combo.find('.ribbon-combo-empty').exists()).toBe(true);
+    expect(bar().exists()).toBe(false);
+  });
+
+  it('הפס אינו אפשרות: לא נספר, לא נבחר, ולא מוכרז', async () => {
+    // `li` בתוך `listbox` שאינו `presentation` הוא אפשרות לכל דבר — כלומר
+    // שורה שהחצים עוצרים עליה ושקורא מסך מונה. והכרזה שלו הייתה קוראת מחדש
+    // את הטקסט שהמשתמש עצמו סימן, בכל תזוזת חץ.
+    await combo.setProps({ options: SAMPLED, modelValue: 'David', sample: 'שלום' });
+    await open();
+
+    expect(optionValues()).toEqual(['David', 'Narkisim', 'Rubik']);
+    expect(bar().attributes('role')).toBe('presentation');
+    expect(bar().attributes('aria-hidden')).toBe('true');
+    expect(bar().attributes('aria-selected')).toBeUndefined();
+
+    await key('ArrowDown');
+    await key('ArrowDown');
+    await key('ArrowDown');
+    await nextTick();
+    // גלישה חוזרת לראש הרשימה, ולא נעצרת על הפס.
+    expect(combo.find('input').attributes('aria-activedescendant')).toBe(
+      combo.find('[role="option"][data-value="David"]').attributes('id'),
+    );
+  });
+
+  it('`dir="auto"` על הפס — ציטוט לטיני במסמך עברי אינו מקבל את הפיסוק בצד הלא נכון', async () => {
+    // הדגימה היא הטקסט של המשתמש, והמעטפת RTL. בלי `dir="auto"` הנקודה של
+    // „Hello world.” נוחתת בקצה השמאלי של המחרוזת.
+    await combo.setProps({ sample: 'Hello world.' });
+    await open();
+    expect(bar().attributes('dir')).toBe('auto');
+  });
+});
+
 describe('נגישות', () => {
   it('התיבה מכריזה על עצמה כ-combobox ומצביעה על הרשימה', async () => {
     const input = combo.find('input');

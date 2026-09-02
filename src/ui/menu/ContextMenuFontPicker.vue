@@ -10,6 +10,7 @@
       :model-value="fonts.family.value"
       :options="fonts.familyOptions.value"
       :disabled="!fonts.familyEnabled.value"
+      :sample="fonts.sampleText.value"
       width="100%"
       title="גופן"
       @done="onDone"
