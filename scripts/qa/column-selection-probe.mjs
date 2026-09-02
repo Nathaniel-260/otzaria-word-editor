@@ -12,8 +12,10 @@
  *
  * ## מה נמדד
  *
- *   1. „עמודות ← שתיים” מהתפריט האמיתי מגיעה לשורת המצב עם ההודעה
- *      (`rtlColumnNote` ב-engine/page-setup.ts) — התיקון היחיד שכן בידינו.
+ *   1. „עמודות ← שתיים” מהתפריט האמיתי — האם המשתמש מקבל הודעה כלשהי על סדר
+ *      הטורים. `applyColumns` (`src/engine/page-setup.ts`) אינו כותב הודעה
+ *      כזאת: הוא מחזיר הצלחה שקטה. לכן ה-✗ בשורה הזאת הוא **המלצה למימוש**
+ *      ולא רגרסיה בקוד קיים — וזה גם התיקון היחיד שכן בידינו.
  *   2. הייצוא: `w:bidi` ושני טורים ב-`sectPr`.
  *   3. באיזה צד נוחתת הפסקה הראשונה — כלומר הפער עצמו.
  *   4. גרירה בסדר המסמך (שמאל→ימין): בקרה, וצריכה לצאת רציפה.
@@ -129,6 +131,10 @@ const selectedLines = () =>
  * `app.clickAt` של המסגרת ולא `mouse()` המקומי: הוא מכניס 40ms בין ה-press
  * ל-release, ובלעדיהם המנוע אינו מאפס את העוגן. מוחזר `true` רק כשהבחירה
  * באמת התאפסה — סמן אינו בוחר טקסט, ולכן `count === 0` הוא התנאי.
+ *
+ * מה שהוא **אינו** מאמת: **איפה** נחת הסמן. `count === 0` נכון לכל מיקום,
+ * ולכן שורה שמסקנתה תלויה במיקום — כמו שורה 7, שכל מובנה הוא היחס לעוגן —
+ * חייבת לאמת את המיקום בעצמה בהקשה בודדת לפני שהיא מודדת רצף הקשות.
  */
 async function placeCaret(point) {
   await app.clickAt(point.x, point.y);
@@ -192,7 +198,12 @@ try {
     if (status?.text?.includes('בצד שמאל') && status?.error === false) {
       report.pass('„עמודות ← שתיים” מודיעה למשתמש על סדר הטורים', status.text);
     } else {
-      report.fail('ההודעה על סדר הטורים אינה מגיעה לשורת המצב', JSON.stringify(status));
+      // אין הודעה כזאת בקוד: `applyColumns` מחזיר הצלחה בלי טקסט. כלומר לא
+      // נשבר כאן דבר — זו המלצה למימוש, וכך היא נרשמת.
+      report.fail(
+        'לא קיימת הודעה על סדר הטורים, וזו ההמלצה',
+        `שורת המצב אחרי „שתיים”: ${JSON.stringify(status)}`,
+      );
     }
   }
   await sleep(2_500);
@@ -299,15 +310,26 @@ try {
     const peak = Math.max(...trail.map((p) => p.right));
     const got = await selectedLines();
 
+    // ההבחנה שהמדידה מספקת, ושהקריטריון הקודם לא נגע בה: `contiguous`. ירידה
+    // במספר המלבנים בטור הימני אינה „הבחירה נמחקה” — כאן נמדד
+    // `contiguous: true`, כלומר **רצף אחד** שראשו עבר למקום מוקדם יותר בסדר
+    // המסמך. זה היפוך של הבחירה סביב העוגן, לא מחיקה. לכן הכשל נשמר למצב שבו
+    // הבחירה באמת התפרקה, וההיפוך נרשם כמה שהוא.
     if (threw) {
       report.stuck('גרירה בסדר הקריאה — `getRects` זרק', threw);
+    } else if (!got.contiguous) {
+      report.fail(
+        'גרירה בסדר הקריאה מפרקת את הבחירה',
+        `הנבחר בסוף אינו רצף אחד: ${got.label} (שיא ${peak} מלבנים בטור הימני, בסיום ${final.right})`,
+      );
     } else if (final.right >= peak) {
       report.pass('גרירה בסדר הקריאה — מה שסומן בטור הימני נשמר', `שיא ${peak}, בסיום ${final.right}`);
     } else {
-      report.fail(
-        'גרירה בסדר הקריאה מוחקת את מה שכבר סומן',
-        `הטור הימני הגיע ל-${peak} שורות מודגשות וירד ל-${final.right} אחרי המעבר לטור השמאלי; ` +
-          `הנבחר בסוף: ${got.label}`,
+      report.partial(
+        'גרירה בסדר הקריאה — הבחירה מתהפכת סביב העוגן',
+        `הטור הימני הגיע ל-${peak} מלבנים וירד ל-${final.right} אחרי המעבר לטור השמאלי, ` +
+          `אך הנבחר נשאר רצף אחד: ${got.label} — כלומר הראש עבר למקום מוקדם מהעוגן ` +
+          `(שורה ${from.line}) במקום להמשיך ממנו, והבחירה לא נמחקה אלא התהפכה`,
       );
     }
   }
@@ -362,23 +384,48 @@ try {
     if (!(await placeCaret(at(anchorLine)))) {
       report.stuck('Shift+חץ מטה בגבול הטורים', 'הלחיצה לא מיקמה סמן נקי — אין ממה למדוד');
     } else {
-      for (let i = 0; i < 6; i++) {
-        await app.press('ArrowDown', 'ArrowDown', 40, 8);
-        await sleep(200);
-      }
-      const got = await selectedLines();
-      // תקין = מתחיל מיד אחרי העוגן (ראו כלל המדידה 2) **וגם** חוצה את הגבול.
-      const startsRight = got.first === anchorLine + 1;
-      const crossed = got.last >= firstOfSecond;
-      if (startsRight && crossed) {
-        report.pass('Shift+חץ מטה חוצה את הגבול בין הטורים', got.label);
-      } else {
-        report.fail(
-          'Shift+חץ מטה אינו חוצה את הגבול בין הטורים',
-          `6 הקשות מסמן בשורה ${anchorLine}: ${got.label} — ` +
-            `${startsRight ? 'מתחיל נכון' : `מתחיל ב-${got.first} ולא ב-${anchorLine + 1}`}, ` +
-            `${crossed ? 'חצה' : `לא הגיע לשורה ${firstOfSecond}`}`,
+      // אימות **מיקום** ולא רק „אין בחירה”: `placeCaret` מאמת שהבחירה
+      // התאפסה, ולא באיזו שורה נחת הסמן. הקשה בודדת אומרת את מספר השורה
+      // בפועל, ובלעדיה כל מה שיימדד ב-6 ההקשות תלוי בהנחה על המיקום — כולל
+      // המסקנה על הגלישה, שכל מובנה הוא היחס לעוגן.
+      await app.press('ArrowDown', 'ArrowDown', 40, 8);
+      await sleep(200);
+      const step = await selectedLines();
+      if (!(step.count === 1 && step.first === anchorLine + 1)) {
+        report.stuck(
+          'Shift+חץ מטה בגבול הטורים',
+          `הקשה בודדת מסמן שהוצב בשורה ${anchorLine} בחרה ${step.label} ולא את שורה ` +
+            `${anchorLine + 1} לבדה — מיקום הסמן אינו מה שהמדידה מניחה, ואין ממה להסיק`,
         );
+      } else {
+        for (let i = 0; i < 5; i++) {
+          await app.press('ArrowDown', 'ArrowDown', 40, 8);
+          await sleep(200);
+        }
+        const got = await selectedLines();
+        // תקין = מתחיל מיד אחרי העוגן (ראו כלל המדידה 2) **וגם** חוצה את הגבול.
+        const startsRight = got.first === anchorLine + 1;
+        const crossed = got.last >= firstOfSecond;
+        // הראש מוקדם מהעוגן ⟹ הבחירה נמשכה **אחורה** בסדר המסמך: מתחתית
+        // הטור הראשון היא גלשה לתחילת המסמך ולא לראש הטור השני.
+        const wrapped = got.first < anchorLine;
+        if (startsRight && crossed) {
+          report.pass('Shift+חץ מטה חוצה את הגבול בין הטורים', got.label);
+        } else if (wrapped) {
+          report.fail(
+            'Shift+חץ מטה בתחתית הטור הראשון גולש לתחילת המסמך',
+            `העוגן בשורה ${anchorLine}, ואומת בהקשה בודדת (${step.label}); 6 הקשות: ${got.label} — ` +
+              `אחרי השורה האחרונה בטור הראשון (${lastOfFirst}) הראש נמצא בשורה ${got.first}, ` +
+              `מוקדם מהעוגן, במקום בשורה ${firstOfSecond} שהיא ראש הטור השני`,
+          );
+        } else {
+          report.fail(
+            'Shift+חץ מטה אינו חוצה את הגבול בין הטורים',
+            `העוגן בשורה ${anchorLine}, ואומת בהקשה בודדת (${step.label}); 6 הקשות: ${got.label} — ` +
+              `${startsRight ? 'מתחיל נכון' : `מתחיל ב-${got.first} ולא ב-${anchorLine + 1}`}, ` +
+              `${crossed ? 'חצה' : `לא הגיע לשורה ${firstOfSecond}`}`,
+          );
+        }
       }
     }
   }
