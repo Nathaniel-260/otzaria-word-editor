@@ -523,6 +523,34 @@ describe('מצב מיקוד', () => {
     return element;
   }
 
+  it('הכניסה מתחילה עם הלוח העליון פתוח', async () => {
+    // מצב מיקוד שמעלים את כל הפקדים ברגע ההפעלה נקרא כתקלה ולא כבחירה. הלוח
+    // נשאר עד תנועת העכבר הראשונה אל גוף המסמך.
+    const wrapper = await mountShell();
+    press({ code: 'F11' });
+    await settle();
+
+    expect(wrapper.find('.word-app-shell').classes()).toContain('reveal-top');
+  });
+
+  it('כפתור היציאה מופיע רק במצב מיקוד — ומכבה אותו', async () => {
+    // `Esc` ו-`F11` עובדים, אבל שניהם דורשים לדעת אותם. זה הפקד היחיד שרואים.
+    const wrapper = await mountShell();
+    expect(wrapper.find('.focus-exit').exists(), 'מחוץ למצב מיקוד').toBe(false);
+
+    press({ code: 'F11' });
+    await settle();
+    const exit = wrapper.find('.focus-exit');
+    expect(exit.exists(), 'במצב מיקוד').toBe(true);
+    expect(exit.attributes('aria-label')).toBe('יציאה ממצב מיקוד');
+
+    await exit.trigger('click');
+    await settle();
+
+    expect(wrapper.find('.word-app-shell').classes()).not.toContain('focus-mode');
+    expect(wrapper.find('.focus-exit').exists(), 'אחרי היציאה').toBe(false);
+  });
+
   it('Escape יוצא ממצב מיקוד', async () => {
     // המקש הראשון שכל משתמש מנסה. בלעדיו היציאה היחידה היא למצוא שוב את F11
     // או לרחף מעל קצה המסך.
@@ -576,9 +604,9 @@ describe('מצב מיקוד', () => {
   });
 
   it('F6 במצב מיקוד אינו ממקד פקד בלתי נראה', async () => {
-    // הרצועה ושורת המצב מוסתרות ב-`opacity: 0` — הן עדיין בעץ ועדיין ניתנות
-    // למיקוד. בלי סימון הזמינות המשתמש היה מקבל טבעת מיקוד שאינה נראית,
-    // הקלדה שאינה מגיעה למסמך, ו-Enter שמפעיל כפתור שקוף.
+    // הרצועה ושורת המצב יוצאות מהזרימה ומוזזות אל מחוץ למסך — הן עדיין בעץ.
+    // בלי סימון הזמינות המשתמש היה מקבל טבעת מיקוד על פס שאינו על המסך,
+    // הקלדה שאינה מגיעה למסמך, ו-Enter שמפעיל כפתור שאינו נראה.
     const wrapper = await mountShell();
     const typing = surface(wrapper);
     typing.focus();

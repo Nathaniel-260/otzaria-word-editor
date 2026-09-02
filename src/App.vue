@@ -10,83 +10,91 @@
     @pointerleave="revealed = null"
     @contextmenu="contextMenu.handleContextMenu"
   >
-    <!-- פס עליון -->
-    <TitleBar
-      :title="title"
-      :is-dirty="saveSnapshot.isDirty"
-      :is-saving="saveSnapshot.isSaving"
-      :is-save-error="saveSnapshot.state === 'error'"
-      :save-state-text="saveStateMessage"
-      :autosave-enabled="autosaveEnabled"
-      :can-undo="canUndo"
-      :can-redo="canRedo"
-      @save="onSave(false)"
-      @undo="onUndo"
-      @redo="onRedo"
-      @open-find="openFindDialog('find')"
-      @toggle-autosave="toggleAutosave"
-      @update-title="onTitleUpdate"
-    />
-
-    <!-- רצועת טאבים — אחד ל-`DocumentSession` פתוח. ראו „ריבוי מסמכים” ליד `sessions` בסקריפט. -->
-    <DocumentTabsBar
-      :tabs="documentTabs"
-      :active-id="documentIdView"
-      @select-tab="onDocumentTabSelect"
-      @close-tab="onDocumentTabClose"
-      @new-tab="onDocumentTabNew"
-    />
-
-    <!-- רצועת הכלים (Ribbon) -->
-    <Ribbon
-      v-model:active-tab="ribbonTab"
-      v-model:collapsed="ribbonCollapsed"
-      :has-document="hasDocument"
-      :has-pdf-export="supportsPdfExport"
-      :is-saving="saveSnapshot.isSaving"
-      :is-opening="isOpening"
-      :book-completion-enabled="bookCompletionEnabled"
-      @new-doc="onNewDocument"
-      @open-doc="onPickAndOpen"
-      @save-doc="onSave(false)"
-      @save-as-doc="onSave(true)"
-      @export-doc="onExportDocx"
-      @print-doc="onPrint"
-      @export-pdf="onExportPdf"
-      @export-otzaria="onExportOtzaria"
-      @about="isAboutOpen = true"
-      @shortcuts-help="isShortcutsHelpOpen = true"
-      @exit-app="onExit"
-      @open-find="openFindDialog('find')"
-      @open-replace="openFindDialog('replace')"
-      @open-link="() => void linkDialog.open()"
-      @toggle-focus-mode="toggleFocusMode"
-      @insert-citation="onInsertCitation"
-      @search-otzaria="onSearchOtzaria"
-      @open-library="onOpenLibrary"
-      @manage-macros="isMacrosOpen = true"
-      @macro-record="onMacroRecord"
-      @macro-play="onMacroPlay"
-      @toggle-book-completion="onToggleBookCompletion"
-    />
-
-    <!-- שורת הסרגל האופקי. הפינה שלפניו רחבה כמו הסרגל האנכי, וכך שניהם
-         מתחילים בדיוק במקום שבו אזור המסמך מתחיל — כמו ב-Word. -->
-    <div class="ruler-row">
-      <div
-        v-show="isRulerVisible"
-        class="ruler-corner"
+    <!--
+      הפסים העליונים כקבוצה אחת: כותרת, טאבי מסמכים, רצועה וסרגל אופקי.
+      העטיפה אינה קוסמטית — היא מה שמאפשר למצב מיקוד להוציא את כולם
+      מהזרימה במכה אחת ולהחזיר אותם כלוח צף אחד, בלי שהמסמך יזוז. ראו
+      `.shell-top` ב-`<style>`.
+    -->
+    <div class="shell-top">
+      <!-- פס עליון -->
+      <TitleBar
+        :title="title"
+        :is-dirty="saveSnapshot.isDirty"
+        :is-saving="saveSnapshot.isSaving"
+        :is-save-error="saveSnapshot.state === 'error'"
+        :save-state-text="saveStateMessage"
+        :autosave-enabled="autosaveEnabled"
+        :can-undo="canUndo"
+        :can-redo="canRedo"
+        @save="onSave(false)"
+        @undo="onUndo"
+        @redo="onRedo"
+        @open-find="openFindDialog('find')"
+        @toggle-autosave="toggleAutosave"
+        @update-title="onTitleUpdate"
       />
-      <DocumentRuler
-        :visible="isRulerVisible"
-        :reading="rulerReading"
-        :host="rulerHost"
-        :viewport-source="rulerViewport"
-        :unit="rulerUnit"
-        :zoom="zoom.value"
-        :editable="isDocumentEditable"
-        @changed="onRulerChanged"
+
+      <!-- רצועת טאבים — אחד ל-`DocumentSession` פתוח. ראו „ריבוי מסמכים” ליד `sessions` בסקריפט. -->
+      <DocumentTabsBar
+        :tabs="documentTabs"
+        :active-id="documentIdView"
+        @select-tab="onDocumentTabSelect"
+        @close-tab="onDocumentTabClose"
+        @new-tab="onDocumentTabNew"
       />
+
+      <!-- רצועת הכלים (Ribbon) -->
+      <Ribbon
+        v-model:active-tab="ribbonTab"
+        v-model:collapsed="ribbonCollapsed"
+        :has-document="hasDocument"
+        :has-pdf-export="supportsPdfExport"
+        :is-saving="saveSnapshot.isSaving"
+        :is-opening="isOpening"
+        :book-completion-enabled="bookCompletionEnabled"
+        @new-doc="onNewDocument"
+        @open-doc="onPickAndOpen"
+        @save-doc="onSave(false)"
+        @save-as-doc="onSave(true)"
+        @export-doc="onExportDocx"
+        @print-doc="onPrint"
+        @export-pdf="onExportPdf"
+        @export-otzaria="onExportOtzaria"
+        @about="isAboutOpen = true"
+        @shortcuts-help="isShortcutsHelpOpen = true"
+        @exit-app="onExit"
+        @open-find="openFindDialog('find')"
+        @open-replace="openFindDialog('replace')"
+        @open-link="() => void linkDialog.open()"
+        @toggle-focus-mode="toggleFocusMode"
+        @insert-citation="onInsertCitation"
+        @search-otzaria="onSearchOtzaria"
+        @open-library="onOpenLibrary"
+        @manage-macros="isMacrosOpen = true"
+        @macro-record="onMacroRecord"
+        @macro-play="onMacroPlay"
+        @toggle-book-completion="onToggleBookCompletion"
+      />
+
+      <!-- שורת הסרגל האופקי. הפינה שלפניו רחבה כמו הסרגל האנכי, וכך שניהם
+           מתחילים בדיוק במקום שבו אזור המסמך מתחיל — כמו ב-Word. -->
+      <div class="ruler-row">
+        <div
+          v-show="isRulerVisible"
+          class="ruler-corner"
+        />
+        <DocumentRuler
+          :visible="isRulerVisible"
+          :reading="rulerReading"
+          :host="rulerHost"
+          :viewport-source="rulerViewport"
+          :unit="rulerUnit"
+          :zoom="zoom.value"
+          :editable="isDocumentEditable"
+          @changed="onRulerChanged"
+        />
+      </div>
     </div>
 
     <!-- אזור המסמך: הסרגל האנכי ולצדו ה-stack שהמנוע מצייר בתוכו -->
@@ -129,6 +137,30 @@
         :revision="spellcheckRevision"
       />
     </div>
+
+    <!--
+      דרך יציאה שרואים. `Esc` ו-`F11` עובדים, אבל שניהם דורשים לדעת אותם —
+      ובמצב מיקוד אין על המסך אף פקד שרומז עליהם. הכפתור יושב בפינה התחתונה,
+      מעל השוליים האפורים ולא מעל העמוד, ונשאר עמום עד ריחוף כדי שלא יתחרה
+      בטקסט. המיקום והשכבה — ב-`.focus-exit` שב-`<style>`.
+    -->
+    <button
+      v-if="isFocusMode"
+      type="button"
+      class="focus-exit"
+      aria-pressed="true"
+      aria-label="יציאה ממצב מיקוד"
+      data-tip-title="יציאה ממצב מיקוד"
+      data-tip-shortcut="Esc"
+      @pointerdown.prevent
+      @click="toggleFocusMode"
+    >
+      <SvgIcon
+        name="focusMode"
+        :size="16"
+      />
+      <span>יציאה ממצב מיקוד</span>
+    </button>
 
     <!-- תפריט הלחצן הימני. אחרי אזור המסמך ולפני הדיאלוגים, כמו ה-z-index שלו. -->
     <ContextMenu
@@ -447,8 +479,10 @@ import {
   readWorkspaceBytes,
   writeWorkspaceBytes,
 } from './host/workspace';
-import { onPluginHidden } from './host/lifecycle';
+import { onPluginHidden, onPluginShown } from './host/lifecycle';
 import { revealZone, type RevealBounds, type RevealZone } from './composables/focus-mode';
+import { enterFullscreen, exitFullscreen, isFullscreen, watchFullscreen } from './composables/window-fullscreen';
+import SvgIcon from './ui/icons/SvgIcon.vue';
 import { selectWholeDocument } from './engine/clipboard';
 import {
   DEFAULT_FONT_SIZE_PT,
@@ -2878,12 +2912,35 @@ function toggleAutosave(): void {
   void saveAutosaveEnabled(autosaveEnabled.value);
 }
 
+/**
+ * מצב מיקוד — והמסך המלא שנלווה אליו.
+ *
+ * הפסים שלנו נעלמים ב-CSS (ראו „מצב מיקוד” ב-`<style>`), אבל סביבנו יושבת
+ * אוצריא: פס הכותרת שלה, שורת הטאבים וסרגל הניווט. „מיקוד” שמשאיר אותם על
+ * המסך מסתיר שליש ממה שמפריע. הבקשה למסך מלא היא הדרך היחידה שיש לתוסף
+ * לבקש את החלון כולו — ההנמקה המלאה ב-composables/window-fullscreen.ts.
+ *
+ * הבקשה נשלחת **מכאן ולא מ-`watch`** על הדגל: הדפדפן מקבל מסך מלא רק מתוך
+ * מחווה של המשתמש, וכאן זו תמיד לחיצה או `F11`. שחזור מצב מיקוד מהפעלה
+ * קודמת (`applyShellPreferences`) אינו מחווה, והוא בכוונה אינו עובר כאן.
+ *
+ * כישלון אינו מבטל את מצב המיקוד: מאחז שאינו מרשה מסך מלא עדיין מקבל מעטפת
+ * נקייה, וזה הרוב של מה שהמצב הזה נותן.
+ */
 function toggleFocusMode(): void {
   isFocusMode.value = !isFocusMode.value;
-  keeper?.updateView({ focusMode: isFocusMode.value });
-  // יציאה ממצב מיקוד מאפסת את החשיפה: אחרת המחלקה נשארת והפסים מקבלים
-  // opacity מיותר ברגע שחוזרים למצב הרגיל.
-  if (!isFocusMode.value) revealed.value = null;
+  updateShellView({ focusMode: isFocusMode.value });
+  // יציאה ממצב מיקוד מאפסת את החשיפה: אחרת המחלקה `reveal-*` נשארת, והפסים
+  // חוזרים למצב הרגיל כשהם עדיין מסומנים כחשופים.
+  // הכניסה מתחילה **פתוחה**: מצב מיקוד שמתחיל בהעלמת כל הפקדים בבת אחת נראה
+  // כמו תקלה, ולא כמו מצב שנבחר. הלוח נשאר עד תנועת העכבר הראשונה אל גוף
+  // המסמך, ומשם והלאה החשיפה היא בקצה בלבד — כרגיל.
+  revealed.value = isFocusMode.value ? 'top' : null;
+  // הפוקוס היה יכול להישאר על הכפתור שהרגע נלחץ — והוא בתוך רצועה שברגע הזה
+  // יצאה מהמסך. `visibility: hidden` מוציא אותו משם ממילא, אבל אל ה-`<body>`
+  // ולא אל הטקסט: המשתמש היה מקבל מסך מיקוד שאי אפשר להקליד בו עד שילחץ.
+  if (isFocusMode.value) focusRing.toDocument();
+  void (isFocusMode.value ? enterFullscreen() : exitFullscreen());
 }
 
 function onToggleBookCompletion(): void {
@@ -2911,36 +2968,24 @@ watch([activeEditorContainer, activeSuperdoc, bookCompletionEnabled, documentGen
 });
 
 /**
- * הפסים שנחשפים בקצה העליון, לפי הסלקטורים שה-CSS של מצב המיקוד מסתיר.
- *
- * הסרגל האנכי (`.doc-vruler`) חסר מהרשימה בכוונה, למרות שהוא נחשף יחד איתם:
- * הוא נמתח לכל גובה המסמך, וגובל שנגזר ממנו היה הופך את „קרוב לקצה העליון”
- * לכל המסך.
- */
-const TOP_BAR_SELECTORS = ['.word-titlebar', '.word-ribbon-container', '.doc-ruler', '.ruler-corner'];
-
-/**
- * עד איפה מגיעים הפסים בפועל.
+ * עד איפה מגיעים הפסים בפועל — הגובל שמחזיק את החשיפה פתוחה.
  *
  * נמדד ולא קבוע: הגובה תלוי במה שמוצג — רצועה מכונסת, סרגל מידות כבוי, שורת
- * מצב בגופן אחר. ההסתרה במצב מיקוד היא `opacity` ולא `display`, ולכן הפסים
- * תופסים את מקומם גם כשאינם נראים והמדידה תקפה בשני המצבים.
+ * מצב בגופן אחר.
+ *
+ * המדידה נקראת **רק כשמשהו חשוף** (ראו `onPointerMove`), וזה מה שהופך אותה
+ * לנכונה גם אחרי שהפסים יצאו מהזרימה: לוח מוסתר מוזז ב-`translateY(-100%)`
+ * ומלבנו יושב מעל הקצה העליון, כלומר `bottom` שלילי — והנפילה ל-0 מחזירה את
+ * ההחלטה לרצועת הקצה בלבד, שזה בדיוק הסף הנכון כשאין מה להחזיק פתוח.
  */
 function measureRevealBounds(): RevealBounds | null {
   const shell = shellRef.value;
   if (!shell) return null;
 
-  let top = 0;
-  for (const selector of TOP_BAR_SELECTORS) {
-    for (const element of shell.querySelectorAll(selector)) {
-      const rect = element.getBoundingClientRect();
-      // פס שאינו מצויר כרגע אינו מרחיב את האזור.
-      if (rect.height > 0) top = Math.max(top, rect.bottom);
-    }
-  }
+  const topRect = shell.querySelector('.shell-top')?.getBoundingClientRect();
+  const top = topRect ? Math.max(0, topRect.bottom) : 0;
 
-  const statusbar = shell.querySelector('.word-statusbar');
-  const statusRect = statusbar?.getBoundingClientRect();
+  const statusRect = shell.querySelector('.word-statusbar')?.getBoundingClientRect();
   const bottom = statusRect && statusRect.height > 0 ? statusRect.top : window.innerHeight;
 
   return { top, bottom };
@@ -3168,9 +3213,7 @@ async function onOpenLibrary(): Promise<void> {
  */
 const contextMenu = useContextMenu({
   superdoc: activeSuperdoc,
-  shell: shellRef,
   isDocumentSurface,
-  isFocusMode,
   isModalOpen: isModalDialogOpen,
   runAction: (action) => runShellAction(action),
   report: reportCommand,
@@ -3459,10 +3502,10 @@ function focusOpenedDocument(superdoc: SuperDoc): void {
  * את הפוקוס אבל אינו מחזיר את הסמן לטקסט, כלומר המשתמש היה מקבל „חזרה למסמך”
  * שאי אפשר להקליד אחריה.
  *
- * שלושת פסי המעטפת מסומנים כלא-זמינים במצב מיקוד. הם עדיין בעץ — ההסתרה היא
- * `opacity: 0` — ולכן בלי הסימון `F6` היה ממקד פקד בלתי נראה. זה גם מה שנותן
- * לשדה שם המסמך דרך יציאה: `Escape` ממנו מזהה שהפוקוס בסרגל הכותרת ומחזיר
- * אותו למסמך.
+ * שלושת פסי המעטפת מסומנים כלא-זמינים במצב מיקוד. הם עדיין בעץ — הם רק יצאו
+ * מהזרימה והוזזו אל מחוץ למסך — ולכן בלי הסימון `F6` היה מעביר את המשתמש לפס
+ * שאינו על המסך. זה גם מה שנותן לשדה שם המסמך דרך יציאה: `Escape` ממנו מזהה
+ * שהפוקוס בסרגל הכותרת ומחזיר אותו למסמך.
  */
 function shellRegion(selector: string): HTMLElement | null {
   return shellRef.value?.querySelector<HTMLElement>(selector) ?? null;
@@ -3555,6 +3598,18 @@ onMounted(async () => {
    */
   void loadInstalledFonts().then((snapshot) => {
     installedFonts.value = snapshot;
+  });
+
+  /*
+   * יציאה ממסך מלא שלא באה מאיתנו — `Escape` או `F11` של הדפדפן — מכבה גם את
+   * מצב המיקוד. בלי זה נשארת מעטפת בלי פסים בתוך חלון רגיל: המשתמש יצא ממה
+   * שהוא רואה כ„מסך מלא”, וכל הפקדים נשארו מוסתרים בלי שהוא ביקש.
+   *
+   * `isFocusMode` בלבד ולא `toggleFocusMode` בשני הכיוונים: כניסה למסך מלא
+   * מכל סיבה אחרת אינה אמורה להדליק מצב מיקוד.
+   */
+  fullscreenListener = watchFullscreen((fullscreen) => {
+    if (!fullscreen && isFocusMode.value) toggleFocusMode();
   });
 
   // „שלח למסמך” — לפני כל `await` שבהמשך. אוצריא מוסרת את אירוע הלחיצה מיד
@@ -3687,12 +3742,24 @@ onUnmounted(() => {
   }
   hiddenListener?.();
   hiddenListener = null;
+  shownListener?.();
+  shownListener = null;
   contextMenuListener?.();
   contextMenuListener = null;
+  fullscreenListener?.();
+  fullscreenListener = null;
+  // מעטפת שנפרקת בזמן מסך מלא הייתה משאירה את החלון מורחב בלי מי שיצא ממנו.
+  if (isFullscreen()) void exitFullscreen();
   // הפריט עצמו אינו מוסר כאן: אוצריא מסירה את רישומי המופע בעצמה בפירוק,
   // וההסרה הידנית רק מסתכנת במחיקת העותק ההצהרתי — הפריט שאמור להישאר
   // בתפריט גם כשהתוסף סגור. ההנמקה המלאה ב-host/otzaria-reader.ts.
   for (const s of sessions.values()) {
+    // המנוע וטיימרי השמירה של **כל** טאב, לא רק הפעיל: לפני ריבוי המסמכים
+    // היה כאן אחד, ומאז כל טאב מחזיק מופע SuperDoc משלו עם ה-workers שלו.
+    // `destroy()` של ה-session אינו מתאים כאן — הוא מוחק גם את הטיוטה, ופירוק
+    // המעטפת אינו „המשתמש ביקש למחוק”.
+    s.swap.destroy();
+    s.save.dispose();
     s.keeper.dispose();
   }
   keeper = null;
@@ -3945,6 +4012,17 @@ async function readDraftBytes(path: string): Promise<Blob | null> {
   color: var(--color-on-surface);
   font-family: var(--font-main);
   direction: rtl;
+  /* מסגרת ההתייחסות של הפסים במצב מיקוד — שם הם יוצאים מהזרימה. */
+  position: relative;
+}
+
+/* קבוצת הפסים העליונים: כותרת, טאבי מסמכים, רצועה ושורת הסרגל. מחוץ למצב
+   מיקוד זו עמודה רגילה, והפריסה זהה למה שהיה כשארבעתם היו ילדים ישירים של
+   המעטפת. הקבוצה קיימת בשביל מצב מיקוד — ראו למטה. */
+.shell-top {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
 }
 
 /* אזור המסמך: שורה של הסרגל האנכי וה-stack. `min-width: 0` על ה-stack הוא מה
@@ -3996,28 +4074,131 @@ async function readDraftBytes(path: string): Promise<Blob | null> {
   border-inline-end: 1px solid var(--color-outline-variant);
 }
 
-/* מצב מיקוד. הסרגל מצטרף לפסים העליונים: הוא חלק מאותה קבוצה שנחשפת בקצה
-   העליון, ומצב מיקוד שמשאיר סרגל מידות על המסך אינו מצב מיקוד. */
-.word-app-shell.focus-mode :deep(.word-titlebar),
-.word-app-shell.focus-mode :deep(.word-ribbon-container),
-.word-app-shell.focus-mode :deep(.doc-ruler),
-.word-app-shell.focus-mode :deep(.doc-vruler),
-.word-app-shell.focus-mode .ruler-corner,
+/**
+ * ## מצב מיקוד
+ *
+ * ההסתרה הייתה `opacity: 0`, והיא לא הסתירה: הפסים שמרו על מקומם בפריסה,
+ * כלומר אזור המסמך נשאר בדיוק באותו גובה ומעליו נמתחה רצועה לבנה (נמדד:
+ * 194 פיקסלים בחלון של 429 — כמעט מחצית מהגובה). מצב מיקוד שמלבין את הפסים
+ * במקום להעלים אותם אינו מצב מיקוד, אלא מסמך קטן עם שוליים ריקים.
+ *
+ * לכן הפסים **יוצאים מהזרימה**: `position: absolute` מוציא אותם מעמודת
+ * ה-flex, ואזור המסמך גדל מיד לכל גובה החלון. החשיפה בקצה מחזירה אותם כלוח
+ * צף מעל המסמך ולא כפס שדוחף אותו — ולכן ריחוף על הקצה אינו מזיז את הטקסט
+ * ואינו מכריח את המנוע לפרוס את המסמך מחדש בכל תנועת עכבר.
+ *
+ * `visibility: hidden` ולא רק ההזזה: פס שהוזז אל מחוץ למסך עדיין נמצא בסדר
+ * ה-Tab ובעץ הנגישות. ההשהיה עליו (`0s linear 0.24s`) היא מה שמשאיר אותו
+ * נראה לכל אורך ההחלקה החוצה ומעלים אותו רק בסופה.
+ *
+ * `z-index` מפני ש-`.editor-area` בא אחרי הפסים ב-DOM וגם הוא ממוקם
+ * (`position: relative`) — בלעדיו אזור המסמך היה נצבע **מעל** הלוח שנחשף.
+ */
+.word-app-shell.focus-mode .shell-top,
 .word-app-shell.focus-mode :deep(.word-statusbar) {
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.3s ease;
+  position: absolute;
+  inset-inline: 0;
+  z-index: 2;
+  visibility: hidden;
+  transition:
+    transform 0.24s ease,
+    visibility 0s linear 0.24s;
+}
+
+.word-app-shell.focus-mode .shell-top {
+  top: 0;
+  transform: translateY(-100%);
+}
+
+.word-app-shell.focus-mode :deep(.word-statusbar) {
+  bottom: 0;
+  transform: translateY(100%);
+}
+
+/* הסרגל האנכי הוא היחיד שאינו מצטרף לחשיפה: הוא עמודה לכל גובה המסמך, והחזרה
+   שלו בכל ריחוף הייתה משנה את **רוחב** אזור העריכה — כלומר פורסת את המסמך
+   מחדש בדיוק במצב שנועד להשקיט אותו. במצב מיקוד הוא פשוט אינו שם, ורוחבו
+   נוסף למסמך. */
+.word-app-shell.focus-mode :deep(.doc-vruler) {
+  display: none;
 }
 
 /* החשיפה לפי קצה, ולא `:hover` על השורש: השורש הוא כל החלון, ולכן כל תנועת
-   עכבר החזירה את שלושת הפסים — ומצב המיקוד לא הסתיר כלום. */
-.word-app-shell.focus-mode.reveal-top :deep(.word-titlebar),
-.word-app-shell.focus-mode.reveal-top :deep(.word-ribbon-container),
-.word-app-shell.focus-mode.reveal-top :deep(.doc-ruler),
-.word-app-shell.focus-mode.reveal-top :deep(.doc-vruler),
-.word-app-shell.focus-mode.reveal-top .ruler-corner,
+   עכבר החזירה את הפסים — ומצב המיקוד לא הסתיר כלום. ההחלטה עצמה
+   ב-composables/focus-mode.ts, כדי שתהיה נבדקת. */
+.word-app-shell.focus-mode.reveal-top .shell-top,
 .word-app-shell.focus-mode.reveal-bottom :deep(.word-statusbar) {
+  transform: none;
+  visibility: visible;
+  transition:
+    transform 0.24s ease,
+    visibility 0s;
+}
+
+/* הצל הוא מה שאומר „זה צף מעל המסמך” ולא „זה חלק מהעמוד”. אותו ערך כמו כל
+   משטח צף אחר בתוכנה (ContextMenu.vue, RibbonMenuButton.vue). */
+.word-app-shell.focus-mode.reveal-top .shell-top {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.16);
+}
+
+.word-app-shell.focus-mode.reveal-bottom :deep(.word-statusbar) {
+  box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.16);
+}
+
+/**
+ * כפתור היציאה ממצב מיקוד.
+ *
+ * `Esc` ו-`F11` עובדים, אבל מצב מיקוד הוא בדיוק המצב שבו אין על המסך שום פקד
+ * שרומז עליהם — ומשתמש שנכנס בטעות נשאר בפנים. הכפתור עמום ולא נעלם: תפקידו
+ * להימצא כשמחפשים אותו, לא להתחרות בטקסט.
+ *
+ * המיקום אינו שרירותי: **בפינה התחתונה**, ו-32 פיקסלים מהתחתית. הקצה העליון
+ * הוא המקום שהלוח נחשף בו — כפתור שם היה נעלם מתחתיו בדיוק כשנכנסים למצב
+ * (הכניסה מתחילה פתוחה), ושורת המצב בגובה 24 פיקסלים היא הסיבה ל-32.
+ *
+ * `z-index: 1` — מעל שכבות המסמך (PageBorderOverlay ואחיותיה, שגם הן 1, והוא
+ * אחריהן ב-DOM) ומתחת ללוח שנחשף בקצה (2).
+ */
+.focus-exit {
+  position: absolute;
+  bottom: 32px;
+  inset-inline-end: 12px;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border: 1px solid var(--color-outline-variant);
+  border-radius: 999px;
+  background: var(--color-surface-container-highest);
+  color: var(--color-on-surface-variant);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.5;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.16);
+  transition:
+    opacity 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.focus-exit:hover,
+.focus-exit:focus-visible {
   opacity: 1;
-  pointer-events: auto;
+  border-color: var(--color-outline);
+  color: var(--color-on-surface);
+}
+
+/* מי שביקש פחות תנועה מקבל את אותה חשיפה בלי ההחלקה — ולא חשיפה שנעלמת. */
+@media (prefers-reduced-motion: reduce) {
+  .word-app-shell.focus-mode .shell-top,
+  .word-app-shell.focus-mode :deep(.word-statusbar),
+  .word-app-shell.focus-mode.reveal-top .shell-top,
+  .word-app-shell.focus-mode.reveal-bottom :deep(.word-statusbar),
+  .focus-exit {
+    transition: none;
+  }
 }
 </style>
