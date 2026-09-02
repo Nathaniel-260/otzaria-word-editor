@@ -129,11 +129,39 @@ export function createTextCursorWatch(options: TextCursorWatchOptions): TextCurs
     host.style.cursor = inside ? 'text' : '';
   }
 
+  let origin: { left: number; top: number } | null = null;
+  let originFrame: number | null = null;
+
+  /**
+   * ה-origin של ה-host — ההמרה מקואורדינטות החלון לאותו ייחוס שהמלבנים
+   * נמדדו בו (`reference === host`).
+   *
+   * במטמון לפריים אחד, ולא לכל אורך החיים: `getBoundingClientRect` בכל
+   * `mousemove` הוא קריאת layout בתדר של עשרות בשנייה, ובזמן שה-DOM מלוכלך
+   * (הקלדה, ציור מחדש של המנוע) היא כופה flush מלא. תוקף של פריים גם אינו
+   * יכול להתיישן באמת: כל מה שמזיז את ה-host — גלילה, resize, קיפול הרצועה,
+   * מצב מיקוד — מצויר בפריים, והמדידה הבאה כבר אחריו.
+   */
+  function hostOrigin(el: HTMLElement): { left: number; top: number } {
+    if (origin) return origin;
+
+    const box = el.getBoundingClientRect();
+    const next = { left: box.left, top: box.top };
+    // בלי rAF (jsdom) אין מטמון בכלל — מדידה בכל תזוזה, כמו קודם.
+    if (typeof requestAnimationFrame === 'function' && originFrame === null) {
+      origin = next;
+      originFrame = requestAnimationFrame(() => {
+        originFrame = null;
+        origin = null;
+      });
+    }
+    return next;
+  }
+
   function onMove(event: MouseEvent): void {
     if (!host) return;
-    // המרה לאותו ייחוס שהמלבנים נמדדו בו (reference === host).
-    const box = host.getBoundingClientRect();
-    lastPoint = { xPx: event.clientX - box.left, yPx: event.clientY - box.top };
+    const base = hostOrigin(host);
+    lastPoint = { xPx: event.clientX - base.left, yPx: event.clientY - base.top };
     apply();
   }
 
@@ -184,6 +212,9 @@ export function createTextCursorWatch(options: TextCursorWatchOptions): TextCurs
       disposed = true;
       generation += 1;
       clearTimeout(timer);
+      if (originFrame !== null && typeof cancelAnimationFrame === 'function') {
+        cancelAnimationFrame(originFrame);
+      }
       watcher?.dispose();
       host?.removeEventListener('mousemove', onMove);
       host?.removeEventListener('mouseleave', onLeave);

@@ -138,6 +138,38 @@ describe('createTextCursorWatch', () => {
     host.remove();
   });
 
+  it('ה-host שזז נמדד מחדש בפריים הבא — המטמון אינו מתיישן', async () => {
+    // ה-origin נשמר לפריים אחד (`hostOrigin`), ולכן קיפול הרצועה — שמזיז את
+    // ה-host מבלי לשנות את מלבני העמודים ביחס אליו — אינו יכול להשאיר את
+    // הסמן על מיפוי ישן.
+    const host = hostWithPage();
+    const watch = createTextCursorWatch({ host, readMargins: () => Promise.resolve(margins) });
+    watch.refreshNow();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    moveTo(host, 250, 500);
+    expect(host.style.cursor, 'בתוך הפס').toBe('text');
+
+    // ה-host **והעמוד שבתוכו** ירדו 300 פיקסלים — כלומר המלבנים ביחס
+    // ל-host לא השתנו, ו-`onChange` של המעקב אינו נקרא בכלל. רק ה-origin
+    // הוא שזז, וזה בדיוק המצב שבו מטמון נצחי היה משקר.
+    const pageEl = host.querySelector('[data-page-index]') as HTMLElement;
+    vi.spyOn(host, 'getBoundingClientRect').mockReturnValue({
+      left: 0, top: 300, right: 600, bottom: 1500, width: 600, height: 1200,
+    } as DOMRect);
+    vi.spyOn(pageEl, 'getBoundingClientRect').mockReturnValue({
+      left: 0, top: 300, right: 500, bottom: 1300, width: 500, height: 1000,
+    } as DOMRect);
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+
+    // אותה נקודה בחלון היא עכשיו 50 פיקסלים **מעל** ראש העמוד.
+    moveTo(host, 250, 250);
+    expect(host.style.cursor, 'מעל העמוד אחרי שה-host זז').toBe('');
+
+    watch.dispose();
+    host.remove();
+  });
+
   it('host שאינו קיים — עצם דומם, בלי זריקות', () => {
     const watch = createTextCursorWatch({ host: null, readMargins: () => Promise.resolve(null) });
     watch.refreshNow();
