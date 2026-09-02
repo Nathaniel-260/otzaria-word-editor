@@ -29,8 +29,6 @@ export interface FullscreenOwner {
   documentElement?: FullscreenTarget;
   fullscreenElement?: Element | null;
   webkitFullscreenElement?: Element | null;
-  fullscreenEnabled?: boolean;
-  webkitFullscreenEnabled?: boolean;
   exitFullscreen?: () => Promise<void>;
   webkitExitFullscreen?: () => Promise<void> | void;
   addEventListener?: (type: string, listener: () => void) => void;
@@ -58,21 +56,6 @@ export function isFullscreen(owner?: FullscreenOwner | null): boolean {
 }
 
 /**
- * האם בכלל יש למי לפנות.
- *
- * `fullscreenEnabled === false` הוא תשובה מפורשת של המאחז („מדיניות אוסרת”),
- * ואילו `undefined` הוא מאחז ישן שאינו מדווח — ושם עדיין שווה לנסות.
- */
-export function canFullscreen(owner?: FullscreenOwner | null): boolean {
-  const host = ownerOf(owner);
-  if (!host) return false;
-  if (host.fullscreenEnabled === false && host.webkitFullscreenEnabled !== true) return false;
-  const target = host.documentElement;
-  return typeof target?.requestFullscreen === 'function'
-    || typeof target?.webkitRequestFullscreen === 'function';
-}
-
-/**
  * בקשת מסך מלא. `false` = המאחז סירב או שאינו תומך.
  *
  * **חייבת להיקרא מתוך מחווה של המשתמש** (לחיצה או הקשה) — זו דרישת הדפדפן,
@@ -80,6 +63,11 @@ export function canFullscreen(owner?: FullscreenOwner | null): boolean {
  *
  * לעולם אינה זורקת. היא נקראת מתוך טיפול במקש, וחריגה שם מפילה את המאזין
  * הגלובלי — כלומר את כל הקיצורים, ולא רק את זה.
+ *
+ * ואין כאן „האם בכלל אפשר” נפרד. הייתה כאן `canFullscreen` שקראה
+ * `fullscreenEnabled`, ולא היה לה אף קורא: מי שרוצה מסך מלא פשוט מבקש, ומקבל
+ * `false` אם המאחז סירב — שאלה מקדימה שאפשר לענות עליה רק בניחוש אינה מוסיפה
+ * לו דבר, ומצב מיקוד ממילא אינו תלוי בתשובה.
  */
 export async function enterFullscreen(owner?: FullscreenOwner | null): Promise<boolean> {
   const host = ownerOf(owner);
@@ -126,6 +114,13 @@ export async function exitFullscreen(owner?: FullscreenOwner | null): Promise<bo
  *
  * בלעדיה נשארת מעטפת בלי פסים בתוך חלון רגיל: המשתמש יצא ממסך מלא, וממצב
  * המיקוד לא. מחזירה פונקציית פירוק.
+ *
+ * **וזה גם ערוץ ה-`Escape` היחיד שיש בתוך מסך מלא.** נמדד ב-Chrome אמיתי:
+ * `Escape` שמשמש ליציאה ממסך מלא **נבלע** — הדף קיבל `keys: []` ורק
+ * `fullscreenchange: [false]`. כלומר בתוך מסך מלא אין שום `keydown` שאפשר
+ * לתלות בו את סגירת השכבה שהמשתמש רואה, והאירוע הזה הוא כל מה שיש. מי שקורא
+ * לכאן חייב לנתב אותו דרך אותן שכבות שהמקלדת עוברת בהן — ראו המאזין
+ * ב-`App.vue`.
  */
 export function watchFullscreen(
   onChange: (fullscreen: boolean) => void,

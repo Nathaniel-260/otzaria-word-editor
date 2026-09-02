@@ -140,15 +140,16 @@
 
     <!--
       דרך יציאה שרואים. `Esc` ו-`F11` עובדים, אבל שניהם דורשים לדעת אותם —
-      ובמצב מיקוד אין על המסך אף פקד שרומז עליהם. הכפתור יושב בפינה התחתונה,
-      מעל השוליים האפורים ולא מעל העמוד, ונשאר עמום עד ריחוף כדי שלא יתחרה
-      בטקסט. המיקום והשכבה — ב-`.focus-exit` שב-`<style>`.
+      ובמצב מיקוד אין על המסך אף פקד שרומז עליהם. הכפתור יושב בפינה התחתונה
+      של החלון — **מעל העמוד ולא לצדו**: העמוד מרוכז ורחב כמעט כמו החלון,
+      ובחלון של 800 פיקסלים (וגם של 400) `elementFromPoint` מתחתיו מחזיר
+      `.superdoc-page`. לכן הוא נשאר עמום עד ריחוף, וזה כל מה שמפריד אותו
+      מהטקסט. המיקום, השכבה וההנמקה המלאה — ב-`.focus-exit` שב-`<style>`.
     -->
     <button
       v-if="isFocusMode"
       type="button"
       class="focus-exit"
-      aria-pressed="true"
       aria-label="יציאה ממצב מיקוד"
       data-tip-title="יציאה ממצב מיקוד"
       data-tip-shortcut="Esc"
@@ -245,6 +246,7 @@
 import {
   ref,
   provide,
+  nextTick,
   onMounted,
   onUnmounted,
   computed,
@@ -339,6 +341,7 @@ import {
 } from './sessions/editor-swap';
 import {
   applyPaneScroll,
+  guardPaneScroll,
   readPaneScroll,
   repairPaneScroll,
   type PaneScroll,
@@ -947,20 +950,51 @@ function documentScrollHost(session: DocumentSession): HTMLElement | null {
 }
 
 /**
+ * מפרק את השומר של הגלילה בטאב הפעיל. אחד בכל רגע — ראו `restorePaneScroll`.
+ */
+let paneScrollGuard: (() => void) | null = null;
+
+/**
  * מחזירה לטאב שנכנס את מיקום הגלילה שנשמר בו.
  *
- * פעמיים, ולא פעם אחת: הפאנל בדיוק יצא מ-`display: none`, והדפדפן מחשב את
- * גובה התוכן שלו מחדש. השמה שקורית לפני שהחישוב הזה הסתיים נחתכת לגובה
- * שעדיין אינו נכון (`scrollTop` נצמד למקסימום האפשרי באותו רגע), ולכן
- * החזרה השנייה בפריים הבא. שתיהן אידמפוטנטיות — ראו `applyPaneScroll`.
+ * ## שלוש פעולות, ולא אחת
+ *
+ * **השמה, ועוד אחת בפריים הבא.** הפאנל בדיוק יצא מ-`display: none`, והדפדפן
+ * מחשב את גובה התוכן שלו מחדש. השמה שקורית לפני שהחישוב הזה הסתיים נחתכת
+ * לגובה שעדיין אינו נכון (`scrollTop` נצמד למקסימום האפשרי באותו רגע). שתיהן
+ * אידמפוטנטיות — ראו `applyPaneScroll`.
+ *
+ * **ואחריהן שומר על אירוע הגלילה הראשון**, וזה מה שמתקן את הבאג שנשאר פתוח:
+ * שתי ההשמות נמדדו כמצליחות (`scrollTop` הוא 720 בכל נקודות הזמן — מיד,
+ * מיקרו-משימה, rAF, rAF שני ו-150ms), ואז **גלגלת אחת** החזירה אפס. הכתיבה
+ * היא של המנוע ולא של הדפדפן, והיא קורית מתוך הגלגלת עצמה — כלומר אחרי כל
+ * מה שאנחנו יכולים לעשות מכאן. ההנמקה המלאה והמדידה: `sessions/pane-scroll.ts`
+ * ו-`docs/engine-gaps.md`.
+ *
+ * ## למה השומר נדרך בתוך ה-rAF ולא לפניו
+ *
+ * ההשמה הראשונה עלולה להיחתך (ראו למעלה), ואירוע הגלילה שהיא יורה היה נראה
+ * לשומר בדיוק כמו „המשתמש גלל למקום אחר” — כלומר מכבה אותו לפני שהמנוע כתב
+ * בכלל. אירועי גלילה נורים לפני קריאות ה-rAF של אותו פריים, ולכן דריכה בתוך
+ * ה-rAF היא הרגע הראשון שבו כבר אין הד תלוי באוויר.
  */
 function restorePaneScroll(session: DocumentSession, scroll: PaneScroll): void {
+  const arm = (): void => {
+    paneScrollGuard?.();
+    paneScrollGuard = guardPaneScroll(documentScrollHost(session), scroll);
+  };
+
   applyPaneScroll(documentScrollHost(session), scroll);
-  if (typeof requestAnimationFrame !== 'function') return;
+  if (typeof requestAnimationFrame !== 'function') {
+    arm();
+    return;
+  }
   requestAnimationFrame(() => {
     // רק אם הוא עדיין הפעיל: מעבר טאב מהיר יותר מפריים היה מחזיר את הגלילה
     // של הטאב הקודם לתוך זה שנכנס אחריו.
-    if (activeSession.value === session) applyPaneScroll(documentScrollHost(session), scroll);
+    if (activeSession.value !== session) return;
+    applyPaneScroll(documentScrollHost(session), scroll);
+    arm();
   });
 }
 
@@ -1473,6 +1507,10 @@ function restoreFromSession(session: DocumentSession): void {
 function activateTab(session: DocumentSession): void {
   if (activeSession.value === session) return;
 
+  // השומר שייך לטאב שיוצא, והוא מאזין ל-host שלו. ראו `restorePaneScroll`.
+  paneScrollGuard?.();
+  paneScrollGuard = null;
+
   const previous = activeSession.value;
   if (previous) {
     stashActiveInto(previous);
@@ -1485,6 +1523,13 @@ function activateTab(session: DocumentSession): void {
   // אחרי החשיפה ואחרי ההשמה ל-`activeSession`: הראשונה מחזירה לפאנל קופסה
   // שאפשר לגלול בה, והשנייה היא מה שהבדיקה שבפריים הבא נשענת עליה.
   restorePaneScroll(session, session.ui.scroll);
+  // ובמצב מיקוד — גם הפוקוס. הלחיצה על הטאב באה מהלוח שנחשף, והפוקוס נשאר על
+  // כפתור הטאב; ברגע שהלוח נסגר `visibility: hidden` מבריח אותו ל-`<body>`
+  // (נמדד `active: BODY`), וההקלדה נעלמת בלי שום סימן על המסך. אותו טעם בדיוק
+  // כמו ב-`toggleFocusMode`, ורק שם: מחוץ למצב מיקוד רצועת הטאבים נשארת
+  // גלויה, ופוקוס שממשיך לשבת על הטאב שנלחץ הוא ההתנהגות הנכונה.
+  const opened = activeSuperdoc.value;
+  if (isFocusMode.value && opened) focusOpenedDocument(opened);
   noteTabUsed(session);
   void trimLiveDocuments();
 
@@ -2773,6 +2818,15 @@ async function openPendingTab(session: DocumentSession): Promise<void> {
   } finally {
     pendingTabLoad = false;
   }
+
+  // והמיקום השמור, עכשיו. `activateTab` כבר קרא ל-`restorePaneScroll` — אבל
+  // הוא רץ **לפני** כאן, כשלטאב עוד לא היה host כלל (טאב ששוחזר או שנרדם),
+  // ולכן לא היה לו למה לכתוב. בלי הקריאה הזאת המיקום שנשמר בטאב שנרדם נזרק,
+  // והוא נפתח בראש המסמך.
+  //
+  // עטופה בבדיקת „עוד הפעיל”: הפתיחה אורכת שניות, והמשתמש עשוי להיות בטאב
+  // אחר מזמן — ואז זו הייתה כתיבה לתוך המסמך הלא נכון.
+  if (activeSession.value === session) restorePaneScroll(session, session.ui.scroll);
 }
 
 /**
@@ -3205,6 +3259,88 @@ function closeContextMenu(): void {
   focusDocument(activeSuperdoc.value);
 }
 
+/**
+ * מחזירה את הפוקוס למסמך אם הוא התייתם — כלומר אם השכבה שנסגרה לקחה איתה את
+ * האלמנט שהחזיק אותו, והדפדפן השאיר אותו על ה-`<body>`.
+ *
+ * הבדיקה על `body` היא מה שהופך את זה לבטוח: מי שסוגר שכבה ומחזיר את הפוקוס
+ * בעצמו אינו נגרר לכאן.
+ */
+function returnOrphanedFocus(): void {
+  // אחרי שה-DOM התעדכן, ולא באותה שורה: ברגע שהדגל כובה השדה עדיין בעץ ועדיין
+  // מחזיק את הפוקוס, ו-`activeElement` היה מראה אותו במקום את ה-`<body>` —
+  // כלומר הבדיקה הייתה תמיד יוצאת מוקדם.
+  void nextTick(() => {
+    const active = document.activeElement;
+    if (active !== null && active !== document.body) return;
+    const opened = activeSuperdoc.value;
+    if (opened) focusOpenedDocument(opened);
+  });
+}
+
+/**
+ * מה ש-`Escape` סוגר, לפי שכבות. מחזירה `true` אם משהו נסגר בפועל.
+ *
+ * **מוצאת לפונקציה בשם ולא נשארת בתוך `closeTopmost` מפני שיש לה קורא שני:**
+ * יציאה ממסך מלא שלא באה מאיתנו (`watchFullscreen` ב-`onMounted`). בתוך מסך
+ * מלא ה-`Escape` שסוגר אותו **נבלע** ואינו מגיע לדף כלל — נמדד ב-Chrome
+ * אמיתי `keys: []` מול `fullscreenchange: [false]` — ולכן אין למאזין ההוא שום
+ * דרך אחרת לדעת שהמשתמש הקיש `Escape`. שני הקוראים חייבים לעבור באותן שכבות
+ * בדיוק, אחרת אותו מקש עושה שני דברים שונים לפי מה שהמשתמש אינו יכול לראות.
+ *
+ * „אודות” הוא `aria-modal`, ולכן הוא זה שנסגר כשהוא פתוח. החיפוש אינו מודאלי
+ * ואפשר להמשיך לערוך מתחתיו, ולכן הוא נסגר רק כשאין חלון מעליו.
+ */
+function closeTopmostLayer(): boolean {
+  if (isShortcutsHelpOpen.value) {
+    isShortcutsHelpOpen.value = false;
+    return true;
+  }
+  if (isMacrosOpen.value) {
+    isMacrosOpen.value = false;
+    return true;
+  }
+  if (isAboutOpen.value) {
+    isAboutOpen.value = false;
+    return true;
+  }
+  if (linkDialog.isOpen.value) {
+    linkDialog.close();
+    return true;
+  }
+  // התפריט **אחרי** החלונות המודאליים ולא לפניהם: הוא אמנם השכבה העליונה,
+  // אבל מודאל פתוח חוסם את פתיחתו מלכתחילה — ולכן „תפריט פתוח מעל מודאל”
+  // הוא מצב שלא אמור להתקיים. ענף ראשון היה מסכן בדיוק את מה שאינו אמור
+  // לקרות: `Escape` שסוגר תפריט תקוע במקום את הדיאלוג שהמשתמש רואה.
+  if (contextMenu.isOpen.value) {
+    closeContextMenu();
+    return true;
+  }
+  if (isFindOpen.value) {
+    closeFindDialog();
+    // השדה שהיה בדיאלוג הוסר מה-DOM, והדפדפן מבריח את הפוקוס ל-`<body>` —
+    // נמדד `active: BODY`. במצב מיקוד זו הקלדה שנעלמת בלי שום סימן, כמו
+    // במעבר טאב. רק כשהפוקוס באמת התייתם: שכבה שמחזירה אותו בעצמה (דיאלוג
+    // הקיצורים, למשל) לא תיגרר מכאן.
+    returnOrphanedFocus();
+    return true;
+  }
+  // מצב מיקוד הוא „חלון” גם הוא: הוא מסתיר את הרצועה ואת שורת המצב, ו-
+  // `Escape` הוא המקש הראשון שכל משתמש מנסה כדי לצאת ממנו. בלי הענף הזה
+  // היציאה היחידה הייתה למצוא שוב את F11 או לרחף מעל קצה המסך.
+  //
+  // **אחרי** כל השכבות שמעליו, וזה עיקר העניין: שכבה פתוחה נסגרת קודם, ומצב
+  // המיקוד נשאר. זה נכון גם כשהקורא הוא מאזין המסך המלא — מצב מיקוד בלי מסך
+  // מלא הוא מצב נתמך ממילא (המאחז עשוי לסרב לבקשה, ראו `enterFullscreen`).
+  if (isFocusMode.value) {
+    toggleFocusMode();
+    return true;
+  }
+  // אין מה לסגור: `Escape` מאחד מפסי המעטפת מחזיר את הפוקוס למסמך.
+  // כשהוא כבר שם — `false`, והאירוע ממשיך למנוע ולדפדפן.
+  return focusRing.toDocument();
+}
+
 const runShellAction = createShellActionRunner({
   isSaving: () => saveSnapshot.value.isSaving,
   save: (saveAs) => void onSave(saveAs),
@@ -3252,48 +3388,7 @@ const runShellAction = createShellActionRunner({
     return true;
   },
   moveFocusRegion: (direction) => focusRing.move(direction) !== null,
-  // „אודות” הוא `aria-modal`, ולכן הוא זה שנסגר כשהוא פתוח. החיפוש אינו מודאלי
-  // ואפשר להמשיך לערוך מתחתיו, ולכן הוא נסגר רק כשאין חלון מעליו.
-  closeTopmost: () => {
-    if (isShortcutsHelpOpen.value) {
-      isShortcutsHelpOpen.value = false;
-      return true;
-    }
-    if (isMacrosOpen.value) {
-      isMacrosOpen.value = false;
-      return true;
-    }
-    if (isAboutOpen.value) {
-      isAboutOpen.value = false;
-      return true;
-    }
-    if (linkDialog.isOpen.value) {
-      linkDialog.close();
-      return true;
-    }
-    // התפריט **אחרי** החלונות המודאליים ולא לפניהם: הוא אמנם השכבה העליונה,
-    // אבל מודאל פתוח חוסם את פתיחתו מלכתחילה — ולכן „תפריט פתוח מעל מודאל”
-    // הוא מצב שלא אמור להתקיים. ענף ראשון היה מסכן בדיוק את מה שאינו אמור
-    // לקרות: `Escape` שסוגר תפריט תקוע במקום את הדיאלוג שהמשתמש רואה.
-    if (contextMenu.isOpen.value) {
-      closeContextMenu();
-      return true;
-    }
-    if (isFindOpen.value) {
-      closeFindDialog();
-      return true;
-    }
-    // מצב מיקוד הוא „חלון” גם הוא: הוא מסתיר את הרצועה ואת שורת המצב, ו-
-    // `Escape` הוא המקש הראשון שכל משתמש מנסה כדי לצאת ממנו. בלי הענף הזה
-    // היציאה היחידה הייתה למצוא שוב את F11 או לרחף מעל קצה המסך.
-    if (isFocusMode.value) {
-      toggleFocusMode();
-      return true;
-    }
-    // אין מה לסגור: `Escape` מאחד מפסי המעטפת מחזיר את הפוקוס למסמך.
-    // כשהוא כבר שם — `false`, והאירוע ממשיך למנוע ולדפדפן.
-    return focusRing.toDocument();
-  },
+  closeTopmost: closeTopmostLayer,
 });
 
 /**
@@ -3474,28 +3569,43 @@ function focusOpenedDocument(superdoc: SuperDoc): void {
  * את הפוקוס אבל אינו מחזיר את הסמן לטקסט, כלומר המשתמש היה מקבל „חזרה למסמך”
  * שאי אפשר להקליד אחריה.
  *
- * שלושת פסי המעטפת מסומנים כלא-זמינים במצב מיקוד. הם עדיין בעץ — הם רק יצאו
- * מהזרימה והוזזו אל מחוץ למסך — ולכן בלי הסימון `F6` היה מעביר את המשתמש לפס
- * שאינו על המסך. זה גם מה שנותן לשדה שם המסמך דרך יציאה: `Escape` ממנו מזהה
- * שהפוקוס בסרגל הכותרת ומחזיר אותו למסמך.
+ * פסי המעטפת מסומנים כלא-זמינים במצב מיקוד **כל זמן שהם מחוץ למסך**. הם
+ * עדיין בעץ — הם רק יצאו מהזרימה והוזזו החוצה — ולכן בלי הסימון `F6` היה
+ * מעביר את המשתמש לפס שאינו נראה. זה גם מה שנותן לשדה שם המסמך דרך יציאה:
+ * `Escape` ממנו מזהה שהפוקוס בסרגל הכותרת ומחזיר אותו למסמך.
  */
 function shellRegion(selector: string): HTMLElement | null {
   return shellRef.value?.querySelector<HTMLElement>(selector) ?? null;
 }
 
-const outsideFocusMode = () => !isFocusMode.value;
+/**
+ * האם פס המעטפת של האזור הזה זמין ל-`F6` עכשיו.
+ *
+ * מחוץ למצב מיקוד — תמיד. בתוכו — רק אם הוא **נחשף בפועל**, וזה מה שהתיקון
+ * הזה הוסיף: הדגל הקודם היה `!isFocusMode` לבדו, ולכן רצועה פרושה על המסך
+ * במלוא רוחבה (הכניסה למצב מיקוד מתחילה ב-`reveal-top`, בלי שום ריחוף) לא
+ * הייתה נגישה למקלדת כלל — נמדד שהפוקוס נשאר במשטח ההקלדה של המנוע. זה גם
+ * מה ש-`FocusRegion.isAvailable` מבטיח בתיעוד שלו.
+ *
+ * לפי אזור ולא דגל אחד: החשיפה היא של קבוצה אחת בכל רגע (`reveal-top` או
+ * `reveal-bottom`), וסימון שניהם כזמינים היה מחזיר בדיוק את הבאג — הפעם
+ * לשורת המצב שמחוץ למסך.
+ */
+function revealedBarAvailable(zone: Exclude<RevealZone, null>): () => boolean {
+  return () => !isFocusMode.value || revealed.value === zone;
+}
 
 const focusRing = createFocusRing({
   regions: [
     {
       id: 'titlebar',
       element: () => shellRegion('.word-titlebar'),
-      isAvailable: outsideFocusMode,
+      isAvailable: revealedBarAvailable('top'),
     },
     {
       id: 'ribbon',
       element: () => shellRegion('.word-ribbon-container'),
-      isAvailable: outsideFocusMode,
+      isAvailable: revealedBarAvailable('top'),
     },
     {
       id: 'document',
@@ -3503,9 +3613,28 @@ const focusRing = createFocusRing({
       focus: () => focusDocument(activeSuperdoc.value),
     },
     {
+      /*
+       * כפתור היציאה ממצב מיקוד. אזור, למרות שהוא פקד בודד: הוא הפקד היחיד
+       * שנראה במצב מיקוד, והמנוע בולע `Tab` — כלומר בלי הכניסה הזאת אין אליו
+       * שום דרך מהמקלדת (נמדד בדפדפן). מחוץ למצב מיקוד הוא אינו בעץ בכלל,
+       * ואז `element()` הוא `null` והמעגל מדלג עליו מאליו.
+       *
+       * `focus` משלו ולא נפילה ל-`querySelector`: החיפוש הגנרי סורק **צאצאים**,
+       * והאזור כאן הוא הכפתור עצמו.
+       */
+      id: 'focus-exit',
+      element: () => shellRegion('.focus-exit'),
+      focus: () => {
+        const button = shellRegion('.focus-exit');
+        if (!button) return false;
+        button.focus();
+        return true;
+      },
+    },
+    {
       id: 'statusbar',
       element: () => shellRegion('.word-statusbar'),
-      isAvailable: outsideFocusMode,
+      isAvailable: revealedBarAvailable('bottom'),
     },
   ],
 });
@@ -3573,15 +3702,28 @@ onMounted(async () => {
   });
 
   /*
-   * יציאה ממסך מלא שלא באה מאיתנו — `Escape` או `F11` של הדפדפן — מכבה גם את
-   * מצב המיקוד. בלי זה נשארת מעטפת בלי פסים בתוך חלון רגיל: המשתמש יצא ממה
-   * שהוא רואה כ„מסך מלא”, וכל הפקדים נשארו מוסתרים בלי שהוא ביקש.
+   * יציאה ממסך מלא שלא באה מאיתנו — `Escape` או `F11` של הדפדפן.
    *
-   * `isFocusMode` בלבד ולא `toggleFocusMode` בשני הכיוונים: כניסה למסך מלא
-   * מכל סיבה אחרת אינה אמורה להדליק מצב מיקוד.
+   * **האירוע הזה הוא ה-`Escape` עצמו, ואין דרך אחרת לדעת שהוא הוקש.** נמדד
+   * ב-Chrome אמיתי: `Escape` שמשמש ליציאה ממסך מלא **נבלע** — הדף קיבל
+   * `keys: []` ורק `fullscreenchange: [false]`. כלומר בתוך מסך מלא אין שום
+   * `keydown` שאפשר לתלות בו את הסגירה, ומאזין ששולח את המקש הזה ישר לכיבוי
+   * מצב המיקוד הפך את השכבות: `Ctrl+F` ואחריו `Escape` אחד נמדדו כ-
+   * `{focus:false, fs:false, find:true}` — הדיאלוג נשאר פתוח ומצב המיקוד כבה,
+   * בדיוק ההיפך ממה שהמקש מבטיח.
+   *
+   * לכן דרך `closeTopmostLayer` ולא ישר ל-`toggleFocusMode`: אותן שכבות
+   * בדיוק שהמקלדת עוברת בהן. שכבה פתוחה נסגרת והמצב נשאר — מצב מיקוד בלי
+   * מסך מלא נתמך ממילא, כי המאחז עשוי לסרב לבקשה מלכתחילה.
+   *
+   * `isFocusMode` בלבד ולא בשני הכיוונים: כניסה למסך מלא מכל סיבה אחרת אינה
+   * אמורה להדליק מצב מיקוד. ויציאה שכן באה מאיתנו כבר כיבתה את הדגל לפני
+   * הקריאה ל-`exitFullscreen`, ולכן היא נופלת כאן על התנאי ואינה סוגרת שכבה
+   * בטעות.
    */
   fullscreenListener = watchFullscreen((fullscreen) => {
-    if (!fullscreen && isFocusMode.value) toggleFocusMode();
+    if (fullscreen || !isFocusMode.value) return;
+    closeTopmostLayer();
   });
 
   // „שלח למסמך” — לפני כל `await` שבהמשך. אוצריא מוסרת את אירוע הלחיצה מיד
@@ -3720,6 +3862,8 @@ onUnmounted(() => {
   contextMenuListener = null;
   fullscreenListener?.();
   fullscreenListener = null;
+  paneScrollGuard?.();
+  paneScrollGuard = null;
   // מעטפת שנפרקת בזמן מסך מלא הייתה משאירה את החלון מורחב בלי מי שיצא ממנו.
   if (isFullscreen()) void exitFullscreen();
   // הפריט עצמו אינו מוסר כאן: אוצריא מסירה את רישומי המופע בעצמה בפירוק,
@@ -3829,6 +3973,11 @@ function restoreTabs(stored: SessionState | null): DocumentSession {
 function applyShellPreferences(session: SessionState | null): void {
   if (!session) return;
   isFocusMode.value = session.view.focusMode;
+  // ואיתו הלוח העליון, בדיוק כמו בכניסה דרך `toggleFocusMode`: מצב מיקוד
+  // שנפתח כשכל הפקדים מוסתרים נראה כמו תקלה ולא כמו מצב שנבחר. עלייה עם
+  // ההעדפה דלוקה היא בדיוק הרגע הזה — ובלי השורה הזאת השחזור נתן את מה
+  // שהכניסה הידנית הוגדרה כבר כתקלה.
+  if (isFocusMode.value) revealed.value = 'top';
   if (session.view.ribbonTab) ribbonTab.value = session.view.ribbonTab;
   ribbonCollapsed.value = session.view.ribbonCollapsed;
 }
@@ -4128,6 +4277,12 @@ async function readDraftBytes(path: string): Promise<Blob | null> {
  * הוא המקום שהלוח נחשף בו — כפתור שם היה נעלם מתחתיו בדיוק כשנכנסים למצב
  * (הכניסה מתחילה פתוחה), ושורת המצב בגובה 24 פיקסלים היא הסיבה ל-32.
  *
+ * **והוא יושב מעל העמוד, לא לצדו.** נמדד: `overlapsPage: true`, ו-
+ * `elementFromPoint` מתחתיו מחזיר `DIV.superdoc-page` — גם בחלון של 800
+ * פיקסלים וגם ב-400. אין שוליים אפורים לשבת עליהם: העמוד מרוכז ורחב כמעט
+ * כמו החלון בכל רוחב סביר. זו הסיבה ל-`opacity: 0.5` ולגודל הקטן, וזה גם
+ * הגבול שלהם — הכפתור אינו „מחוץ לתוכן”, הוא **עמום מעל התוכן**.
+ *
  * `z-index: 1` — מעל שכבות המסמך (PageBorderOverlay ואחיותיה, שגם הן 1, והוא
  * אחריהן ב-DOM) ומתחת ללוח שנחשף בקצה (2).
  */
@@ -4156,6 +4311,9 @@ async function readDraftBytes(path: string): Promise<Blob | null> {
     color 0.15s ease;
 }
 
+/* `:focus-visible` אינו קוד מת למרות ה-`@pointerdown.prevent`: הכפתור הוא אזור
+   במעגל ה-`F6` (ראו `focusRing`), וזו הדרך היחידה להגיע אליו מהמקלדת — המנוע
+   בולע `Tab`. ה-`prevent` חוסם רק את המיקוד שבא מלחיצה. */
 .focus-exit:hover,
 .focus-exit:focus-visible {
   opacity: 1;

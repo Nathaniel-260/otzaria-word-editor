@@ -8,7 +8,6 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 import {
-  canFullscreen,
   enterFullscreen,
   exitFullscreen,
   isFullscreen,
@@ -28,8 +27,6 @@ function fakeOwner(flavour: 'standard' | 'webkit' | 'none'): FullscreenOwner & {
     calls,
     listeners,
     fullscreenElement: null as Element | null,
-    fullscreenEnabled: flavour === 'standard',
-    webkitFullscreenEnabled: flavour === 'webkit',
     documentElement: {
       ...(flavour === 'standard'
         ? {
@@ -74,23 +71,6 @@ function fakeOwner(flavour: 'standard' | 'webkit' | 'none'): FullscreenOwner & {
   };
   return owner;
 }
-
-describe('canFullscreen', () => {
-  it('מאחז סטנדרטי ומאחז WebKit — שניהם כן', () => {
-    expect(canFullscreen(fakeOwner('standard'))).toBe(true);
-    expect(canFullscreen(fakeOwner('webkit'))).toBe(true);
-  });
-
-  it('מאחז בלי API — לא', () => {
-    expect(canFullscreen(fakeOwner('none'))).toBe(false);
-  });
-
-  it('סירוב מפורש של המאחז מכובד', () => {
-    const owner = fakeOwner('standard');
-    owner.fullscreenEnabled = false;
-    expect(canFullscreen(owner)).toBe(false);
-  });
-});
 
 describe('enterFullscreen / exitFullscreen', () => {
   it('קוראת ל-API הלא מקודם כשהוא קיים', async () => {
