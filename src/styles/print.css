@@ -42,9 +42,24 @@
 
   /* פס הכותרת, הרצועה, שורת המצב והדיאלוגים — בשורה אחת, לפי מקומם במעטפת
      ולא לפי שמם. זה מכוון: פקד או פאנל שיתווסף למעטפת מאוחר יותר לא ידפיס את
-     עצמו בלי שאיש ישים לב. */
-  .word-app-shell > :not(.editor-stack) {
+     עצמו בלי שאיש ישים לב.
+
+     **שתי שורות ולא אחת, ובזה היה הבאג.** הכלל נכתב כש-`.editor-stack` היה
+     ילד ישיר של המעטפת. מאז נכנס `.editor-area` בין השניים (הסרגל האנכי
+     ושכבות ה-overlay חיות בו), והכלל הפסיק לפסוח על אזור המסמך — הוא הסתיר
+     אותו. נמדד במדיית print: `.editor-area` קיבל `display: none` ברוחב 0,
+     כלומר „הדפסה” הוציאה גיליון ריק. העיקרון נשמר, פשוט בשתי הרמות: בכל רמה
+     שורד רק מי שמוביל למסמך. */
+  .word-app-shell > :not(.editor-area),
+  .editor-area > :not(.editor-stack) {
     display: none !important;
+  }
+
+  /* אזור המסמך חוזר לזרימה רגילה. ה-`flex` וה-`position: relative` שלו הם של
+     המסך — שכבות ה-overlay נמדדות מולו — ובגיליון אין להם תפקיד. */
+  .editor-area {
+    display: block !important;
+    position: static !important;
   }
 
   /* דיאלוגים שעושים Teleport ל-body (ראו LinkDialog.vue) יוצאים מהעץ של
@@ -60,6 +75,17 @@
     height: auto !important;
     overflow: visible !important;
     background: none !important;
+  }
+
+  /* פאנל הטאב (`:global(.document-pane)` ב-App.vue) הוא `position: absolute;
+     inset: 0` — כך כל טאב פתוח מקבל את מלוא אזור המסמך, ורק הפעיל נראה. בגיליון
+     הוא חייב לחזור לזרימה: בלעדיו ערימת העמודים יוצאת מהזרימה של כל הוריה,
+     גובהם 0 — נמדד, כולל `document.body` — והדפדפן מדפיס גיליון אחד חתוך.
+     זה נמצא רק אחרי שהכלל שמעל תוקן: כל עוד אזור המסמך היה מוסתר לגמרי, לא
+     היה מה למדוד. */
+  .document-pane {
+    position: static !important;
+    height: auto !important;
   }
 
   .editor-stack__host {

@@ -68,9 +68,29 @@ describe('גלון ההדפסה', () => {
   it('המעטפת מוסתרת — לפי מקומה במעטפת ולא לפי שם כל פס', () => {
     // כלל אחד לכל הצאצאים שאינם אזור המסמך: פקד שיתווסף למעטפת לא ידפיס את
     // עצמו בשקט. הכלל הזה הוא הליבה של התיקון.
-    expect(PRINT_CSS).toContain('.word-app-shell > :not(.editor-stack)');
+    expect(PRINT_CSS).toContain('.word-app-shell > :not(.editor-area)');
     // דיאלוג שעושה Teleport ל-body יוצא מהעץ של המעטפת.
     expect(PRINT_CSS).toContain('body > :not(#app)');
+  });
+
+  it('הכלל פוסח על אזור המסמך בשתי הרמות, ולא רק באחת', () => {
+    // הבאג שהבדיקה מקבעת: הכלל נכתב כש-`.editor-stack` היה ילד ישיר של
+    // המעטפת, ומאז נכנס `.editor-area` ביניהם — כלומר הכלל הסתיר את המסמך
+    // עצמו. נמדד במדיית print: `display: none` ורוחב 0 על אזור המסמך.
+    expect(PRINT_CSS).toContain('.editor-area > :not(.editor-stack)');
+    // בלי זה `.editor-area` נשאר `flex` ו-`position: relative` של המסך.
+    const at = PRINT_CSS.indexOf('.editor-area {');
+    expect(at, 'יש בלוק משלו ל-.editor-area').toBeGreaterThan(-1);
+    expect(PRINT_CSS.slice(at, at + 200)).toContain('display: block !important');
+  });
+
+  it('פאנל הטאב חוזר לזרימה — אחרת כל השרשרת מעליו בגובה 0', () => {
+    // `:global(.document-pane)` הוא `position: absolute; inset: 0`. נמדד
+    // במדיית print אחרי תיקון הכלל שמעל: העמוד צויר 794×1123, אבל `.editor-area`,
+    // `.editor-stack` ו-`document.body` כולם בגובה 0 — כלומר גיליון אחד חתוך.
+    const at = PRINT_CSS.indexOf('.document-pane {');
+    expect(at, 'יש בלוק משלו ל-.document-pane').toBeGreaterThan(-1);
+    expect(PRINT_CSS.slice(at, at + 200)).toContain('position: static !important');
   });
 
   it('מיכל הגלילה משוחרר — אחרת נדפס גובה חלון אחד', () => {
