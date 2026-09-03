@@ -26,6 +26,14 @@
         :disabled="!ready"
         @click="alternatingOpen = true"
       />
+      <RibbonButton
+        icon="paste"
+        label="תיקון העתקה"
+        variant="large"
+        :tooltip="toolTooltip('רווחים קשיחים שהגיעו מהדבקה מתוכנות אחרות הופכים לרווחים רגילים, בפסקאות המסומנות')"
+        :disabled="!ready"
+        @click="onCopyFix"
+      />
     </RibbonGroup>
 
     <!-- הערות שוליים -->
@@ -41,16 +49,17 @@
         <RibbonButton
           label="הערות ⟵ סוגריים"
           variant="small"
-          :tooltip="toolTooltip('תוכן כל הערות השוליים חוזר לגוף הטקסט בסוגריים, במקום ההפניה')"
+          :tooltip="toolTooltip('תוכן הערות השוליים שבבחירה חוזר לגוף הטקסט בסוגריים, במקום ההפניה')"
           :disabled="!ready"
           @click="onNotesToBrackets"
         />
         <RibbonSelect
-          v-model="bracketsType"
+          :model-value="bracketsType"
           :options="bracketOptions"
           :disabled="!ready"
           title="סוג הסוגריים להמרה"
           width="150px"
+          @update:model-value="onBracketsTypeChange"
         />
       </RibbonStack>
     </RibbonGroup>
@@ -113,9 +122,11 @@
       :is-open="unclosedOpen"
       :busy="inFlight"
       :findings="unclosedFindings"
+      :mode="unclosedMode"
       @close="unclosedOpen = false"
       @rescan="onScanUnclosed"
       @reveal="onRevealFinding"
+      @update:mode="onUnclosedModeChange"
     />
     <ShulchanAlternatingDialog
       :is-open="alternatingOpen"
@@ -126,6 +137,7 @@
     <ShulchanFirstWordDialog
       :is-open="firstWordOpen"
       :busy="inFlight"
+      :styles="styleOptions"
       @close="firstWordOpen = false"
       @apply="onFirstWordApply"
       @remove="onFirstWordRemove"
@@ -162,11 +174,23 @@ import ShulchanUnclosedDialog from '../../panels/ShulchanUnclosedDialog.vue';
 import ShulchanAlternatingDialog from '../../panels/ShulchanAlternatingDialog.vue';
 import ShulchanFirstWordDialog from '../../panels/ShulchanFirstWordDialog.vue';
 import ShulchanUniformDialog from '../../panels/ShulchanUniformDialog.vue';
-import { COMMAND_REPORTER, STATUS_NOTIFIER, type CommandReporter } from '../../../composables/keys';
+import { COMMAND_REPORTER, STATUS_NOTIFIER, STYLE_GALLERY, type CommandReporter } from '../../../composables/keys';
+import { useRememberedOptions } from '../../../composables/useRememberedOptions';
 import { ACTIVE_SUPERDOC } from '../../../engine/document-api';
-import { runTypos, typosSummaryText, type TyposOptions } from '../../../engine/shulchan/typos';
+import { fallbackStyleGallery, type StyleGalleryState } from '../../../engine/style-gallery';
+import {
+  copyFixSummaryText,
+  runCopyFix,
+  runTypos,
+  typosSummaryText,
+  type TyposOptions,
+} from '../../../engine/shulchan/typos';
 import { readShulchanBlocks, revealRange } from '../../../engine/shulchan/shulchan-doc';
-import { scanForUnclosed, type ParenFinding } from '../../../engine/shulchan/unclosed-parens';
+import {
+  scanForUnclosed,
+  type ParenFinding,
+  type UnclosedScanMode,
+} from '../../../engine/shulchan/unclosed-parens';
 import {
   alternatingSummaryText,
   runTextAlternating,
@@ -211,6 +235,26 @@ const fallbackReporter: CommandReporter = (outcome, id) => {
 const superdoc = inject(ACTIVE_SUPERDOC, shallowRef<SuperDoc | null>(null));
 const report = inject(COMMAND_REPORTER, fallbackReporter);
 const notify = inject(STATUS_NOTIFIER, () => undefined);
+const styleGallery = inject(STYLE_GALLERY, shallowRef<StyleGalleryState>(fallbackStyleGallery()));
+
+/** סגנונות הפסקה של המסמך, לסינון „רק בסגנון” בעיצוב המילה הראשונה. */
+const styleOptions = computed(() => styleGallery.value.items.map((item) => ({ id: item.id, label: item.label })));
+
+/**
+ * ההעדפות שהלשונית עצמה מחזיקה (לא דיאלוג): סוג הסוגריים ומצב סריקת
+ * הסוגריים. נטענות פעם אחת בהרכבה — שני הפקדים נראים עוד לפני שנלחץ משהו.
+ */
+const tabPrefs = useRememberedOptions('tab', () => ({ bracketsType: 'round', unclosedMode: 'paragraph' }));
+void tabPrefs.load().then((prefs) => {
+  if (BRACKET_TYPE_LABELS.some((entry) => entry.value === prefs.bracketsType)) {
+    bracketsType.value = prefs.bracketsType as BracketsType;
+  }
+  unclosedMode.value = prefs.unclosedMode === 'document' ? 'document' : 'paragraph';
+});
+
+function saveTabPrefs(): void {
+  void tabPrefs.save({ bracketsType: bracketsType.value, unclosedMode: unclosedMode.value });
+}
 
 /** פעולה על המסמך באוויר — אותה נעילה כמו ב-LayoutTab, ומאותו טעם. */
 const inFlight = shallowRef(false);
@@ -255,8 +299,13 @@ function onTyposSubmit(options: TyposOptions): void {
   );
 }
 
+function onCopyFix(): void {
+  void runTool('shulchan-copy-fix', () => runCopyFix(superdoc.value), (result) => copyFixSummaryText(result));
+}
+
 const unclosedOpen = shallowRef(false);
 const unclosedFindings = shallowRef<readonly ParenFinding[]>([]);
+const unclosedMode = shallowRef<UnclosedScanMode>('paragraph');
 
 async function onScanUnclosed(): Promise<void> {
   if (inFlight.value || !superdoc.value) return;
@@ -267,12 +316,18 @@ async function onScanUnclosed(): Promise<void> {
       report({ ok: false, message: 'הסריקה נכשלה: אין מסמך פתוח, או שהמסמך אינו תומך בפעולה', reason: 'command-unsupported' }, 'shulchan-unclosed');
       return;
     }
-    unclosedFindings.value = scanForUnclosed(blocks);
+    unclosedFindings.value = scanForUnclosed(blocks, unclosedMode.value);
     unclosedOpen.value = true;
     report({ ok: true }, 'shulchan-unclosed');
   } finally {
     inFlight.value = false;
   }
+}
+
+/** הדיאלוג מבקש סריקה מחדש מיד אחרי השינוי — ולכן המצב נכתב לפני שהיא רצה. */
+function onUnclosedModeChange(mode: UnclosedScanMode): void {
+  unclosedMode.value = mode;
+  saveTabPrefs();
 }
 
 function onRevealFinding(index: number): void {
@@ -294,6 +349,13 @@ function onAlternatingSubmit(options: AlternatingOptions): void {
 
 const bracketsType = shallowRef<BracketsType>('round');
 const bracketOptions = BRACKET_TYPE_LABELS.map((entry) => ({ value: entry.value, label: entry.label }));
+
+function onBracketsTypeChange(value: string): void {
+  const entry = BRACKET_TYPE_LABELS.find((candidate) => candidate.value === value);
+  if (!entry) return;
+  bracketsType.value = entry.value;
+  saveTabPrefs();
+}
 
 function onBracketsToNotes(): void {
   void runTool(

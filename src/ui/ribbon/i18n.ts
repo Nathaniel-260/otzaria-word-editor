@@ -603,8 +603,11 @@ const EN: Readonly<Record<string, string>> = {
     'Bold the opening phrase in the selected paragraphs — from the start of the paragraph to the end character, and between the start and end characters',
   'כל קטע בסוגריים בפסקאות המסומנות הופך להערת שוליים במקומו':
     'Each bracketed passage in the selected paragraphs becomes a footnote in its place',
-  'תוכן כל הערות השוליים חוזר לגוף הטקסט בסוגריים, במקום ההפניה':
-    'The content of every footnote returns to the body in brackets, where the reference stood',
+  'תוכן הערות השוליים שבבחירה חוזר לגוף הטקסט בסוגריים, במקום ההפניה':
+    'The content of the footnotes in the selection returns to the body in brackets, where the reference stood',
+  'תיקון העתקה': 'Paste Cleanup',
+  'רווחים קשיחים שהגיעו מהדבקה מתוכנות אחרות הופכים לרווחים רגילים, בפסקאות המסומנות':
+    'Non-breaking spaces pasted from other programs become regular spaces, in the selected paragraphs',
   'סוג הסוגריים להמרה':
     'Bracket type to convert',
   'הגדלה והדגשה של המילה הראשונה בכל פסקה מסומנת, פרופורציונלית לגוף הפסקה':

@@ -100,6 +100,28 @@ export async function setSetting(key: string, value: unknown): Promise<void> {
   await call('storage.set', { key, value });
 }
 
+/**
+ * הגדרה גנרית לפי מפתח — לזיכרון של דיאלוגים (composables/useRememberedOptions.ts).
+ *
+ * `fallback` חוזר גם כשאין ערך, גם בכשל קריאה וגם מחוץ לאוצריא: זיכרון של
+ * דיאלוג אינו סיבה שהדיאלוג לא ייפתח. האימות של הצורה נעשה אצל הקורא —
+ * כאן רק ההבחנה בין „יש משהו” ל„אין”.
+ */
+export async function loadSetting<T>(
+  key: string,
+  fallback: T,
+  parse: (raw: unknown) => T | null,
+): Promise<T> {
+  const raw = await tryCall<unknown>('storage.get', { key });
+  if (raw === null || raw === undefined) return fallback;
+  return parse(raw) ?? fallback;
+}
+
+/** כתיבה שקטה — כשל בשמירת זיכרון של דיאלוג אינו כשל של הכלי. */
+export async function saveSetting(key: string, value: unknown): Promise<void> {
+  await tryCall('storage.set', { key, value });
+}
+
 const SPELLCHECK_KEY = 'spellcheck-enabled';
 
 /**

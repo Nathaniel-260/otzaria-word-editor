@@ -65,6 +65,43 @@ describe('shulchan/first-word — החלה', () => {
     expect(calls.inline[0]!.blockId).toBe('p2');
   });
 
+  /* „כותרת” במקור היא גם פסקה ממורכזת — כותרות-משנה בספרים תורניים הן פסקאות
+     רגילות שמורכזו ידנית, או שירשו מירכוז מהסגנון (`resolved`). */
+  it('דילוג על כותרות מדלג גם על פסקאות ממורכזות — ישירות או מהסגנון', async () => {
+    const { host, calls } = fakeShulchanHost({
+      blocks: [
+        { blockId: 'c1', text: 'כותרת ממורכזת ידנית' },
+        { blockId: 'c2', text: 'כותרת ממורכזת מסגנון' },
+        { blockId: 'p1', text: 'פסקת גוף רגילה' },
+      ],
+      alignment: { c1: { value: 'center' }, c2: { value: 'center', resolved: true } },
+    });
+    const result = await applyFirstWordDesign(host, defaultFirstWordOptions());
+    expect(result.formatted).toBe(1);
+    expect(calls.inline.map((call) => call.blockId)).toEqual(['p1']);
+
+    // וכשהדילוג כבוי — הכול מעוצב.
+    const all = fakeShulchanHost({
+      blocks: [{ blockId: 'c1', text: 'כותרת ממורכזת ידנית' }],
+      alignment: { c1: { value: 'center' } },
+    });
+    await applyFirstWordDesign(all.host, { ...defaultFirstWordOptions(), skipHeadings: false });
+    expect(all.calls.inline).toHaveLength(1);
+  });
+
+  it('סינון לפי סגנון — רק פסקאות באותו styleId', async () => {
+    const { host, calls } = fakeShulchanHost({
+      blocks: [
+        { blockId: 'p1', text: 'פסקה בסגנון גוף', styleId: 'Body' },
+        { blockId: 'p2', text: 'פסקה בסגנון פירוש', styleId: 'Perush' },
+        { blockId: 'p3', text: 'פסקה בלי סגנון' },
+      ],
+    });
+    const result = await applyFirstWordDesign(host, { ...defaultFirstWordOptions(), styleId: 'Perush' });
+    expect(result.formatted).toBe(1);
+    expect(calls.inline.map((call) => call.blockId)).toEqual(['p2']);
+  });
+
   it('הסרה מנקה את המאפיינים ב-null — לא כותבת ערכים חדשים', async () => {
     const { host, calls } = fakeShulchanHost({
       blocks: [{ blockId: 'p1', text: 'שלום עולם' }],

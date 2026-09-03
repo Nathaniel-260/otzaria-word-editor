@@ -7,11 +7,15 @@
  * הקנוני של כל בלוק, והחלה נקודתית מהעריכה האחרונה לראשונה דרך
  * `doc.replace` — כך העיצוב סביב כל תיקון נשמר, בניגוד להחלפת בלוק שלם.
  * בין כלל לכלל הטקסט המקומי מעודכן בזיכרון, כדי שהכלל הבא יראה את התוצאה.
+ *
+ * בסוף הקובץ — „תיקון העתקה מתוכנות” (`FixHebrewPunctuation` במקור), כלי
+ * אח שרץ על הבחירה בלבד ומשתמש באותה תשתית עריכות.
  */
 import { thrownText } from '../document-api';
 import {
   readShulchanBlocks,
   replaceRange,
+  scopedBlocks,
   shulchanDoc,
   textTarget,
   unavailableOutcome,
@@ -174,11 +178,15 @@ export function ruleEdits(rule: keyof TyposOptions, text: string): TextEdit[] {
       return edits;
     }
     case 'doubleApostrophes':
-      return collectRegexEdits(text, /''/g, () => '"');
+      // גם גרש מסולסל (U+2019) — מעבדי תמלילים ממירים אליו את הגרש הישר
+      // תוך כדי הקלדה, ולכן ''רש''י שהוקלד מגיע בפועל כתערובת של השניים.
+      return collectRegexEdits(text, /['’]{2}/g, () => '"');
     case 'shiftedHebrewAfterQuote':
-      return collectRegexEdits(text, /"([A-Z<>])/g, (match) => {
-        const fixed = SHIFTED_HEBREW_MAP[match[1]!];
-        return fixed ? `"${fixed}` : match[0];
+      // כל צורות הגרשיים — ישרים, מסולסלים ותחתונים — כי המקור תפס `[""]` ב-Word,
+      // שבו המרכאות החכמות כבר הוחלפו. הגרשיים עצמם נשמרים כפי שהם.
+      return collectRegexEdits(text, /(["“”„])([A-Z<>])/g, (match) => {
+        const fixed = SHIFTED_HEBREW_MAP[match[2]!];
+        return fixed ? `${match[1]!}${fixed}` : match[0];
       });
     case 'emptyParagraphs':
       return []; // מטופל ברמת הבלוק — ראו runTypos.
@@ -319,4 +327,66 @@ export async function runTypos(host: ShulchanTarget, options: TyposOptions): Pro
   }
 
   return { ok: true, fixes, removedParagraphs };
+}
+
+/* ------------------------------------------------------------------ */
+/* תיקון העתקה מתוכנות                                                 */
+/* ------------------------------------------------------------------ */
+
+/**
+ * תווים שהמנוע מייצג בהם מעבר שורה ידני בתוך הטקסט הקנוני של בלוק. `\n`
+ * הוא מה שנצפה; `\r` ו-VT (התו שבו Word עצמו מייצג `^l`) נשמרים כרשת ביטחון.
+ */
+const LINE_BREAK_CHARS = new Set(['\n', '\r', String.fromCharCode(0x0b)]);
+
+/** רווח קשיח — U+00A0. `fromCharCode` ולא ליטרל, כדי שהתו הבלתי-נראה לא יאבד בעריכה. */
+const NBSP_PATTERN = new RegExp(String.fromCharCode(0xa0), 'g');
+
+/**
+ * העריכות של „תיקון העתקה מתוכנות” על טקסט בלוק אחד — `FixHebrewPunctuation`
+ * במקור: רווח קשיח (NBSP) הופך לרווח רגיל, **פרט** לרווח קשיח שבא מיד אחרי
+ * מעבר שורה ידני (התבנית `([!^l])(^s)` של המקור — שם הוא מחזיק את השורה
+ * הריקה, ומחיקתו הייתה מקריסה אותה).
+ *
+ * התבנית הראשונה של המקור — החלפה-עצמית של סימני הפיסוק (`^&`) כדי לנרמל
+ * כיווניות „הפוכה” אחרי הדבקה — אין לה שקילות במנוע: ב-Word ההחלפה כותבת
+ * מחדש את מאפייני הכיוון של התו; אצלנו `doc.replace` באותו טקסט הוא no-op.
+ */
+export function copyFixEdits(text: string): TextEdit[] {
+  return collectRegexEdits(text, NBSP_PATTERN, (match) => {
+    const before = text[match.index - 1];
+    return before !== undefined && LINE_BREAK_CHARS.has(before) ? match[0] : ' ';
+  });
+}
+
+const COPY_FIX_FAILED = 'תיקון ההעתקה נכשל';
+
+export interface CopyFixResult extends Record<string, unknown> {
+  ok: boolean;
+  message?: string;
+  /** מספר הרווחים הקשיחים שהוחלפו. */
+  fixes: number;
+}
+
+export function copyFixSummaryText(result: CopyFixResult): string {
+  if (result.fixes === 0) return 'לא נמצאו רווחים קשיחים להחלפה';
+  return result.fixes === 1 ? 'הוחלף רווח קשיח אחד' : `הוחלפו ${result.fixes} רווחים קשיחים`;
+}
+
+/** מריצה את התיקון על הפסקאות שבבחירה — התחום של המקור (`Selection.Range`). */
+export async function runCopyFix(host: ShulchanTarget): Promise<CopyFixResult> {
+  const scoped = await scopedBlocks(host, 'selection', COPY_FIX_FAILED);
+  if (!scoped.ok) {
+    return { ok: false, message: scoped.outcome.ok ? undefined : scoped.outcome.message, fixes: 0 };
+  }
+
+  let fixes = 0;
+  for (const block of scoped.result.blocks) {
+    for (const edit of orderedEdits(copyFixEdits(block.text))) {
+      const outcome = await replaceRange(host, textTarget(block.blockId, edit.start, edit.end), edit.text, COPY_FIX_FAILED);
+      if (!outcome.ok) return { ok: false, message: outcome.message, fixes };
+      fixes += 1;
+    }
+  }
+  return { ok: true, fixes };
 }

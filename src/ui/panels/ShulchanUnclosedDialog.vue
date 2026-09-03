@@ -24,6 +24,28 @@
       </div>
 
       <div class="shunc-body">
+        <div class="shunc-row">
+          <label
+            for="shunc-mode"
+            class="shunc-label"
+          >אופן הסריקה:</label>
+          <select
+            id="shunc-mode"
+            class="shunc-select"
+            :value="mode"
+            :disabled="busy"
+            aria-label="האם כל פסקה נבדקת לעצמה, או שהמסמך כולו נבדק כיחידה אחת"
+            @change="onModeChange"
+          >
+            <option
+              v-for="option in UNCLOSED_SCAN_MODE_LABELS"
+              :key="option.value"
+              :value="option.value"
+            >
+              {{ option.label }}
+            </option>
+          </select>
+        </div>
         <p
           v-if="findings.length === 0"
           class="shunc-note"
@@ -76,26 +98,41 @@
 <script setup lang="ts">
 /**
  * „סוגריים לא סגורים” — רשימת הממצאים של הסריקה, במקום ה„הבא/הבא” של
- * הטופס המקורי: הכול נגלה מראש, ולחיצה קופצת לממצא.
+ * הטופס המקורי: הכול נגלה מראש, ולחיצה קופצת לממצא. בורר המצב הוא שני
+ * מצבי `Search(entireDocument)` של המקור; שינויו סורק מחדש מיד, והלשונית
+ * — שמחזיקה את המצב — זוכרת אותו בין הפעלות.
  */
-import { PAREN_FINDING_LABELS, type ParenFinding } from '../../engine/shulchan/unclosed-parens';
+import {
+  PAREN_FINDING_LABELS,
+  UNCLOSED_SCAN_MODE_LABELS,
+  type ParenFinding,
+  type UnclosedScanMode,
+} from '../../engine/shulchan/unclosed-parens';
 
 withDefaults(
   defineProps<{
     isOpen?: boolean;
     busy?: boolean;
     findings?: readonly ParenFinding[];
+    mode?: UnclosedScanMode;
   }>(),
-  { isOpen: false, busy: false, findings: () => [] },
+  { isOpen: false, busy: false, findings: () => [], mode: 'paragraph' },
 );
 
-defineEmits<{
+const emit = defineEmits<{
   (e: 'close'): void;
   (e: 'rescan'): void;
   (e: 'reveal', index: number): void;
+  (e: 'update:mode', mode: UnclosedScanMode): void;
 }>();
 
 const TITLE = 'סוגריים לא סגורים';
+
+function onModeChange(event: Event): void {
+  const value = (event.target as HTMLSelectElement).value;
+  emit('update:mode', value === 'document' ? 'document' : 'paragraph');
+  emit('rescan');
+}
 </script>
 
 <style scoped>
@@ -151,6 +188,35 @@ const TITLE = 'סוגריים לא סגורים';
   gap: 4px;
   max-height: 320px;
   overflow-y: auto;
+}
+
+.shunc-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-block-end: 6px;
+}
+
+.shunc-label {
+  font-size: 11px;
+  color: var(--color-on-surface);
+  flex-shrink: 0;
+}
+
+.shunc-select {
+  padding: 4px 8px;
+  border: 1px solid var(--color-outline-variant);
+  border-radius: var(--radius-xs);
+  background: var(--color-surface);
+  color: var(--color-on-surface);
+  font-family: var(--font-main);
+  font-size: 12px;
+  outline: none;
+}
+
+.shunc-select:focus {
+  border-color: var(--word-blue);
+  box-shadow: 0 0 0 1px var(--word-blue);
 }
 
 .shunc-note {

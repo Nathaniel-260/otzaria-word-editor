@@ -5,11 +5,13 @@
  *
  * לכיוון „הערות ⟵ סוגריים” נדרש מיקום ההפניה בגוף — `doc.find` על צומתי
  * `footnoteRef`. במסמך שהמנוע אינו חושף בו את החיפוש הזה, הכיוון הזה נכשל
- * סגור עם הסבר, והכיוון השני עדיין עובד.
+ * סגור עם הסבר, והכיוון השני עדיין עובד. שני הכיוונים עובדים על הבחירה
+ * בלבד, כמו במקור.
  */
 import type { CommandOutcome } from '../command-adapter';
 import { receiptFailureText, thrownText, type DocReceipt, type MaybePromise } from '../document-api';
 import {
+  offsetInScope,
   replaceRange,
   scopedBlocks,
   shulchanDoc,
@@ -190,8 +192,10 @@ async function listFootnoteRefs(host: ShulchanTarget): Promise<FootnoteRefSite[]
 }
 
 /**
- * ממירה את כל הערות השוליים לטקסט בסוגריים בגוף, במקום ההפניה. העיבוד
- * מהאחרונה לראשונה — מאותו טעם של הכיוון השני.
+ * ממירה את הערות השוליים **שבבחירה** לטקסט בסוגריים בגוף, במקום ההפניה —
+ * `Selection.Range.Footnotes` במקור: סמן בלבד ⟵ ההערות של הפסקה שבה הסמן;
+ * קטע מסומן ⟵ רק הפניות שיושבות בתוכו. העיבוד מהאחרונה לראשונה — מאותו
+ * טעם של הכיוון השני.
  */
 export async function convertFootnotesToBrackets(
   host: ShulchanTarget,
@@ -203,14 +207,23 @@ export async function convertFootnotesToBrackets(
     return { ok: false, message: outcome.ok ? undefined : outcome.message, converted: 0 };
   }
 
-  const sites = await listFootnoteRefs(host);
-  if (sites === null) {
+  const scoped = await scopedBlocks(host, 'selection', TO_BRACKETS_FAILED);
+  if (!scoped.ok) {
+    return { ok: false, message: scoped.outcome.ok ? undefined : scoped.outcome.message, converted: 0 };
+  }
+
+  const allSites = await listFootnoteRefs(host);
+  if (allSites === null) {
     return {
       ok: false,
       message: `${TO_BRACKETS_FAILED}: המנוע אינו חושף את מיקומי ההערות במסמך הזה`,
       converted: 0,
     };
   }
+  const selectedIds = new Set(scoped.result.blocks.map((block) => block.blockId));
+  const sites = allSites.filter(
+    (site) => selectedIds.has(site.blockId) && offsetInScope(scoped.result, site.blockId, site.offset),
+  );
 
   const { open, close } = BRACKET_CHARS[type];
   let converted = 0;

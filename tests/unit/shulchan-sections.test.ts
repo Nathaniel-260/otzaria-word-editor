@@ -59,33 +59,36 @@ describe('shulchan/sections-uniform — עמוד', () => {
 });
 
 describe('shulchan/sections-uniform — טורים', () => {
-  it('רק מקטעים מרובי-טורים נכנסים לקיבוץ', async () => {
+  /* כמו `ColumnWidth` במקור (`NumberOfColumns = 2`): טור יחיד אינו טעות, ושלושה
+     טורים ומעלה הם פריסה מכוונת — שניהם מחוץ לקיבוץ. */
+  it('רק מקטעי שני-טורים נכנסים לקיבוץ', async () => {
     const { host } = fakeShulchanHost({
       sections: [
         { address: 's1', columns: { count: 1 } },
         { address: 's2', columns: { count: 2, gap: 0.2, equalWidth: true } },
         { address: 's3', columns: { count: 2, gap: 0.4, equalWidth: false } },
+        { address: 's4', columns: { count: 3, gap: 0.2, equalWidth: true } },
       ],
     });
     const result = await readColumnsProfiles(host);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.groups).toHaveLength(2);
+    expect(result.groups.every((group) => group.profile.count === 2)).toBe(true);
     expect(columnsProfileLabel(result.groups[1]!.profile)).toContain('טורים לא שווים');
   });
 
-  it('החלת פרופיל טורים מדלגת על מקטעי טור-יחיד', async () => {
+  it('החלת פרופיל טורים נוגעת רק במקטעי שני-טורים, ואינה כותבת מספר טורים', async () => {
     const { host, calls } = fakeShulchanHost({
       sections: [
         { address: 's1', columns: { count: 1 } },
         { address: 's2', columns: { count: 2, gap: 0.4, equalWidth: false } },
+        { address: 's3', columns: { count: 3, gap: 0.4, equalWidth: false } },
       ],
     });
     const outcome = await applyColumnsProfile(host, { count: 2, gapIn: 0.2, equalWidth: true });
     expect(outcome.ok).toBe(true);
-    expect(calls.setColumns).toEqual([
-      { target: 's2', count: 2, gap: 0.2, equalWidth: true },
-    ]);
+    expect(calls.setColumns).toEqual([{ target: 's2', gap: 0.2, equalWidth: true }]);
   });
 
   it('מסמך בלי sections API — כשל סגור', async () => {

@@ -40,7 +40,20 @@ interface SelectionInfoLike {
 }
 
 interface BlocksPage {
-  blocks?: readonly { nodeId?: string; text?: string; nodeType?: string }[];
+  blocks?: readonly { nodeId?: string; text?: string; nodeType?: string; styleId?: string }[];
+}
+
+/** בלוק כפי שהכלים צורכים אותו — הבלוק הקנוני של החיפוש, ועליו מזהה הסגנון. */
+export interface ShulchanBlock extends SearchableBlock {
+  /** `w:styleId` של הפסקה, כשהמנוע מדווח אותו. */
+  styleId?: string;
+}
+
+/** תכונות פסקה במודל — `props` הישירות ו-`resolved` הפתורות (סגנון + ירושה). */
+interface ParagraphLike {
+  content?: readonly unknown[];
+  props?: Record<string, unknown>;
+  resolved?: Record<string, unknown>;
 }
 
 /** צומת במודל `doc.get()` — רק החלק שהכלים קוראים. */
@@ -48,9 +61,9 @@ export interface ShulchanModelNode {
   id?: string;
   paragraphIds?: { paraId?: string };
   kind?: string;
-  paragraph?: { content?: readonly unknown[]; props?: Record<string, unknown> };
-  heading?: { content?: readonly unknown[]; props?: Record<string, unknown> };
-  list?: { content?: readonly unknown[]; props?: Record<string, unknown> };
+  paragraph?: ParagraphLike;
+  heading?: ParagraphLike;
+  list?: ParagraphLike;
 }
 
 export interface ShulchanDocumentApi {
@@ -122,11 +135,11 @@ const BLOCKS_MAX_PAGES = 50;
  * כל בלוקי המסמך, עם הטקסט הקנוני, בסדר המסמך. `null` כשאין `blocks.list`
  * או כשקריאה נכשלה — כיסוי חלקי מסוכן יותר מכשל גלוי (ראו search.ts).
  */
-export async function readShulchanBlocks(host: ShulchanTarget): Promise<SearchableBlock[] | null> {
+export async function readShulchanBlocks(host: ShulchanTarget): Promise<ShulchanBlock[] | null> {
   const list = shulchanDoc(host)?.blocks?.list;
   if (typeof list !== 'function') return null;
 
-  const blocks: SearchableBlock[] = [];
+  const blocks: ShulchanBlock[] = [];
   let offset = 0;
   try {
     for (let page = 0; page < BLOCKS_MAX_PAGES; page += 1) {
@@ -134,11 +147,13 @@ export async function readShulchanBlocks(host: ShulchanTarget): Promise<Searchab
       const entries = result?.blocks ?? [];
       for (const entry of entries) {
         if (typeof entry?.nodeId === 'string') {
-          blocks.push({
+          const block: ShulchanBlock = {
             blockId: entry.nodeId,
             text: typeof entry.text === 'string' ? entry.text : '',
             nodeType: typeof entry.nodeType === 'string' ? entry.nodeType : undefined,
-          });
+          };
+          if (typeof entry.styleId === 'string' && entry.styleId !== '') block.styleId = entry.styleId;
+          blocks.push(block);
         }
       }
       if (entries.length < BLOCKS_PAGE_SIZE) break;
@@ -152,11 +167,32 @@ export async function readShulchanBlocks(host: ShulchanTarget): Promise<Searchab
 
 export type ShulchanScope = 'selection' | 'document';
 
+/** טווח טקסט בתוך בלוק — קצה הבחירה כפי ש-`selection.current()` מדווח אותו. */
+export interface ScopedRange {
+  start: number;
+  end: number;
+}
+
 export interface ScopedBlocksResult {
   /** הבלוקים לעיבוד, בסדר המסמך. */
-  blocks: SearchableBlock[];
+  blocks: ShulchanBlock[];
   /** כל בלוקי המסמך — לכלים שצריכים הקשר (בלוק קודם/עוקב). */
-  all: SearchableBlock[];
+  all: ShulchanBlock[];
+  /**
+   * הטווח המסומן בכל בלוק, לכלים שעובדים על **תוכן** הבחירה ולא על פסקאות
+   * שלמות (הערות ⟵ סוגריים). `undefined` כשהתחום הוא כל המסמך, וגם כשהבחירה
+   * היא סמן בלבד — שאז הפסקה כולה היא התחום, כמו בכל שאר הכלים.
+   */
+  ranges?: ReadonlyMap<string, ScopedRange>;
+}
+
+/** האם היסט בבלוק נמצא בתחום שנבחר. בלי `ranges` — כל הבלוק בתחום. */
+export function offsetInScope(scoped: ScopedBlocksResult, blockId: string, offset: number): boolean {
+  if (!scoped.ranges) return true;
+  const range = scoped.ranges.get(blockId);
+  /* הקצה כלול: הפניית הערה שיושבת בדיוק בסוף הקטע המסומן נבחרה יחד איתו
+     בעיני המשתמש, והמנוע מדווח את מיקומה כהיסט שאחרי התו האחרון. */
+  return range !== undefined && offset >= range.start && offset <= range.end;
 }
 
 /**
@@ -185,8 +221,20 @@ export async function scopedBlocks(
   }
 
   const ids = new Set<string>();
+  const ranges = new Map<string, ScopedRange>();
+  let collapsed = true;
   for (const segment of info?.target?.segments ?? []) {
-    if (typeof segment?.blockId === 'string') ids.add(segment.blockId);
+    if (typeof segment?.blockId !== 'string') continue;
+    ids.add(segment.blockId);
+    const start = segment.range?.start;
+    const end = segment.range?.end;
+    if (typeof start !== 'number' || typeof end !== 'number') continue;
+    if (end > start) collapsed = false;
+    const existing = ranges.get(segment.blockId);
+    ranges.set(segment.blockId, {
+      start: existing ? Math.min(existing.start, start) : start,
+      end: existing ? Math.max(existing.end, end) : end,
+    });
   }
   if (ids.size === 0) {
     return {
@@ -194,7 +242,26 @@ export async function scopedBlocks(
       outcome: { ok: false, message: `${failedAction}: ${NO_SELECTION_TEXT}`, reason: 'no-selection' },
     };
   }
-  return { ok: true, result: { blocks: all.filter((block) => ids.has(block.blockId)), all } };
+  const blocks = all.filter((block) => ids.has(block.blockId));
+  // סמן בלבד, או מנוע שלא דיווח טווחים — הפסקאות השלמות הן התחום.
+  if (collapsed || ranges.size === 0) return { ok: true, result: { blocks, all } };
+  return { ok: true, result: { blocks, all, ranges } };
+}
+
+/**
+ * יישור הפסקה מהמודל — הפתור (`resolved`, כולל מה שירש מהסגנון) לפני
+ * הישיר (`props`). `undefined` כשהבלוק לא נמצא או שלא דווח יישור.
+ */
+export function paragraphAlignment(body: readonly ShulchanModelNode[] | undefined, blockId: string): string | undefined {
+  if (!Array.isArray(body)) return undefined;
+  for (const node of body) {
+    if (!node || typeof node !== 'object') continue;
+    if (nodeParagraphId(node) !== blockId) continue;
+    const inner = nodeInner(node);
+    const alignment = inner?.resolved?.alignment ?? inner?.props?.alignment;
+    return typeof alignment === 'string' ? alignment : undefined;
+  }
+  return undefined;
 }
 
 export function textTarget(blockId: string, start: number, end: number): ShulchanSelectionTarget {
@@ -288,7 +355,7 @@ function nodeParagraphId(node: ShulchanModelNode): string | undefined {
   return typeof paraId === 'string' && paraId !== '' ? paraId : undefined;
 }
 
-function nodeInner(node: ShulchanModelNode): { content?: readonly unknown[] } | undefined {
+function nodeInner(node: ShulchanModelNode): ParagraphLike | undefined {
   return node.paragraph ?? node.heading ?? node.list;
 }
 

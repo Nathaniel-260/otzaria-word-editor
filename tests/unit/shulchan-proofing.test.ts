@@ -3,7 +3,11 @@
  * הכפיל.
  */
 import { describe, expect, it } from 'vitest';
-import { scanBlockForUnclosed, scanForUnclosed } from '../../src/engine/shulchan/unclosed-parens';
+import {
+  scanBlockForUnclosed,
+  scanDocumentAsOne,
+  scanForUnclosed,
+} from '../../src/engine/shulchan/unclosed-parens';
 import {
   alternatingRanges,
   defaultAlternatingOptions,
@@ -39,6 +43,34 @@ describe('shulchan/unclosed-parens', () => {
     expect(findings).toHaveLength(1);
     expect(findings[0]?.blockId).toBe('p2');
   });
+
+  /* מצב „המסמך כולו כאחד” של המקור: הערה בסוגריים שנמשכת על פני כמה פסקאות
+     אינה שגיאה — הפותח בפסקה הראשונה נסגר בשלישית. */
+  it('במצב מסמך-כאחד, סוגר בפסקה מאוחרת סוגר פותח מפסקה מוקדמת', () => {
+    const blocks = [
+      { blockId: 'p1', text: 'תחילת הערה (שנמשכת' },
+      { blockId: 'p2', text: 'עוד פסקה [פנימית]' },
+      { blockId: 'p3', text: 'וסופה כאן) והמשך' },
+    ];
+    expect(scanForUnclosed(blocks, 'paragraph').map((f) => `${f.blockId}:${f.kind}`)).toEqual([
+      'p1:open-without-close',
+      'p3:close-without-open',
+    ]);
+    expect(scanDocumentAsOne(blocks)).toEqual([]);
+  });
+
+  it('במצב מסמך-כאחד, פותח שלא נסגר עד סוף המסמך מדווח במקום שנפתח, בסדר המסמך', () => {
+    const blocks = [
+      { blockId: 'p1', text: 'א (ב' },
+      { blockId: 'p2', text: 'ג ] ד' },
+      { blockId: 'p3', text: 'ה' },
+    ];
+    const findings = scanDocumentAsOne(blocks);
+    expect(findings.map((f) => `${f.blockId}:${f.kind}:${f.start}`)).toEqual([
+      'p1:open-without-close:2',
+      'p2:mismatched-close:2',
+    ]);
+  });
 });
 
 describe('shulchan/text-alternating', () => {
@@ -53,6 +85,27 @@ describe('shulchan/text-alternating', () => {
 
   it('פסקה בלי תו סיום — אין הדגשות', () => {
     expect(alternatingRanges('אין כאן נקודה', defaultAlternatingOptions())).toEqual([]);
+  });
+
+  /* כמו `MoveUntil` במקור: כל תו בשדה הוא תוחם. „דיבור המתחיל” שנגמר בסימן
+     שאלה או בנקודתיים הוא אותו דיבור. */
+  it('כל תו בסט הוא תוחם, ותו יכול להופיע בשני הסטים', () => {
+    const text = 'שאלה? הסבר: תשובה. ועוד; קטע.';
+    expect(alternatingRanges(text, { startChar: ':;', endChar: '.?' })).toEqual([
+      { start: 0, end: 5 },
+      { start: 12, end: 18 },
+      { start: 25, end: 29 },
+    ]);
+    // תו משותף — הסיום של קטע הוא ההתחלה של הבא.
+    expect(alternatingRanges('א. ב. ג.', { startChar: '.', endChar: '.' })).toEqual([
+      { start: 0, end: 2 },
+      { start: 6, end: 8 },
+    ]);
+  });
+
+  it('שדה ריק — אין הדגשות', () => {
+    expect(alternatingRanges('א. ב: ג.', { startChar: '', endChar: '.' })).toEqual([]);
+    expect(alternatingRanges('א. ב: ג.', { startChar: ':', endChar: '' })).toEqual([]);
   });
 
   it('מדגיש דרך format.apply עם bold ו-bCs', async () => {

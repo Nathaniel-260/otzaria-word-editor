@@ -14,6 +14,7 @@
 import {
   applyInline,
   inParagraphsText,
+  paragraphAlignment,
   resolvedFontAt,
   readResolvedBody,
   scopedBlocks,
@@ -36,8 +37,18 @@ export interface FirstWordOptions {
    * מתיישר עם ראש שאר השורה (הנוסחה מהמקור: `-(גודל המילה - גודל הגוף) / 2`).
    */
   raiseBaseline: boolean;
-  /** דילוג על כותרות — עיבוד פסקאות גוף בלבד. */
+  /**
+   * דילוג על כותרות — עיבוד פסקאות גוף בלבד. כמו במקור, „כותרת” היא גם
+   * פסקה ממורכזת: בספרים תורניים כותרות-משנה רבות הן פסקאות רגילות
+   * שמורכזו ידנית, ומילה ראשונה מוגדלת בהן נראית כטעות.
+   */
   skipHeadings: boolean;
+  /**
+   * עיבוד פסקאות בסגנון הזה בלבד (`w:styleId`); `null` — כל הפסקאות
+   * שבבחירה. המקבילה ל„לפי סגנון” של המקור, בצד הסינון בלבד: יצירת סגנון
+   * למילה עצמה אינה זמינה במנוע.
+   */
+  styleId: string | null;
 }
 
 export function defaultFirstWordOptions(): FirstWordOptions {
@@ -50,7 +61,14 @@ export function defaultFirstWordOptions(): FirstWordOptions {
     underline: false,
     raiseBaseline: false,
     skipHeadings: true,
+    styleId: null,
   };
+}
+
+/** האם הפסקה היא „כותרת” לעניין הדילוג — לפי סוג הצומת או לפי מירכוז. */
+function isHeadingLike(block: { nodeType?: string }, alignment: string | undefined): boolean {
+  if (block.nodeType !== undefined && block.nodeType !== 'paragraph') return true;
+  return alignment === 'center';
 }
 
 /** אורך המילה הראשונה: עד הרווח הראשון, ובלבד שיש אחריה עוד טקסט. `0` = אין מה לעצב. */
@@ -97,7 +115,8 @@ export async function applyFirstWordDesign(
   let formatted = 0;
 
   for (const block of scoped.result.blocks) {
-    if (options.skipHeadings && block.nodeType !== undefined && block.nodeType !== 'paragraph') continue;
+    if (options.styleId !== null && block.styleId !== options.styleId) continue;
+    if (options.skipHeadings && isHeadingLike(block, paragraphAlignment(body, block.blockId))) continue;
     const length = firstWordLength(block.text);
     if (length === 0) continue;
 

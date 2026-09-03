@@ -5,9 +5,12 @@
 import { describe, expect, it } from 'vitest';
 import {
   applyEditsToText,
+  copyFixEdits,
+  copyFixSummaryText,
   defaultTyposOptions,
   orderedEdits,
   ruleEdits,
+  runCopyFix,
   runTypos,
   typosSummaryText,
   type TyposOptions,
@@ -80,14 +83,63 @@ describe('shulchan/typos — הכללים הטהורים', () => {
     expect(applyRule('paragraphEdgeSpaces', '   ')).toBe('');
   });
 
-  it('זוג גרשים בודדים הופך לגרשיים', () => {
+  it('זוג גרשים בודדים הופך לגרשיים — גם מסולסלים וגם בתערובת', () => {
     expect(applyRule('doubleApostrophes', "רש''י")).toBe('רש"י');
+    expect(applyRule('doubleApostrophes', 'רש’’י')).toBe('רש"י');
+    expect(applyRule('doubleApostrophes', "רש'’י")).toBe('רש"י');
+    // גרש בודד — ראשי תיבות תקינים, לא נוגעים.
+    expect(applyRule('doubleApostrophes', "ר' עקיבא")).toBe("ר' עקיבא");
   });
 
   it('אות אנגלית של Shift אחרי גרשיים מוחלפת לעברית הנכונה', () => {
     expect(applyRule('shiftedHebrewAfterQuote', 'אמר "Tבא')).toBe('אמר "אבא');
     expect(applyRule('shiftedHebrewAfterQuote', '"A"')).toBe('"ש"');
     expect(applyRule('shiftedHebrewAfterQuote', '"Q')).toBe('"Q'); // אין מיפוי — נשאר
+  });
+
+  it('גרשיים חכמים — מסולסלים ותחתונים — נתפסים גם הם, והגרשיים נשמרים כמו שהם', () => {
+    expect(applyRule('shiftedHebrewAfterQuote', 'אמר “Tבא”')).toBe('אמר “אבא”');
+    expect(applyRule('shiftedHebrewAfterQuote', '”Aלום')).toBe('”שלום');
+    expect(applyRule('shiftedHebrewAfterQuote', '„Rבי')).toBe('„רבי');
+  });
+});
+
+describe('shulchan/typos — תיקון העתקה מתוכנות', () => {
+  const NBSP = String.fromCharCode(0xa0);
+
+  it('רווח קשיח הופך לרווח רגיל', () => {
+    expect(applyEditsToText(`שלום${NBSP}עולם${NBSP}${NBSP}טוב`, copyFixEdits(`שלום${NBSP}עולם${NBSP}${NBSP}טוב`))).toBe(
+      'שלום עולם  טוב',
+    );
+  });
+
+  it('רווח קשיח מיד אחרי מעבר שורה ידני נשאר — הוא מחזיק את השורה הריקה', () => {
+    const text = `שורה\n${NBSP}\nעוד${NBSP}מילה`;
+    expect(applyEditsToText(text, copyFixEdits(text))).toBe(`שורה\n${NBSP}\nעוד מילה`);
+    // גם VT — הייצוג של Word ל-^l.
+    const vt = `שורה${String.fromCharCode(0x0b)}${NBSP}סוף`;
+    expect(copyFixEdits(vt)).toEqual([]);
+  });
+
+  it('רץ על הפסקאות שבבחירה בלבד ומדווח מניין', async () => {
+    const { host, textOf } = fakeShulchanHost({
+      blocks: [
+        { blockId: 'p1', text: `א${NBSP}ב` },
+        { blockId: 'p2', text: `ג${NBSP}ד` },
+      ],
+      selected: ['p2'],
+    });
+    const result = await runCopyFix(host);
+    expect(result).toMatchObject({ ok: true, fixes: 1 });
+    expect(textOf('p1')).toBe(`א${NBSP}ב`);
+    expect(textOf('p2')).toBe('ג ד');
+    expect(copyFixSummaryText(result)).toBe('הוחלף רווח קשיח אחד');
+  });
+
+  it('בלי בחירה — כשל סגור', async () => {
+    const { host } = fakeShulchanHost({ blocks: [{ blockId: 'p1', text: `א${NBSP}ב` }], selected: [] });
+    const result = await runCopyFix(host);
+    expect(result.ok).toBe(false);
   });
 });
 
