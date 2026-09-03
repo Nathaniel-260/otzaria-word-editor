@@ -24,7 +24,17 @@ const LIST_BLOCKS = {
   ],
 };
 
-function fakeDoc(options: { receipts?: Record<string, unknown>; selection?: unknown } = {}) {
+function fakeDoc(
+  options: {
+    receipts?: Record<string, unknown>;
+    selection?: unknown;
+    blocksList?: () => Promise<{
+      blocks: Array<{ nodeId: string; nodeType: string; paragraphNumbering?: unknown }>;
+    }>;
+    /** `lists.getState` — מזהה בלוק → isListItem. בלי המפה הפעולה חסרה (מנוע ישן). */
+    listState?: Record<string, boolean>;
+  } = {},
+) {
   const calls = new Map<string, unknown[]>();
   const impls: Record<string, (input: unknown) => unknown> = {};
   for (const name of ['setLevelNumberStyle', 'restartAt', 'continuePrevious', 'convertToText']) {
@@ -36,9 +46,18 @@ function fakeDoc(options: { receipts?: Record<string, unknown>; selection?: unkn
     };
   }
 
+  if (options.listState) {
+    const listState = options.listState;
+    impls.getState = (input: unknown) => {
+      const nodeId = (input as { target: { nodeId: string } }).target.nodeId;
+      return nodeId in listState ? { success: true, isListItem: listState[nodeId] } : { success: false };
+    };
+  }
+
+  const listFn = options.blocksList ?? vi.fn(async () => LIST_BLOCKS);
   const doc = {
     selection: { current: vi.fn(async () => options.selection ?? SELECTION_IN_LIST) },
-    blocks: { list: vi.fn(async () => LIST_BLOCKS) },
+    blocks: { list: listFn },
     lists: impls,
   } as never;
 
@@ -109,6 +128,71 @@ describe('resolveListItem', () => {
 
     expect(outcome).toMatchObject({ ok: false, reason: 'selection-required' });
     expect(calls.get('setLevelNumberStyle')).toHaveLength(0);
+  });
+
+  it('פריט רשימה בתוך תא טבלה: אינו ב-blocks.list, ו-lists.getState מכריע', async () => {
+    // issue #14 ג׳: blocks.list מונה בלוקים עליונים בלבד, ולכן הפריט שבטבלה
+    // אינו שם — ובלי getState הפקד ענה „יש למקם את הסמן בתוך רשימה”.
+    const selection = { target: { segments: [{ blockId: 'li-in-table' }] } };
+    const blocksList = vi.fn(async () => ({ blocks: [{ nodeId: 'p1', nodeType: 'paragraph' }] }));
+    const { host, calls } = fakeDoc({ selection, blocksList, listState: { 'li-in-table': true } });
+
+    const outcome = await setListNumberStyle(host, 'hebrew1');
+
+    expect(outcome).toEqual({ ok: true });
+    expect(calls.get('setLevelNumberStyle')?.[0]).toMatchObject({
+      target: { kind: 'block', nodeType: 'listItem', nodeId: 'li-in-table' },
+    });
+    expect(blocksList).not.toHaveBeenCalled();
+  });
+
+  it('כותרת ממוספרת: blocks.list אומר heading, lists.getState אומר פריט רשימה — נשלח', async () => {
+    const selection = { target: { segments: [{ blockId: 'h1' }] } };
+    const blocksList = vi.fn(async () => ({ blocks: [{ nodeId: 'h1', nodeType: 'heading' }] }));
+    const { host, calls } = fakeDoc({ selection, blocksList, listState: { h1: true } });
+
+    expect(await setListNumberStyle(host, 'hebrew1')).toEqual({ ok: true });
+    expect(calls.get('setLevelNumberStyle')?.[0]).toMatchObject({
+      target: { nodeType: 'listItem', nodeId: 'h1' },
+    });
+  });
+
+  it('lists.getState אומר שאינו פריט רשימה — הפקד מסביר, גם אם blocks.list היה אומר אחרת', async () => {
+    const { host, calls } = fakeDoc({ listState: { li1: false } });
+
+    const outcome = await setListNumberStyle(host, 'hebrew1');
+
+    expect(outcome).toMatchObject({ ok: false, reason: 'selection-required' });
+    expect(calls.get('setLevelNumberStyle')).toHaveLength(0);
+  });
+
+  it('מנוע בלי lists.getState: blocks.list בקריאה אחת, ו-paragraphNumbering נחשב פריט רשימה', async () => {
+    // הנפילה לאחור. בלי ארגומנטים blocks.list מחזיר את כל הסיפור (נמדד),
+    // וכותרת ממוספרת מגיעה שם כ-heading עם paragraphNumbering.
+    const selection = { target: { segments: [{ blockId: 'h-numbered' }] } };
+    const blocksList = vi.fn(async () => ({
+      blocks: [{ nodeId: 'h-numbered', nodeType: 'heading', paragraphNumbering: { numId: 1, level: 0 } }],
+    }));
+    const { host, calls } = fakeDoc({ selection, blocksList });
+
+    expect(await setListNumberStyle(host, 'hebrew1')).toEqual({ ok: true });
+    expect(calls.get('setLevelNumberStyle')?.[0]).toMatchObject({ target: { nodeType: 'listItem', nodeId: 'h-numbered' } });
+    expect(blocksList).toHaveBeenCalledTimes(1);
+    expect(blocksList).toHaveBeenCalledWith();
+  });
+
+  it('getState שנכשל (success:false) או זורק — נופלים ל-blocks.list', async () => {
+    // הבלוק אינו במפה → success:false → blocks.list (הכפיל: li1 הוא listItem).
+    const { host: unknownHost, calls: unknownCalls } = fakeDoc({ listState: {} });
+    expect(await setListNumberStyle(unknownHost, 'hebrew1')).toEqual({ ok: true });
+    expect(unknownCalls.get('setLevelNumberStyle')).toHaveLength(1);
+
+    const { host, calls, doc } = fakeDoc({ listState: {} });
+    (doc as { lists: { getState: unknown } }).lists.getState = () => {
+      throw new Error('boom');
+    };
+    expect(await setListNumberStyle(host, 'hebrew1')).toEqual({ ok: true });
+    expect(calls.get('setLevelNumberStyle')).toHaveLength(1);
   });
 });
 

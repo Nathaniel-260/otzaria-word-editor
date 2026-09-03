@@ -15,8 +15,22 @@ import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { tmpdir } from 'node:os';
 
-export const CHROME =
-  process.env.CHROME ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+function defaultChromePath() {
+  if (process.env.CHROME) return process.env.CHROME;
+  if (process.platform === 'win32') {
+    const candidates = [
+      'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+      'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+      process.env.LOCALAPPDATA ? join(process.env.LOCALAPPDATA, 'Google', 'Chrome', 'Application', 'chrome.exe') : '',
+    ].filter(Boolean);
+    for (const c of candidates) {
+      if (existsSync(c)) return c;
+    }
+  }
+  return '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+}
+
+export const CHROME = defaultChromePath();
 
 export const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 

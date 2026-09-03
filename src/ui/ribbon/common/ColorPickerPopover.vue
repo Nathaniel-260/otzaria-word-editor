@@ -51,8 +51,13 @@
       ref="popoverRef"
       class="color-palette-popover"
       :style="popoverStyle"
-      @pointerdown.stop
+      @pointerdown.prevent.stop
     >
+      <!--
+        `.prevent` על המעטפת ולא רק על הדוגמיות: לחיצה על כותרת פלטה או
+        ברווח שביניהן גזלה את הפוקוס מהמסמך. שדה הצבע המותאם נפתח ב-`click()`
+        תכנותי, שביטול `pointerdown` אינו נוגע בו.
+      -->
       <div
         v-if="allowClear"
         class="palette-section"
@@ -130,7 +135,7 @@
             type="color"
             :value="modelValue || defaultColor"
             class="custom-color-input"
-            @input="selectColor(($event.target as HTMLInputElement).value)"
+            @change="selectColor(($event.target as HTMLInputElement).value)"
           >
         </label>
       </div>
@@ -139,7 +144,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue';
+import { inject, ref, shallowRef, onMounted, onUnmounted } from 'vue';
+import type { SuperDoc } from 'superdoc';
+import { ACTIVE_SUPERDOC } from '../../../engine/document-api';
+import { focusDocument } from '../../../engine/focus';
 import SvgIcon from '../../icons/SvgIcon.vue';
 import { menuString } from '../i18n';
 import { usePopoverPosition } from '../../../composables/popover-position';
@@ -225,6 +233,7 @@ const containerRef = ref<HTMLElement | null>(null);
 const popoverRef = ref<HTMLElement | null>(null);
 const customColorRef = ref<HTMLInputElement | null>(null);
 const isOpen = ref(false);
+const superdoc = inject(ACTIVE_SUPERDOC, shallowRef<SuperDoc | null>(null));
 
 const { popoverStyle } = usePopoverPosition(containerRef, popoverRef, isOpen);
 
@@ -233,12 +242,18 @@ function toggleDropdown(): void {
   isOpen.value = !isOpen.value;
 }
 
+/**
+ * גם הבחירה מהדו-שיח המקורי מגיעה לכאן, אבל ב-`change` ולא ב-`input`:
+ * `input` יורה על כל תזוזה בתוך הדו-שיח, וכל ירייה סגרה את הפופאובר, שלחה
+ * פקודת צבע למנוע והחזירה מיקוד למסמך — עוד לפני שהמשתמש סיים לבחור.
+ */
 function selectColor(hex: string | null): void {
   // `modelValue` נשאר מחרוזת — הוא מזין את פס הצבע שעל הכפתור, ו-CSS צריך שם
   // ערך ולא null. רק ה-`change`, כלומר מה שהופך ל-payload, נושא את ההבחנה.
   emit('update:modelValue', hex ?? '');
   emit('change', hex);
   isOpen.value = false;
+  focusDocument(superdoc.value);
 }
 
 /**

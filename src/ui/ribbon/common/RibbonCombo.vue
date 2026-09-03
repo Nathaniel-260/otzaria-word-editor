@@ -27,9 +27,12 @@
       @keydown="onKeydown"
     >
     <!--
-      `mousedown.prevent` ולא `click`: בלי מניעת ברירת המחדל הלחיצה מוציאה את
+      `pointerdown.prevent` ולא `click`: בלי מניעת ברירת המחדל הלחיצה מוציאה את
       הפוקוס מהשדה, `blur` סוגר את הרשימה, והפתיחה מיד אחריה נראתה כהבהוב.
-      `click` נוסף עליו בשביל הפעלה שאינה מעכבר — ראו `onArrowClick`.
+      `pointerdown` ולא `mousedown`, כמו בשאר פקדי הרצועה: ביטול `pointerdown`
+      מדכא גם את `mousedown` התואם (Pointer Events §11), ולכן מאזין שני על
+      `mousedown` היה רץ פעמיים רק ב-jsdom ואף פעם בדפדפן. `click` נוסף עליו
+      בשביל הפעלה שאינה מעכבר — ראו `onArrowClick`.
     -->
     <button
       type="button"
@@ -37,7 +40,7 @@
       tabindex="-1"
       :disabled="disabled"
       :aria-label="menuString('פתח את הרשימה')"
-      @mousedown.prevent="toggle"
+      @pointerdown.prevent="toggle"
       @click="onArrowClick"
     >
       <SvgIcon
@@ -53,7 +56,12 @@
       class="ribbon-combo-list"
       role="listbox"
       :style="popoverStyle"
+      @pointerdown.prevent.stop
     >
+      <!--
+        גם על הרשימה עצמה ולא רק על הפריטים: לחיצה על כותרת קבוצה או ברווח
+        שביניהם הייתה מוציאה את הפוקוס מהשדה, ו-`blur` סוגר את הרשימה.
+      -->
       <template
         v-for="(row, i) in built.rows"
         :key="row.type === 'group' ? `g:${row.label}:${i}` : `o:${row.option.value}`"
@@ -75,7 +83,7 @@
           :data-value="row.option.value"
           :data-group="row.option.group ?? ''"
           :style="row.option.preview ? { fontFamily: row.option.preview } : undefined"
-          @mousedown.prevent="choose(row.option.value)"
+          @pointerdown.prevent.stop="choose(row.option.value)"
           @mousemove="activeIndex = row.index"
         >
           {{ menuString(row.option.label) }}
@@ -112,7 +120,10 @@
  * ההכרעות שאינן חיווט — מה נחשב התאמה, מה מדורג לפני מה, ומה Enter מחיל —
  * יושבות ב-`../font-search.ts` ונבדקות שם ישירות.
  */
-import { computed, nextTick, ref, watch } from 'vue';
+import { computed, inject, nextTick, ref, shallowRef, watch } from 'vue';
+import type { SuperDoc } from 'superdoc';
+import { ACTIVE_SUPERDOC } from '../../../engine/document-api';
+import { focusDocument } from '../../../engine/focus';
 import { usePopoverPosition } from '../../../composables/popover-position';
 import SvgIcon from '../../icons/SvgIcon.vue';
 import { menuString } from '../i18n';
@@ -149,6 +160,7 @@ const inputRef = ref<HTMLInputElement | null>(null);
 const listRef = ref<HTMLElement | null>(null);
 const open = ref(false);
 const activeIndex = ref(-1);
+const superdoc = inject(ACTIVE_SUPERDOC, shallowRef<SuperDoc | null>(null));
 
 /**
  * המיקום נמדד ואינו CSS, ומאותו טעם בדיוק שבו שאר הפופאוברים של הרצועה
@@ -221,7 +233,7 @@ function toggle(): void {
  * הפעלת החץ שאינה מעכבר: מקלדת, או `click()` תכנותי.
  *
  * `detail === 0` הוא מה שמפריד ביניהן ללחיצת עכבר אמיתית, וההבחנה נדרשת מפני
- * ש-`mousedown` כבר טיפל בזו: בלעדיה לחיצת עכבר הייתה פותחת ב-`mousedown`
+ * ש-`pointerdown` כבר טיפל בזו: בלעדיה לחיצת עכבר הייתה פותחת ב-`pointerdown`
  * וסוגרת מיד ב-`click` שאחריו.
  */
 function onArrowClick(event: MouseEvent): void {
@@ -232,6 +244,8 @@ function onArrowClick(event: MouseEvent): void {
 function choose(value: string): void {
   closeList();
   if (value !== props.modelValue) emit('update:modelValue', value);
+  inputRef.value?.blur();
+  focusDocument(superdoc.value);
 }
 
 function onFocus(): void {
@@ -263,6 +277,8 @@ function onKeydown(event: KeyboardEvent): void {
     event.stopPropagation();
     event.preventDefault();
     closeList();
+    inputRef.value?.blur();
+    focusDocument(superdoc.value);
     return;
   }
 
@@ -270,8 +286,13 @@ function onKeydown(event: KeyboardEvent): void {
     if (!open.value) return;
     event.preventDefault();
     const value = commitValue(built.value, activeIndex.value, query.value ?? '');
-    if (value !== null) choose(value);
-    else closeList();
+    if (value !== null) {
+      choose(value);
+    } else {
+      closeList();
+      inputRef.value?.blur();
+      focusDocument(superdoc.value);
+    }
     return;
   }
 

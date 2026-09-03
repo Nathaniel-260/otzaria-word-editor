@@ -187,8 +187,8 @@ export interface Shortcut {
 
 **בוצע כאשר:** `npm run verify` ירוק, וכל הבדיקות עוברות.
 
-**הערת סביבה:** `check:boot` מחפש Chrome בנתיב של macOS ונכשל במכונת Windows
-גם על `main` נקי. יש להריץ אותו עם `CHROME=` שמצביע ל‑chrome.exe המקומי.
+**הערת סביבה:** `scripts/cdp.mjs` מזהה את Chrome בנתיבי ההתקנה המקובלים של
+Windows ושל macOS; התקנה במקום אחר דורשת `CHROME=` שמצביע ל‑chrome.exe.
 
 **קומיט:** `קיצורי מקלדת: רג'יסטרי אחד, והתאמה לפי code במקום key`
 

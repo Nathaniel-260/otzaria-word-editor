@@ -109,8 +109,15 @@ async function flush(): Promise<void> {
   for (let i = 0; i < 20; i += 1) await Promise.resolve();
 }
 
+// כשל שמירה נרשם ל-console.warn (fail() בקואורדינטור); הבדיקות כאן מייצרות
+// אותו בכוונה, ובלי ההשתקה כל ריצה מדפיסה עקבות מחסנית של כשלים מתוכננים.
+beforeEach(() => {
+  vi.spyOn(console, 'warn').mockImplementation(() => {});
+});
+
 afterEach(() => {
   vi.useRealTimers();
+  vi.restoreAllMocks();
 });
 
 describe('saveNow', () => {
@@ -250,6 +257,21 @@ describe('כשלים', () => {
     // הכשל שמדווח הוא של ההעלאה, לא של הניקוי.
     expect(outcome.status).toBe('failed');
     expect(outcome.status === 'failed' && outcome.message).toContain('413');
+  });
+
+  it('כשל ב-beginWrite מדווח על כשל בהכנת השמירה ולא כשל בהעלאה', async () => {
+    const h = harness();
+    h.coordinator.markDirty();
+    h.onBeginWrite(() => Promise.reject(new Error('error.permission_denied')));
+
+    const outcome = await h.coordinator.saveNow();
+
+    expect(outcome.status).toBe('failed');
+    if (outcome.status === 'failed') {
+      expect(outcome.message).toContain('הכנת השמירה באוצריא נכשלה');
+      expect(outcome.message).toContain('error.permission_denied');
+      expect(outcome.message).not.toContain('העלאת המסמך נכשלה');
+    }
   });
 
   it('כשל commit משאיר מלוכלך ואינו מאמץ יעד', async () => {
