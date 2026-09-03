@@ -13,6 +13,7 @@
  *   4. „הפוך רשימה ממוספרת לתבליטים” על רשימה קיימת — הסמן שמצטייר, ובנפרד
  *      `numFmt` **וגם** `lvlText`: `numFmt="bullet"` עם `lvlText="%1."` הוא
  *      מסמך שנראה תקין בבדיקה חלקית ומצייר „%1.” על המסך.
+ *   5. אותה המרה בצמוד לרשימת תבליטים אחרת — האם השכנה נגררת.
  * ובכל אחד: `doc.selection.current()` (אסינכרוני!) לפני התפריט ובזמן שהוא פתוח.
  *
  * כל שורת פעולה דורשת שני דברים: שלא הופיעה ההודעה „יש למקם את הסמן” (שומר
@@ -229,6 +230,34 @@ try {
   } else {
     report.fail('4. המרה לתבליטים — הסמן אינו תבליט',
       `numFmt=${second4.numFmt} lvlText=„${second4.lvlText}” | סמנים ${JSON.stringify(r4.markers)} status=${r4.status.text}`);
+  }
+
+  /* ---- 5. ההמרה נוגעת רק ברשימה שהסמן בה ---- */
+  // `continuity` אינו נמסר ל-`lists.setType`, וברירת המחדל בחוזה היא
+  // `'preserve'` — „מיזוג רצפים סמוכים תואמים”. אחרי 4 „שני” היא תבליטים
+  // ו„ראשון” נשארה ממוספרת בנפרד (ההתחלה מחדש בשלב 1 פיצלה אותן), ולכן
+  // המרת „ראשון” היא בדיוק המצב שבו מיזוג היה נראה: שתי רשימות תבליטים צמודות.
+  const numbering4 = numberingOf(r4.files);
+  const firstBefore5 = lvl0Of(paragraphsOf(r4.files).find((p) => textOf(p) === 'ראשון') || '', numbering4);
+  await app.caret(0);
+  await app.press('End', 'End', 35);
+  await app.sleep(400);
+  const r5 = await menuAction('הפוך רשימה ממוספרת לתבליטים', 'פעולות תבליטים');
+  const numbering5 = numberingOf(r5.files);
+  const first5 = lvl0Of(paragraphsOf(r5.files).find((p) => textOf(p) === 'ראשון') || '', numbering5);
+  const second5 = lvl0Of(paragraphsOf(r5.files).find((p) => textOf(p) === 'שני') || '', numbering5);
+  console.log('5 „ראשון” לפני:', JSON.stringify(firstBefore5), '| „שני” לפני:', JSON.stringify(second4),
+    '| „ראשון” אחרי:', JSON.stringify(first5), '| „שני” אחרי:', JSON.stringify(second5),
+    '| סמנים:', JSON.stringify(r5.markers));
+  const neighbourKept = second5.numId === second4.numId && second5.abstractNumId === second4.abstractNumId;
+  if (firstBefore5.numFmt === 'bullet') {
+    report.fail('5. ההמרה נגעה רק ברשימה שהסמן בה', `„ראשון” הפכה לתבליטים כבר בשלב 4 — הרצפים מוזגו (${JSON.stringify(firstBefore5)})`);
+  } else if (first5.numFmt === 'bullet' && first5.lvlText === '•' && neighbourKept && first5.numId !== second5.numId) {
+    report.pass('5. ההמרה נגעה רק ברשימה שהסמן בה',
+      `„ראשון” ${firstBefore5.numFmt}→bullet ב-numId ${first5.numId}; „שני” נשארה numId=${second5.numId}/abstractNum=${second5.abstractNumId} — בלי מיזוג`);
+  } else {
+    report.fail('5. ההמרה נגעה רק ברשימה שהסמן בה',
+      `„ראשון”=${JSON.stringify(first5)} „שני” ${JSON.stringify(second4)}→${JSON.stringify(second5)} status=${r5.status.text}`);
   }
 
   console.log('לוג הדף:', JSON.stringify(await app.log()));
