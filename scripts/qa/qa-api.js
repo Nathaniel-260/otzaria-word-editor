@@ -196,7 +196,14 @@
 
   /**
    * בחירה בבורר. ב-`<select>` — הצבה ואירוע; ב-RibbonCombo — פתיחה ולחיצה
-   * אמיתית על השורה, כי הקומפוננטה מקשיבה ל-`mousedown` ולא ל-`change`.
+   * על השורה, כי הקומפוננטה אינה מקשיבה ל-`change`.
+   *
+   * `pointerdown` ולא `mousedown`: שורת האפשרות מחוברת ל-`@pointerdown` בלבד
+   * (RibbonCombo.vue), ולכן `mousedown` מסונתז לא הפעיל מאזין כלל — והשער
+   * שמעליו קרא „נבחר אך אינו ב-OOXML” על מוצר שעובד.
+   *
+   * ולכן ה-`ok` נמדד ולא מוצהר: `choose` סוגר את הרשימה וה-`v-if` מוציא אותה
+   * מה-DOM, ורשימה שנשארה פתוחה היא הוכחה שהמאזין לא רץ.
    */
   Q.selectValue = function (name, value) {
     var el = Q.el(name, { selector: PICKER });
@@ -222,8 +229,21 @@
         comboClose(el);
         return 'no-option:' + all.slice(0, 40).join(',');
       }
-      hit.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
-      return 'ok';
+      hit.dispatchEvent(
+        new PointerEvent('pointerdown', {
+          bubbles: true,
+          cancelable: true,
+          pointerType: 'mouse',
+          isPrimary: true,
+        })
+      );
+      var listId = el.getAttribute('aria-controls');
+      return Promise.resolve()
+        .then(function () { return null; })
+        .then(function () { return null; })
+        .then(function () {
+          return listId && document.getElementById(listId) ? 'no-commit' : 'ok';
+        });
     });
   };
 
