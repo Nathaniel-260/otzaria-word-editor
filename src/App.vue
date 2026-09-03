@@ -1382,7 +1382,7 @@ async function openDocumentInto(
   // החוט הראשי, ומשם אין חזרה — גם `OPEN_TIMEOUT_MS` אינו יכול לירות. ראו
   // engine/docx-preflight.ts. השלב הזה אינו יכול להיכשל: הוא מחזיר את המקור
   // כמות שהוא בכל מקרה שאינו „מצאתי בדיוק את הערך הזה”.
-  const { source, fontTable, vba } = await preflightSource(options.draft ?? file?.url);
+  const { source, fontTable, vba, notice: preflightNotice } = await preflightSource(options.draft ?? file?.url);
   // „דלג” בזמן שהבייטים נקראו. הבדיקה כאן ולא רק לפני המנוע: שאר הפונקציה
   // כותבת למצב של המעטפת — כותרת, יעד שמירה, רשומת ההפעלה — ופתיחה שהמשתמש
   // נטש אינה אמורה לכתוב שם דבר.
@@ -1802,16 +1802,22 @@ async function openDocumentInto(
   );
   setStatus('');
 
-  /* שורת המצב מציגה הודעה אחת, ולכן יש סדר עדיפות בין השתיים שיכולות להיאמר
+  /* שורת המצב מציגה הודעה אחת, ולכן יש סדר עדיפות בין אלה שיכולות להיאמר
      כאן. „יש במסמך מאקרו שWord מריץ בפתיחה” קודמת ל„פתוח לקריאה”: הראשונה היא
      מה שהמשתמש צריך לדעת על הקובץ שהוא פתח, והשנייה תתגלה לו בעצמה ברגע
      שילחץ „שמור”. ספירת מודולים בלבד — הפחות דחוף — נאמרת רק כשאין השתקה
-     אחרת. */
+     אחרת.
+
+     הודעת השלב המקדים נכנסה **שנייה**, אחרי המאקרו ולפני „פתוח לקריאה”, ולא
+     כי היא דחופה יותר מהן: „פתוח לקריאה” המשתמש יגלה בעצמו בשמירה הראשונה,
+     ואת העובדה שהמסמך שלו **שונה** הוא אינו יכול לגלות בשום דרך — לא ברצועה,
+     לא בביטול, ולא בקובץ. ראו COMPLEX_SCRIPT_BOLD_NOTICE. */
   const readOnlyNotice =
     file && file.access !== 'readwrite'
       ? `${title.value} — פתוח לקריאה; „שמור” יבקש מקום חדש`
       : null;
   if (vba.autoRun.length > 0 && vba.status) setStatus(vba.status);
+  else if (preflightNotice) setStatus(preflightNotice);
   else if (readOnlyNotice) setStatus(readOnlyNotice);
   else if (vba.status) setStatus(vba.status);
 

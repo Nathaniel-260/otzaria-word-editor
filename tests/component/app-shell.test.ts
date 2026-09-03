@@ -39,6 +39,8 @@ import {
   type SuperdocDouble,
 } from './harness';
 import type { SaveCoordinatorDeps, SaveSnapshot } from '../../src/sessions/save-coordinator';
+import { COMPLEX_SCRIPT_BOLD_NOTICE } from '../../src/engine/docx-preflight';
+import { NO_VBA, type DocumentVba } from '../../src/engine/vba-import';
 import { COMMAND_REPORTER, STATUS_NOTIFIER, type CommandReporter } from '../../src/composables/keys';
 
 /**
@@ -89,6 +91,12 @@ const stub = vi.hoisted(() => ({
   forgotLastDocument: false,
   /** כמה פתיחות הבאות ייכשלו. */
   openFailures: 0,
+  /**
+   * מה שהשלב המקדים מדווח על המסמך שנפתח. `notice` הוא ההודעה על תיקון שנכתב
+   * לתוך המסמך; `vba` הוא המאקרו שנקרא ממנו. שניהם מתחרים על שורת המצב עם
+   * „פתוח לקריאה”, וסדר העדיפות ביניהם הוא מה שנמדד למטה.
+   */
+  preflight: { notice: null as string | null, vba: null as DocumentVba | null },
 }));
 
 vi.mock('../../src/engine/create-editor', () => ({
@@ -113,6 +121,21 @@ vi.mock('../../src/sessions/editor-swap', () => ({
       return { status: 'opened', session: stub.session };
     },
     destroy: () => {},
+  }),
+}));
+
+/**
+ * השלב המקדים אינו יכול לרוץ כאן — הוא מושך את המסמך מ-URL ופותח את ה-zip —
+ * ולכן הוא מוחלף בכפיל שמחזיר את המקור כמות שהוא, עם מה שהבדיקה קבעה. הקבוע
+ * של ההודעה נשאר אמיתי: הבדיקה מודדת שהנוסח **הזה** מגיע לשורת המצב.
+ */
+vi.mock('../../src/engine/docx-preflight', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/engine/docx-preflight')>()),
+  preflightSource: async (source: unknown) => ({
+    source,
+    fontTable: null,
+    vba: stub.preflight.vba ?? { hasMacroPart: false, modules: [], autoRun: [], warnings: [], status: null, unreadable: false },
+    notice: stub.preflight.notice,
   }),
 }));
 
@@ -264,6 +287,7 @@ beforeEach(() => {
   stub.lastDocument = null;
   stub.forgotLastDocument = false;
   stub.openFailures = 0;
+  stub.preflight = { notice: null, vba: null };
   stub.markDirtyCalls = 0;
   stub.resetCalls = 0;
   stub.searchOpens = 0;
@@ -807,6 +831,82 @@ describe('חזרה למה שהיה', () => {
  * שהמעטפת מספקת, וכל ההחלטה מה יופיע בפס היא של `reportCommand`. לכן נמדד
  * כאן המדווח עצמו, בדיוק כפי שהפקד קורא לו.
  */
+/**
+ * שורת המצב מציגה הודעה אחת, ובפתיחה יש שלוש שיכולות להיאמר. הסדר נקבע
+ * ב-App.vue ומנומק שם; כאן הוא נמדד, כדי ששינוי תמים ב-`else if` לא ידחוק
+ * בשקט את ההודעה היחידה שאומרת למשתמש שהמסמך שלו **שונה**.
+ */
+describe('הודעת השלב המקדים בשורת המצב', () => {
+  const statusText = (wrapper: ReturnType<typeof mount>) => wrapper.find('.word-statusbar').text();
+
+  /**
+   * מסמך זכור שנפתח בעלייה. „פתוח לקריאה” נגזרת מ-`writable` שברשומה
+   * (ראו resolveRememberedFile), ולא ממה ש-`resolveFileUrl` מחזיר.
+   */
+  function openFile(access: 'read' | 'readwrite'): void {
+    stub.storedSession = {
+      version: 2,
+      documents: [
+        {
+          id: 'doc-1',
+          document: { token: 'tok', name: 'חידושים.docx', writable: access === 'readwrite' },
+          caret: null,
+          draft: null,
+        },
+      ],
+      activeId: 'doc-1',
+      view: { zoom: null, focusMode: false, ribbonTab: null, ribbonCollapsed: false },
+    };
+    stub.resolvedFile = { token: 'tok', url: 'loopback://fresh', name: 'חידושים.docx', size: 120 };
+  }
+
+  it('מסמך שההדגשה בו הושלמה — ההודעה מגיעה לשורת המצב, ולא כשגיאה', async () => {
+    openFile('readwrite');
+    stub.preflight.notice = COMPLEX_SCRIPT_BOLD_NOTICE;
+
+    const wrapper = await mountShell();
+
+    expect(statusText(wrapper)).toContain(COMPLEX_SCRIPT_BOLD_NOTICE);
+    expect(wrapper.find('.status-message').classes()).not.toContain('error');
+  });
+
+  it('קודמת ל„פתוח לקריאה” — את זה המשתמש יגלה בשמירה, ואת השינוי במסמך לא', async () => {
+    openFile('read');
+    stub.preflight.notice = COMPLEX_SCRIPT_BOLD_NOTICE;
+
+    const wrapper = await mountShell();
+
+    expect(statusText(wrapper)).toContain(COMPLEX_SCRIPT_BOLD_NOTICE);
+    expect(statusText(wrapper)).not.toContain('פתוח לקריאה');
+  });
+
+  it('נדחית מפני מאקרו שWord מריץ בפתיחה', async () => {
+    openFile('readwrite');
+    stub.preflight.notice = COMPLEX_SCRIPT_BOLD_NOTICE;
+    stub.preflight.vba = {
+      ...NO_VBA,
+      hasMacroPart: true,
+      autoRun: ['Module1.AutoOpen'],
+      status: 'יש במסמך מאקרו שWord מריץ בפתיחה',
+    };
+
+    const wrapper = await mountShell();
+
+    expect(statusText(wrapper)).toContain('מאקרו שWord מריץ בפתיחה');
+    expect(statusText(wrapper)).not.toContain(COMPLEX_SCRIPT_BOLD_NOTICE);
+  });
+
+  it('בלי תיקון — „פתוח לקריאה” נאמרת כרגיל, ומאקרו שאינו רץ בפתיחה נדחה מפניה', async () => {
+    openFile('read');
+    stub.preflight.vba = { ...NO_VBA, hasMacroPart: true, status: 'במסמך יש מאקרו' };
+
+    const wrapper = await mountShell();
+
+    expect(statusText(wrapper)).toContain('פתוח לקריאה');
+    expect(statusText(wrapper)).not.toContain('במסמך יש מאקרו');
+  });
+});
+
 describe('הודעת-מידע על פקודה שהצליחה', () => {
   const NOTE = 'העמודה הראשונה מצוירת בצד שמאל, וגם הסימון עובר שמאל→ימין. הקובץ יישמר נכון.';
 
