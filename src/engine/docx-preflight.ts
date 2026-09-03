@@ -442,7 +442,13 @@ export function repairComplexScriptBold(xml: string): string | null {
     if (depth !== 1 || !scope || closing) continue;
     if (name === 'b') scope.hasBold = true;
     else if (name === 'bCs') {
-      scope.boldCsAt = match.index;
+      // המקום מה**ראשונה**, המצב מה**אחרונה** — ושני חצאי ההחלטה שונים
+      // בכוונה. `rPr` עם שתי `bCs` פסולה מלכתחילה, אבל התוצאה אסור לה להיות
+      // פסולה **יותר**: `CT_RPr` היא `xsd:sequence` שבו `b` בא לפני `bCs`,
+      // ולכן הוספה לפני ה-`bCs` השנייה מציבה `b` **אחרי** `bCs` — כלומר חלק
+      // שהסכימה של Word פוסלת. המצב נלקח מהאחרונה, כי בכפילות Word מכריע
+      // „האחרון קובע”.
+      if (scope.boldCsAt === null) scope.boldCsAt = match.index;
       scope.boldCsOn = isOn(attributes);
       scope.prefix = prefix;
     }
@@ -690,13 +696,25 @@ async function rewriteEntry(entry: ZipEntry, content: Bytes): Promise<ZipEntry> 
   };
 }
 
+/**
+ * פענוח XML של חלק, **בלי לפשוט את ה-BOM**.
+ *
+ * ברירת המחדל של `TextDecoder` מוחקת U+FEFF, ו-`TextEncoder` אינו מחזיר אותו,
+ * ולכן חלק שהתחיל ב-BOM היה נכתב מחדש בלעדיו. אין לזה נזק תפקודי — ההצהרה
+ * אומרת UTF-8 — אבל ההבטחה בכותרת הקובץ היא „זהה למקור בכל מה שאינו התיקון
+ * עצמו”, וזה חלק ממנה.
+ */
+function decodeXml(bytes: Bytes): string {
+  return new TextDecoder('utf-8', { ignoreBOM: true }).decode(bytes);
+}
+
 /** תוכן החלק כטקסט, או `null` כשאי אפשר לפרוס אותו. */
 async function readEntryText(entry: ZipEntry): Promise<string | null> {
-  if (entry.method === METHOD_STORED) return new TextDecoder().decode(entry.data);
+  if (entry.method === METHOD_STORED) return decodeXml(entry.data);
   if (entry.method !== METHOD_DEFLATE) return null;
 
   const inflated = await inflateRaw(entry.data);
-  return inflated && new TextDecoder().decode(inflated);
+  return inflated && decodeXml(inflated);
 }
 
 /**
