@@ -196,6 +196,73 @@ describe('resolveListItem', () => {
   });
 });
 
+/**
+ * issue #14 ג׳ — „במספור פסקאות – רשימה מופיע ‚יש למקם את הסמן בתוך הרשימה׳”.
+ *
+ * שוחזר (scripts/qa/list-caret-qa.mjs): סמן בפסקה רגילה, תפריט המספור, „א, ב,
+ * ג” — סירוב. המשתמש ביקש למספר את הפסקה; התפריט ענה שאלה טכנית על רשימה
+ * קיימת. עם `createList` הפסקה הופכת קודם לרשימה — הפקודה של הכפתור — ואז
+ * מקבלת את הסגנון.
+ */
+describe('setListNumberStyle — פסקה שאינה רשימה', () => {
+  const IN_PARAGRAPH = { target: { segments: [{ blockId: 'p9' }] } };
+
+  /** בחירה שמתחלפת: פסקה לפני `createList`, פריט רשימה אחריה — כמו במנוע. */
+  function docWithConvertibleParagraph(createOutcome = { ok: true } as const) {
+    let selection: unknown = IN_PARAGRAPH;
+    const { host, calls, doc } = fakeDoc();
+    (doc as { selection: { current: unknown } }).selection.current = vi.fn(async () => selection);
+    const createList = vi.fn(async () => {
+      if (createOutcome.ok) selection = SELECTION_IN_LIST;
+      return createOutcome;
+    });
+    return { host, calls, createList };
+  }
+
+  it('יוצרת רשימה ואז מחילה את הסגנון על הפריט **החדש**', async () => {
+    const { host, calls, createList } = docWithConvertibleParagraph();
+
+    const outcome = await setListNumberStyle(host, 'hebrew1', { createList });
+
+    expect(outcome).toEqual({ ok: true });
+    expect(createList).toHaveBeenCalledTimes(1);
+    expect(calls.get('setLevelNumberStyle')?.[0]).toEqual({
+      target: { kind: 'block', nodeType: 'listItem', nodeId: 'li1' },
+      level: 0,
+      numberStyle: 'hebrew1',
+    });
+  });
+
+  it('כשיצירת הרשימה נכשלה — הכשל שלה חוזר, והסגנון אינו נשלח', async () => {
+    const failed = { ok: false, message: 'המנוע אינו מוכן', reason: 'not-ready' } as const;
+    const { host, calls, createList } = docWithConvertibleParagraph(failed as never);
+
+    const outcome = await setListNumberStyle(host, 'hebrew1', { createList });
+
+    expect(outcome).toEqual(failed);
+    expect(calls.get('setLevelNumberStyle')).toEqual([]);
+  });
+
+  it('בלי `createList` — הסירוב המפורש, כמו קודם', async () => {
+    const { host, calls } = fakeDoc({ selection: IN_PARAGRAPH });
+
+    const outcome = await setListNumberStyle(host, 'hebrew1');
+
+    expect(outcome).toMatchObject({ ok: false, reason: 'selection-required' });
+    expect(calls.get('setLevelNumberStyle')).toEqual([]);
+  });
+
+  it('כשהסמן כבר ברשימה — `createList` אינה נקראת', async () => {
+    const { host, calls } = fakeDoc();
+    const createList = vi.fn(async () => ({ ok: true }) as const);
+
+    await setListNumberStyle(host, 'hebrew2', { createList });
+
+    expect(createList).not.toHaveBeenCalled();
+    expect(calls.get('setLevelNumberStyle')).toHaveLength(1);
+  });
+});
+
 describe('restartListAt', () => {
   it('startAt נשלח כמות שהוא', async () => {
     const { host, calls } = fakeDoc();

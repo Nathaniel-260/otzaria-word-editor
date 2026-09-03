@@ -1184,7 +1184,10 @@ function onListMenuSelect(id: string): void {
 
   if (id.startsWith('style:')) {
     const style = id.slice('style:'.length);
-    void runList(() => setListNumberStyle(superdoc.value, style));
+    // פסקה שעדיין אינה רשימה מקבלת קודם רשימה — הפקודה של הכפתור המפוצל
+    // עצמו — ואז את הסגנון. ראו `SetNumberStyleOptions.createList` ב-engine/lists.ts.
+    const createList = (style === 'bullet' ? bulletCmd : numberedCmd).run;
+    void runList(() => setListNumberStyle(superdoc.value, style, { createList: () => createList() }));
     return;
   }
 

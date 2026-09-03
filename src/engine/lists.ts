@@ -195,13 +195,32 @@ function notInList(failedAction: string): CommandOutcome {
   return { ok: false, message: `${failedAction}: יש למקם את הסמן בתוך רשימה`, reason: 'selection-required' };
 }
 
+export interface SetNumberStyleOptions {
+  /**
+   * איך להפוך את הפסקה שבסמן לרשימה כשהיא עדיין אינה כזאת — הפקודה של
+   * הכפתור („מספור”/„תבליטים”), שיושבת ב-registry של המנוע ולא ב-Document
+   * API, ולכן מוזרקת מהרצועה ולא נקראת מכאן.
+   *
+   * בלעדיה הבחירה בסגנון מסרבת על פסקה רגילה. זה מה שהמשתמש קיבל (issue
+   * #14 ג׳, שוחזר ב-scripts/qa/list-caret-qa.mjs): פתח את תפריט המספור על
+   * פסקה, בחר „א, ב, ג”, וקרא „יש למקם את הסמן בתוך רשימה” — כשכל מה שביקש
+   * הוא למספר את הפסקה, כמו שגלריית המספור של Word עושה.
+   */
+  createList?: () => Promise<CommandOutcome>;
+}
+
 /**
  * מגדירה את סגנון המספור של רמה 0 ברשימה שבה הסמן. `hebrew1` הוא
  * המספור העברי (א׳ ב׳ ג׳) — נמדד שנכתב ל-numbering.xml.
+ *
+ * על פסקה שאינה רשימה: אם נמסרה `createList`, קודם יוצרים את הרשימה ואז
+ * מחילים את הסגנון — בחירת סגנון היא בקשה למספר, לא שאלה על רשימה קיימת.
+ * בלי `createList` (או כשהיצירה נכשלה) — הסירוב המפורש, כמו קודם.
  */
 export async function setListNumberStyle(
   host: ListsTarget,
   numberStyle: string,
+  options: SetNumberStyleOptions = {},
 ): Promise<CommandOutcome> {
   const failedAction = 'שינוי סגנון המספור נכשל';
 
@@ -210,7 +229,14 @@ export async function setListNumberStyle(
     return { ok: false, message: `${failedAction}: סגנון המספור אינו חוקי`, reason: 'invalid-number-style' };
   }
 
-  const item = await resolveListItem(host);
+  let item = await resolveListItem(host);
+  if (!item && options.createList) {
+    const created = await options.createList();
+    if (!created.ok) return created;
+    // נפתר מחדש ולא מונח: הפקודה החליפה את הפסקה בפריט רשימה עם `nodeId`
+    // חדש, וכתובת ישנה הייתה TARGET_NOT_FOUND.
+    item = await resolveListItem(host);
+  }
   if (!item) return notInList(failedAction);
 
   const setLevelNumberStyle = docOf(host)?.lists?.setLevelNumberStyle;
