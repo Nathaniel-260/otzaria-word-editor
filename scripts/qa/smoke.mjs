@@ -37,6 +37,14 @@ try {
 
   clicked ? report.pass('נמצא הכפתור „מודגש” ונלחץ') : report.fail('הכפתור „מודגש” לא נמצא');
 
+  // כל פקד נראה בלשונית מול מה ש-`Q.el` מחזיר עליו — שער שנפל על התאמה מוסתרת
+  // דיווח „הכפתור לא נמצא”, בלי שום דרך לדעת שהעזר הוא שטעה.
+  const shadowed = await app.shadowed();
+  console.log('פקדים שהעזר מחזיר עליהם אלמנט מוסתר:', JSON.stringify(shadowed));
+  shadowed.length === 0
+    ? report.pass('העזר בוחר את הפקד הנראה', `${(await app.controls()).length} פקדים נסרקו`)
+    : report.fail('העזר בחר אלמנט מוסתר על פקד נראה', shadowed.map((s) => `${s.name} → ${s.tag} „${s.picked}”`).join(' | ').slice(0, 200));
+
   const files = await app.docx();
   if (!files) {
     report.fail('ייצוא docx', 'לא הוחזר קובץ');

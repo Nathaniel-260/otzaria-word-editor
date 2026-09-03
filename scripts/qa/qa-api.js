@@ -128,6 +128,24 @@
     return hits[opts.index || 0] || null;
   };
 
+  /** פקדים נראים שעליהם `Q.el` בכל זאת מחזיר אלמנט מוסתר — המלכודת עצמה. */
+  Q.shadowed = function () {
+    var body = document.querySelector('.word-ribbon-body');
+    if (!body) return [];
+    var out = [];
+    var seen = {};
+    Array.prototype.forEach.call(body.querySelectorAll('button, select, input'), function (el) {
+      var n = nameOf(el);
+      if (!n || seen[n] || !Q.rectOf(el)) return;
+      seen[n] = true;
+      var picked = Q.el(n);
+      if (picked && !Q.rectOf(picked)) {
+        out.push({ name: n, picked: nameOf(picked).slice(0, 60), tag: picked.tagName.toLowerCase() });
+      }
+    });
+    return out;
+  };
+
   Q.state = function (name, opts) {
     var el = Q.el(name, opts);
     if (!el) return { found: false };
