@@ -10,6 +10,9 @@
  *      סגנון מספור לפריט הבא.
  *   3. סמן בפסקה **רגילה** (לא רשימה) ובחירת סגנון מספור מהתפריט — האם התפריט
  *      יוצר רשימה, או מסרב.
+ *   4. „הפוך רשימה ממוספרת לתבליטים” על רשימה קיימת — הסמן שמצטייר, ובנפרד
+ *      `numFmt` **וגם** `lvlText`: `numFmt="bullet"` עם `lvlText="%1."` הוא
+ *      מסמך שנראה תקין בבדיקה חלקית ומצייר „%1.” על המסך.
  * ובכל אחד: `doc.selection.current()` (אסינכרוני!) לפני התפריט ובזמן שהוא פתוח.
  *
  * כל שורת פעולה דורשת שני דברים: שלא הופיעה ההודעה „יש למקם את הסמן” (שומר
@@ -77,14 +80,16 @@ function lvl0Of(paragraph, numbering) {
     numId,
     abstractNumId,
     numFmt: lvl0.match(/<w:numFmt w:val="([^"]+)"/)?.[1] ?? null,
+    lvlText: lvl0.match(/<w:lvlText w:val="([^"]*)"/)?.[1] ?? null,
+    markerFont: lvl0.match(/<w:rFonts[^>]*w:ascii="([^"]+)"/)?.[1] ?? null,
     start: lvl0.match(/<w:start w:val="(\d+)"\s*\/>/)?.[1] ?? null,
     startOverride: override.match(/<w:startOverride w:val="(\d+)"\s*\/>/)?.[1] ?? null,
   };
 }
 
-async function menuAction(label) {
+async function menuAction(label, button = 'פעולות מספור') {
   await app.reset();
-  await app.click('פעולות מספור');
+  await app.click(button);
   await app.sleep(600);
   const during = parse(await readSelection());
   const picked = await app.clickMenu(label);
@@ -201,6 +206,29 @@ try {
   } else {
     report.fail('3. סגנון מספור על פסקה רגילה — לא סורב, אך לא מוספר כמבוקש',
       `numPr=${numbered} lvl0=${JSON.stringify(lvl3)} status=${r3.status.text}`);
+  }
+
+  /* ---- 4. „הפוך רשימה ממוספרת לתבליטים” על רשימה קיימת ---- */
+  await app.caret(2);
+  await app.press('End', 'End', 35);
+  await app.sleep(400);
+  const before4 = await markersOf();
+  const r4 = await menuAction('הפוך רשימה ממוספרת לתבליטים', 'פעולות תבליטים');
+  const second4 = lvl0Of(paragraphsOf(r4.files).find((p) => textOf(p) === 'שני') || '', numberingOf(r4.files));
+  // `numFmt` לבדו אינו הוכחה: הסמן נגזר מ-`lvlText`, ו-„%1.” שנשאר שם הוא
+  // בדיוק הבאג. ולכן שתי הבדיקות, ובנוסף הסמן שמצטייר בפועל.
+  const bulletXml = second4.numFmt === 'bullet' && second4.lvlText === '•';
+  const bulletDrawn = r4.markers.includes('•') && !r4.markers.some((m) => m.includes('%'));
+  console.log('4 סמנים לפני:', JSON.stringify(before4), '| אחרי:', JSON.stringify(r4.markers),
+    '| status:', JSON.stringify(r4.status), '| lvl0 של „שני”:', JSON.stringify(second4));
+  if (/יש למקם את הסמן/.test(r4.status.text || '')) {
+    report.fail('4. המרה לתבליטים על רשימה קיימת — סורב', r4.status.text);
+  } else if (bulletXml && bulletDrawn) {
+    report.pass('4. המרה לתבליטים — גם ה-OOXML וגם הסמן',
+      `numFmt=bullet lvlText=„•” גופן=${second4.markerFont} | סמנים ${r4.markers.join(' ')}`);
+  } else {
+    report.fail('4. המרה לתבליטים — הסמן אינו תבליט',
+      `numFmt=${second4.numFmt} lvlText=„${second4.lvlText}” | סמנים ${JSON.stringify(r4.markers)} status=${r4.status.text}`);
   }
 
   console.log('לוג הדף:', JSON.stringify(await app.log()));
