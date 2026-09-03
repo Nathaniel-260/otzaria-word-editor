@@ -1067,6 +1067,7 @@ export function createSuperdocDouble(options: SuperdocDoubleOptions = {}): Super
       setLevelNumberStyle: route('lists.setLevelNumberStyle', () =>
         receipt('lists.setLevelNumberStyle'),
       ),
+      setType: route('lists.setType', () => receipt('lists.setType')),
       restartAt: route('lists.restartAt', () => receipt('lists.restartAt')),
       continuePrevious: route('lists.continuePrevious', () => receipt('lists.continuePrevious')),
       convertToText: route('lists.convertToText', () => receipt('lists.convertToText')),

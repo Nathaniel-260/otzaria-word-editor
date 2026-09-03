@@ -11,6 +11,7 @@ import {
   NUMBER_STYLE_LABELS,
   restartListAt,
   setListNumberStyle,
+  setListToBullets,
 } from '../../src/engine/lists';
 
 const SELECTION_IN_LIST = {
@@ -37,7 +38,7 @@ function fakeDoc(
 ) {
   const calls = new Map<string, unknown[]>();
   const impls: Record<string, (input: unknown) => unknown> = {};
-  for (const name of ['setLevelNumberStyle', 'restartAt', 'continuePrevious', 'convertToText']) {
+  for (const name of ['setLevelNumberStyle', 'setType', 'restartAt', 'continuePrevious', 'convertToText']) {
     calls.set(name, []);
     const receipt = options.receipts?.[name] ?? { success: true };
     impls[name] = (input: unknown) => {
@@ -63,6 +64,53 @@ function fakeDoc(
 
   return { doc, calls, host: { activeEditor: { doc } } };
 }
+
+describe('setListToBullets', () => {
+  it('lists.setType עם kind:bullet — ולא numFmt לבדו', async () => {
+    const { host, calls } = fakeDoc();
+
+    expect(await setListToBullets(host)).toEqual({ ok: true });
+    expect(calls.get('setType')?.[0]).toEqual({
+      target: { kind: 'block', nodeType: 'listItem', nodeId: 'li1' },
+      kind: 'bullet',
+    });
+    // `setLevelNumberStyle({numberStyle:'bullet'})` כותב numFmt בלי lvlText,
+    // והסמן שמצטייר הוא „%1.” — נמדד.
+    expect(calls.get('setLevelNumberStyle')).toHaveLength(0);
+  });
+
+  it("'bullet' אינו סגנון מספור חוקי יותר — המסלול השבור חסום", async () => {
+    const { host, calls } = fakeDoc();
+
+    const outcome = await setListNumberStyle(host, 'bullet');
+
+    expect(outcome.ok).toBe(false);
+    expect(calls.get('setLevelNumberStyle')).toHaveLength(0);
+  });
+
+  it('פסקה שאינה רשימה — סירוב בלי לגעת במסמך, גם בלי createList', async () => {
+    const { host, calls } = fakeDoc({
+      selection: { target: { segments: [{ blockId: 'p9' }] } },
+      listState: { p9: false },
+    });
+
+    const outcome = await setListToBullets(host);
+
+    expect(outcome.ok).toBe(false);
+    expect(outcome.ok === false && outcome.message).toContain('יש למקם את הסמן בתוך רשימה');
+    expect(calls.get('setType')).toHaveLength(0);
+  });
+
+  it('מנוע בלי lists.setType — „אינו זמין בגרסה זו”', async () => {
+    const { host, doc } = fakeDoc();
+    delete (doc as unknown as { lists: Record<string, unknown> }).lists.setType;
+
+    const outcome = await setListToBullets(host);
+
+    expect(outcome.ok).toBe(false);
+    expect(outcome.ok === false && outcome.message).toContain('אינו זמין בגרסה זו');
+  });
+});
 
 describe('setListNumberStyle', () => {
   it('hebrew1 נשלח ברמה 0 — המספור העברי', async () => {

@@ -148,14 +148,11 @@ describe('כפתורי הרשימה בלשונית „בית"', () => {
     // הידנית אינה נגזרת מהמפה, ולכן סגנון שיתווסף ל-`NUMBER_STYLE_LABELS`
     // פשוט לא יופיע — בלי שגיאה, בלי אזהרה, ובלי דרך לראות זאת בקוד. וגם
     // ההפך: סגנון שיימחק מהרשימה נעלם מהממשק בשקט.
-    //
-    // `bullet` הוא היוצא היחיד, והוא יוצא מוצהר: הוא התפריט של „תבליטים”.
     const harness = mountUi(HomeTab, { superdoc: withSelection() });
     await settle();
 
     const labels = await openMenu(harness.wrapper, NUMBER);
     const missing = Object.entries(NUMBER_STYLE_LABELS)
-      .filter(([id]) => id !== 'bullet')
       .filter(([, label]) => !labels.includes(label))
       .map(([id, label]) => `${id} (${label})`);
 
@@ -234,9 +231,9 @@ describe('createList מוסרת לסגנוני מספור בלבד', () => {
     );
     expect(ids).not.toContain('numbered-list');
     // ובלי לגעת במסמך: הסירוב היחיד שהמשתמש מקבל.
-    expect(harness.superdoc.calls.map((call) => call.op)).not.toContain(
-      'lists.setLevelNumberStyle',
-    );
+    const ops = harness.superdoc.calls.map((call) => call.op);
+    expect(ops).not.toContain('lists.setType');
+    expect(ops).not.toContain('lists.setLevelNumberStyle');
     const failures = harness.failures();
     expect(failures).toHaveLength(1);
     expect(failures[0]!.outcome.ok === false && failures[0]!.outcome.message).toContain(

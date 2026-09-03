@@ -37,6 +37,9 @@ const UNAVAILABLE_TEXT = 'אינו זמין בגרסה זו';
  * ונמדד ש-`w:numFmt="hebrew1"` אכן נכתב ל-numbering.xml. מה שלא נמדד אז הוא
  * שה**סמן צויר ריק**: על superdoc@2.8.0 המשתמש קיבל „. ” בלי אות, כלומר
  * מסמך נכון ומסך ריק. במעבר ל-2.10.0 הסמנים מצוירים, ולכן `hebrew2` מצטרף.
+ *
+ * `bullet` **אינו** כאן: הוא היה נכתב כ-`numFmt` בלי `lvlText`, והסמן שהצטייר
+ * היה „%1.” (נמדד). תבליטים הם `setListToBullets` — `lists.setType`.
  */
 export const NUMBER_STYLES: readonly string[] = [
   'decimal',
@@ -46,7 +49,6 @@ export const NUMBER_STYLES: readonly string[] = [
   'lowerRoman',
   'hebrew1',
   'hebrew2',
-  'bullet',
 ];
 
 /**
@@ -68,7 +70,6 @@ export const NUMBER_STYLE_LABELS: Record<string, string> = {
   lowerRoman: 'i, ii, iii',
   hebrew1: 'א, ב, ג … יא, יב (גימטריה)',
   hebrew2: 'א, ב, ג … כ, ל (אלף־בית)',
-  bullet: 'תבליט',
 };
 
 interface ListsApiShape {
@@ -85,6 +86,7 @@ interface ListsApiShape {
       target: { kind: 'block'; nodeType: 'paragraph' | 'listItem'; nodeId: string };
     }) => MaybePromise<{ success?: boolean; isListItem?: boolean } | undefined>;
     setLevelNumberStyle?: (input: Record<string, unknown>) => MaybePromise<DocReceipt>;
+    setType?: (input: Record<string, unknown>) => MaybePromise<DocReceipt>;
     restartAt?: (input: Record<string, unknown>) => MaybePromise<DocReceipt>;
     continuePrevious?: (input: Record<string, unknown>) => MaybePromise<DocReceipt>;
     convertToText?: (input: Record<string, unknown>) => MaybePromise<DocReceipt>;
@@ -290,6 +292,29 @@ export async function setListNumberStyle(
   if (typeof setLevelNumberStyle !== 'function') return unsupported(failedAction);
 
   return call(failedAction, () => setLevelNumberStyle({ target: item, level: 0, numberStyle }));
+}
+
+/**
+ * „הפוך רשימה ממוספרת לתבליטים” — `lists.setType`, ולא
+ * `setLevelNumberStyle({numberStyle:'bullet'})`: החוזה של האחרון הוא
+ * `{target, level, numberStyle}` בלבד, ונמדד שהוא כותב `w:numFmt="bullet"`
+ * ומשאיר את `w:lvlText` על `"%1."` — כלומר הסמן שמצטייר הוא „%1.”.
+ * `setType({kind:'bullet'})` כותב את שלושתם: numFmt, `lvlText="•"` ו-Symbol
+ * ב-`rPr/rFonts`, באותו `numId` (המרה במקום, בלי לפרק את הרשימה).
+ *
+ * אינו יוצר רשימה על פסקה רגילה — לא כאן (אין `createList`) וגם לא במנוע,
+ * שמחזיר `TARGET_NOT_FOUND` על בלוק שאינו פריט.
+ */
+export async function setListToBullets(host: ListsTarget): Promise<CommandOutcome> {
+  const failedAction = 'המרת הרשימה לתבליטים נכשלה';
+
+  const item = await resolveAddress(host);
+  if (!item) return notInList(failedAction);
+
+  const setType = docOf(host)?.lists?.setType;
+  if (typeof setType !== 'function') return unsupported(failedAction);
+
+  return call(failedAction, () => setType({ target: item, kind: 'bullet' }));
 }
 
 /** „התחל מחדש": מגדיר את ערך ההתחלה של הרשימה שבה הסמן. */

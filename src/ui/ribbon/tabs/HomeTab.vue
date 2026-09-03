@@ -511,6 +511,7 @@ import {
   convertListToText,
   restartListAt,
   setListNumberStyle,
+  setListToBullets,
 } from '../../../engine/lists';
 import {
   DEFAULT_LINE_HEIGHT,
@@ -1140,14 +1141,14 @@ const numberMenuItems = computed(() => [
 ]);
 
 /**
- * התפריט של „תבליטים”. `style:bullet` אינו כפילות של הכפתור שמעליו: הכפתור
- * מחיל רשימה על פסקאות, וזה מחליף את סגנון המספור של רשימה **קיימת** —
- * כלומר הדרך להפוך רשימה ממוספרת לתבליטים בלי לפרק אותה ולבנות מחדש.
- * לכן `style:bullet` אינו מקבל `createList` ב-`onListMenuSelect`, בשונה
- * מסגנוני המספור: על פסקה רגילה הוא מסרב ואינו נוגע במסמך.
+ * התפריט של „תבליטים”. `to-bullets` אינו כפילות של הכפתור שמעליו: הכפתור
+ * מחיל רשימה על פסקאות, וזה מחליף את סגנון הסמן של רשימה **קיימת** — כלומר
+ * הדרך להפוך רשימה ממוספרת לתבליטים בלי לפרק אותה ולבנות מחדש. לכן הוא אינו
+ * מקבל `createList` ב-`onListMenuSelect`, בשונה מסגנוני המספור: על פסקה רגילה
+ * הוא מסרב ואינו נוגע במסמך.
  */
 const bulletMenuItems = computed(() => [
-  { id: 'style:bullet', label: 'הפוך רשימה ממוספרת לתבליטים' },
+  { id: 'to-bullets', label: 'הפוך רשימה ממוספרת לתבליטים' },
   convertItem.value,
 ]);
 
@@ -1186,11 +1187,14 @@ function onListMenuSelect(id: string): void {
 
   if (id.startsWith('style:')) {
     const style = id.slice('style:'.length);
-    // סגנון **מספור** על פסקה שאינה רשימה ממספר אותה קודם (issue #14 ג׳). `bullet`
-    // אינו מקבל זאת: הוא מחליף את סגנון המספור של רשימה קיימת, ויצירת תבליטים היא
-    // הכפתור שמעליו. ראו `SetNumberStyleOptions.createList` ב-engine/lists.ts.
-    const options = style === 'bullet' ? {} : { createList: numberedCmd.run };
-    void runList(() => setListNumberStyle(superdoc.value, style, options));
+    // סגנון מספור על פסקה שאינה רשימה ממספר אותה קודם (issue #14 ג׳). ראו
+    // `SetNumberStyleOptions.createList` ב-engine/lists.ts.
+    void runList(() => setListNumberStyle(superdoc.value, style, { createList: numberedCmd.run }));
+    return;
+  }
+
+  if (id === 'to-bullets') {
+    void runList(() => setListToBullets(superdoc.value));
     return;
   }
 
