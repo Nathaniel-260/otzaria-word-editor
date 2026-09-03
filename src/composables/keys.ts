@@ -10,6 +10,7 @@ import type { CommandAdapter, CommandOutcome } from '../engine/command-adapter';
 import type { FontOptions } from '../engine/font-options';
 import type { StyleGalleryState } from '../engine/style-gallery';
 import type { ReadoutSelection } from '../engine/readout-hold';
+import type { PageEdgeWords } from '../engine/page-ruler';
 import type { FontMemory } from './use-font-controls';
 
 /** האדפטר של ה-session הפעיל. `null` עד שיש מסמך פתוח. */
@@ -104,3 +105,28 @@ export interface SpellcheckHandle {
 }
 
 export const SPELLCHECK: InjectionKey<SpellcheckHandle> = Symbol('spellcheck');
+
+/**
+ * „סימון עמודים” של שולחן העורך, ל-`ui/ribbon/tabs/ShulchanTab.vue`.
+ *
+ * השכבה שמציירת (ui/shell/PageMarkingOverlay.vue) יושבת ב-App.vue מעל
+ * המסמך, והלשונית רק מדליקה/מכבה אותה ומבקשת מדידה טרייה ל„סמן”/„בדוק”.
+ * `changedPages` — העמודים ש„בדיקה” מצאה שזזו, מסומנים בכתום.
+ */
+export interface PageMarkingHandle {
+  readonly enabled: Ref<boolean>;
+  readonly changedPages: Ref<ReadonlySet<number>>;
+  setEnabled: (enabled: boolean) => void;
+  setChangedPages: (pages: ReadonlySet<number>) => void;
+  /** מדידה טרייה של מילות הקצה של כל עמוד מצויר (engine/page-ruler.ts). */
+  measure: () => readonly PageEdgeWords[];
+}
+
+export const PAGE_MARKING: InjectionKey<PageMarkingHandle> = Symbol('pageMarking');
+
+/**
+ * פתיחת מסמך חדש מ-Blob בטאב נוסף — „פירוק מסמך” של שולחן העורך צריך מסמך
+ * שני להערות. המסלול הוא `openDocument(undefined, { draft })` של App.vue:
+ * המסמך נפתח כטיוטה לא-שמורה, ו„שמור” בו פותח „שמור בשם”. `false` = לא נפתח.
+ */
+export const DRAFT_OPENER: InjectionKey<(blob: Blob) => Promise<boolean>> = Symbol('draftOpener');

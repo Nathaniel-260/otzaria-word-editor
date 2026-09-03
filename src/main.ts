@@ -6,6 +6,7 @@ import './styles/tokens.css';
 import './styles/shell.css';
 import './styles/ribbon.css';
 import './styles/print.css';
+import './styles/crop-marks.css';
 import App from './App.vue';
 import { installBundledFonts } from './styles/fonts';
 import { onThemeChanged, resolveBoot } from './host/otzaria-client';

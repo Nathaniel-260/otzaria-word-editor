@@ -54,7 +54,7 @@
           type="button"
           class="shtypos-btn"
           @pointerdown.prevent
-          @click="$emit('close')"
+          @click="onCancel"
         >
           ביטול
         </button>
@@ -67,6 +67,7 @@
 /**
  * „שגיאות מצויות” — בחירת סוגי התיקונים, כמו FormTyposCommon בתבנית המקור.
  * מציג בלבד: הכללים עצמם ב-engine/shulchan/typos.ts, והלשונית מריצה אותם.
+ * הבחירה נזכרת בין הפעלות (useRememberedOptions), כמו קובץ ה-INI של המקור.
  */
 import { computed, reactive, watch } from 'vue';
 import {
@@ -74,6 +75,7 @@ import {
   defaultTyposOptions,
   type TyposOptions,
 } from '../../engine/shulchan/typos';
+import { useRememberedOptions } from '../../composables/useRememberedOptions';
 
 const props = withDefaults(
   defineProps<{
@@ -90,12 +92,16 @@ const emit = defineEmits<{
 
 const TITLE = 'תיקון שגיאות מצויות';
 
+const remembered = useRememberedOptions('typos', defaultTyposOptions);
 const selected = reactive<TyposOptions>(defaultTyposOptions());
 
 watch(
   () => props.isOpen,
   (open) => {
-    if (open) Object.assign(selected, defaultTyposOptions());
+    if (!open) return;
+    void remembered.load().then((options) => {
+      if (props.isOpen) Object.assign(selected, options);
+    });
   },
 );
 
@@ -105,7 +111,14 @@ const canSubmit = computed(
 
 function onSubmit(): void {
   if (!canSubmit.value) return;
+  void remembered.save({ ...selected });
   emit('submit', { ...selected });
+}
+
+/** גם ביטול שומר — כמו במקור, מה שהמשתמש סימן אינו נעלם בסגירה. */
+function onCancel(): void {
+  void remembered.save({ ...selected });
+  emit('close');
 }
 </script>
 

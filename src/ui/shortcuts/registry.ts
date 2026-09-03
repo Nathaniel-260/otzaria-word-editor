@@ -79,7 +79,8 @@ export type ShellAction =
   | 'shortcuts-help'
   | 'context-menu'
   | 'focus-next-region'
-  | 'focus-prev-region';
+  | 'focus-prev-region'
+  | 'tell-me';
 
 export interface Shortcut {
   /** מזהה יציב. משמש את הרצועה, את הבדיקות ואת דיאלוג העזרה. */
@@ -763,6 +764,16 @@ export const SHORTCUTS = [
     group: 'app',
     code: 'ContextMenu',
     action: 'context-menu',
+  },
+  {
+    id: 'tell-me',
+    label: 'Alt+Q',
+    description: 'חיפוש אפשרויות ופקודות (Tell Me)',
+    group: 'app',
+    code: 'KeyQ',
+    alt: true,
+    action: 'tell-me',
+    inTextEntry: true,
   },
   {
     id: 'escape',

@@ -17,6 +17,7 @@ import '../styles/engine-chrome.css';
 import { splashStage, SPLASH_STAGES } from '../host/splash';
 import { installFormatPainter } from './format-painter';
 import { localizeEngineChrome } from './hf-chrome';
+import { installPointerSnap } from './pointer-snap';
 import { installWordSelection } from './word-selection';
 import { engineWorkerUrls } from './workers';
 
@@ -173,6 +174,11 @@ export function createEditor(options: CreateEditorOptions): Promise<EditorSessio
       }
       target.destroy();
     }
+
+    // הצמדת לחיצה לשורה הקרובה (pointer-snap.ts). **לפני** הבנאי, ובכוונה:
+    // המאזין מחליף את קואורדינטות האירוע, וזה עוזר רק אם הוא רץ לפני המאזינים
+    // שהמנוע רושם על window/document בבנייה — סדר הרישום הוא סדר הריצה.
+    disposers.push(installPointerSnap(container).dispose);
 
     const superdoc = new SuperDoc({
       selector: container,

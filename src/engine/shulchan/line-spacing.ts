@@ -13,7 +13,6 @@
  */
 import {
   applyParagraphSpacing,
-  findParagraphProps,
   TWIPS_PER_PT,
   type ParagraphFormatTarget,
 } from '../paragraph-format';
@@ -81,9 +80,8 @@ interface BlockSpacing {
   rule: string | undefined;
 }
 
-function readSpacing(body: readonly unknown[] | undefined, blockId: string): BlockSpacing {
-  const props = findParagraphProps({ body }, blockId);
-  const spacing = props?.spacing;
+function readSpacing(props: Record<string, unknown> | undefined): BlockSpacing {
+  const spacing = props?.spacing as { before?: unknown; after?: unknown; line?: unknown; lineRule?: unknown } | undefined;
   const toTwips = (points: unknown): number =>
     typeof points === 'number' && Number.isFinite(points) && points > 0 ? Math.round(points * TWIPS_PER_PT) : 0;
   return {
@@ -112,7 +110,7 @@ export async function applyExactLineSpacing(
   let updated = 0;
 
   for (const block of scoped.result.blocks) {
-    const spacing = readSpacing(body, block.blockId);
+    const spacing = readSpacing(body.props(block.blockId));
     if (spacing.rule === 'exact') continue;
 
     /* גופן הייחוס הוא של גוף הפסקה, ולכן נקרא מהמילה השנייה — היא זו שלא
@@ -156,7 +154,7 @@ export async function removeExactLineSpacing(
   let updated = 0;
 
   for (const block of scoped.result.blocks) {
-    const spacing = readSpacing(body, block.blockId);
+    const spacing = readSpacing(body.props(block.blockId));
     if (spacing.rule !== 'exact' || spacing.linePt === undefined || spacing.linePt <= 0) continue;
 
     const wordLength = firstWordLength(block.text);

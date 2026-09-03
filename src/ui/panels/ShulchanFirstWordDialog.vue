@@ -39,9 +39,31 @@
             v-model="sizeMode"
             class="shfw-select"
           >
-            <option value="percent">הגדלה באחוזים</option>
-            <option value="fixed">גודל קבוע</option>
+            <option value="percent">הגדלה באחוזים מגוף הפסקה</option>
+            <option value="fixed">גודל מוחלט בנקודות</option>
             <option value="none">ללא שינוי</option>
+          </select>
+        </div>
+
+        <div class="shfw-row">
+          <label
+            for="shfw-style"
+            class="shfw-label"
+          >רק בסגנון:</label>
+          <select
+            id="shfw-style"
+            v-model="styleId"
+            class="shfw-select"
+            aria-label="הגבלת העיצוב לפסקאות בסגנון אחד בלבד"
+          >
+            <option :value="null">כל הפסקאות שבבחירה</option>
+            <option
+              v-for="style in styles"
+              :key="style.id"
+              :value="style.id"
+            >
+              {{ style.label }}
+            </option>
           </select>
         </div>
 
@@ -122,7 +144,7 @@
             v-model="skipHeadings"
             type="checkbox"
           >
-          <span>דלג על כותרות</span>
+          <span>דלג על כותרות ועל פסקאות ממורכזות</span>
         </label>
 
         <p
@@ -158,7 +180,7 @@
           type="button"
           class="shfw-btn"
           @pointerdown.prevent
-          @click="$emit('close')"
+          @click="onCancel"
         >
           ביטול
         </button>
@@ -171,20 +193,25 @@
 /**
  * „עיצוב מילה ראשונה” — האפשרויות של FormatFirstWord + FormDinami מהתבנית
  * המקורית, במסלול העיצוב הישיר (ראו engine/shulchan/first-word.ts על ההבדל
- * מ„לפי סגנון” — אין יצירת סגנונות במנוע).
+ * מ„לפי סגנון” — אין יצירת סגנונות במנוע). „גודל קבוע” של המקור פירושו
+ * גודל הגוף בלי הגדלה; כאן הוא נקרא „גודל מוחלט בנקודות” כדי לא להתבלבל.
+ * האפשרויות נזכרות בין הפעלות, כמו `GetSavedSetting` ב-FormDinami.
  */
 import { computed, ref, watch } from 'vue';
 import {
   defaultFirstWordOptions,
   type FirstWordOptions,
 } from '../../engine/shulchan/first-word';
+import { useRememberedOptions } from '../../composables/useRememberedOptions';
 
 const props = withDefaults(
   defineProps<{
     isOpen?: boolean;
     busy?: boolean;
+    /** סגנונות הפסקה של המסמך, לסינון „רק בסגנון” — מגלריית הסגנונות. */
+    styles?: readonly { id: string; label: string }[];
   }>(),
-  { isOpen: false, busy: false },
+  { isOpen: false, busy: false, styles: () => [] },
 );
 
 const emit = defineEmits<{
@@ -194,8 +221,9 @@ const emit = defineEmits<{
 }>();
 
 const TITLE = 'עיצוב מילה ראשונה';
-const ERROR_HINT = 'אחוז ההגדלה: מספר בין 1 ל-500; גודל קבוע: 5 עד 100 נקודות';
+const ERROR_HINT = 'אחוז ההגדלה: מספר בין 1 ל-500; גודל מוחלט: 5 עד 100 נקודות';
 
+const remembered = useRememberedOptions('first-word', defaultFirstWordOptions);
 const sizeMode = ref<FirstWordOptions['sizeMode']>('percent');
 const percentText = ref('30');
 const fixedText = ref('18');
@@ -204,20 +232,25 @@ const italic = ref(false);
 const underline = ref(false);
 const raiseBaseline = ref(false);
 const skipHeadings = ref(true);
+const styleId = ref<string | null>(null);
 
 watch(
   () => props.isOpen,
   (open) => {
     if (!open) return;
-    const defaults = defaultFirstWordOptions();
-    sizeMode.value = defaults.sizeMode;
-    percentText.value = String(defaults.sizePercent);
-    fixedText.value = String(defaults.fixedSizePt);
-    bold.value = defaults.bold;
-    italic.value = defaults.italic;
-    underline.value = defaults.underline;
-    raiseBaseline.value = defaults.raiseBaseline;
-    skipHeadings.value = defaults.skipHeadings;
+    void remembered.load().then((options) => {
+      if (!props.isOpen) return;
+      sizeMode.value = options.sizeMode;
+      percentText.value = String(options.sizePercent);
+      fixedText.value = String(options.fixedSizePt);
+      bold.value = options.bold;
+      italic.value = options.italic;
+      underline.value = options.underline;
+      raiseBaseline.value = options.raiseBaseline;
+      skipHeadings.value = options.skipHeadings;
+      // סגנון שנזכר ממסמך אחר ואינו במסמך הזה — חוזר ל„כל הפסקאות”.
+      styleId.value = props.styles.some((style) => style.id === options.styleId) ? options.styleId : null;
+    });
   },
 );
 
@@ -233,9 +266,8 @@ const isValid = computed(() => {
 const showError = computed(() => !isValid.value);
 const canApply = computed(() => isValid.value && !props.busy);
 
-function onApply(): void {
-  if (!canApply.value) return;
-  emit('apply', {
+function current(): FirstWordOptions {
+  return {
     sizeMode: sizeMode.value,
     sizePercent: percent.value,
     fixedSizePt: fixed.value,
@@ -244,7 +276,21 @@ function onApply(): void {
     underline: underline.value,
     raiseBaseline: raiseBaseline.value,
     skipHeadings: skipHeadings.value,
-  });
+    styleId: styleId.value,
+  };
+}
+
+function onApply(): void {
+  if (!canApply.value) return;
+  const options = current();
+  void remembered.save(options);
+  emit('apply', options);
+}
+
+/** ביטול שומר רק מה שתקין — ערך פסול בשדה מספרי אינו נזכר. */
+function onCancel(): void {
+  if (isValid.value) void remembered.save(current());
+  emit('close');
 }
 </script>
 

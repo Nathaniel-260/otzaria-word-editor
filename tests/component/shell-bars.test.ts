@@ -55,19 +55,27 @@ describe('מתג השמירה האוטומטית', () => {
 });
 
 describe('פקדי פס הכותרת', () => {
-  it('החיפוש הוא כפתור עם שם נגיש', async () => {
-    // מה שהיה: `input readonly` שנראה כמו מקום להקליד בו, וה-`@click` על ה-div
-    // העוטף — כלומר המקלדת לא הגיעה אליו בכלל.
+  it('החיפוש הוא תיבת Tell Me אינטראקטיבית עם שם נגיש ו-combobox', async () => {
     const harness = mountUi(TitleBar);
     await settle();
 
-    const search = harness.wrapper.find('.search-box');
-    expect(search.element.tagName).toBe('BUTTON');
-    expect(search.attributes('aria-label')).toBe('חיפוש והחלפה במסמך');
+    const searchInput = harness.wrapper.find('.tell-me-input');
+    expect(searchInput.exists()).toBe(true);
+    expect(searchInput.element.tagName).toBe('INPUT');
+    expect(searchInput.attributes('role')).toBe('combobox');
+    expect(searchInput.attributes('aria-label')).toBe('חיפוש אפשרויות, פקודות ועזרה');
     expect(harness.wrapper.find('input[readonly]').exists()).toBe(false);
 
-    await search.trigger('click');
-    expect(harness.wrapper.emitted('open-find')).toHaveLength(1);
+    // לחיצה על אפשרות "חפש במסמך" בתפריט Tell Me פולטת open-find
+    await searchInput.trigger('focus');
+    await searchInput.setValue('טקסט לבדיקה');
+    await settle();
+
+    const docSearch = harness.wrapper.find('#tell-me-item-doc-search');
+    expect(docSearch.exists()).toBe(true);
+    await docSearch.trigger('click');
+    expect(harness.wrapper.emitted('open-find')).toBeDefined();
+    expect(harness.wrapper.emitted('open-find')![0]).toEqual(['טקסט לבדיקה']);
   });
 
   it('לכל כפתור בסרגל הגישה המהירה יש מטפל', async () => {

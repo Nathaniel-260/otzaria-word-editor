@@ -3,14 +3,18 @@
  * הסיום הראשון, ואחר כך כל קטע שאחרי תו ההתחלה ועד תו הסיום הבא. נויד
  * מ-TextAlternating.bas של שולחן העורך, כולל ברירות המחדל `:` ו-`.` ודילוג
  * על התו שאחרי תו ההתחלה (בדרך כלל הרווח).
+ *
+ * „תו” ההתחלה והסיום הם בפועל **סטים** של תווים — כמו במקור, שבו
+ * `MoveUntil`/`MoveEndUntil` מקבלים מחרוזת שכל תו בה הוא תוחם. כך „. או :
+ * או !” הוא סט אחד ולא שלוש ריצות.
  */
 import type { CommandOutcome } from '../command-adapter';
 import { applyInline, scopedBlocks, textTarget, type ShulchanTarget } from './shulchan-doc';
 
 export interface AlternatingOptions {
-  /** תו ההתחלה של קטע מודגש (ברירת מחדל `:`). תו יחיד. */
+  /** תווי ההתחלה של קטע מודגש — כל תו במחרוזת הוא תוחם (ברירת מחדל `:`). */
   startChar: string;
-  /** תו הסיום של קטע מודגש (ברירת מחדל `.`). תו יחיד. */
+  /** תווי הסיום של קטע מודגש — כל תו במחרוזת הוא תוחם (ברירת מחדל `.`). */
   endChar: string;
 }
 
@@ -18,24 +22,32 @@ export function defaultAlternatingOptions(): AlternatingOptions {
   return { startChar: ':', endChar: '.' };
 }
 
+/** המופע הראשון של אחד מתווי הסט, מ-`from` ואילך. `-1` כשאין. */
+function indexOfAny(text: string, chars: string, from: number): number {
+  for (let i = from; i < text.length; i += 1) {
+    if (chars.includes(text[i]!)) return i;
+  }
+  return -1;
+}
+
 /** הקטעים להדגשה בפסקה אחת — לוגיקה טהורה, נבדקת בלי מנוע. */
 export function alternatingRanges(text: string, options: AlternatingOptions): { start: number; end: number }[] {
   const { startChar, endChar } = options;
-  if (startChar.length !== 1 || endChar.length !== 1) return [];
+  if (startChar.length === 0 || endChar.length === 0) return [];
 
   const ranges: { start: number; end: number }[] = [];
-  const firstEnd = text.indexOf(endChar);
+  const firstEnd = indexOfAny(text, endChar, 0);
   if (firstEnd < 0) return [];
   if (firstEnd > 0) ranges.push({ start: 0, end: firstEnd + 1 });
 
   let position = firstEnd + 1;
   for (;;) {
-    const start = text.indexOf(startChar, position);
+    const start = indexOfAny(text, startChar, position);
     if (start < 0) break;
     // דילוג על תו ההתחלה ועל התו שאחריו — בדרך כלל רווח, כמו במקור.
     const from = start + 2;
     if (from >= text.length) break;
-    const end = text.indexOf(endChar, from);
+    const end = indexOfAny(text, endChar, from);
     if (end < 0) break;
     if (end > from) ranges.push({ start: from, end: end + 1 });
     position = end + 1;

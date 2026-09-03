@@ -9,6 +9,8 @@ export interface FakeBlock {
   blockId: string;
   text: string;
   nodeType?: string;
+  /** `w:styleId` שהבלוק מדווח, כמו `blocks.list`. */
+  styleId?: string;
 }
 
 export interface FakeRun {
@@ -20,10 +22,17 @@ export interface FakeShulchanOptions {
   blocks?: FakeBlock[];
   /** מזהי הבלוקים שבבחירה. ברירת מחדל: כולם. `[]` = אין בחירה. */
   selected?: string[];
+  /**
+   * הטווח המסומן בכל בלוק שבבחירה. ברירת מחדל: הבלוק כולו. `{start,end}`
+   * שווים = סמן בלבד (הכלים מרחיבים לפסקה השלמה).
+   */
+  selectionRanges?: Record<string, { start: number; end: number }>;
   /** runs למודל `doc.get()` — ברירת מחדל: run יחיד לכל בלוק בגופן 12pt. */
   runs?: Record<string, FakeRun[]>;
   /** ריווח פסקה למודל (בנקודות, כמו המנוע). */
   spacing?: Record<string, { before?: number; after?: number; line?: number; lineRule?: string }>;
+  /** יישור פסקה במודל — ב-`resolved` כשמסומן כך, אחרת ב-`props`. */
+  alignment?: Record<string, { value: string; resolved?: boolean }>;
   /** הערות שוליים לפי noteId. */
   notes?: Record<string, { type?: string; content: string }>;
   /** מיקומי הפניות הערות בגוף — מזין את `doc.find`. `undefined` = אין find. */
@@ -81,10 +90,24 @@ export function fakeShulchanHost(options: FakeShulchanOptions = {}) {
     return runs.map((run) => ({ kind: 'run', run: { text: run.text, resolved: run.resolved } }));
   };
 
+  const paragraphProps = (block: FakeBlock): { props: Record<string, unknown>; resolved?: Record<string, unknown> } => {
+    const props: Record<string, unknown> = {};
+    const spacing = options.spacing?.[block.blockId];
+    if (spacing) props.spacing = spacing;
+    const alignment = options.alignment?.[block.blockId];
+    if (!alignment) return { props };
+    if (alignment.resolved) return { props, resolved: { alignment: alignment.value } };
+    props.alignment = alignment.value;
+    return { props };
+  };
+
+  const rangeFor = (blockId: string): { start: number; end: number } =>
+    options.selectionRanges?.[blockId] ?? { start: 0, end: textOf(blockId).length };
+
   const doc = {
     selection: {
       current: () => ({
-        target: { segments: selected.map((blockId) => ({ blockId, range: { start: 0, end: 1 } })) },
+        target: { segments: selected.map((blockId) => ({ blockId, range: rangeFor(blockId) })) },
       }),
     },
     blocks: {
@@ -96,6 +119,7 @@ export function fakeShulchanHost(options: FakeShulchanOptions = {}) {
             nodeId: block.blockId,
             text: block.text,
             nodeType: block.nodeType ?? 'paragraph',
+            ...(block.styleId ? { styleId: block.styleId } : {}),
           })),
         };
       },
@@ -111,7 +135,7 @@ export function fakeShulchanHost(options: FakeShulchanOptions = {}) {
         paragraphIds: { paraId: block.blockId },
         paragraph: {
           content: runsFor(block),
-          props: options.spacing?.[block.blockId] ? { spacing: options.spacing[block.blockId] } : {},
+          ...paragraphProps(block),
         },
       })),
     }),

@@ -40,7 +40,20 @@ interface SelectionInfoLike {
 }
 
 interface BlocksPage {
-  blocks?: readonly { nodeId?: string; text?: string; nodeType?: string }[];
+  blocks?: readonly { nodeId?: string; text?: string; nodeType?: string; styleId?: string }[];
+}
+
+/** בלוק כפי שהכלים צורכים אותו — הבלוק הקנוני של החיפוש, ועליו מזהה הסגנון. */
+export interface ShulchanBlock extends SearchableBlock {
+  /** `w:styleId` של הפסקה, כשהמנוע מדווח אותו. */
+  styleId?: string;
+}
+
+/** תכונות פסקה במודל — `props` הישירות ו-`resolved` הפתורות (סגנון + ירושה). */
+interface ParagraphLike {
+  content?: readonly unknown[];
+  props?: Record<string, unknown>;
+  resolved?: Record<string, unknown>;
 }
 
 /** צומת במודל `doc.get()` — רק החלק שהכלים קוראים. */
@@ -48,9 +61,9 @@ export interface ShulchanModelNode {
   id?: string;
   paragraphIds?: { paraId?: string };
   kind?: string;
-  paragraph?: { content?: readonly unknown[]; props?: Record<string, unknown> };
-  heading?: { content?: readonly unknown[]; props?: Record<string, unknown> };
-  list?: { content?: readonly unknown[]; props?: Record<string, unknown> };
+  paragraph?: ParagraphLike;
+  heading?: ParagraphLike;
+  list?: ParagraphLike;
 }
 
 export interface ShulchanDocumentApi {
@@ -122,11 +135,11 @@ const BLOCKS_MAX_PAGES = 50;
  * כל בלוקי המסמך, עם הטקסט הקנוני, בסדר המסמך. `null` כשאין `blocks.list`
  * או כשקריאה נכשלה — כיסוי חלקי מסוכן יותר מכשל גלוי (ראו search.ts).
  */
-export async function readShulchanBlocks(host: ShulchanTarget): Promise<SearchableBlock[] | null> {
+export async function readShulchanBlocks(host: ShulchanTarget): Promise<ShulchanBlock[] | null> {
   const list = shulchanDoc(host)?.blocks?.list;
   if (typeof list !== 'function') return null;
 
-  const blocks: SearchableBlock[] = [];
+  const blocks: ShulchanBlock[] = [];
   let offset = 0;
   try {
     for (let page = 0; page < BLOCKS_MAX_PAGES; page += 1) {
@@ -134,11 +147,13 @@ export async function readShulchanBlocks(host: ShulchanTarget): Promise<Searchab
       const entries = result?.blocks ?? [];
       for (const entry of entries) {
         if (typeof entry?.nodeId === 'string') {
-          blocks.push({
+          const block: ShulchanBlock = {
             blockId: entry.nodeId,
             text: typeof entry.text === 'string' ? entry.text : '',
             nodeType: typeof entry.nodeType === 'string' ? entry.nodeType : undefined,
-          });
+          };
+          if (typeof entry.styleId === 'string' && entry.styleId !== '') block.styleId = entry.styleId;
+          blocks.push(block);
         }
       }
       if (entries.length < BLOCKS_PAGE_SIZE) break;
@@ -150,13 +165,54 @@ export async function readShulchanBlocks(host: ShulchanTarget): Promise<Searchab
   return blocks;
 }
 
+/**
+ * מזהה למסמך, לזיכרון של כלים שמצבם אינו בקובץ: FNV-1a על מזהי הבלוקים
+ * (`w14:paraId`), שנשמרים ב-docx ושורדים עריכה של הטקסט. הוספה או מחיקה
+ * של פסקאות משנה את המפתח: „סימון עמודים” דורש התאמה מדויקת ולכן לא ימצא
+ * תצלום ישן; „סימני חיתוך” מחזיקים בנוסף אינדקס של מזהי הפסקאות ומסוגלים
+ * לאתר את הרשומה גם אחרי עריכה מבנית (crop-marks.ts).
+ */
+export function documentKey(blocks: readonly { blockId: string }[]): string {
+  let hash = 0x811c9dc5;
+  const feed = (text: string): void => {
+    for (let i = 0; i < text.length; i += 1) {
+      hash ^= text.charCodeAt(i);
+      hash = Math.imul(hash, 0x01000193) >>> 0;
+    }
+  };
+  for (const block of blocks.slice(0, 64)) feed(`${block.blockId}\u0000`);
+  feed(String(blocks.length));
+  return hash.toString(16).padStart(8, '0');
+}
+
 export type ShulchanScope = 'selection' | 'document';
+
+/** טווח טקסט בתוך בלוק — קצה הבחירה כפי ש-`selection.current()` מדווח אותו. */
+export interface ScopedRange {
+  start: number;
+  end: number;
+}
 
 export interface ScopedBlocksResult {
   /** הבלוקים לעיבוד, בסדר המסמך. */
-  blocks: SearchableBlock[];
+  blocks: ShulchanBlock[];
   /** כל בלוקי המסמך — לכלים שצריכים הקשר (בלוק קודם/עוקב). */
-  all: SearchableBlock[];
+  all: ShulchanBlock[];
+  /**
+   * הטווח המסומן בכל בלוק, לכלים שעובדים על **תוכן** הבחירה ולא על פסקאות
+   * שלמות (הערות ⟵ סוגריים). `undefined` כשהתחום הוא כל המסמך, וגם כשהבחירה
+   * היא סמן בלבד — שאז הפסקה כולה היא התחום, כמו בכל שאר הכלים.
+   */
+  ranges?: ReadonlyMap<string, ScopedRange>;
+}
+
+/** האם היסט בבלוק נמצא בתחום שנבחר. בלי `ranges` — כל הבלוק בתחום. */
+export function offsetInScope(scoped: ScopedBlocksResult, blockId: string, offset: number): boolean {
+  if (!scoped.ranges) return true;
+  const range = scoped.ranges.get(blockId);
+  /* הקצה כלול: הפניית הערה שיושבת בדיוק בסוף הקטע המסומן נבחרה יחד איתו
+     בעיני המשתמש, והמנוע מדווח את מיקומה כהיסט שאחרי התו האחרון. */
+  return range !== undefined && offset >= range.start && offset <= range.end;
 }
 
 /**
@@ -185,8 +241,20 @@ export async function scopedBlocks(
   }
 
   const ids = new Set<string>();
+  const ranges = new Map<string, ScopedRange>();
+  let collapsed = true;
   for (const segment of info?.target?.segments ?? []) {
-    if (typeof segment?.blockId === 'string') ids.add(segment.blockId);
+    if (typeof segment?.blockId !== 'string') continue;
+    ids.add(segment.blockId);
+    const start = segment.range?.start;
+    const end = segment.range?.end;
+    if (typeof start !== 'number' || typeof end !== 'number') continue;
+    if (end > start) collapsed = false;
+    const existing = ranges.get(segment.blockId);
+    ranges.set(segment.blockId, {
+      start: existing ? Math.min(existing.start, start) : start,
+      end: existing ? Math.max(existing.end, end) : end,
+    });
   }
   if (ids.size === 0) {
     return {
@@ -194,7 +262,20 @@ export async function scopedBlocks(
       outcome: { ok: false, message: `${failedAction}: ${NO_SELECTION_TEXT}`, reason: 'no-selection' },
     };
   }
-  return { ok: true, result: { blocks: all.filter((block) => ids.has(block.blockId)), all } };
+  const blocks = all.filter((block) => ids.has(block.blockId));
+  // סמן בלבד, או מנוע שלא דיווח טווחים — הפסקאות השלמות הן התחום.
+  if (collapsed || ranges.size === 0) return { ok: true, result: { blocks, all } };
+  return { ok: true, result: { blocks, all, ranges } };
+}
+
+/**
+ * יישור הפסקה מהמודל — הפתור (`resolved`, כולל מה שירש מהסגנון) לפני
+ * הישיר (`props`). `undefined` כשהבלוק לא נמצא או שלא דווח יישור.
+ */
+export function paragraphAlignment(body: ResolvedBody, blockId: string): string | undefined {
+  const inner = nodeInner(body.node(blockId));
+  const alignment = inner?.resolved?.alignment ?? inner?.props?.alignment;
+  return typeof alignment === 'string' ? alignment : undefined;
 }
 
 export function textTarget(blockId: string, start: number, end: number): ShulchanSelectionTarget {
@@ -288,8 +369,8 @@ function nodeParagraphId(node: ShulchanModelNode): string | undefined {
   return typeof paraId === 'string' && paraId !== '' ? paraId : undefined;
 }
 
-function nodeInner(node: ShulchanModelNode): { content?: readonly unknown[] } | undefined {
-  return node.paragraph ?? node.heading ?? node.list;
+function nodeInner(node: ShulchanModelNode | undefined): ParagraphLike | undefined {
+  return node?.paragraph ?? node?.heading ?? node?.list;
 }
 
 function readFont(record: Record<string, unknown> | undefined): ResolvedRunFont {
@@ -312,44 +393,63 @@ function readFont(record: Record<string, unknown> | undefined): ResolvedRunFont 
  * ההיסט נספר על טקסט ה-runs בלבד — אותה ספירה שהבלוק הקנוני מחזיר. `{}`
  * כשהבלוק/ההיסט לא נמצאו: הכלי מחליט בעצמו מה ברירת המחדל שלו.
  */
-export function resolvedFontAt(
-  body: readonly ShulchanModelNode[] | undefined,
-  blockId: string,
-  offset: number,
-): ResolvedRunFont {
-  if (!Array.isArray(body)) return {};
-  for (const node of body) {
-    if (!node || typeof node !== 'object') continue;
-    if (nodeParagraphId(node) !== blockId) continue;
-    const content = nodeInner(node)?.content ?? [];
-    let position = 0;
-    let lastFont: ResolvedRunFont = {};
-    for (const child of content) {
-      const run = (child as RunLike) ?? {};
-      if (run.kind !== 'run' || !run.run) continue;
-      const text = typeof run.run.text === 'string' ? run.run.text : '';
-      const font = readFont(run.run.resolved ?? run.run.props);
-      if (offset >= position && offset < position + text.length) return font;
-      position += text.length;
-      lastFont = font;
-    }
-    // היסט בסוף הבלוק (או בלוק בלי runs) — התכונות של ה-run האחרון.
-    return lastFont;
+export function resolvedFontAt(body: ResolvedBody, blockId: string, offset: number): ResolvedRunFont {
+  const node = body.node(blockId);
+  if (!node) return {};
+  const content = nodeInner(node)?.content ?? [];
+  let position = 0;
+  let lastFont: ResolvedRunFont = {};
+  for (const child of content) {
+    const run = (child as RunLike) ?? {};
+    if (run.kind !== 'run' || !run.run) continue;
+    const text = typeof run.run.text === 'string' ? run.run.text : '';
+    const font = readFont(run.run.resolved ?? run.run.props);
+    if (offset >= position && offset < position + text.length) return font;
+    position += text.length;
+    lastFont = font;
   }
-  return {};
+  // היסט בסוף הבלוק (או בלוק בלי runs) — התכונות של ה-run האחרון.
+  return lastFont;
 }
 
 /**
  * המודל המלא עם ערכים פתורים. `undefined` בכשל — הקורא נופל לברירת מחדל
  * שלו, לא לזריקה.
  */
-export async function readResolvedBody(host: ShulchanTarget): Promise<readonly ShulchanModelNode[] | undefined> {
+export async function readResolvedBody(host: ShulchanTarget): Promise<ResolvedBody> {
   const get = shulchanDoc(host)?.get;
-  if (typeof get !== 'function') return undefined;
+  if (typeof get !== 'function') return indexResolvedBody(undefined);
   try {
     const model = await get({ options: { includeResolved: true } });
-    return Array.isArray(model?.body) ? model.body : undefined;
+    return indexResolvedBody(Array.isArray(model?.body) ? model.body : undefined);
   } catch {
-    return undefined;
+    return indexResolvedBody(undefined);
   }
+}
+
+/**
+ * המודל הפתור, מפוענח לפי מזהה פסקה. הכלים עוברים על הבלוקים שבבחירה
+ * וקוראים ממנו לכל בלוק — סריקה לינארית של ה-body לכל קריאה הפכה את זה
+ * ל-O(בלוקים × צומתי המסמך), ופעמיים: פעם ליישור ופעם לגופן.
+ */
+export interface ResolvedBody {
+  node(blockId: string): ShulchanModelNode | undefined;
+  /** התכונות הישירות של הפסקה (`props`), כפי ש-`findParagraphProps` מחזיר אותן. */
+  props(blockId: string): Record<string, unknown> | undefined;
+}
+
+export function indexResolvedBody(body: readonly ShulchanModelNode[] | undefined): ResolvedBody {
+  const byId = new Map<string, ShulchanModelNode>();
+  if (Array.isArray(body)) {
+    for (const node of body) {
+      if (!node || typeof node !== 'object') continue;
+      const id = nodeParagraphId(node);
+      // הראשון מנצח, כמו הסריקה הלינארית שקדמה לכאן.
+      if (id !== undefined && !byId.has(id)) byId.set(id, node);
+    }
+  }
+  return {
+    node: (blockId) => byId.get(blockId),
+    props: (blockId) => nodeInner(byId.get(blockId))?.props,
+  };
 }

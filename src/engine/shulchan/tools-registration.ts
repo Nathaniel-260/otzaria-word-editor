@@ -10,7 +10,7 @@
  */
 import type { MacroKit, MacroOutcome } from 'superdoc-macros';
 import type { ShulchanTarget } from './shulchan-doc';
-import { defaultTyposOptions, runTypos, typosSummaryText } from './typos';
+import { copyFixSummaryText, defaultTyposOptions, runCopyFix, runTypos, typosSummaryText } from './typos';
 import { defaultAlternatingOptions, runTextAlternating, alternatingSummaryText } from './text-alternating';
 import { convertBracketsToFootnotes, convertFootnotesToBrackets, conversionSummaryText } from './brackets-notes';
 import { applyFirstWordDesign, defaultFirstWordOptions, firstWordSummaryText, removeFirstWordDesign } from './first-word';
@@ -63,6 +63,16 @@ export function registerShulchanTools(
   });
 
   register({
+    id: 'shulchan.copy-fix',
+    name: 'שולחן העורך: תיקון העתקה מתוכנות',
+    description: 'רווחים קשיחים שהגיעו מהדבקה הופכים לרווחים רגילים, בפסקאות המסומנות',
+    run: async () => {
+      const result = await runCopyFix(host());
+      return toOutcome(result, copyFixSummaryText(result), onSummary);
+    },
+  });
+
+  register({
     id: 'shulchan.text-alternating',
     name: 'שולחן העורך: טקסט מתחלף',
     description: 'הדגשת דיבור-המתחיל בפסקאות המסומנות (: עד .)',
@@ -85,7 +95,7 @@ export function registerShulchanTools(
   register({
     id: 'shulchan.notes-to-brackets',
     name: 'שולחן העורך: הערות ⟵ סוגריים',
-    description: 'תוכן כל הערות השוליים חוזר לגוף בסוגריים עגולים',
+    description: 'תוכן הערות השוליים שבבחירה חוזר לגוף בסוגריים עגולים',
     run: async () => {
       const result = await convertFootnotesToBrackets(host(), 'round');
       return toOutcome(result, conversionSummaryText(result, 'to-brackets'), onSummary);

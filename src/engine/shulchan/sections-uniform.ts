@@ -187,7 +187,19 @@ export function columnsProfileLabel(profile: ColumnsProfile): string {
   return `${profile.count} טורים , מרווח בין טורים: ${cmText(profile.gapIn)} , ${width}`;
 }
 
-/** הפרופילים של המקטעים מרובי-הטורים בלבד — מקטע טור-יחיד אינו טעות אחידות. */
+/**
+ * מספר הטורים שהכלי עובד עליו — שניים בדיוק, כמו `ColumnWidth` במקור
+ * (`NumberOfColumns = 2`). מקטע טור-יחיד אינו טעות אחידות, ומקטע של שלושה
+ * טורים ומעלה הוא פריסה מכוונת (טבלת מפתחות, למשל) שאין להשוות למקטעי
+ * הגוף — ולכן שניהם מחוץ לקיבוץ ומחוץ להחלה.
+ */
+const UNIFORM_COLUMN_COUNT = 2;
+
+function isUniformCandidate(item: SectionItemLike): boolean {
+  return item.columns?.count === UNIFORM_COLUMN_COUNT;
+}
+
+/** הפרופילים של מקטעי שני-הטורים בלבד. */
 export async function readColumnsProfiles(
   host: ShulchanTarget,
 ): Promise<{ ok: true; groups: ColumnsProfileGroup[] } | { ok: false; outcome: CommandOutcome }> {
@@ -196,10 +208,9 @@ export async function readColumnsProfiles(
 
   const groups = new Map<string, ColumnsProfileGroup>();
   for (const item of sections.items) {
-    const count = item.columns?.count;
-    if (typeof count !== 'number' || count < 2) continue;
+    if (!isUniformCandidate(item)) continue;
     const profile: ColumnsProfile = {
-      count,
+      count: UNIFORM_COLUMN_COUNT,
       gapIn: roundIn(item.columns?.gap, 0.5),
       equalWidth: item.columns?.equalWidth !== false,
     };
@@ -211,7 +222,11 @@ export async function readColumnsProfiles(
   return { ok: true, groups: [...groups.values()] };
 }
 
-/** מחילה פרופיל טורים על כל המקטעים מרובי-הטורים. */
+/**
+ * מחילה פרופיל טורים על כל מקטעי שני-הטורים. `count` אינו נכתב — הכלי משווה
+ * מרווח ורוחב, לא מספר טורים, וכתיבתו הייתה דורסת בשקט מקטע שהמשתמש עיצב
+ * אחרת.
+ */
 export async function applyColumnsProfile(host: ShulchanTarget, profile: ColumnsProfile): Promise<CommandOutcome> {
   const api = sectionsApi(host);
   if (typeof api?.setColumns !== 'function') return unavailableOutcome(APPLY_COLUMNS_FAILED);
@@ -219,12 +234,10 @@ export async function applyColumnsProfile(host: ShulchanTarget, profile: Columns
   if (!sections.ok) return sections.outcome;
 
   for (const item of sections.items) {
-    const count = item.columns?.count;
-    if (typeof count !== 'number' || count < 2) continue;
+    if (!isUniformCandidate(item)) continue;
     const outcome = await callReceipt(APPLY_COLUMNS_FAILED, () =>
       api.setColumns!({
         target: item.address,
-        count: profile.count,
         gap: profile.gapIn,
         equalWidth: profile.equalWidth,
       }),

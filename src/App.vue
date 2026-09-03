@@ -19,6 +19,7 @@
     <div class="shell-top">
       <!-- פס עליון -->
       <TitleBar
+        ref="titleBarRef"
         :title="title"
         :is-dirty="saveSnapshot.isDirty"
         :is-saving="saveSnapshot.isSaving"
@@ -30,7 +31,10 @@
         @save="onSave(false)"
         @undo="onUndo"
         @redo="onRedo"
-        @open-find="openFindDialog('find')"
+        @open-find="(q) => openFindDialog('find', q)"
+        @run-command="onRunCommandFromTellMe"
+        @run-action="onRunActionFromTellMe"
+        @custom-action="onCustomActionFromTellMe"
         @toggle-autosave="toggleAutosave"
         @update-title="onTitleUpdate"
       />
@@ -135,6 +139,14 @@
         :dictionary="spellcheckDictionary"
         :revision="spellcheckRevision"
       />
+      <PageMarkingOverlay
+        ref="pageMarkingOverlayRef"
+        :host="rulerHost"
+        :viewport-source="rulerViewport"
+        :enabled="pageMarkingEnabled"
+        :changed-pages="pageMarkingChanged"
+        :revision="spellcheckRevision"
+      />
     </div>
 
     <!--
@@ -200,6 +212,7 @@
     <FindReplaceDialog
       :is-open="isFindOpen"
       :initial-mode="findMode"
+      :initial-query="findInitialQuery"
       :result-text="searchCounter"
       :can-replace="canShowReplace"
       :is-replacing="searchState.isReplacing"
@@ -264,6 +277,7 @@ import PageBorderOverlay from './ui/shell/PageBorderOverlay.vue';
 import LineNumberOverlay from './ui/shell/LineNumberOverlay.vue';
 import PilcrowOverlay from './ui/shell/PilcrowOverlay.vue';
 import SpellingOverlay from './ui/shell/SpellingOverlay.vue';
+import PageMarkingOverlay from './ui/shell/PageMarkingOverlay.vue';
 import FindReplaceDialog from './ui/panels/FindReplaceDialog.vue';
 import AboutDialog from './ui/panels/AboutDialog.vue';
 import LinkDialog from './ui/panels/LinkDialog.vue';
@@ -280,6 +294,8 @@ import {
   FONT_OPTIONS,
   READOUT_SELECTION,
   SPELLCHECK,
+  PAGE_MARKING,
+  DRAFT_OPENER,
   STYLE_GALLERY,
 } from './composables/keys';
 import { ACTIVE_SUPERDOC } from './engine/document-api';
@@ -381,6 +397,7 @@ import {
   createRulerModel,
   paintedHost,
   readRulerUnit,
+  type PageEdgeWords,
   type RulerModel,
   type RulerReading,
   type ViewportSource,
@@ -484,7 +501,8 @@ import { onPluginHidden, onPluginShown } from './host/lifecycle';
 import { revealZone, type RevealBounds, type RevealZone } from './composables/focus-mode';
 import { enterFullscreen, exitFullscreen, isFullscreen, watchFullscreen } from './composables/window-fullscreen';
 import SvgIcon from './ui/icons/SvgIcon.vue';
-import { selectWholeDocument } from './engine/clipboard';
+import { copySelection, cutSelection, pasteFromClipboard, selectWholeDocument } from './engine/clipboard';
+import type { TellMeCustomAction } from './ui/shell/tell-me-actions';
 import {
   DEFAULT_FONT_SIZE_PT,
   fontSizePayload,
@@ -498,6 +516,7 @@ import { startParagraphOnNewPage, pageBreakTracker } from './engine/page-break';
 import { createFontMemory } from './composables/use-font-controls';
 import { createLinkDialog } from './composables/use-link-dialog';
 import { createShellActionRunner } from './ui/shortcuts/actions';
+import type { ShellAction } from './ui/shortcuts/registry';
 import { useContextMenu } from './composables/use-context-menu';
 import ContextMenu from './ui/menu/ContextMenu.vue';
 import {
@@ -685,6 +704,8 @@ watch([ribbonTab, ribbonCollapsed], ([tab, collapsed]) => {
 
 const isFindOpen = ref(false);
 const findMode = ref<'find' | 'replace'>('find');
+const findInitialQuery = ref('');
+const titleBarRef = ref<InstanceType<typeof TitleBar> | null>(null);
 const isAboutOpen = ref(false);
 const isShortcutsHelpOpen = ref(false);
 
@@ -831,6 +852,37 @@ async function toggleSpellcheck(): Promise<void> {
     spellcheckBusy.value = false;
   }
 }
+
+/**
+ * „סימון עמודים” של שולחן העורך (ui/shell/PageMarkingOverlay.vue). כמו
+ * המילון, השכבה שייכת למעטפת ולא לטאב; הלשונית מדליקה אותה ומבקשת מדידה.
+ * `revision` של בדיקת האיות משמש גם כאן — אותה „עריכה קרתה” בדיוק.
+ */
+const pageMarkingEnabled = ref(false);
+const pageMarkingChanged = shallowRef<ReadonlySet<number>>(new Set());
+const pageMarkingOverlayRef = shallowRef<{ measure: () => readonly PageEdgeWords[] } | null>(null);
+provide(PAGE_MARKING, {
+  enabled: pageMarkingEnabled,
+  changedPages: pageMarkingChanged,
+  setEnabled: (enabled) => {
+    pageMarkingEnabled.value = enabled;
+    if (!enabled) pageMarkingChanged.value = new Set();
+  },
+  setChangedPages: (pages) => {
+    pageMarkingChanged.value = pages;
+  },
+  measure: () => pageMarkingOverlayRef.value?.measure() ?? [],
+});
+
+/**
+ * „פירוק מסמך” של שולחן העורך: מסמך ההערות נפתח בטאב חדש מ-Blob, במסלול
+ * של שחזור טיוטה — לא שמור, ו„שמור” בו פותח „שמור בשם”.
+ */
+provide(DRAFT_OPENER, async (blob: Blob) => {
+  if (isOpening.value) return false;
+  activateTab(createNewDocumentSession());
+  return openDocument(undefined, { draft: blob });
+});
 
 provide(SPELLCHECK, {
   enabled: computed(() => spellcheckDictionary.value !== null),
@@ -3097,14 +3149,64 @@ function onPointerMove(event: PointerEvent): void {
  * רב-פסקאות (ראו הראש של engine/search.ts). המימוש שלנו עצמאי לגמרי:
  * `doc.blocks.list`/`doc.replace` של ה-Document API הציבורי.
  */
-function openFindDialog(mode: 'find' | 'replace'): void {
+function openFindDialog(mode: 'find' | 'replace', initialQuery = ''): void {
   findMode.value = mode;
+  findInitialQuery.value = initialQuery;
   isFindOpen.value = true;
   void reportSearch(searchAdapter?.open());
 }
 
+async function onRunCommandFromTellMe(id: string, payload?: unknown): Promise<void> {
+  if (!commandAdapter.value) {
+    setStatus('אין מסמך פתוח לביצוע הפעולה', true);
+    return;
+  }
+  const outcome = await commandAdapter.value.run(id, payload);
+  reportCommand(outcome, id);
+}
+
+function onRunActionFromTellMe(action: ShellAction): void {
+  runShellAction(action);
+}
+
+/**
+ * הפעולות הייעודיות של Tell Me (ראו `TellMeCustomAction`). הלוח עובר כאן
+ * ב-engine/clipboard.ts ומדווח כמו כפתורי „בית”, כי אין למנוע פקודות
+ * `copy`/`cut`/`paste`; כלי שולחן העורך הם כלי MacroKit עם דיאלוגים, ולכן
+ * הפעולה פותחת את הלשונית שלהם.
+ */
+function onCustomActionFromTellMe(action: TellMeCustomAction): void {
+  switch (action) {
+    case 'export-pdf':
+      void onExportPdf();
+      break;
+    case 'export-otzaria':
+      void onExportOtzaria();
+      break;
+    case 'about':
+      isAboutOpen.value = true;
+      break;
+    case 'clipboard-copy':
+      void copySelection(activeSuperdoc.value).then((outcome) => reportCommand(outcome, 'clipboard-copy'));
+      break;
+    case 'clipboard-cut':
+      void cutSelection(activeSuperdoc.value).then((outcome) => reportCommand(outcome, 'clipboard-cut'));
+      break;
+    case 'clipboard-paste':
+      void pasteFromClipboard(activeSuperdoc.value).then((outcome) => reportCommand(outcome, 'clipboard-paste'));
+      break;
+    case 'ribbon-shulchan':
+      ribbonTab.value = 'shulchan';
+      ribbonCollapsed.value = false;
+      break;
+  }
+}
+
 function closeFindDialog(): void {
   isFindOpen.value = false;
+  // השאילתה שהגיעה מ-Tell Me היא של אותה פתיחה בלבד; בלי האיפוס היא הייתה
+  // נדחפת שוב לשדה בפתיחה הבאה, ודורסת את החיפוש האחרון של המשתמש.
+  findInitialQuery.value = '';
   // סגירה מנקה את ההדגשות במסמך. בלעדיה הן נשארות אחרי שהדיאלוג נעלם.
   searchAdapter?.close();
 }
@@ -3441,6 +3543,7 @@ const runShellAction = createShellActionRunner({
     return true;
   },
   moveFocusRegion: (direction) => focusRing.move(direction) !== null,
+  openTellMe: () => titleBarRef.value?.focusTellMe(),
   closeTopmost: closeTopmostLayer,
 });
 

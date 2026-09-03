@@ -17,6 +17,7 @@ import {
   createRulerModel,
   directionFromText,
   measureAllPageTextSegments,
+  measurePageGlyphs,
   measurePageRect,
   paintedHost,
   sameTextSegments,
@@ -725,5 +726,140 @@ describe('sameTextSegments', () => {
     expect(sameTextSegments([segment('אבג', 10)], [segment('דהו', 10)])).toBe(false);
     expect(sameTextSegments([segment('אבג', 10)], [segment('אבג', 30)])).toBe(false);
     expect(sameTextSegments([segment('אבג', 10)], [])).toBe(false);
+  });
+});
+
+/**
+ * `measurePageGlyphs` — הגליפים שלחיצה מוצמדת אליהם (engine/pointer-snap.ts).
+ *
+ * jsdom אינו מפריס, ולכן כל צומת טקסט „מצויר” במלבן של ה-`<span>` שמכיל אותו
+ * (`withRect`), ו-`getClientRects` של טווח מחזיר אותו. מה שנמדד: ההיקף נגזר
+ * מהמטרה (שורה, עמוד, גרירה), אובייקטים אינם טקסט, וכותרות אינן גוף.
+ */
+describe('measurePageGlyphs', () => {
+  let restoreRects: (() => void) | null = null;
+
+  beforeEach(() => {
+    const original = Range.prototype.getClientRects;
+    Range.prototype.getClientRects = function fake(this: Range) {
+      const node = this.startContainer;
+      const element = node.nodeType === Node.TEXT_NODE ? node.parentElement : (node as Element);
+      const rect = element ? element.getBoundingClientRect() : null;
+      const list = rect && rect.width > 0 && rect.height > 0 ? [rect] : [];
+      return Object.assign(list, { item: (i: number) => list[i] ?? null }) as unknown as DOMRectList;
+    };
+    restoreRects = () => {
+      Range.prototype.getClientRects = original;
+    };
+  });
+  afterEach(() => {
+    restoreRects?.();
+    restoreRects = null;
+  });
+
+  /** עמוד בפינה (100, 200) עם שורה עברית ארוכה, שורה ריקה, ושורה קצרה — כפי שנמדד. */
+  function page(): {
+    host: HTMLElement;
+    page: HTMLElement;
+    lines: HTMLElement[];
+    runs: HTMLElement[];
+  } {
+    const host = withRect(document.createElement('div'), 0, 1000, 0, 1500);
+    const pageEl = withRect(document.createElement('div'), 100, 800, 200, 1100);
+    pageEl.setAttribute('data-page-index', '0');
+    host.appendChild(pageEl);
+    document.body.appendChild(host);
+
+    const lines: HTMLElement[] = [];
+    const runs: HTMLElement[] = [];
+    const add = (text: string, left: number, width: number, top: number): void => {
+      const fragment = document.createElement('div');
+      const line = withRect(document.createElement('div'), 196, 600, top, 18);
+      const run = withRect(document.createElement('span'), left, width, top, 17);
+      run.textContent = text;
+      line.appendChild(run);
+      fragment.appendChild(line);
+      pageEl.appendChild(fragment);
+      lines.push(line);
+      runs.push(run);
+    };
+    add('שורה ראשונה ארוכה יותר', 540, 158, 314);
+    add(' ', 693, 5, 332);
+    add('קצר', 673, 25, 351);
+    return { host, page: pageEl, lines, runs };
+  }
+
+  it('מטרה על שורה — הגליפים של אותה שורה בלבד, ביחס לפינת העמוד', () => {
+    const { host, lines } = page();
+    const measured = measurePageGlyphs(host, lines[0]!, 150, 322);
+    expect(measured).not.toBeNull();
+    expect(measured!.rects).toEqual([{ leftPx: 440, topPx: 114, widthPx: 158, heightPx: 17 }]);
+    expect(measured!.pageBox()).toEqual({ leftPx: 100, topPx: 200, widthPx: 800, heightPx: 1100 });
+  });
+
+  it('מטרה על צומת הטקסט עצמו — ההורה הוא ההיקף', () => {
+    const { host, runs } = page();
+    const measured = measurePageGlyphs(host, runs[2]!.firstChild, 680, 360);
+    expect(measured!.rects).toHaveLength(1);
+    expect(measured!.rects[0]).toMatchObject({ leftPx: 573 });
+  });
+
+  it('מטרה על העמוד — כל השורות', () => {
+    const { host, page: pageEl } = page();
+    const measured = measurePageGlyphs(host, pageEl, 300, 900);
+    expect(measured!.rects.map((rect) => rect.topPx)).toEqual([114, 132, 151]);
+  });
+
+  it('כותרת עליונה אינה גוף: מדולגת בהיקף העמוד, ונמדדת כשלוחצים עליה', () => {
+    const { host, page: pageEl } = page();
+    const header = document.createElement('div');
+    header.setAttribute('data-layout-story', 'header');
+    const run = withRect(document.createElement('span'), 600, 90, 230, 17);
+    run.textContent = 'כותרת';
+    header.appendChild(run);
+    pageEl.insertBefore(header, pageEl.firstChild);
+
+    expect(measurePageGlyphs(host, pageEl, 300, 900)!.rects.map((rect) => rect.topPx)).toEqual([114, 132, 151]);
+    expect(measurePageGlyphs(host, header, 300, 238)!.rects).toEqual([{ leftPx: 500, topPx: 30, widthPx: 90, heightPx: 17 }]);
+  });
+
+  it('גרירה (בלי מטרה) — העמוד שמתחת לנקודה; מחוץ לכל עמוד — כלום', () => {
+    const { host } = page();
+    expect(measurePageGlyphs(host, null, 300, 900)!.rects).toHaveLength(3);
+    expect(measurePageGlyphs(host, null, 50, 900)).toBeNull();
+    expect(measurePageGlyphs(host, null, 300, 1400)).toBeNull();
+  });
+
+  it('תמונה — בחירת אובייקט, לא טקסט', () => {
+    const { host, lines } = page();
+    const image = withRect(document.createElement('img'), 560, 40, 314, 17);
+    lines[0]!.appendChild(image);
+    expect(measurePageGlyphs(host, image, 570, 320)).toBeNull();
+  });
+
+  it('אלמנט בתוך העמוד בלי טקסט תחתיו — ידית או מסגרת — לא מוצמד', () => {
+    const { host, page: pageEl } = page();
+    const handle = withRect(document.createElement('div'), 500, 8, 400, 8);
+    pageEl.appendChild(handle);
+    expect(measurePageGlyphs(host, handle, 504, 404)).toBeNull();
+  });
+
+  it('שכבה מעל העמוד: מכסה אותו — כמו לחיצה על העמוד; פקד קטן — לא', () => {
+    const { host } = page();
+    const layer = withRect(document.createElement('div'), 0, 1000, 0, 1500);
+    host.appendChild(layer);
+    expect(measurePageGlyphs(host, layer, 300, 900)!.rects).toHaveLength(3);
+
+    const widget = withRect(document.createElement('div'), 300, 20, 900, 20);
+    host.appendChild(widget);
+    expect(measurePageGlyphs(host, widget, 310, 910)).toBeNull();
+
+    // ה-host עצמו הוא שכבה שמכסה הכול.
+    expect(measurePageGlyphs(host, host, 300, 900)!.rects).toHaveLength(3);
+  });
+
+  it('בלי host או בלי עמודים — אין מדידה', () => {
+    expect(measurePageGlyphs(null, null, 0, 0)).toBeNull();
+    expect(measurePageGlyphs(document.createElement('div'), null, 0, 0)).toBeNull();
   });
 });

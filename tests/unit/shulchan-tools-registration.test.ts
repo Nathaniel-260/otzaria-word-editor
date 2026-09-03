@@ -21,6 +21,7 @@ describe('shulchan/tools-registration', () => {
 
     expect(tools.map((tool) => tool.id)).toEqual([
       'shulchan.typos',
+      'shulchan.copy-fix',
       'shulchan.text-alternating',
       'shulchan.brackets-to-notes',
       'shulchan.notes-to-brackets',

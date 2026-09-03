@@ -26,21 +26,21 @@
       <div class="shalt-body">
         <p class="shalt-note">
           מדגיש דיבור-המתחיל בפסקאות המסומנות: מתחילת הפסקה עד תו הסיום,
-          ואחר כך כל קטע שאחרי תו ההתחלה ועד תו הסיום הבא.
+          ואחר כך כל קטע שאחרי תו ההתחלה ועד תו הסיום הבא. אפשר לכתוב כמה
+          תווים בכל שדה — כל אחד מהם הוא תוחם.
         </p>
         <div class="shalt-row">
           <label
             for="shalt-start"
             class="shalt-label"
-          >תו התחלה:</label>
+          >תווי התחלה:</label>
           <input
             id="shalt-start"
             ref="firstFieldRef"
             v-model="startChar"
             class="shalt-char"
             type="text"
-            maxlength="1"
-            aria-label="התו שאחריו מתחיל קטע מודגש"
+            aria-label="התווים שאחריהם מתחיל קטע מודגש"
             @keydown.enter="onSubmit"
           >
         </div>
@@ -48,14 +48,13 @@
           <label
             for="shalt-end"
             class="shalt-label"
-          >תו סיום:</label>
+          >תווי סיום:</label>
           <input
             id="shalt-end"
             v-model="endChar"
             class="shalt-char"
             type="text"
-            maxlength="1"
-            aria-label="התו שבו מסתיים קטע מודגש"
+            aria-label="התווים שבהם מסתיים קטע מודגש"
             @keydown.enter="onSubmit"
           >
         </div>
@@ -75,7 +74,7 @@
           type="button"
           class="shalt-btn"
           @pointerdown.prevent
-          @click="$emit('close')"
+          @click="onCancel"
         >
           ביטול
         </button>
@@ -87,13 +86,16 @@
 <script setup lang="ts">
 /**
  * „טקסט מתחלף” — תווי ההתחלה והסיום של הדגשת דיבור-המתחיל, כמו
- * FormTextAlternating בתבנית המקור (ברירות מחדל `:` ו-`.`).
+ * FormTextAlternating בתבנית המקור (ברירות מחדל `:` ו-`.`). כל שדה הוא
+ * **סט** תווים — כמו `MoveUntil` במקור — ולכן אין כאן מגבלת תו יחיד ואין
+ * איסור על תו משותף לשני הסטים. הבחירה נזכרת בין הפעלות.
  */
 import { computed, nextTick, ref, watch } from 'vue';
 import {
   defaultAlternatingOptions,
   type AlternatingOptions,
 } from '../../engine/shulchan/text-alternating';
+import { useRememberedOptions } from '../../composables/useRememberedOptions';
 
 const props = withDefaults(
   defineProps<{
@@ -110,6 +112,7 @@ const emit = defineEmits<{
 
 const TITLE = 'טקסט מתחלף — הדגשת דיבור המתחיל';
 
+const remembered = useRememberedOptions('text-alternating', defaultAlternatingOptions);
 const startChar = ref(':');
 const endChar = ref('.');
 const firstFieldRef = ref<HTMLInputElement | null>(null);
@@ -118,20 +121,32 @@ watch(
   () => props.isOpen,
   (open) => {
     if (!open) return;
-    const defaults = defaultAlternatingOptions();
-    startChar.value = defaults.startChar;
-    endChar.value = defaults.endChar;
+    void remembered.load().then((options) => {
+      if (!props.isOpen) return;
+      startChar.value = options.startChar;
+      endChar.value = options.endChar;
+    });
     nextTick(() => firstFieldRef.value?.focus());
   },
 );
 
 const canSubmit = computed(
-  () => !props.busy && startChar.value.length === 1 && endChar.value.length === 1 && startChar.value !== endChar.value,
+  () => !props.busy && startChar.value.length > 0 && endChar.value.length > 0,
 );
+
+function current(): AlternatingOptions {
+  return { startChar: startChar.value, endChar: endChar.value };
+}
 
 function onSubmit(): void {
   if (!canSubmit.value) return;
-  emit('submit', { startChar: startChar.value, endChar: endChar.value });
+  void remembered.save(current());
+  emit('submit', current());
+}
+
+function onCancel(): void {
+  void remembered.save(current());
+  emit('close');
 }
 </script>
 
@@ -217,7 +232,7 @@ function onSubmit(): void {
   font-family: var(--font-main);
   font-size: 12px;
   outline: none;
-  width: 40px;
+  width: 90px;
   text-align: center;
 }
 
