@@ -1277,16 +1277,24 @@ function rawBox(rect: DOMRect): RawTextRect {
   return { leftPx: rect.left, topPx: rect.top, widthPx: rect.width, heightPx: rect.height };
 }
 
-function pushGlyphRects(node: Text, out: RawTextRect[], origin: DOMRect): boolean {
-  let range: Range;
+/**
+ * מלבני הגליפים של צומת טקסט. ה-`Range` מגיע מבחוץ ומשמש מחדש: מדידת עמוד
+ * שלם עוברת על מאות צומתי טקסט, ו-`createRange` לכל אחד מהם היה מקצה מאות
+ * טווחים חיים בתוך מאזין של `mousedown`. `null` כשה-Range אינו יכול לכסות
+ * את הצומת.
+ */
+function glyphRects(node: Text, range: Range): DOMRectList | null {
   try {
-    range = document.createRange();
     range.selectNodeContents(node);
   } catch {
-    return false;
+    return null;
   }
-  if (typeof range.getClientRects !== 'function') return false;
-  const list = range.getClientRects();
+  return typeof range.getClientRects === 'function' ? range.getClientRects() : null;
+}
+
+function pushGlyphRects(node: Text, out: RawTextRect[], origin: DOMRect, range: Range): boolean {
+  const list = glyphRects(node, range);
+  if (!list) return false;
   let found = false;
   for (let i = 0; i < list.length; i++) {
     const rect = list[i]!;
@@ -1297,14 +1305,20 @@ function pushGlyphRects(node: Text, out: RawTextRect[], origin: DOMRect): boolea
   return found;
 }
 
-/** האם יש תחת האלמנט טקסט מצויר — כלומר זה היקף שאפשר להצמיד אליו. */
-function hasGlyphs(element: Element): boolean {
+/**
+ * האם יש תחת האלמנט טקסט מצויר — כלומר זה היקף שאפשר להצמיד אליו. יוצאת
+ * במלבן הראשון ואינה אוספת כלום: התשובה היא כן/לא.
+ */
+function hasGlyphs(element: Element, range: Range): boolean {
   const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
-  const scratch: RawTextRect[] = [];
-  const origin = { left: 0, top: 0 } as DOMRect;
   for (let node = walker.nextNode(); node; node = walker.nextNode()) {
     if ((node.nodeValue ?? '').length === 0) continue;
-    if (pushGlyphRects(node as Text, scratch, origin)) return true;
+    const list = glyphRects(node as Text, range);
+    if (!list) continue;
+    for (let i = 0; i < list.length; i++) {
+      const rect = list[i]!;
+      if (rect.width > 0 && rect.height > 0) return true;
+    }
   }
   return false;
 }
@@ -1339,10 +1353,19 @@ export function measurePageGlyphs(
 ): PageGlyphMeasure | null {
   if (!host) return null;
   if (typeof document === 'undefined' || typeof document.createTreeWalker !== 'function') return null;
+  if (typeof document.createRange !== 'function') return null;
   const pages = Array.from(host.querySelectorAll(`[${PAGE_INDEX_ATTRIBUTE}]`)).filter(
     (node): node is HTMLElement => node instanceof HTMLElement,
   );
   if (pages.length === 0) return null;
+
+  // Range אחד לכל המדידה — ראו `glyphRects`.
+  let range: Range;
+  try {
+    range = document.createRange();
+  } catch {
+    return null;
+  }
 
   const targetEl = target instanceof Element ? target : target instanceof Node ? target.parentElement : null;
   let page = targetEl ? (pages.find((candidate) => candidate.contains(targetEl)) ?? null) : null;
@@ -1354,7 +1377,7 @@ export function measurePageGlyphs(
     } else {
       for (let el: Element | null = targetEl; el && el !== page; el = el.parentElement) {
         if (REPLACED_TAGS.has(el.tagName.toUpperCase())) return null;
-        if (hasGlyphs(el)) {
+        if (hasGlyphs(el, range)) {
           scope = el;
           break;
         }
@@ -1395,7 +1418,7 @@ export function measurePageGlyphs(
   for (let node = walker.nextNode(); node; node = walker.nextNode()) {
     if ((node.nodeValue ?? '').length === 0) continue;
     if (bodyOnly && outsideBody(node as Text)) continue;
-    pushGlyphRects(node as Text, rects, origin);
+    pushGlyphRects(node as Text, rects, origin, range);
   }
 
   const pageEl = page;
