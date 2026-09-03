@@ -65,7 +65,6 @@
           :sample="fonts.sampleText.value"
           width="130px"
           title="גופן"
-          @done="returnFocusToDocument"
           @update:model-value="fonts.setFamily"
           @preview="fonts.hoverFamily"
           @preview-end="fonts.endHoverFamily"
@@ -85,7 +84,6 @@
           list-min-width="52px"
           width="54px"
           title="גודל גופן"
-          @done="returnFocusToDocument"
           @update:model-value="fonts.setSize"
         />
         <RibbonButton
@@ -474,7 +472,6 @@ import { applyOptimistically, withCurrent } from '../../../composables/picker-va
 import { COMMAND_REPORTER, type CommandReporter } from '../../../composables/keys';
 import type { CommandOutcome } from '../../../engine/command-adapter';
 import { ACTIVE_SUPERDOC } from '../../../engine/document-api';
-import { focusDocument } from '../../../engine/focus';
 import { readDocCapabilities, type DocCapabilityReport } from '../../../engine/doc-capabilities';
 import {
   copySelection,
@@ -683,25 +680,6 @@ const fallbackReporter: CommandReporter = (outcome, id) => {
 
 const superdoc = inject(ACTIVE_SUPERDOC, shallowRef<SuperDoc | null>(null));
 
-/**
- * החזרת המיקוד למסמך אחרי שתיבת גופן ברצועה סיימה.
- *
- * שני דברים תלויים בזה, ושניהם דווחו כבאג אחד (Y-PLONI#14, סעיף א):
- *
- * 1. **ההקלדה הבאה.** התיבה היא `input` והיא לוקחת את המיקוד; בלי החזרה
- *    ההקלדה שאחרי הבחירה נכנסת לרצועה, והמשתמש רואה „הסמן לא כותב”.
- * 2. **העיצוב עצמו.** `focus({restoreSelection:true})` מחזיר את הבחירה שהייתה
- *    לפני המעבר לרצועה. בלעדיו החזרה למסמך היא לחיצת עכבר של המשתמש, והיא
- *    קובעת בחירה **חדשה** — ובחירה חדשה מוחקת עיצוב שהוחל על סמן מכווץ, וזה
- *    „חוזר לכתב הקודם”.
- *
- * נקרא מ-`@done`, שנפלט לפני `update:model-value` — ראו RibbonCombo.vue.
- * נמדד ב-`scripts/qa/context-font-focus-probe.mjs`, שמודד את שני המקומות —
- * הרצועה והכרטיס — מפני שסדר הפליטה הפוך ביניהם.
- */
-function returnFocusToDocument(): void {
-  focusDocument(superdoc.value);
-}
 const report = inject(COMMAND_REPORTER, fallbackReporter);
 
 /* ------------------------------------------------------------------ */

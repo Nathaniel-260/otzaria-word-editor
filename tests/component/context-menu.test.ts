@@ -331,7 +331,7 @@ describe('שורת הגופן בתפריט ההקשר', () => {
       .findAll('[role="option"]')
       .find((row) => row.attributes('data-value') === 'Assistant');
     expect(current).toBeDefined();
-    await current?.trigger('mousedown');
+    await current?.trigger('pointerdown');
     await settle();
 
     // שום דבר לא הוחל — הערך זהה — ובכל זאת הכרטיס נסגר פעם אחת בדיוק.

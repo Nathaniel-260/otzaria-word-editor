@@ -145,7 +145,7 @@ describe('הקפאת הרשימה בזמן שהיא פתוחה', () => {
     // בלי להקפיא, ומשם השורות זזות תחת העכבר — בדיוק הרגרסיה שההקפאה נוספה
     // בשבילה.
     await open();
-    await combo.find('.ribbon-combo-arrow').trigger('mousedown');
+    await combo.find('.ribbon-combo-arrow').trigger('pointerdown');
     await nextTick();
     expect(combo.find('[role="listbox"]').exists()).toBe(false);
 
