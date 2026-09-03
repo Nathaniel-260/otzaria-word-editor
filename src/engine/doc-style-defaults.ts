@@ -143,6 +143,24 @@ export async function applyDocStyleDefaults(
       return { ok: false, message: `${failedAction}: הגודל חייב להיות בין 0.5 ל-800 נקודות`, reason: 'invalid-font-size' };
     }
     inline.fontSize = halfPoints;
+    /*
+     * `fontSizeCs` לצד `fontSize`, אחרת הגודל אינו חל על עברית בכלל.
+     *
+     * `fontSize` הוא `w:sz` והוא חל על טקסט לטיני; טקסט עברי הוא complex
+     * script ונצבע לפי `w:szCs`. המסמך הריק של המנוע נושא את **שניהם**
+     * ב-docDefaults (‏`w:sz="24"` ו-`w:szCs="24"`), ולכן כתיבה של `sz`
+     * לבדו משאירה את העברית על 12 נקודות בעוד המשתמש ביקש 14 — שינוי
+     * שנראה כאילו לא קרה.
+     *
+     * זו הייתה אסימומטריה בת שדה אחד: ערוץ המשפחה שמעל כבר כותב
+     * `{ ascii, hAnsi, cs }` ומכסה את שלושת הערוצים. `fontSizeCs` הוא
+     * `runAttribute('fontSizeCs', 'number', 'w:szCs')` בחוזה של המנוע.
+     *
+     * ערך אחד לשניהם, ולא שדה נפרד בממשק: „גודל ברירת המחדל” הוא מספר אחד
+     * מבחינת מי שיושב מול המסך, והפרדה בין שני הערוצים היא בדיוק סוג
+     * ההגדרה שמייצרת מסמך שנראה שבור בלי שאיש יודע למה.
+     */
+    inline.fontSizeCs = halfPoints;
   }
 
   if (Object.keys(inline).length === 0) {

@@ -52,7 +52,8 @@ describe('applyDocStyleDefaults', () => {
     expect(outcome).toEqual({ ok: true });
     expect(calls[0]).toMatchObject({
       target: { scope: 'docDefaults', channel: 'run' },
-      patch: { fontSize: 28 },
+      // `fontSizeCs` לצדו — בלעדיו הגודל אינו חל על עברית כלל (w:szCs).
+      patch: { fontSize: 28, fontSizeCs: 28 },
     });
   });
 
