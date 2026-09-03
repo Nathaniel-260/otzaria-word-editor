@@ -29,7 +29,10 @@
     <!--
       `pointerdown.prevent` ולא `click`: בלי מניעת ברירת המחדל הלחיצה מוציאה את
       הפוקוס מהשדה, `blur` סוגר את הרשימה, והפתיחה מיד אחריה נראתה כהבהוב.
-      `click` נוסף עליו בשביל הפעלה שאינה מעכבר — ראו `onArrowClick`.
+      `pointerdown` ולא `mousedown`, כמו בשאר פקדי הרצועה: ביטול `pointerdown`
+      מדכא גם את `mousedown` התואם (Pointer Events §11), ולכן מאזין שני על
+      `mousedown` היה רץ פעמיים רק ב-jsdom ואף פעם בדפדפן. `click` נוסף עליו
+      בשביל הפעלה שאינה מעכבר — ראו `onArrowClick`.
     -->
     <button
       type="button"
@@ -38,7 +41,6 @@
       :disabled="disabled"
       :aria-label="menuString('פתח את הרשימה')"
       @pointerdown.prevent="toggle"
-      @mousedown.prevent="toggle"
       @click="onArrowClick"
     >
       <SvgIcon
@@ -56,6 +58,10 @@
       :style="popoverStyle"
       @pointerdown.prevent.stop
     >
+      <!--
+        גם על הרשימה עצמה ולא רק על הפריטים: לחיצה על כותרת קבוצה או ברווח
+        שביניהם הייתה מוציאה את הפוקוס מהשדה, ו-`blur` סוגר את הרשימה.
+      -->
       <template
         v-for="(row, i) in built.rows"
         :key="row.type === 'group' ? `g:${row.label}:${i}` : `o:${row.option.value}`"
@@ -78,7 +84,6 @@
           :data-group="row.option.group ?? ''"
           :style="row.option.preview ? { fontFamily: row.option.preview } : undefined"
           @pointerdown.prevent.stop="choose(row.option.value)"
-          @mousedown.prevent.stop="choose(row.option.value)"
           @mousemove="activeIndex = row.index"
         >
           {{ menuString(row.option.label) }}
@@ -215,11 +220,7 @@ function closeList(): void {
   query.value = null;
 }
 
-let lastToggleTime = 0;
 function toggle(): void {
-  const now = Date.now();
-  if (now - lastToggleTime < 50) return;
-  lastToggleTime = now;
   if (open.value) {
     closeList();
     return;
@@ -232,7 +233,7 @@ function toggle(): void {
  * הפעלת החץ שאינה מעכבר: מקלדת, או `click()` תכנותי.
  *
  * `detail === 0` הוא מה שמפריד ביניהן ללחיצת עכבר אמיתית, וההבחנה נדרשת מפני
- * ש-`mousedown` כבר טיפל בזו: בלעדיה לחיצת עכבר הייתה פותחת ב-`mousedown`
+ * ש-`pointerdown` כבר טיפל בזו: בלעדיה לחיצת עכבר הייתה פותחת ב-`pointerdown`
  * וסוגרת מיד ב-`click` שאחריו.
  */
 function onArrowClick(event: MouseEvent): void {

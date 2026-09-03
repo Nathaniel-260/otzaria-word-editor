@@ -53,6 +53,11 @@
       :style="popoverStyle"
       @pointerdown.prevent.stop
     >
+      <!--
+        `.prevent` על המעטפת ולא רק על הדוגמיות: לחיצה על כותרת פלטה או
+        ברווח שביניהן גזלה את הפוקוס מהמסמך. שדה הצבע המותאם נפתח ב-`click()`
+        תכנותי, שביטול `pointerdown` אינו נוגע בו.
+      -->
       <div
         v-if="allowClear"
         class="palette-section"
@@ -130,7 +135,7 @@
             type="color"
             :value="modelValue || defaultColor"
             class="custom-color-input"
-            @input="selectColor(($event.target as HTMLInputElement).value)"
+            @change="selectColor(($event.target as HTMLInputElement).value)"
           >
         </label>
       </div>
@@ -237,6 +242,11 @@ function toggleDropdown(): void {
   isOpen.value = !isOpen.value;
 }
 
+/**
+ * גם הבחירה מהדו-שיח המקורי מגיעה לכאן, אבל ב-`change` ולא ב-`input`:
+ * `input` יורה על כל תזוזה בתוך הדו-שיח, וכל ירייה סגרה את הפופאובר, שלחה
+ * פקודת צבע למנוע והחזירה מיקוד למסמך — עוד לפני שהמשתמש סיים לבחור.
+ */
 function selectColor(hex: string | null): void {
   // `modelValue` נשאר מחרוזת — הוא מזין את פס הצבע שעל הכפתור, ו-CSS צריך שם
   // ערך ולא null. רק ה-`change`, כלומר מה שהופך ל-payload, נושא את ההבחנה.

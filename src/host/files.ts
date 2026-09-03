@@ -214,9 +214,14 @@ export async function beginBinaryWrite(expectedSize: number): Promise<WriteTicke
  *
  * „Failed to fetch” הוא כל מה שהדפדפן אומר, והוא מכסה שני עולמות שונים
  * לגמרי: שרת ה-loopback אינו נגיש בכלל, או שדווקא ה-PUT נחסם (שער בקשות
- * של ה-WebView, preflight שנכשל). ההבחנה נמדדת: GET לשורש השרת. אם ה-GET
- * עובר (כל סטטוס HTTP הוא הוכחת נגישות) — הבעיה ב-PUT עצמו; אם גם הוא
- * נופל — השרת אינו נגיש מהדף.
+ * של ה-WebView, preflight שנכשל). ההבחנה נמדדת: GET לנתיב קובץ של השרת.
+ * אם ה-GET עובר (כל סטטוס HTTP הוא הוכחת נגישות) — הבעיה ב-PUT עצמו; אם
+ * גם הוא נופל — השרת אינו נגיש מהדף.
+ *
+ * למה `/f/probe` ולא השורש: שער ה-WebView של אוצריא מאשר לתוסף רק נתיבי
+ * `/f/` (ובגרסאות שלפני התיקון של `/w/` — רק אותם), ו-GET לשורש היה נחסם
+ * באותו שער בדיוק כמו ה-PUT, כך ששני המקרים היו נראים „השרת אינו נגיש”.
+ * token שאינו קיים מחזיר 404 מהשרת עצמו — וזו ההוכחה שהוא נגיש.
  *
  * חד-פעמי לכל חיי הדף: שמירה אוטומטית רצה כל כמה שניות, ואבחון בכל כשל
  * היה מציף את הלוג ואת השרת. הממצא נכנס גם להודעת השגיאה — צילום מסך של
@@ -231,7 +236,7 @@ async function uploadFailureDetail(uploadUrl: string): Promise<string> {
   let probe: string;
   try {
     const origin = new URL(uploadUrl).origin;
-    const res = await fetch(`${origin}/`, { method: 'GET' });
+    const res = await fetch(`${origin}/f/probe`, { method: 'GET' });
     probe = `GET לשרת עבר (${res.status}) — ה-PUT עצמו נחסם`;
   } catch (probeError) {
     probe = `גם GET לשרת נכשל (${

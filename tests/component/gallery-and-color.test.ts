@@ -213,6 +213,8 @@ describe('ColorPickerPopover', () => {
     expect(harness.wrapper.emitted('change')).toEqual([['#c00000']]);
     expect(harness.wrapper.emitted('update:modelValue')).toEqual([['#c00000']]);
     expect(harness.wrapper.find('.color-palette-popover').exists()).toBe(false);
+    // issue #14 (ד): אחרי הבחירה הסמן חוזר לטקסט, ולא נשאר „מחוץ למסמך".
+    expect(harness.superdoc.ops()).toContain('focus');
   });
 
   it('„ללא צבע” פולט `null` — ולא מחרוזת ריקה', async () => {

@@ -74,6 +74,8 @@ describe('מסך הטעינה', () => {
       ['--splash-muted', '--color-on-surface-variant'],
       ['--splash-track', '--color-outline-variant'],
       ['--splash-accent', '--color-primary'],
+      // צבע הכשל, ומופיע רק בכלל של data-failed.
+      ['--splash-error', '--color-error'],
     ];
 
     for (const [splashName, tokenName] of pairs) {
@@ -81,9 +83,35 @@ describe('מסך הטעינה', () => {
       expect(expected, `${tokenName} חסר ב-tokens.css`).toBeDefined();
       expect(cssVar(html, splashName), `${splashName} מול ${tokenName}`).toBe(expected);
     }
+  });
 
-    // צבע הכשל הוא --color-error, ומופיע רק בכלל של data-failed.
-    expect(html).toContain(cssVar(tokens, '--color-error'));
+  it('עומד בכללי העיצוב של הוולידטור', () => {
+    // הוולידטור של אוצריא סורק את בלוק ה-<style> של index.html — ה-CSS היחיד
+    // בתוסף שאינו מוטמע ב-app.js — ומעיר על ערכים קשיחים: hex מחוץ להגדרת
+    // משתנה, font-family בלי var(--font-*), font-size ו-border-radius ב-px,
+    // ואפס שימוש ב-var(--color-*). חמש ההערות האלה ישבו על main בכל ריצה.
+    // הכללים כאן הם שלו (extendedValidator.js, checkDesignCompliance), כדי
+    // שהתיקון לא יישחק בשקט.
+    const style = html.match(/<style[^>]*>([\s\S]*?)<\/style>/)?.[1] ?? '';
+    expect(style).not.toBe('');
+    const stripped = style
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/--[a-zA-Z_][\w-]*\s*:\s*[^;}]+;?/g, '');
+
+    expect(stripped).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
+    expect(stripped).not.toMatch(/\b(?:rgb|rgba|hsl|hsla)\s*\(/);
+    for (const [, value] of stripped.matchAll(/font-family\s*:\s*([^;}]+)/g)) {
+      expect(value).toMatch(/var\(\s*--font/);
+    }
+    for (const [, value] of stripped.matchAll(/font-size\s*:\s*([^;}]+)/g)) {
+      expect(value.trim()).toMatch(/^(?:var\(|\d+(?:\.\d+)?(?:em|rem|%)$)/);
+    }
+    for (const [, value] of stripped.matchAll(/border-radius\s*:\s*([^;}]+)/g)) {
+      // כמו אצל הוולידטור: ערך שמתחיל ב-var() עובר, גם אם ה-fallback שלו ב-px.
+      if (/var\s*\(/.test(value)) continue;
+      expect(value.trim()).not.toMatch(/\d\s*px/);
+    }
+    expect(style).toMatch(/var\(\s*--color-/);
   });
 
   it('מאמץ את ערכת הנושא גם כשהיא מגיעה מאוחר', () => {

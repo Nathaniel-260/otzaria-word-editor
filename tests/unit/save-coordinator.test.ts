@@ -109,8 +109,15 @@ async function flush(): Promise<void> {
   for (let i = 0; i < 20; i += 1) await Promise.resolve();
 }
 
+// כשל שמירה נרשם ל-console.warn (fail() בקואורדינטור); הבדיקות כאן מייצרות
+// אותו בכוונה, ובלי ההשתקה כל ריצה מדפיסה עקבות מחסנית של כשלים מתוכננים.
+beforeEach(() => {
+  vi.spyOn(console, 'warn').mockImplementation(() => {});
+});
+
 afterEach(() => {
   vi.useRealTimers();
+  vi.restoreAllMocks();
 });
 
 describe('saveNow', () => {

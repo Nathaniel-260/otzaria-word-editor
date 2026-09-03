@@ -71,6 +71,11 @@ const emit = defineEmits<{
 
 const superdoc = inject(ACTIVE_SUPERDOC, shallowRef<SuperDoc | null>(null));
 
+/**
+ * אחרי בחירה המיקוד חוזר למסמך — בכל פקד `<select>` ברצועה, גם כשהערך הוא
+ * אפשרות של כלי (סוג הסוגריים בלשונית „שולחן העורך") ולא עיצוב: כך נוהגת
+ * הרצועה של Word, ובלי זה ההקלדה הבאה נבלעת בפקד (issue #14 א׳).
+ */
 function onChange(event: Event): void {
   const target = event.target as HTMLSelectElement;
   emit('update:modelValue', target.value);
@@ -79,6 +84,8 @@ function onChange(event: Event): void {
 }
 
 function onEscape(event: KeyboardEvent): void {
+  // כמו ב-RibbonCombo: המקש נבלע כאן ואינו מגיע למאזין הקיצורים הגלובלי.
+  event.stopPropagation();
   const target = event.target as HTMLSelectElement;
   target.blur();
   focusDocument(superdoc.value);

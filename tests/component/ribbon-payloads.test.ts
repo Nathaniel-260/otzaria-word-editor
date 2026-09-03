@@ -41,6 +41,9 @@ describe('גופן', () => {
 
     expect(harness.adapter.payloads('font-family')).toEqual(['TaameyDavidCLM']);
     expect(harness.adapter.rejected).toEqual([]);
+    // issue #14 (א): הבחירה מחזירה את המיקוד למסמך — פעם אחת, מהפקד עצמו.
+    // ההקלדה שאחריה נכנסת לטקסט בגופן שנבחר, ולא לתיבת החיפוש.
+    expect(harness.superdoc.ops().filter((op) => op === 'focus')).toEqual(['focus']);
   });
 
   it('בחירה בבורר הגודל שולחת מספר נקודות — לא `{ fontSize }`', async () => {
@@ -52,6 +55,7 @@ describe('גופן', () => {
 
     expect(harness.adapter.payloads('font-size')).toEqual([16]);
     expect(harness.adapter.rejected).toEqual([]);
+    expect(harness.superdoc.ops().filter((op) => op === 'focus')).toEqual(['focus']);
   });
 
   it('„הגדל גופן” מחשב מהערך שהמנוע דיווח, ולא ממספר מקומי', async () => {

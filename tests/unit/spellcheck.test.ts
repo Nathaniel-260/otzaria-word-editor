@@ -256,6 +256,7 @@ describe('מילון תורני שלם (torah-dictionary.txt)', () => {
   it('מכיל את המילים התורניות הבסיסיות זצ״ל, ערוך, פי ומזהה אותן בטקסט', async () => {
     const fs = await import('node:fs');
     const path = await import('node:path');
+    // יחסית ל-cwd של vitest (שורש הפרויקט), כמו ב-tests/component/dialogs.test.ts.
     const text = fs.readFileSync(path.resolve('src/data/torah-dictionary.txt'), 'utf8');
     const dictionary = createDictionary(text.trim());
 
@@ -263,7 +264,8 @@ describe('מילון תורני שלם (torah-dictionary.txt)', () => {
     expect(dictionary.has('זצ"ל')).toBe(true);
     expect(dictionary.has('ערוך')).toBe(true);
     expect(dictionary.has('פי')).toBe(true);
-    expect(dictionary.has('על־פי')).toBe(false); // מקף מפריד בין מילים
+    // המקף (U+05BE) מפריד בין מילים בסריקה, ולכן „על־פי” אינו ערך במילון אלא שניים.
+    expect(findMisspellings('על־פי', dictionary)).toEqual([]);
     expect(findMisspellings('מרן זצ״ל בספרו ערוך על פי הדין', dictionary)).toEqual([]);
   });
 });

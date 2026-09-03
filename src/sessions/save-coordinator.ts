@@ -217,7 +217,7 @@ export function createSaveCoordinator(deps: SaveCoordinatorDeps): SaveCoordinato
   }
 
   function fail(error: unknown, fallback: string): SaveOutcome {
-    console.error(`[otzaria-word] שמירה נכשלה (${fallback}):`, error);
+    console.warn(`[otzaria-word] שמירה נכשלה (${fallback}):`, error);
     const errorMsg = error instanceof Error && error.message ? error.message.trim() : '';
     let message: string;
     if (!errorMsg || errorMsg === fallback) {

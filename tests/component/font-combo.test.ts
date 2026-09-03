@@ -129,8 +129,18 @@ describe('מקלדת', () => {
 describe('עכבר ופוקוס', () => {
   it('לחיצה על שורה מחילה אותה', async () => {
     await open();
-    await combo.findAll('[role="option"]')[4].trigger('mousedown');
+    await combo.findAll('[role="option"]')[4].trigger('pointerdown');
     expect(emitted()?.[0]).toEqual(['Narkisim']);
+  });
+
+  it('`mousedown` לבדו אינו בוחר — הרשימה מאזינה ל-`pointerdown` בלבד', async () => {
+    // ביטול `pointerdown` מדכא בדפדפן את `mousedown` התואם, ולכן מאזין שני על
+    // `mousedown` היה חי רק ב-jsdom — ושם היה בוחר פעמיים. הבדיקה מקבעת שיש
+    // מאזין אחד, כדי שהכפילות לא תחזור בשם „גם וגם".
+    await open();
+    await combo.findAll('[role="option"]')[4].trigger('mousedown');
+    expect(emitted()).toBeUndefined();
+    expect(combo.find('[role="listbox"]').exists()).toBe(true);
   });
 
   it('בחירת גופן מחזירה פוקוס למסמך דרך ACTIVE_SUPERDOC', async () => {
@@ -186,8 +196,8 @@ describe('נגישות', () => {
   });
 
   it('כפתור החץ נפתח גם בהפעלה שאינה מעכבר', async () => {
-    // `mousedown` לבדו נראה נכון עד שמפעילים אחרת: `click()` תכנותי, והפעלה
-    // במקלדת, אינם מייצרים `mousedown` כלל — כלומר כפתור מת. `detail === 0`
+    // `pointerdown` לבדו נראה נכון עד שמפעילים אחרת: `click()` תכנותי, והפעלה
+    // במקלדת, אינם מייצרים `pointerdown` כלל — כלומר כפתור מת. `detail === 0`
     // הוא מה שמפריד ביניהם ללחיצת עכבר, שכבר טופלה.
     // `element.click()` ולא `trigger`: זו בדיוק ההפעלה שאינה מעכבר — היא
     // מייצרת `detail === 0`, ו-`trigger` אינו יכול לקבוע את השדה הזה.
@@ -197,10 +207,10 @@ describe('נגישות', () => {
   });
 
   it('לחיצת עכבר על החץ אינה נסגרת מיד אחרי שנפתחה', async () => {
-    // הרצף האמיתי הוא `mousedown` ואז `click`. בלי ההבחנה השני היה מבטל את
+    // הרצף האמיתי הוא `pointerdown` ואז `click`. בלי ההבחנה השני היה מבטל את
     // הראשון, והרשימה הייתה מהבהבת במקום להיפתח.
     const arrow = combo.find('.ribbon-combo-arrow').element;
-    await combo.find('.ribbon-combo-arrow').trigger('mousedown');
+    await combo.find('.ribbon-combo-arrow').trigger('pointerdown');
     arrow.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
     await nextTick();
     expect(combo.find('[role="listbox"]').exists()).toBe(true);
