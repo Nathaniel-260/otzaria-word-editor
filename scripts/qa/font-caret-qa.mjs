@@ -83,11 +83,15 @@ const screenSpotOf = async (text) =>
   })()`)) || 'null',
   );
 
+const OPTION_SEL = '.ribbon-combo-list [role="option"]';
+
 /** בוחר גופן בבורר הרצועה בעכבר אמיתי: קליק על התיבה, ואז קליק על הפריט. */
 async function pickFontByMouse(value) {
   await app.click('גופן');
   await app.sleep(500);
-  const options = await app.js(`JSON.stringify(Array.from(document.querySelectorAll('[role="option"]')).map(function(o){return o.getAttribute('data-value');}))`);
+  // רשימת הבורר ולא כל [role="option"] בדף: רשימת ה-Tell Me מוסתרת אך קיימת
+  // ב-DOM, וכל אינדקס שנמדד מולה מצביע על השורה הלא-נכונה.
+  const options = await app.js(`JSON.stringify(Array.from(document.querySelectorAll('${OPTION_SEL}')).map(function(o){return o.getAttribute('data-value');}))`);
   const list = JSON.parse(options || '[]');
   const index = list.indexOf(value);
   // סוגרים את הרשימה גם בכשל: פופ-אובר פתוח היה מסתיר פקדים מכל מדידה שתבוא.
@@ -95,7 +99,7 @@ async function pickFontByMouse(value) {
     await app.press('Escape', 'Escape', 27);
     return { ok: false, list };
   }
-  await app.clickSel('[role="option"]', index);
+  await app.clickSel(OPTION_SEL, index);
   return { ok: true, index };
 }
 

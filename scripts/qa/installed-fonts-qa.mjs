@@ -169,7 +169,9 @@ try {
   // ה-`await` אינו נימוס: Vue מרנדר במיקרו-משימה, ולכן מיד אחרי `focus`
   // הרשימה עוד אינה ב-DOM. אותה מלכודת בדיוק כמו ב-scripts/qa/qa-api.js.
   const geometry = await app.js(`(async function () {
-    var input = document.querySelector('input[role="combobox"]');
+    /* דרך הרצועה, ולא „הראשון במסמך”: תיבת ה-Tell Me בפס הכותרת היא גם
+       input[role="combobox"] והיא קודמת בסדר ה-DOM. */
+    var input = window.__qa.el('גופן', { scope: '.word-ribbon-body', selector: 'input[role="combobox"]' });
     if (!input) return JSON.stringify({ found: false, why: 'אין פקד' });
     /* פתיחה כמו ב-qa-api.js, ולא focus() לבד: ב-headless החלון אינו ממוקד
        ואירוע ה-focus אינו בהכרח נורה. אירוע input פותח בכל מקרה, והוא גם
