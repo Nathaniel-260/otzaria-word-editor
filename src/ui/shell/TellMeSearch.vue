@@ -25,7 +25,7 @@
         aria-controls="tell-me-listbox"
         :aria-activedescendant="activeItemId"
         aria-label="חיפוש אפשרויות, פקודות ועזרה"
-        placeholder="חפש אפשרויות, פקודות ועזרה (Alt+Q)"
+        :placeholder="`חפש אפשרויות, פקודות ועזרה (${TELL_ME_LABEL})`"
         @focus="onFocus"
         @blur="onBlur"
         @input="onInput"
@@ -44,7 +44,7 @@
       <span
         v-else
         class="tell-me-shortcut-hint"
-      >Alt+Q</span>
+      >{{ TELL_ME_LABEL }}</span>
     </div>
 
     <!-- תפריט תוצאות נפתח (Dropdown) -->
@@ -137,7 +137,7 @@
           </div>
         </div>
         <div class="tell-me-item-shortcut">
-          <kbd class="shortcut-pill">Ctrl+F</kbd>
+          <kbd class="shortcut-pill">{{ FIND_LABEL }}</kbd>
         </div>
       </div>
     </div>
@@ -152,7 +152,19 @@ import {
   type TellMeAction,
   type TellMeCustomAction,
 } from './tell-me-actions';
-import type { ShellAction } from '../shortcuts/registry';
+import { shortcutLabel, type ShellAction } from '../shortcuts/registry';
+
+/*
+ * שלוש התוויות שבתבנית באות מהרג'יסטרי ואינן נכתבות כאן.
+ *
+ * הן היו כתובות ביד — `Alt+Q` פעמיים ו-`Ctrl+F` — והיו נכונות. מה שהיה שבור
+ * הוא ההגנה: בדיקת החוזה סורקת `title`/`tooltip`/`aria-label` בלבד, ולכן
+ * `placeholder` וצומת טקסט חמקו ממנה. זה בדיוק המצב שהרג'יסטרי נבנה כדי
+ * למנוע — תווית שמבטיחה למשתמש צירוף, בלי שום דבר שיצליב אותה מול המאזין.
+ * הבדיקה הורחבה יחד עם השינוי הזה.
+ */
+const TELL_ME_LABEL = shortcutLabel('tell-me');
+const FIND_LABEL = shortcutLabel('find');
 
 const emit = defineEmits<{
   (e: 'run-command', id: string, payload?: unknown): void;
