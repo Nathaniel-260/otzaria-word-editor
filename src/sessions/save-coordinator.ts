@@ -217,9 +217,19 @@ export function createSaveCoordinator(deps: SaveCoordinatorDeps): SaveCoordinato
   }
 
   function fail(error: unknown, fallback: string): SaveOutcome {
-    lastError = error instanceof Error && error.message ? error.message : fallback;
+    console.error(`[otzaria-word] שמירה נכשלה (${fallback}):`, error);
+    const errorMsg = error instanceof Error && error.message ? error.message.trim() : '';
+    let message: string;
+    if (!errorMsg || errorMsg === fallback) {
+      message = fallback;
+    } else if (errorMsg.startsWith(`${fallback}: `)) {
+      message = errorMsg;
+    } else {
+      message = `${fallback}: ${errorMsg}`;
+    }
+    lastError = message;
     setState('error');
-    return { status: 'failed', message: `${fallback}: ${lastError}` };
+    return { status: 'failed', message };
   }
 
   /** סבב שמירה אחד: ייצוא → העלאה → commit. */
@@ -252,10 +262,16 @@ export function createSaveCoordinator(deps: SaveCoordinatorDeps): SaveCoordinato
       return fail(error, 'ייצוא המסמך נכשל');
     }
 
-    let ticket: SaveTicket | undefined;
+    let ticket: SaveTicket;
     try {
       stage('uploading');
       ticket = await deps.beginWrite(blob.size);
+    } catch (error) {
+      if (mine !== epoch) return { status: 'stale' };
+      return fail(error, 'הכנת השמירה באוצריא נכשלה');
+    }
+
+    try {
       await deps.upload(ticket.uploadUrl, blob);
     } catch (error) {
       // ההעלאה נפתחה ולא תגיע ל-commit — לשחרר אותה עכשיו ולא לחכות לפקיעה.

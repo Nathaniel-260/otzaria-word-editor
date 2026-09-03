@@ -10,9 +10,11 @@
  * ולא המראה — jsdom אינו מודד פריסה, אבל הוא כן אומר איזה `position` הוחל,
  * וזו ההבחנה בין „נמדד ב-fixed” לבין „absolute שנחתך”.
  */
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mount, type VueWrapper } from '@vue/test-utils';
-import { nextTick } from 'vue';
+import { nextTick, shallowRef } from 'vue';
+import type { SuperDoc } from 'superdoc';
+import { ACTIVE_SUPERDOC } from '../../src/engine/document-api';
 import RibbonCombo from '../../src/ui/ribbon/common/RibbonCombo.vue';
 import type { ComboOption } from '../../src/ui/ribbon/font-search';
 
@@ -129,6 +131,24 @@ describe('עכבר ופוקוס', () => {
     await open();
     await combo.findAll('[role="option"]')[4].trigger('mousedown');
     expect(emitted()?.[0]).toEqual(['Narkisim']);
+  });
+
+  it('בחירת גופן מחזירה פוקוס למסמך דרך ACTIVE_SUPERDOC', async () => {
+    const focusSpy = vi.fn();
+    const fakeSuperdoc = shallowRef({ focus: focusSpy } as unknown as SuperDoc);
+    const wrapper = mount(RibbonCombo, {
+      props: { modelValue: 'Arial', options: OPTIONS, title: 'גופן' },
+      global: {
+        provide: {
+          [ACTIVE_SUPERDOC as symbol]: fakeSuperdoc,
+        },
+      },
+    });
+
+    await wrapper.find('input').trigger('focus');
+    await nextTick();
+    await wrapper.findAll('[role="option"]')[4].trigger('pointerdown');
+    expect(focusSpy).toHaveBeenCalledWith({ restoreSelection: true });
   });
 
   it('יציאה מהשדה סוגרת ואינה מחילה', async () => {

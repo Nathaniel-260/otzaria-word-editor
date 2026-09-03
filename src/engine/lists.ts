@@ -75,7 +75,10 @@ interface ListsApiShape {
     current?: () => MaybePromise<SelectionInfoLike | undefined>;
   };
   blocks?: {
-    list?: () => MaybePromise<{ blocks?: Array<{ nodeId?: string; nodeType?: string }> }>;
+    list?: (input?: { offset?: number; limit?: number }) => MaybePromise<{
+      total?: number;
+      blocks?: Array<{ nodeId?: string; nodeType?: string }>;
+    }>;
   };
   lists?: {
     setLevelNumberStyle?: (input: Record<string, unknown>) => MaybePromise<DocReceipt>;
@@ -105,8 +108,18 @@ function docOf(host: ListsTarget): ListsApiShape | null {
 }
 
 /**
- * פותרת את פריט הרשימה שבו הסמן: `blockId` מהבחירה, ו-`nodeType` מ-
- * `blocks.list` (הבחירה אינה מדווחת listItem). פסקה שאינה ברשימה היא
+ * כמה פסקאות לבקש בכל קריאה, וכמה קריאות לכל היותר.
+ *
+ * כמו ב-caret-anchor.ts ו-search.ts: קריאה בלי דפדוף קיבלה את העמוד הראשון
+ * בלבד (ברירת המחדל של המנוע היא 50 בלוקים), ורשימה שהחלה מעבר לו נדחתה
+ * ב„יש למקם את הסמן בתוך רשימה” למרות שהסמן היה בתוכה.
+ */
+const PAGE_SIZE = 500;
+const MAX_PAGES = 50;
+
+/**
+ * פותרת את פריט הרשימה מתוך הבחירה: ה-`blockId` מהבחירה חייב להיות `listItem`
+ * ב-`blocks.list` (הבחירה אינה מדווחת listItem). פסקה שאינה ברשימה היא
  * `null` — ולא כשל, כדי שהפקד יוכל להסביר „יש למקם את הסמן ברשימה".
  */
 async function resolveListItem(host: ListsTarget): Promise<ListItemAddress | null> {
@@ -123,11 +136,26 @@ async function resolveListItem(host: ListsTarget): Promise<ListItemAddress | nul
   }
   if (!blockId) return null;
 
+  const list = doc.blocks?.list;
+  if (typeof list !== 'function') return null;
+
   try {
-    const listed = await doc.blocks?.list?.();
-    const block = (listed?.blocks ?? []).find((b) => b.nodeId === blockId);
-    if (block?.nodeType !== 'listItem') return null;
-    return { kind: 'block', nodeType: 'listItem', nodeId: block.nodeId as string };
+    let offset = 0;
+    for (let page = 0; page < MAX_PAGES; page += 1) {
+      const listed = await list({ offset, limit: PAGE_SIZE });
+      const blocks = Array.isArray(listed?.blocks) ? listed.blocks : [];
+      if (blocks.length === 0) break;
+
+      const block = blocks.find((b) => b.nodeId === blockId);
+      if (block) {
+        if (block.nodeType !== 'listItem') return null;
+        return { kind: 'block', nodeType: 'listItem', nodeId: block.nodeId as string };
+      }
+
+      offset += blocks.length;
+      if (typeof listed?.total === 'number' && offset >= listed.total) break;
+    }
+    return null;
   } catch {
     return null;
   }

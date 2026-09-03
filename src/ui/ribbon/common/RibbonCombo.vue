@@ -27,7 +27,7 @@
       @keydown="onKeydown"
     >
     <!--
-      `mousedown.prevent` ולא `click`: בלי מניעת ברירת המחדל הלחיצה מוציאה את
+      `pointerdown.prevent` ולא `click`: בלי מניעת ברירת המחדל הלחיצה מוציאה את
       הפוקוס מהשדה, `blur` סוגר את הרשימה, והפתיחה מיד אחריה נראתה כהבהוב.
       `click` נוסף עליו בשביל הפעלה שאינה מעכבר — ראו `onArrowClick`.
     -->
@@ -37,6 +37,7 @@
       tabindex="-1"
       :disabled="disabled"
       :aria-label="menuString('פתח את הרשימה')"
+      @pointerdown.prevent="toggle"
       @mousedown.prevent="toggle"
       @click="onArrowClick"
     >
@@ -53,6 +54,7 @@
       class="ribbon-combo-list"
       role="listbox"
       :style="popoverStyle"
+      @pointerdown.prevent.stop
     >
       <template
         v-for="(row, i) in built.rows"
@@ -75,7 +77,8 @@
           :data-value="row.option.value"
           :data-group="row.option.group ?? ''"
           :style="row.option.preview ? { fontFamily: row.option.preview } : undefined"
-          @mousedown.prevent="choose(row.option.value)"
+          @pointerdown.prevent.stop="choose(row.option.value)"
+          @mousedown.prevent.stop="choose(row.option.value)"
           @mousemove="activeIndex = row.index"
         >
           {{ menuString(row.option.label) }}
@@ -112,7 +115,10 @@
  * ההכרעות שאינן חיווט — מה נחשב התאמה, מה מדורג לפני מה, ומה Enter מחיל —
  * יושבות ב-`../font-search.ts` ונבדקות שם ישירות.
  */
-import { computed, nextTick, ref, watch } from 'vue';
+import { computed, inject, nextTick, ref, shallowRef, watch } from 'vue';
+import type { SuperDoc } from 'superdoc';
+import { ACTIVE_SUPERDOC } from '../../../engine/document-api';
+import { focusDocument } from '../../../engine/focus';
 import { usePopoverPosition } from '../../../composables/popover-position';
 import SvgIcon from '../../icons/SvgIcon.vue';
 import { menuString } from '../i18n';
@@ -149,6 +155,7 @@ const inputRef = ref<HTMLInputElement | null>(null);
 const listRef = ref<HTMLElement | null>(null);
 const open = ref(false);
 const activeIndex = ref(-1);
+const superdoc = inject(ACTIVE_SUPERDOC, shallowRef<SuperDoc | null>(null));
 
 /**
  * המיקום נמדד ואינו CSS, ומאותו טעם בדיוק שבו שאר הפופאוברים של הרצועה
@@ -208,7 +215,11 @@ function closeList(): void {
   query.value = null;
 }
 
+let lastToggleTime = 0;
 function toggle(): void {
+  const now = Date.now();
+  if (now - lastToggleTime < 50) return;
+  lastToggleTime = now;
   if (open.value) {
     closeList();
     return;
@@ -232,6 +243,8 @@ function onArrowClick(event: MouseEvent): void {
 function choose(value: string): void {
   closeList();
   if (value !== props.modelValue) emit('update:modelValue', value);
+  inputRef.value?.blur();
+  focusDocument(superdoc.value);
 }
 
 function onFocus(): void {
@@ -263,6 +276,8 @@ function onKeydown(event: KeyboardEvent): void {
     event.stopPropagation();
     event.preventDefault();
     closeList();
+    inputRef.value?.blur();
+    focusDocument(superdoc.value);
     return;
   }
 
@@ -270,8 +285,13 @@ function onKeydown(event: KeyboardEvent): void {
     if (!open.value) return;
     event.preventDefault();
     const value = commitValue(built.value, activeIndex.value, query.value ?? '');
-    if (value !== null) choose(value);
-    else closeList();
+    if (value !== null) {
+      choose(value);
+    } else {
+      closeList();
+      inputRef.value?.blur();
+      focusDocument(superdoc.value);
+    }
     return;
   }
 

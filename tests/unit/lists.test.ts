@@ -24,7 +24,16 @@ const LIST_BLOCKS = {
   ],
 };
 
-function fakeDoc(options: { receipts?: Record<string, unknown>; selection?: unknown } = {}) {
+function fakeDoc(
+  options: {
+    receipts?: Record<string, unknown>;
+    selection?: unknown;
+    blocksList?: (input?: { offset?: number; limit?: number }) => Promise<{
+      total?: number;
+      blocks: Array<{ nodeId: string; nodeType: string }>;
+    }>;
+  } = {},
+) {
   const calls = new Map<string, unknown[]>();
   const impls: Record<string, (input: unknown) => unknown> = {};
   for (const name of ['setLevelNumberStyle', 'restartAt', 'continuePrevious', 'convertToText']) {
@@ -36,9 +45,10 @@ function fakeDoc(options: { receipts?: Record<string, unknown>; selection?: unkn
     };
   }
 
+  const listFn = options.blocksList ?? vi.fn(async () => LIST_BLOCKS);
   const doc = {
     selection: { current: vi.fn(async () => options.selection ?? SELECTION_IN_LIST) },
-    blocks: { list: vi.fn(async () => LIST_BLOCKS) },
+    blocks: { list: listFn },
     lists: impls,
   } as never;
 
@@ -109,6 +119,30 @@ describe('resolveListItem', () => {
 
     expect(outcome).toMatchObject({ ok: false, reason: 'selection-required' });
     expect(calls.get('setLevelNumberStyle')).toHaveLength(0);
+  });
+
+  it('פריט רשימה שנמצא בדף השני (מעבר ל-50 בלוקים) מאותר דרך דפדוף', async () => {
+    const selection = { target: { segments: [{ blockId: 'li-page-2' }] } };
+    const page1 = Array.from({ length: 500 }, (_, i) => ({ nodeId: `p-${i}`, nodeType: 'paragraph' }));
+    const page2 = [{ nodeId: 'li-page-2', nodeType: 'listItem' }];
+
+    const blocksList = vi.fn(async (input?: { offset?: number; limit?: number }) => {
+      const offset = input?.offset ?? 0;
+      if (offset === 0) return { total: 501, blocks: page1 };
+      return { total: 501, blocks: page2 };
+    });
+
+    const { host, calls } = fakeDoc({ selection, blocksList });
+
+    const outcome = await setListNumberStyle(host, 'hebrew1');
+
+    expect(outcome).toEqual({ ok: true });
+    expect(calls.get('setLevelNumberStyle')?.[0]).toEqual({
+      target: { kind: 'block', nodeType: 'listItem', nodeId: 'li-page-2' },
+      level: 0,
+      numberStyle: 'hebrew1',
+    });
+    expect(blocksList).toHaveBeenCalledTimes(2);
   });
 });
 

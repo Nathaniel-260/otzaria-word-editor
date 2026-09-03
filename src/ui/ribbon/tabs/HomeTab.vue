@@ -459,6 +459,7 @@ import { useFontOptions } from '../../../composables/useFontOptions';
 import { COMMAND_REPORTER, type CommandReporter } from '../../../composables/keys';
 import type { CommandOutcome } from '../../../engine/command-adapter';
 import { ACTIVE_SUPERDOC } from '../../../engine/document-api';
+import { focusDocument } from '../../../engine/focus';
 import { readDocCapabilities, type DocCapabilityReport } from '../../../engine/doc-capabilities';
 import {
   copySelection,
@@ -717,12 +718,14 @@ function onFontFamilyChange(font: string): void {
   const payload = fontFamilyPayload(font);
   if (payload === null) return;
   void applyOptimistically(pendingFamily, lastFamily, payload, () => fontFamilyCmd.run(payload));
+  focusDocument(superdoc.value);
 }
 
 function applyFontSize(pt: number): void {
   const payload = fontSizePayload(pt);
   if (payload === null) return;
   void applyOptimistically(pendingSize, lastSize, payload, () => fontSizeCmd.run(payload));
+  focusDocument(superdoc.value);
 }
 
 function onFontSizeChange(size: string): void {
@@ -755,6 +758,7 @@ function onLineSpacingChange(val: string): void {
   void applyOptimistically(pendingLineHeight, lastLineHeight, multiplier, () =>
     lineSpacingCmd.run(payload),
   );
+  focusDocument(superdoc.value);
 }
 
 function onAlign(alignment: ParagraphAlignment): void {

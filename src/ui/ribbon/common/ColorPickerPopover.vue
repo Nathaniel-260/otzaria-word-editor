@@ -51,7 +51,7 @@
       ref="popoverRef"
       class="color-palette-popover"
       :style="popoverStyle"
-      @pointerdown.stop
+      @pointerdown.prevent.stop
     >
       <div
         v-if="allowClear"
@@ -139,7 +139,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue';
+import { inject, ref, shallowRef, onMounted, onUnmounted } from 'vue';
+import type { SuperDoc } from 'superdoc';
+import { ACTIVE_SUPERDOC } from '../../../engine/document-api';
+import { focusDocument } from '../../../engine/focus';
 import SvgIcon from '../../icons/SvgIcon.vue';
 import { menuString } from '../i18n';
 import { usePopoverPosition } from '../../../composables/popover-position';
@@ -225,6 +228,7 @@ const containerRef = ref<HTMLElement | null>(null);
 const popoverRef = ref<HTMLElement | null>(null);
 const customColorRef = ref<HTMLInputElement | null>(null);
 const isOpen = ref(false);
+const superdoc = inject(ACTIVE_SUPERDOC, shallowRef<SuperDoc | null>(null));
 
 const { popoverStyle } = usePopoverPosition(containerRef, popoverRef, isOpen);
 
@@ -239,6 +243,7 @@ function selectColor(hex: string | null): void {
   emit('update:modelValue', hex ?? '');
   emit('change', hex);
   isOpen.value = false;
+  focusDocument(superdoc.value);
 }
 
 /**

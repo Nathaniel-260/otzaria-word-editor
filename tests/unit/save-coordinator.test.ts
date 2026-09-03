@@ -252,6 +252,21 @@ describe('כשלים', () => {
     expect(outcome.status === 'failed' && outcome.message).toContain('413');
   });
 
+  it('כשל ב-beginWrite מדווח על כשל בהכנת השמירה ולא כשל בהעלאה', async () => {
+    const h = harness();
+    h.coordinator.markDirty();
+    h.onBeginWrite(() => Promise.reject(new Error('error.permission_denied')));
+
+    const outcome = await h.coordinator.saveNow();
+
+    expect(outcome.status).toBe('failed');
+    if (outcome.status === 'failed') {
+      expect(outcome.message).toContain('הכנת השמירה באוצריא נכשלה');
+      expect(outcome.message).toContain('error.permission_denied');
+      expect(outcome.message).not.toContain('העלאת המסמך נכשלה');
+    }
+  });
+
   it('כשל commit משאיר מלוכלך ואינו מאמץ יעד', async () => {
     const h = harness();
     h.coordinator.markDirty();

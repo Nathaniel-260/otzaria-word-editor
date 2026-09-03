@@ -135,7 +135,9 @@ export interface ParagraphFormatDocumentApi extends SelectionDocumentApi {
   };
   get?: () => MaybePromise<unknown>;
   blocks?: {
-    list?: () => MaybePromise<{ blocks?: readonly { nodeId?: string; nodeType?: string }[] } | undefined>;
+    list?: (input?: { offset?: number; limit?: number }) => MaybePromise<
+      { blocks?: readonly { nodeId?: string; nodeType?: string }[]; total?: number } | undefined
+    >;
   };
 }
 
@@ -156,6 +158,9 @@ export interface ParagraphTarget {
   story?: unknown;
 }
 
+const PAGE_SIZE = 500;
+const MAX_PAGES = 50;
+
 /**
  * סוג הבלוק בפועל של המזהה — פסקה, כותרת או פריט רשימה — לפי `blocks.list`.
  *
@@ -165,7 +170,7 @@ export interface ParagraphTarget {
  * כאן הוא אותו דפוס בדיוק כמו `resolveListItem` ב-lists.ts.
  *
  * ברירת המחדל `'paragraph'` — גם כשאין `blocks.list`, וגם כשהמזהה לא נמצא
- * בעמוד שנקרא — היא התאמה לאחור: פסקה היא הסוג הנפוץ, וגרסת מנוע ישנה
+ * בעמודים שנקראו — היא התאמה לאחור: פסקה היא הסוג הנפוץ, וגרסת מנוע ישנה
  * שאינה חושפת את הפעולה לא הייתה מפסיקה לעבוד על המקרה הרגיל.
  */
 async function resolveBlockType(
@@ -175,9 +180,23 @@ async function resolveBlockType(
   const list = doc.blocks?.list;
   if (typeof list !== 'function') return 'paragraph';
   try {
-    const listed = await list();
-    const type = (listed?.blocks ?? []).find((b) => b.nodeId === blockId)?.nodeType;
-    return type === 'heading' || type === 'listItem' ? type : 'paragraph';
+    let offset = 0;
+    for (let page = 0; page < MAX_PAGES; page += 1) {
+      const listed = await list({ offset, limit: PAGE_SIZE });
+      const blocks = Array.isArray(listed?.blocks) ? listed.blocks : [];
+      if (blocks.length === 0) break;
+
+      const found = blocks.find((b) => b.nodeId === blockId);
+      if (found) {
+        return found.nodeType === 'heading' || found.nodeType === 'listItem'
+          ? found.nodeType
+          : 'paragraph';
+      }
+
+      offset += blocks.length;
+      if (typeof listed?.total === 'number' && offset >= listed.total) break;
+    }
+    return 'paragraph';
   } catch {
     return 'paragraph';
   }
