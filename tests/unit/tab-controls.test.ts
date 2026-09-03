@@ -32,6 +32,7 @@ const FILES = [
   'ReferencesTab.vue',
   'ReviewTab.vue',
   'OtzariaTab.vue',
+  'DeveloperTab.vue',
 ] as const;
 
 const SOURCES = new Map(FILES.map((file) => [file, readFileSync(join(TABS, file), 'utf8')]));
@@ -46,8 +47,8 @@ function labelOf(control: string): string {
   return control.match(/label="([^"]*)"/)?.[1] ?? control.slice(0, 60);
 }
 
-describe('פקדי הלשוניות פריסה, הפניות, סקירה ואוצריא', () => {
-  it('נמצאו פקדים לבדוק בכל שלוש הלשוניות', () => {
+describe('פקדי הלשוניות פריסה, הפניות, סקירה, אוצריא ומפתחים', () => {
+  it('נמצאו פקדים לבדוק בכל הלשוניות', () => {
     for (const file of FILES) {
       expect(controls(SOURCES.get(file)!).length, file).toBeGreaterThan(0);
     }
