@@ -25,7 +25,7 @@
  * tests/unit/engine-boundaries.test.ts), ומי שיודע למדוד עמודים מצוירים
  * הוא engine/page-ruler.ts; הלשונית מחברת ביניהם.
  */
-import { applyParagraphSpacing, findParagraphProps, TWIPS_PER_PT, type ParagraphFormatTarget } from '../paragraph-format';
+import { applyParagraphSpacing, TWIPS_PER_PT, type ParagraphFormatTarget } from '../paragraph-format';
 import type { DocReceipt, MaybePromise } from '../document-api';
 import { receiptFailureText, thrownText } from '../document-api';
 import {
@@ -35,8 +35,8 @@ import {
   shulchanDoc,
   textTarget,
   unavailableOutcome,
+  type ResolvedBody,
   type ShulchanBlock,
-  type ShulchanModelNode,
   type ShulchanTarget,
 } from './shulchan-doc';
 
@@ -220,8 +220,10 @@ interface BlockSpacing {
   rule: 'auto' | 'exact' | 'atLeast';
 }
 
-function readBlockSpacing(body: readonly ShulchanModelNode[] | undefined, blockId: string): BlockSpacing {
-  const spacing = findParagraphProps({ body }, blockId)?.spacing;
+function readBlockSpacing(body: ResolvedBody, blockId: string): BlockSpacing {
+  const spacing = body.props(blockId)?.spacing as
+    | { before?: unknown; after?: unknown; line?: unknown; lineRule?: unknown }
+    | undefined;
   const pt = (value: unknown, fallback: number): number =>
     typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : fallback;
   const rule = spacing?.lineRule;
@@ -282,38 +284,29 @@ interface RunLike {
   run?: { text?: string; props?: Record<string, unknown>; resolved?: Record<string, unknown> };
 }
 
-function nodeParagraphId(node: ShulchanModelNode): string | undefined {
-  if (typeof node.id === 'string' && node.id !== '') return node.id;
-  const paraId = node.paragraphIds?.paraId;
-  return typeof paraId === 'string' && paraId !== '' ? paraId : undefined;
-}
-
 /** ריצות הפסקה עם היסטיהן וגודליהן הפתורים. */
 export function runsOf(
-  body: readonly ShulchanModelNode[] | undefined,
+  body: ResolvedBody,
   blockId: string,
 ): { start: number; end: number; fontSize?: number; fontSizeCs?: number }[] {
-  if (!Array.isArray(body)) return [];
-  for (const node of body) {
-    if (!node || typeof node !== 'object' || nodeParagraphId(node) !== blockId) continue;
-    const content = (node.paragraph ?? node.heading ?? node.list)?.content ?? [];
-    const out: { start: number; end: number; fontSize?: number; fontSizeCs?: number }[] = [];
-    let position = 0;
-    for (const child of content) {
-      const run = (child as RunLike) ?? {};
-      if (run.kind !== 'run' || !run.run) continue;
-      const text = typeof run.run.text === 'string' ? run.run.text : '';
-      const record = run.run.resolved ?? run.run.props ?? {};
-      const size = (key: string): number | undefined =>
-        typeof record[key] === 'number' && Number.isFinite(record[key]) ? (record[key] as number) : undefined;
-      if (text.length > 0) {
-        out.push({ start: position, end: position + text.length, fontSize: size('fontSize'), fontSizeCs: size('fontSizeCs') });
-      }
-      position += text.length;
+  const node = body.node(blockId);
+  if (!node) return [];
+  const content = (node.paragraph ?? node.heading ?? node.list)?.content ?? [];
+  const out: { start: number; end: number; fontSize?: number; fontSizeCs?: number }[] = [];
+  let position = 0;
+  for (const child of content) {
+    const run = (child as RunLike) ?? {};
+    if (run.kind !== 'run' || !run.run) continue;
+    const text = typeof run.run.text === 'string' ? run.run.text : '';
+    const record = run.run.resolved ?? run.run.props ?? {};
+    const size = (key: string): number | undefined =>
+      typeof record[key] === 'number' && Number.isFinite(record[key]) ? (record[key] as number) : undefined;
+    if (text.length > 0) {
+      out.push({ start: position, end: position + text.length, fontSize: size('fontSize'), fontSizeCs: size('fontSizeCs') });
     }
-    return out;
+    position += text.length;
   }
-  return [];
+  return out;
 }
 
 /** גודל אחרי סבב: מעל הסף ⟵ פחות נקודה; `undefined` = אין שינוי. */

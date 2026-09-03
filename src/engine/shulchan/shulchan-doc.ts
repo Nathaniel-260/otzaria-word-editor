@@ -271,16 +271,10 @@ export async function scopedBlocks(
  * יישור הפסקה מהמודל — הפתור (`resolved`, כולל מה שירש מהסגנון) לפני
  * הישיר (`props`). `undefined` כשהבלוק לא נמצא או שלא דווח יישור.
  */
-export function paragraphAlignment(body: readonly ShulchanModelNode[] | undefined, blockId: string): string | undefined {
-  if (!Array.isArray(body)) return undefined;
-  for (const node of body) {
-    if (!node || typeof node !== 'object') continue;
-    if (nodeParagraphId(node) !== blockId) continue;
-    const inner = nodeInner(node);
-    const alignment = inner?.resolved?.alignment ?? inner?.props?.alignment;
-    return typeof alignment === 'string' ? alignment : undefined;
-  }
-  return undefined;
+export function paragraphAlignment(body: ResolvedBody, blockId: string): string | undefined {
+  const inner = nodeInner(body.node(blockId));
+  const alignment = inner?.resolved?.alignment ?? inner?.props?.alignment;
+  return typeof alignment === 'string' ? alignment : undefined;
 }
 
 export function textTarget(blockId: string, start: number, end: number): ShulchanSelectionTarget {
@@ -374,8 +368,8 @@ function nodeParagraphId(node: ShulchanModelNode): string | undefined {
   return typeof paraId === 'string' && paraId !== '' ? paraId : undefined;
 }
 
-function nodeInner(node: ShulchanModelNode): ParagraphLike | undefined {
-  return node.paragraph ?? node.heading ?? node.list;
+function nodeInner(node: ShulchanModelNode | undefined): ParagraphLike | undefined {
+  return node?.paragraph ?? node?.heading ?? node?.list;
 }
 
 function readFont(record: Record<string, unknown> | undefined): ResolvedRunFont {
@@ -398,44 +392,63 @@ function readFont(record: Record<string, unknown> | undefined): ResolvedRunFont 
  * ההיסט נספר על טקסט ה-runs בלבד — אותה ספירה שהבלוק הקנוני מחזיר. `{}`
  * כשהבלוק/ההיסט לא נמצאו: הכלי מחליט בעצמו מה ברירת המחדל שלו.
  */
-export function resolvedFontAt(
-  body: readonly ShulchanModelNode[] | undefined,
-  blockId: string,
-  offset: number,
-): ResolvedRunFont {
-  if (!Array.isArray(body)) return {};
-  for (const node of body) {
-    if (!node || typeof node !== 'object') continue;
-    if (nodeParagraphId(node) !== blockId) continue;
-    const content = nodeInner(node)?.content ?? [];
-    let position = 0;
-    let lastFont: ResolvedRunFont = {};
-    for (const child of content) {
-      const run = (child as RunLike) ?? {};
-      if (run.kind !== 'run' || !run.run) continue;
-      const text = typeof run.run.text === 'string' ? run.run.text : '';
-      const font = readFont(run.run.resolved ?? run.run.props);
-      if (offset >= position && offset < position + text.length) return font;
-      position += text.length;
-      lastFont = font;
-    }
-    // היסט בסוף הבלוק (או בלוק בלי runs) — התכונות של ה-run האחרון.
-    return lastFont;
+export function resolvedFontAt(body: ResolvedBody, blockId: string, offset: number): ResolvedRunFont {
+  const node = body.node(blockId);
+  if (!node) return {};
+  const content = nodeInner(node)?.content ?? [];
+  let position = 0;
+  let lastFont: ResolvedRunFont = {};
+  for (const child of content) {
+    const run = (child as RunLike) ?? {};
+    if (run.kind !== 'run' || !run.run) continue;
+    const text = typeof run.run.text === 'string' ? run.run.text : '';
+    const font = readFont(run.run.resolved ?? run.run.props);
+    if (offset >= position && offset < position + text.length) return font;
+    position += text.length;
+    lastFont = font;
   }
-  return {};
+  // היסט בסוף הבלוק (או בלוק בלי runs) — התכונות של ה-run האחרון.
+  return lastFont;
 }
 
 /**
  * המודל המלא עם ערכים פתורים. `undefined` בכשל — הקורא נופל לברירת מחדל
  * שלו, לא לזריקה.
  */
-export async function readResolvedBody(host: ShulchanTarget): Promise<readonly ShulchanModelNode[] | undefined> {
+export async function readResolvedBody(host: ShulchanTarget): Promise<ResolvedBody> {
   const get = shulchanDoc(host)?.get;
-  if (typeof get !== 'function') return undefined;
+  if (typeof get !== 'function') return indexResolvedBody(undefined);
   try {
     const model = await get({ options: { includeResolved: true } });
-    return Array.isArray(model?.body) ? model.body : undefined;
+    return indexResolvedBody(Array.isArray(model?.body) ? model.body : undefined);
   } catch {
-    return undefined;
+    return indexResolvedBody(undefined);
   }
+}
+
+/**
+ * המודל הפתור, מפוענח לפי מזהה פסקה. הכלים עוברים על הבלוקים שבבחירה
+ * וקוראים ממנו לכל בלוק — סריקה לינארית של ה-body לכל קריאה הפכה את זה
+ * ל-O(בלוקים × צומתי המסמך), ופעמיים: פעם ליישור ופעם לגופן.
+ */
+export interface ResolvedBody {
+  node(blockId: string): ShulchanModelNode | undefined;
+  /** התכונות הישירות של הפסקה (`props`), כפי ש-`findParagraphProps` מחזיר אותן. */
+  props(blockId: string): Record<string, unknown> | undefined;
+}
+
+export function indexResolvedBody(body: readonly ShulchanModelNode[] | undefined): ResolvedBody {
+  const byId = new Map<string, ShulchanModelNode>();
+  if (Array.isArray(body)) {
+    for (const node of body) {
+      if (!node || typeof node !== 'object') continue;
+      const id = nodeParagraphId(node);
+      // הראשון מנצח, כמו הסריקה הלינארית שקדמה לכאן.
+      if (id !== undefined && !byId.has(id)) byId.set(id, node);
+    }
+  }
+  return {
+    node: (blockId) => byId.get(blockId),
+    props: (blockId) => nodeInner(byId.get(blockId))?.props,
+  };
 }

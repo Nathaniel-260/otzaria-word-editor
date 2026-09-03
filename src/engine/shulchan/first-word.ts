@@ -116,9 +116,10 @@ export async function applyFirstWordDesign(
 
   for (const block of scoped.result.blocks) {
     if (options.styleId !== null && block.styleId !== options.styleId) continue;
-    if (options.skipHeadings && isHeadingLike(block, paragraphAlignment(body, block.blockId))) continue;
+    // אורך המילה קודם לקריאת המודל: פסקה של מילה אחת יוצאת בלי לגעת ב-body.
     const length = firstWordLength(block.text);
     if (length === 0) continue;
+    if (options.skipHeadings && isHeadingLike(block, paragraphAlignment(body, block.blockId))) continue;
 
     // גופן הייחוס: התו הראשון של המילה השנייה — כמו במצב הדינמי במקור.
     const reference = resolvedFontAt(body, block.blockId, length + 1);
