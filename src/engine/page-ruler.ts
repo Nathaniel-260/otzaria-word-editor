@@ -1256,6 +1256,152 @@ export function measureAllPageTextSegments(
   return out;
 }
 
+/* ------------------------------------------------------------------ */
+/* גליפים של עמוד — להצמדת לחיצה (engine/pointer-snap.ts)             */
+/* ------------------------------------------------------------------ */
+
+/** מלבני הגליפים ביחס לפינת העמוד ברגע המדידה, והעמוד עצמו — עכשיו. */
+export interface PageGlyphMeasure {
+  readonly rects: readonly RawTextRect[];
+  /** מלבן העמוד ברגע הקריאה, בקואורדינטות חלון — גלילה מזיזה אותו. */
+  pageBox(): RawTextRect;
+}
+
+/** אלמנטים מוחלפים: לחיצה עליהם היא בחירת אובייקט, לא של טקסט. */
+const REPLACED_TAGS = new Set(['IMG', 'SVG', 'CANVAS', 'VIDEO', 'PICTURE', 'OBJECT', 'IFRAME', 'EMBED']);
+
+/** התכונה שהמנוע מסמן בה לאיזה „סיפור” שייך פרגמנט: גוף, כותרת, הערה. */
+const STORY_ATTRIBUTE = 'data-layout-story';
+
+function rawBox(rect: DOMRect): RawTextRect {
+  return { leftPx: rect.left, topPx: rect.top, widthPx: rect.width, heightPx: rect.height };
+}
+
+function pushGlyphRects(node: Text, out: RawTextRect[], origin: DOMRect): boolean {
+  let range: Range;
+  try {
+    range = document.createRange();
+    range.selectNodeContents(node);
+  } catch {
+    return false;
+  }
+  if (typeof range.getClientRects !== 'function') return false;
+  const list = range.getClientRects();
+  let found = false;
+  for (let i = 0; i < list.length; i++) {
+    const rect = list[i]!;
+    if (!(rect.width > 0) || !(rect.height > 0)) continue;
+    found = true;
+    out.push({ leftPx: rect.left - origin.left, topPx: rect.top - origin.top, widthPx: rect.width, heightPx: rect.height });
+  }
+  return found;
+}
+
+/** האם יש תחת האלמנט טקסט מצויר — כלומר זה היקף שאפשר להצמיד אליו. */
+function hasGlyphs(element: Element): boolean {
+  const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+  const scratch: RawTextRect[] = [];
+  const origin = { left: 0, top: 0 } as DOMRect;
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    if ((node.nodeValue ?? '').length === 0) continue;
+    if (pushGlyphRects(node as Text, scratch, origin)) return true;
+  }
+  return false;
+}
+
+/** צומת טקסט שאינו בגוף המסמך — כותרת עליונה/תחתונה, הערה — כשהתכונה קיימת. */
+function outsideBody(node: Text): boolean {
+  const story = node.parentElement?.closest(`[${STORY_ATTRIBUTE}]`)?.getAttribute(STORY_ATTRIBUTE);
+  return typeof story === 'string' && story !== '' && story !== 'body';
+}
+
+/**
+ * מלבני הגליפים שלחיצה בנקודה מוצמדת אליהם — ראו engine/pointer-snap.ts.
+ *
+ * ההיקף נגזר מ-`target`, מטרת האירוע:
+ *
+ *   - בתוך עמוד: האלמנט הראשון במעלה העץ שיש תחתיו טקסט מצויר — השורה
+ *     שנלחצה, תא הטבלה, הפסקה. אלמנט מוחלף בדרך (תמונה) — `null`: זו
+ *     בחירת אובייקט, ואין להזיז אותה. מטרה בלי טקסט תחתיה ושאינה העמוד
+ *     עצמו (ידית, מסגרת) — גם כן `null`.
+ *   - העמוד עצמו, או אלמנט שמכסה את העמוד כולו (שכבה של המנוע, ה-host):
+ *     כל גליפי **הגוף** של העמוד שמתחת לנקודה — לא כותרות ולא הערות,
+ *     כשהמנוע מסמן אותן.
+ *   - `null` כמטרה — גרירה: העמוד שמתחת לנקודה, כל גליפי הגוף.
+ *
+ * קריאה בלבד, אותו עיגון כמו `measureAllPageRects`.
+ */
+export function measurePageGlyphs(
+  host: HTMLElement | null,
+  target: EventTarget | null,
+  xPx: number,
+  yPx: number,
+): PageGlyphMeasure | null {
+  if (!host) return null;
+  if (typeof document === 'undefined' || typeof document.createTreeWalker !== 'function') return null;
+  const pages = Array.from(host.querySelectorAll(`[${PAGE_INDEX_ATTRIBUTE}]`)).filter(
+    (node): node is HTMLElement => node instanceof HTMLElement,
+  );
+  if (pages.length === 0) return null;
+
+  const targetEl = target instanceof Element ? target : target instanceof Node ? target.parentElement : null;
+  let page = targetEl ? (pages.find((candidate) => candidate.contains(targetEl)) ?? null) : null;
+  let scope: Element | null = null;
+
+  if (page && targetEl) {
+    if (targetEl === page) {
+      scope = page;
+    } else {
+      for (let el: Element | null = targetEl; el && el !== page; el = el.parentElement) {
+        if (REPLACED_TAGS.has(el.tagName.toUpperCase())) return null;
+        if (hasGlyphs(el)) {
+          scope = el;
+          break;
+        }
+      }
+      if (!scope) return null;
+    }
+  } else {
+    page = pages.find((candidate) => {
+      const box = candidate.getBoundingClientRect();
+      return xPx >= box.left && xPx <= box.right && yPx >= box.top && yPx <= box.bottom;
+    }) ?? null;
+    if (!page) return null;
+    if (targetEl && targetEl !== host) {
+      // מטרה מחוץ לעמוד שאינה מכסה אותו — פקד של המנוע מעל הדף. לא שלנו.
+      const targetBox = targetEl.getBoundingClientRect();
+      const pageBox = page.getBoundingClientRect();
+      if (
+        targetBox.left > pageBox.left + 1 ||
+        targetBox.top > pageBox.top + 1 ||
+        targetBox.right < pageBox.right - 1 ||
+        targetBox.bottom < pageBox.bottom - 1
+      ) {
+        return null;
+      }
+    }
+    scope = page;
+  }
+
+  const origin = page.getBoundingClientRect();
+  const rects: RawTextRect[] = [];
+  const bodyOnly = scope === page;
+  let walker: TreeWalker;
+  try {
+    walker = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT);
+  } catch {
+    return null;
+  }
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    if ((node.nodeValue ?? '').length === 0) continue;
+    if (bodyOnly && outsideBody(node as Text)) continue;
+    pushGlyphRects(node as Text, rects, origin);
+  }
+
+  const pageEl = page;
+  return { rects, pageBox: () => rawBox(pageEl.getBoundingClientRect()) };
+}
+
 /** שני מערכי טווחים שקולים — כדי לא לצייר מחדש מדידה שלא זזה. */
 export function sameTextSegments(a: readonly MeasuredSegment[], b: readonly MeasuredSegment[]): boolean {
   if (a.length !== b.length) return false;
