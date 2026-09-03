@@ -250,6 +250,36 @@ button:disabled {
   visibility: hidden;
 }
 
+/* סמן כתיבה מהבהב — כמו ב-Word.
+   המנוע (SuperDoc) מרנדר את סמן העריכה כ-div עם המחלקה `sd-v2-local-selection-caret`
+   ומגדיר עבורו אנימציית הבהוב `sd-v2-local-caret-blink` (החלפה חדה של opacity
+   כל ~530ms, קצב כולל של 1.06s — בדיוק כמו ברירת המחדל של סמן Windows ושל Word).
+   אולם באריזת המנוע האנימציה הזו מכובה באופן גורף תחת `@media (prefers-reduced-motion: reduce)`:
+   הגדרה זו פעילה כברירת מחדל במערכות Windows רבות (למשל כאשר אפקטי הנפשה כבויים
+   בהגדרות הנגישות או ביצועי המערכת, או בסביבות וירטואליזציה). כתוצאה מכך, הסמן במסמך
+   נשאר קפוא לחלוטין.
+   ב-Word סמן העריכה תמיד מהבהב — מדובר באינדיקטור מיקום והקלדה חיוני ולא באנימציה
+   דקורטיבית.
+   הכלל כאן כופה את האנימציה עם `!important` ומגדיר את ה-keyframes, כך שהסמן יהבהב
+   לסירוגין באופן עקבי בכל סביבה בדיוק כמו ב-Word. */
+.sd-v2-local-selection-caret,
+[data-v2-local-selection-caret] {
+  animation: sd-v2-local-caret-blink 1.06s steps(1, end) infinite !important;
+  will-change: opacity;
+}
+
+@keyframes sd-v2-local-caret-blink {
+  0%,
+  49.999% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+
+
 .status {
   flex-shrink: 0;
   padding: 4px 16px;

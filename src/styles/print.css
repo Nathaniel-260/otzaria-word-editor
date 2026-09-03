@@ -163,6 +163,12 @@
     page-break-after: auto !important;
     break-after: auto !important;
   }
+
+  /* הסתרת סמן העריכה ושכבת הבחירה בהדפסה */
+  .sd-v2-local-selection-caret,
+  [data-v2-selection-overlay] {
+    display: none !important;
+  }
 }
 
 /* ברירת המחדל כשגודל הדף לא נקרא מהמסמך: בלי שוליים כפולים. השוליים של
