@@ -6,6 +6,8 @@
  * שאוצריא מחזירה תקף לריצה אחת בלבד, כי הפורט של שרת ה-loopback מתחלף.
  */
 import { call, tryCall } from './otzaria-client';
+import type { RecentDocument } from '../sessions/recent-documents';
+import type { DiscardedDocument } from '../sessions/discard-backup';
 
 /**
  * המסמך שהיה פתוח לאחרונה.
@@ -157,4 +159,51 @@ export async function loadSpellcheckWords(): Promise<string[]> {
 
 export async function saveSpellcheckWords(words: readonly string[]): Promise<void> {
   await tryCall('storage.set', { key: SPELLCHECK_WORDS_KEY, value: [...words] });
+}
+
+const RECENT_DOCUMENTS_KEY = 'recent-documents';
+
+/**
+ * הרשימה הגולמית של „המסמכים האחרונים”. הפירוש — השמטת שורות פגומות, השמטת
+ * token חוזר וברירות המחדל — יושב ב-sessions/recent-documents.ts
+ * (`normalizeRecents`), בדיוק כמו ההפרדה בין `loadSessionRecord`
+ * ל-`normalizeSession` שמעל, ומאותו טעם: ההחלטות נבדקות בלי לזייף את הגשר.
+ */
+export async function loadRecentDocuments(): Promise<unknown> {
+  return tryCall<unknown>('storage.get', { key: RECENT_DOCUMENTS_KEY });
+}
+
+/**
+ * כותבת את הרשימה. `[...list]` ולא `list` עצמה: מה שנמסר עשוי להיות מערך
+ * לקריאה בלבד שנשמר גם ב-state של המעטפת, וה-JSON שיוצא לגשר לא אמור להיות
+ * אותו אובייקט.
+ *
+ * כשל כתיבה נבלע (`tryCall`) כמו בכל שאר ההעדפות כאן: רשימת אחרונים שלא
+ * נשמרה אינה סיבה להפיל פתיחת מסמך.
+ */
+export async function saveRecentDocuments(list: readonly RecentDocument[]): Promise<void> {
+  await tryCall('storage.set', { key: RECENT_DOCUMENTS_KEY, value: [...list] });
+}
+
+const DISCARD_BACKUPS_KEY = 'discard-backups';
+
+/**
+ * רשומת „חמשת האחרונים שנסגרו בלי לשמור” — metadata בלבד: משבצת, שם, גודל,
+ * זמן ו-token. הבייטים עצמם יושבים במרחב הפרטי (`host/workspace.ts`), בדיוק
+ * כמו הטיוטה, ומאותה סיבה: ב-`storage` נשמר JSON, לא מסמך.
+ *
+ * הפירוש — השמטת שורות פגומות, משבצת כפולה, והסדר מהחדש לישן — יושב
+ * ב-sessions/discard-backup.ts (`normalizeBackups`), כמו כל שאר ההפרדות כאן.
+ */
+export async function loadDiscardBackups(): Promise<unknown> {
+  return tryCall<unknown>('storage.get', { key: DISCARD_BACKUPS_KEY });
+}
+
+/**
+ * כותבת את הרשומה. כשל נבלע — גיבוי שלא נרשם אינו סיבה להפיל את הסגירה
+ * שהמשתמש ביקש; מה שהוא כן עושה הוא להשאיר קובץ שהרשומה אינה מכירה, ואת זה
+ * המשבצות כבר פותרות (ראו את ראש discard-backup.ts).
+ */
+export async function saveDiscardBackups(list: readonly DiscardedDocument[]): Promise<void> {
+  await tryCall('storage.set', { key: DISCARD_BACKUPS_KEY, value: [...list] });
 }

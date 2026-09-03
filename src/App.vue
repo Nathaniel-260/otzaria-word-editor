@@ -19,7 +19,6 @@
     <div class="shell-top">
       <!-- פס עליון -->
       <TitleBar
-        ref="titleBarRef"
         :title="title"
         :is-dirty="saveSnapshot.isDirty"
         :is-saving="saveSnapshot.isSaving"
@@ -31,10 +30,7 @@
         @save="onSave(false)"
         @undo="onUndo"
         @redo="onRedo"
-        @open-find="(q) => openFindDialog('find', q)"
-        @run-command="onRunCommandFromTellMe"
-        @run-action="onRunActionFromTellMe"
-        @custom-action="onCustomActionFromTellMe"
+        @open-find="openFindDialog('find')"
         @toggle-autosave="toggleAutosave"
         @update-title="onTitleUpdate"
       />
@@ -58,8 +54,8 @@
         :is-opening="isOpening"
         :is-exiting="isExiting"
         :book-completion-enabled="bookCompletionEnabled"
-        @new-doc="onNewDocument"
-        @open-doc="onPickAndOpen"
+        @new-doc="openOpenDialog"
+        @open-doc="openOpenDialog"
         @save-doc="onSave(false)"
         @save-as-doc="onSave(true)"
         @print-doc="onPrint"
@@ -140,14 +136,6 @@
         :dictionary="spellcheckDictionary"
         :revision="spellcheckRevision"
       />
-      <PageMarkingOverlay
-        ref="pageMarkingOverlayRef"
-        :host="rulerHost"
-        :viewport-source="rulerViewport"
-        :enabled="pageMarkingEnabled"
-        :changed-pages="pageMarkingChanged"
-        :revision="spellcheckRevision"
-      />
     </div>
 
     <!--
@@ -213,7 +201,6 @@
     <FindReplaceDialog
       :is-open="isFindOpen"
       :initial-mode="findMode"
-      :initial-query="findInitialQuery"
       :result-text="searchCounter"
       :can-replace="canShowReplace"
       :is-replacing="searchState.isReplacing"
@@ -232,6 +219,50 @@
     <ShortcutsDialog
       :is-open="isShortcutsHelpOpen"
       @close="isShortcutsHelpOpen = false"
+    />
+
+    <!--
+      „פתח מסמך”. תצוגה בלבד: הרשימה המלאה נכנסת כ-prop, והסינון והמיון
+      לתצוגה נעשים בתוכו — ראו את ראש הקומפוננטה.
+    -->
+    <OpenDocumentDialog
+      v-model:search-query="recentSearch"
+      :is-open="isOpenDialogOpen"
+      :templates="DOCUMENT_TEMPLATES"
+      :recents="recentDocuments"
+      :busy="isOpening || saveSnapshot.isSaving"
+      :discarded-count="discardedBackups.length"
+      @close="isOpenDialogOpen = false"
+      @browse="onOpenDialogBrowse"
+      @create-from-template="onOpenDialogCreate"
+      @open-recent="onOpenDialogRecent"
+      @toggle-pin="onOpenDialogTogglePin"
+      @forget-recent="onOpenDialogForget"
+      @show-discarded="onShowDiscarded"
+    />
+
+    <!--
+      מסך השחזור של „לא לשמור”. נכנסים אליו מ„פתח מסמך” בלבד, ולכן הוא נפתח
+      אחרי שזה נסגר — שני מודאלים פתוחים זה מעל זה הם שתי מלכודות מיקוד
+      שמתחרות על אותו Tab.
+    -->
+    <DiscardedDocumentsDialog
+      :is-open="isDiscardedOpen"
+      :entries="discardedBackups"
+      :busy="isOpening || saveSnapshot.isSaving"
+      @close="isDiscardedOpen = false"
+      @open="onOpenDiscarded"
+      @forget="onForgetDiscarded"
+    />
+
+    <!--
+      „המסמך לא נשמר”. הדיאלוג היחיד שתשובה בו מוחקת עבודה, ולכן הוא מודאלי
+      אמיתי ולא לוח צף: `isModalDialogOpen` מזהה אותו לפי `aria-modal` וחוסמת
+      בזמן שהוא פתוח את קיצורי המקלדת שמתחילים פתיחה או סגירה נוספת.
+    -->
+    <UnsavedChangesDialog
+      :question="unsavedPrompt.question.value"
+      @choose="unsavedPrompt.answer"
     />
 
     <MacrosDialog
@@ -278,12 +309,23 @@ import PageBorderOverlay from './ui/shell/PageBorderOverlay.vue';
 import LineNumberOverlay from './ui/shell/LineNumberOverlay.vue';
 import PilcrowOverlay from './ui/shell/PilcrowOverlay.vue';
 import SpellingOverlay from './ui/shell/SpellingOverlay.vue';
-import PageMarkingOverlay from './ui/shell/PageMarkingOverlay.vue';
 import FindReplaceDialog from './ui/panels/FindReplaceDialog.vue';
 import AboutDialog from './ui/panels/AboutDialog.vue';
 import LinkDialog from './ui/panels/LinkDialog.vue';
 import ShortcutsDialog from './ui/panels/ShortcutsDialog.vue';
+import OpenDocumentDialog from './ui/panels/OpenDocumentDialog.vue';
+import UnsavedChangesDialog from './ui/panels/UnsavedChangesDialog.vue';
+import DiscardedDocumentsDialog from './ui/panels/DiscardedDocumentsDialog.vue';
 import TooltipLayer from './ui/tooltip/TooltipLayer.vue';
+import { DOCUMENT_TEMPLATES, applyTemplate, type TemplateId } from './engine/templates';
+import {
+  normalizeRecents,
+  rememberRecent,
+  forgetRecent,
+  setRecentPinned,
+  sortedRecents,
+  type RecentDocument,
+} from './sessions/recent-documents';
 import { createCommandAdapter, type CommandAdapter, type CommandOutcome } from './engine/command-adapter';
 import type { CommandId } from './engine/capabilities';
 import {
@@ -295,8 +337,6 @@ import {
   FONT_OPTIONS,
   READOUT_SELECTION,
   SPELLCHECK,
-  PAGE_MARKING,
-  DRAFT_OPENER,
   STYLE_GALLERY,
 } from './composables/keys';
 import { ACTIVE_SUPERDOC } from './engine/document-api';
@@ -398,7 +438,6 @@ import {
   createRulerModel,
   paintedHost,
   readRulerUnit,
-  type PageEdgeWords,
   type RulerModel,
   type RulerReading,
   type ViewportSource,
@@ -450,6 +489,16 @@ import {
   type WriteTicket,
 } from './host/files';
 import { decideDocumentSwitch, decidePendingTabClose } from './sessions/open-flow';
+import { createUnsavedPrompt } from './composables/use-unsaved-prompt';
+import {
+  backupPathFor,
+  forgetDiscard,
+  nextBackupSlot,
+  normalizeBackups,
+  rememberDiscard,
+  sortedBackups,
+  type DiscardedDocument,
+} from './sessions/discard-backup';
 import { decideSleep, type SleepCandidate } from './sessions/sleep-policy';
 import { call, confirm, isAvailable, notifyError, on, tryCall } from './host/otzaria-client';
 import { supportsPdfExport } from './host/host-capabilities';
@@ -465,6 +514,10 @@ import {
   saveSpellcheckEnabled,
   loadSessionRecord,
   saveSessionRecord,
+  loadRecentDocuments,
+  saveRecentDocuments,
+  loadDiscardBackups,
+  saveDiscardBackups,
 } from './host/settings';
 import {
   activeEntry,
@@ -502,8 +555,7 @@ import { onPluginHidden, onPluginShown } from './host/lifecycle';
 import { revealZone, type RevealBounds, type RevealZone } from './composables/focus-mode';
 import { enterFullscreen, exitFullscreen, isFullscreen, watchFullscreen } from './composables/window-fullscreen';
 import SvgIcon from './ui/icons/SvgIcon.vue';
-import { copySelection, cutSelection, pasteFromClipboard, selectWholeDocument } from './engine/clipboard';
-import type { TellMeCustomAction } from './ui/shell/tell-me-actions';
+import { selectWholeDocument } from './engine/clipboard';
 import {
   DEFAULT_FONT_SIZE_PT,
   fontSizePayload,
@@ -517,7 +569,6 @@ import { startParagraphOnNewPage, pageBreakTracker } from './engine/page-break';
 import { createFontMemory } from './composables/use-font-controls';
 import { createLinkDialog } from './composables/use-link-dialog';
 import { createShellActionRunner } from './ui/shortcuts/actions';
-import type { ShellAction } from './ui/shortcuts/registry';
 import { useContextMenu } from './composables/use-context-menu';
 import ContextMenu from './ui/menu/ContextMenu.vue';
 import {
@@ -666,10 +717,7 @@ const hasDocument = computed(() => activeSuperdoc.value !== null);
 
 const title = ref('מסמך חדש');
 const isOpening = ref(false);
-/**
- * סגירה היא פעולה א-סינכרונית והרסנית: מרגע שהתחילה אין להיכנס אליה שוב,
- * גם לפני שה-DOM מספיק לנטרל את הכפתור. ראו `onExit`.
- */
+/** מונע כניסה שנייה לסגירה הא-סינכרונית של כל הטאבים. */
 const isExiting = ref(false);
 /**
  * מחוון הטעינה של שורת המצב. ההכרעות — התחנות, הזחילה, ומה „דלג” מבטל — ב-
@@ -710,10 +758,55 @@ watch([ribbonTab, ribbonCollapsed], ([tab, collapsed]) => {
 
 const isFindOpen = ref(false);
 const findMode = ref<'find' | 'replace'>('find');
-const findInitialQuery = ref('');
-const titleBarRef = ref<InstanceType<typeof TitleBar> | null>(null);
 const isAboutOpen = ref(false);
 const isShortcutsHelpOpen = ref(false);
+
+/**
+ * „פתח מסמך” — הדיאלוג שהחליף את הקפיצה הישירה לבורר הקבצים.
+ *
+ * שלושת המצבים כאן שייכים למעטפת ולא לדיאלוג: הוא תצוגה בלבד (ראו את ראש
+ * `OpenDocumentDialog.vue`), ואינו נוגע ב-storage. `recentDocuments` היא
+ * הרשימה **המלאה**; הסינון והמיון לתצוגה נעשים בתוכו דרך אותן פונקציות
+ * טהורות שנשמרות כאן — `sessions/recent-documents.ts`.
+ */
+const isOpenDialogOpen = ref(false);
+const recentDocuments = ref<RecentDocument[]>([]);
+
+/**
+ * „מסמכים שנסגרו בלי לשמור” — חמשת הגיבויים האחרונים, ומסך השחזור שלהם.
+ *
+ * הרשימה נטענת פעם אחת בעלייה ומתעדכנת אחרי כל כתיבה
+ * (`backupDiscardedDocument`), ולא נקראת מחדש בכל פתיחת דיאלוג: המונה מוצג
+ * על כפתור בתוך „פתח מסמך”, וקריאת גשר בכל הצגה שלו היא סבב שלם על מידע
+ * שאיש מלבדנו אינו כותב.
+ */
+const discardedBackups = ref<DiscardedDocument[]>([]);
+const isDiscardedOpen = ref(false);
+const recentSearch = ref('');
+
+/**
+ * רושמת מסמך שנפתח או שנשמר בשם חדש לרשימת האחרונים.
+ *
+ * שני אתרי הקריאה הם בדיוק שני הרגעים שבהם ל-token יש משמעות חדשה: פתיחת
+ * קובץ, ו„שמור בשם” שמחליף את הקובץ שמאחורי המסמך. שמירה רגילה אינה כאן —
+ * היא אינה משנה זהות, והיא הייתה מקפיצה את המסמך לראש הרשימה בכל סבב
+ * אוטומטי.
+ *
+ * הכתיבה ל-storage אינה ב-await אצל הקוראים: רשימת אחרונים שלא נשמרה אינה
+ * סיבה לעכב פתיחת מסמך, ו-`saveRecentDocuments` בולעת כשל ממילא.
+ */
+function rememberRecentDocument(entry: { token: string; name: string; size: number }): void {
+  recentDocuments.value = rememberRecent(recentDocuments.value, { ...entry, openedAt: Date.now() });
+  void saveRecentDocuments(recentDocuments.value);
+}
+
+/**
+ * „המסמך לא נשמר” — שאלה אחת עם שלושה כפתורים, במקום שתי שאלות רצופות של
+ * `ui.showConfirm` (שהוא דו-כפתורי). ההמתנה לתשובה ב-composables/use-unsaved-prompt.ts,
+ * ההחלטה שנגזרת ממנה ב-sessions/open-flow.ts, והגיבוי שמאפשר שאלה אחת
+ * ב-sessions/discard-backup.ts.
+ */
+const unsavedPrompt = createUnsavedPrompt();
 
 /**
  * מצב החיפוש כפי שהמנוע מדווח עליו. הדיאלוג נשען עליו למונה התוצאות ולשאלה
@@ -859,37 +952,6 @@ async function toggleSpellcheck(): Promise<void> {
   }
 }
 
-/**
- * „סימון עמודים” של שולחן העורך (ui/shell/PageMarkingOverlay.vue). כמו
- * המילון, השכבה שייכת למעטפת ולא לטאב; הלשונית מדליקה אותה ומבקשת מדידה.
- * `revision` של בדיקת האיות משמש גם כאן — אותה „עריכה קרתה” בדיוק.
- */
-const pageMarkingEnabled = ref(false);
-const pageMarkingChanged = shallowRef<ReadonlySet<number>>(new Set());
-const pageMarkingOverlayRef = shallowRef<{ measure: () => readonly PageEdgeWords[] } | null>(null);
-provide(PAGE_MARKING, {
-  enabled: pageMarkingEnabled,
-  changedPages: pageMarkingChanged,
-  setEnabled: (enabled) => {
-    pageMarkingEnabled.value = enabled;
-    if (!enabled) pageMarkingChanged.value = new Set();
-  },
-  setChangedPages: (pages) => {
-    pageMarkingChanged.value = pages;
-  },
-  measure: () => pageMarkingOverlayRef.value?.measure() ?? [],
-});
-
-/**
- * „פירוק מסמך” של שולחן העורך: מסמך ההערות נפתח בטאב חדש מ-Blob, במסלול
- * של שחזור טיוטה — לא שמור, ו„שמור” בו פותח „שמור בשם”.
- */
-provide(DRAFT_OPENER, async (blob: Blob) => {
-  if (isOpening.value) return false;
-  activateTab(createNewDocumentSession());
-  return openDocument(undefined, { draft: blob });
-});
-
 provide(SPELLCHECK, {
   enabled: computed(() => spellcheckDictionary.value !== null),
   busy: spellcheckBusy,
@@ -1008,6 +1070,42 @@ const MAX_LIVE_DOCUMENTS = 3;
  * הוא מתעדכן ב-`activateTab` — הרגע היחיד שבו „מתי השתמשו בו” משתנה.
  */
 const recentTabs: DocumentSessionId[] = [];
+
+/**
+ * הטאבים שנסגרו בהפעלה הזאת, החדש בראש — מה ש-`Ctrl+Shift+T` פותח מחדש
+ * (`reopenClosedTab`).
+ *
+ * **בזיכרון בלבד, ובכוונה.** מה ששורד הפעלה הוא רשימת „המסמכים האחרונים”
+ * (`recentDocuments`), והיא כבר מוצגת בדיאלוג הפתיחה עם שם, גודל וזמן. שכבה
+ * שנייה קבועה על אותם נתונים לא הייתה מוסיפה למשתמש דבר — ואילו „הטאב שסגרתי
+ * בטעות לפני שנייה” הוא בדיוק שאלה של ההפעלה הנוכחית.
+ *
+ * רק טאב שיש לו קובץ נרשם: מסמך חדש שלא נשמר מעולם אין לו token, ואין ממה
+ * לפתוח אותו מחדש. רישום שלו היה מייצר שורה שלחיצה עליה נכשלת תמיד.
+ *
+ * המזהה הוא ה-token ולא הנתיב, מאותו טעם שבגללו רשימת האחרונים בנויה עליו
+ * (ראו sessions/recent-documents.ts): ה-URL של אוצריא תקף לריצה אחת בלבד.
+ */
+const closedTabs: { token: string; name: string }[] = [];
+
+/**
+ * התקרה. עשרה כמו ברוב הדפדפנים; מעבר לזה מדובר בזיכרון ולא בפעולת „ביטול”,
+ * וזה כבר תפקידה של רשימת האחרונים.
+ */
+const MAX_CLOSED_TABS = 10;
+
+/** רושמת טאב שנסגר, אם יש לו קובץ לחזור אליו. ראו `closedTabs`. */
+function rememberClosedTab(session: DocumentSession): void {
+  const document = activeEntry(session.keeper.state)?.document ?? null;
+  if (!document) return;
+
+  // אותו קובץ פעמיים הוא שורה אחת, ולא שתי לחיצות שפותחות את אותו דבר.
+  const at = closedTabs.findIndex((entry) => entry.token === document.token);
+  if (at >= 0) closedTabs.splice(at, 1);
+
+  closedTabs.unshift({ token: document.token, name: sessionDisplayTitle(session) });
+  closedTabs.splice(MAX_CLOSED_TABS);
+}
 
 /** סבב הרדמה אחד בכל רגע: הוא ממתין ל-`flush`, ושניים היו נכנסים זה בזה. */
 let trimming = false;
@@ -1285,6 +1383,10 @@ function initSaveCoordinator(getSession: () => DocumentSession): SaveCoordinator
       // הראשון הוא זהות חדשה, ורק אז נכון לשכוח את מקום הסמן.
       if (activeEntry(session.keeper.state)?.document?.token !== info.token) {
         session.keeper.setDocument({ token: info.token, name: info.name, writable: true });
+        // „שמור בשם” הוא קובץ חדש שהמשתמש בחר בעצמו — בדיוק מה שרשימת
+        // האחרונים אמורה להחזיק. שמירה רגילה אינה נכנסת לכאן (התנאי מעל),
+        // ולכן היא אינה מקפיצה את המסמך לראש הרשימה בכל סבב אוטומטי.
+        rememberRecentDocument({ token: info.token, name: info.name, size: info.size });
       }
       // הגודל הוא של מה שנכתב עכשיו, ולכן הוא הבסיס להשוואה הבאה מול
       // הדיסק — בלעדיו „הקובץ השתנה מבחוץ” היה נשאל אחרי כל שמירה רגילה.
@@ -1815,6 +1917,15 @@ interface OpenOptions {
    * מסומן מיד כלא-שמור, כי זה בדיוק מה שהוא — עבודה שאינה בדיסק.
    */
   draft?: Blob;
+  /**
+   * שם למסמך שנפתח מבייטים בלבד — כלומר בלי קובץ.
+   *
+   * למסלול אחד: פתיחת גיבוי מ„נסגרו בלי לשמור” (`onOpenDiscarded`). בלעדיו
+   * המסמך היה נקרא „מסמך חדש”, ומי שפתח שלושה גיבויים היה מקבל שלושה טאבים
+   * באותו שם — בלי שום דרך לדעת מה יש בכל אחד. אין לו יעד כתיבה בכל מקרה;
+   * זהו שם לתצוגה, ו„שמור” עדיין פותח „שמור בשם”.
+   */
+  name?: string;
   /** גודל התצוגה והסמן שיוחזרו אחרי הפתיחה. ראו restoreDocumentView. */
   restore?: { zoom: number | null; caret: CaretAnchor | null };
   /**
@@ -1842,8 +1953,8 @@ interface OpenOptions {
 async function openDocument(file?: UserFile, options: OpenOptions = {}): Promise<boolean> {
   if (!swap) return false;
   const attempt = documentLoad.begin(
-    file ? file.name : 'מסמך חדש',
-    file ? 'קורא את הקובץ…' : 'מכין מסמך ריק…',
+    file?.name ?? options.name ?? 'מסמך חדש',
+    file || options.draft ? 'קורא את הקובץ…' : 'מכין מסמך ריק…',
   );
   try {
     return await openDocumentInto(attempt, file, options);
@@ -2315,12 +2426,12 @@ async function openDocumentInto(
     }
   });
 
-  title.value = file ? stripWordExtension(file.name) : 'מסמך חדש';
+  title.value = stripWordExtension(file?.name ?? options.name ?? '') || 'מסמך חדש';
   // שני הדברים שהמסמך הזה מביא איתו, יחד: מה יש בו, ותחת איזו סיומת הוא
   // נשמר. הסיומת נגזרת מהשם **ומהחבילה** — מסמך `.docx` שנושא חלק מאקרו
   // (קורה) יישמר כ-`.docm`, אחרת Word יתלונן עליו.
   documentVba.value = vba;
-  saveExtension.value = resolveSaveExtension(file?.name, vba.hasMacroPart);
+  saveExtension.value = resolveSaveExtension(file?.name ?? options.name, vba.hasMacroPart);
   // זמן הטעינה הוא מדידת פיתוח ולא הודעה למשתמש: „נטען ב-473 מילישניות” תפס
   // את שורת המצב עד ההודעה הבאה. הוא נשמר — הוא מה שמסביר פתיחה איטית —
   // בלוג של אוצריא, במקום שבו מסתכלים על מדידות.
@@ -2355,6 +2466,10 @@ async function openDocumentInto(
       file ? { token: file.token, name: file.name, writable: file.access === 'readwrite' } : null,
       { sourceSize: file?.size ?? null, keepDraft: options.draft !== undefined },
     );
+    // אותו תנאי בדיוק כמו הזוכר שמעל: `remember: false` הוא „אל תרשום את
+    // הפתיחה הזאת בשום מקום”, וזה כולל את רשימת האחרונים. מסמך חדש (`!file`)
+    // אין לו token, ואין מה לרשום.
+    if (file) rememberRecentDocument({ token: file.token, name: file.name, size: file.size });
   }
 
   if (!file && !options.draft) {
@@ -2540,6 +2655,171 @@ function ensureOpenTargetTab(): void {
   }
 }
 
+/**
+ * „פתח מסמך”: מה שקורה סביב הדיאלוג.
+ *
+ * ## הדיאלוג אינו מסלול פתיחה נוסף
+ *
+ * שני הכפתורים הוותיקים נשארו בדיוק כפי שהיו, והדיאלוג רק החליף את הדרך
+ * אליהם: „עיון בקבצים…” קורא ל-`onPickAndOpen`, וכרטיס תבנית קורא
+ * ל-`onNewDocument`. כלומר „המסמך לא נשמר”, בחירת הטאב והשמירה-לפני-החלפה
+ * ממשיכים לעבור בקוד אחד — ולא בעותק שני שיכול להתפצל בשקט.
+ *
+ * המסלול היחיד שהוא באמת חדש הוא פתיחה משורת „אחרונים”, ובו אין בורר קבצים
+ * אלא token שנפתר. גם הוא אינו מוחק עבודה: `ensureOpenTargetTab` פותח **טאב
+ * חדש** כשהפעיל אינו „ריק במובן שאפשר להחליף” (`isActiveTabReplaceable`),
+ * ולכן טאב מלוכלך מקבל שכן ואינו נדרס — בדיוק כמו בדפדפן. אחריו הטאב שאליו
+ * פותחים נקי תמיד, וזו הסיבה שאין שם שאלה שנייה לשאול.
+ */
+function openOpenDialog(): void {
+  if (isOpenBusy()) return;
+  recentSearch.value = '';
+  isOpenDialogOpen.value = true;
+}
+
+async function onOpenDialogBrowse(): Promise<void> {
+  isOpenDialogOpen.value = false;
+  // המסלול המלא הקיים, על כל השאלות שבו — הדיאלוג רק החליף את הדרך אליו.
+  await onPickAndOpen();
+}
+
+/**
+ * „מסמך חדש מתבנית”.
+ *
+ * התבנית מוחלת **אחרי** שהמסמך נפתח, ולא לפניו: `applyTemplate` עובד על מופע
+ * מנוע חי (`engine/templates.ts`), ואין מסמך לפני `openDocument()`.
+ *
+ * שלוש התוצאות מדווחות שונה, ובכוונה: כשל הוא שגיאה אדומה; `note` (למשל
+ * „הטורים מצוירים הפוך”) הוא הודעה רגילה שאינה כשל; והצלחה שקטה אינה מדווחת
+ * כלל — המסמך על המסך הוא הדיווח.
+ */
+async function onOpenDialogCreate(id: string): Promise<void> {
+  isOpenDialogOpen.value = false;
+  // המסלול המלא הקיים, ולא פתיחה מקבילה: `onNewDocument` הוא זה שמחזיק את
+  // „המסמך לא נשמר” למקרה שבו אין טאב חדש לפתוח אליו.
+  if (!(await onNewDocument())) return;
+
+  const templateId = id as TemplateId;
+  if (templateId === 'blank') return;
+
+  const outcome = await applyTemplate(activeSuperdoc.value, templateId);
+  if (!outcome.ok) {
+    setStatus(outcome.message, true);
+    return;
+  }
+  if (outcome.note) setStatus(outcome.note);
+}
+
+/**
+ * פתיחת מסמך מרשימת האחרונים.
+ *
+ * ה-token שורד הפעלות אבל ה-URL לא (הפורט של שרת ה-loopback מתחלף), ולכן
+ * הפתיחה עוברת דרך `resolveFileUrl`. `null` ממנו פירושו שהקובץ הוזז, נמחק או
+ * שההרשאה בוטלה — ואז השורה **מוסרת מהרשימה**: שורה שנכשלת ונשארת היא שורה
+ * שהמשתמש ילחץ עליה שוב.
+ */
+async function onOpenDialogRecent(token: string): Promise<void> {
+  if (isOpenBusy()) return;
+  const known = recentDocuments.value.find((item) => item.token === token);
+  const name = known?.name ?? 'המסמך';
+
+  const file = await resolveFileUrl(token);
+  if (!file) {
+    onOpenDialogForget(token);
+    setStatus(`${name} לא נמצא — ייתכן שהקובץ הוזז או נמחק. הוא הוסר מהרשימה`, true);
+    return;
+  }
+
+  isOpenDialogOpen.value = false;
+  ensureOpenTargetTab();
+  await openDocument(file);
+}
+
+function onOpenDialogTogglePin(token: string, pinned: boolean): void {
+  recentDocuments.value = setRecentPinned(recentDocuments.value, token, pinned);
+  void saveRecentDocuments(recentDocuments.value);
+}
+
+/**
+ * „נסגרו בלי לשמור” — המעבר ממסך הפתיחה למסך השחזור.
+ *
+ * הדיאלוג הראשון נסגר לפני שהשני נפתח, ולא נשאר מתחתיו: שניהם מכריזים
+ * `aria-modal` ומחזיקים מלכודת מיקוד, ושתי מלכודות פתוחות בו-זמנית מתחרות על
+ * אותו `Tab`. „סגור” במסך השחזור מחזיר את המשתמש לעורך, לא למסך הפתיחה —
+ * מסך שנכנסים אליו כדי לפתוח משהו, וסגירתו פירושה שנמלכו בדעתם.
+ */
+function onShowDiscarded(): void {
+  isOpenDialogOpen.value = false;
+  isDiscardedOpen.value = true;
+}
+
+/**
+ * פתיחת גיבוי — **כמסמך חדש**, ולא מעל הקובץ שהוא בא ממנו.
+ *
+ * הרשומה יודעת מאיזה `token` העבודה הזאת באה, והפיתוי היה לפתוח את הקובץ
+ * ולהצמיד אליו את הבייטים — „שמור” אחד והכול חוזר למקומו. זה בדיוק מה שאסור:
+ * המשתמש אמר על העבודה הזאת „לא לשמור”, ופתיחה שמצמידה אותה ליעד כתיבה הופכת
+ * לחיצה אחת בשוגג („שמור” מתוך הרגל) לדריסת הקובץ שלו בגרסה שהוא דחה. בלי
+ * יעד, „שמור” פותח „שמור בשם” — והמשתמש בוחר במפורש לאן.
+ *
+ * הרשומה **אינה** מוסרת אחרי פתיחה: מה שנפתח עדיין לא נשמר לשום מקום, ומחיקת
+ * העותק ברגע הזה הייתה משאירה את העבודה שוב בלי רשת. „הסר” הוא פעולה מפורשת
+ * (`onForgetDiscarded`), וזו ההזדמנות היחידה למחוק אותה.
+ */
+async function onOpenDiscarded(slot: number): Promise<void> {
+  if (isOpenBusy()) return;
+  const entry = discardedBackups.value.find((item) => item.slot === slot);
+  if (!entry) return;
+
+  const bytes = await readWorkspaceBytes(backupPathFor(slot));
+  if (!bytes) {
+    // הקובץ אינו במקומו — נמחק מבחוץ, או שהכתיבה שלו נכשלה מלכתחילה. שורה
+    // שאי אפשר לפתוח היא שורה שהמשתמש ילחץ עליה שוב, ולכן היא יורדת.
+    await onForgetDiscarded(slot);
+    setStatus(`העותק של ${entry.name} לא נמצא, והשורה הוסרה`, true);
+    return;
+  }
+
+  isDiscardedOpen.value = false;
+  ensureOpenTargetTab();
+  const opened = await openDocument(undefined, {
+    draft: new Blob([bytes], { type: DOCX_MIME }),
+    name: entry.name,
+  });
+  if (!opened) {
+    // הרשומה **אינה** יורדת כאן, בשונה מ„העותק לא נמצא”: הבייטים קיימים,
+    // והכשל עשוי להיות זמני (worker שלא עלה). מחיקת השורה הייתה מוחקת את
+    // ההזדמנות היחידה לנסות שוב.
+    setStatus(`${entry.name} לא נפתח מהעותק שנשמר בסגירה`, true);
+    return;
+  }
+
+  const age = draftAgeLabel(entry.discardedAt, Date.now());
+  setStatus(
+    age
+      ? `${entry.name} נפתח מהעותק שנשמר בסגירה (${age}) — טרם נשמר לקובץ`
+      : `${entry.name} נפתח מהעותק שנשמר בסגירה — טרם נשמר לקובץ`,
+  );
+}
+
+/**
+ * „הסר”. מוחקת גם את הקובץ ולא רק את השורה: המשבצת הייתה מתפנה בלאו הכי
+ * והכתיבה הבאה דורסת אותה, אבל מי שביקש להסיר עותק של העבודה שלו התכוון
+ * שהוא לא יישאר על הדיסק עד שמישהו יזדמן לדרוס אותו.
+ */
+async function onForgetDiscarded(slot: number): Promise<void> {
+  discardedBackups.value = forgetDiscard(discardedBackups.value, slot);
+  await saveDiscardBackups(discardedBackups.value);
+  await deleteWorkspaceEntry(backupPathFor(slot));
+  // מסך ריק אינו מסך: הכפתור שמוביל לכאן ממילא נעלם כשאין מה להציג.
+  if (discardedBackups.value.length === 0) isDiscardedOpen.value = false;
+}
+
+function onOpenDialogForget(token: string): void {
+  recentDocuments.value = forgetRecent(recentDocuments.value, token);
+  void saveRecentDocuments(recentDocuments.value);
+}
+
 async function onPickAndOpen(): Promise<void> {
   if (isOpenBusy()) return;
   try {
@@ -2555,14 +2835,16 @@ async function onPickAndOpen(): Promise<void> {
       const decision = await decideDocumentSwitch({
         isDirty: () => save!.snapshot.isDirty,
         isSaving: () => save!.snapshot.isSaving,
-        confirm,
+        ask: unsavedPrompt.ask,
         documentName: () => title.value,
       });
 
-      // „החלף” על מסמך שהיו בו שינויים פירושו שהמשתמש אישר את מחיקתם
-      // במפורש — שתי שאלות, ראו open-flow.ts. זה המסלול היחיד שבו הטיוטה
-      // נמחקת מלבד שמירה מוצלחת.
-      if (hadUnsaved && decision.action === 'switch') await keeper?.discardDraft();
+      // „החלף” על מסמך שהיו בו שינויים פירושו שהמשתמש בחר „לא לשמור”
+      // במפורש (ראו open-flow.ts). זה המסלול היחיד שבו הטיוטה נמחקת מלבד
+      // שמירה מוצלחת — ולכן זה גם המסלול שכותב עותק לגיבוי לפני המחיקה.
+      if (hadUnsaved && decision.action === 'switch') {
+        await discardWithBackup(activeSession.value);
+      }
 
       if (decision.action === 'cancel') {
         setStatus(
@@ -2589,28 +2871,36 @@ async function onPickAndOpen(): Promise<void> {
   }
 }
 
-async function onNewDocument(): Promise<void> {
+/**
+ * „מסמך חדש”.
+ *
+ * מחזירה **האם מסמך אכן נפתח**, ולא `void`: `onOpenDialogCreate` צריך לדעת
+ * את זה כדי להחליט אם להחיל תבנית — החלה על מסמך שלא נפתח (הפתיחה בוטלה,
+ * השמירה נכשלה, „לא נשמר” נענה ב„בטל”) הייתה נוגעת במסמך **הקודם**, שנשאר
+ * על המסך. זו הסיבה היחידה שהיא מחזירה ערך.
+ */
+async function onNewDocument(): Promise<boolean> {
   // כמו שאר מתחילי הפתיחה (onPickAndOpen/onDocumentTab*): הכפתור ברצועה
   // מנוטרל בזמן isOpening, אבל Ctrl+N מגיע דרך runShellAction ועוקף אותו —
   // בלי הבדיקה הזאת הוא היה פותח מסמך שני לתוך אותו טאב באמצע פתיחה ראשונה.
-  if (isOpenBusy()) return;
+  if (isOpenBusy()) return false;
   ensureOpenTargetTab();
   if (save && swap && save.snapshot.isDirty) {
     const decision = await decideDocumentSwitch({
       isDirty: () => save!.snapshot.isDirty,
       isSaving: () => save!.snapshot.isSaving,
-      confirm,
+      ask: unsavedPrompt.ask,
       documentName: () => title.value,
     });
-    // ראו onPickAndOpen: „החלף” כאן פירושו שהמחיקה אושרה במפורש.
-    if (decision.action === 'switch') await keeper?.discardDraft();
-    if (decision.action === 'cancel') return;
+    // ראו onPickAndOpen: „החלף” כאן פירושו ש„לא לשמור” נבחר במפורש.
+    if (decision.action === 'switch') await discardWithBackup(activeSession.value);
+    if (decision.action === 'cancel') return false;
     if (decision.action === 'save-first') {
       const outcome = await save.saveNow({ suggestedName: documentFileName(title.value, saveExtension.value) });
-      if (outcome.status !== 'saved') return;
+      if (outcome.status !== 'saved') return false;
     }
   }
-  await openDocument();
+  return openDocument();
 }
 
 /**
@@ -2630,37 +2920,38 @@ async function onNewDocument(): Promise<void> {
  * שאינו סוגר ואינו שואל — ועכשיו ההבדל בין שני הכפתורים הוא בדיוק ההבדל
  * שהתוויות שלהם מבטיחות.
  *
- * השאלה אינה מחייבת לשמור: „לא” על „לשמור לפני יציאה?” מוביל לשאלת אישור
- * שנייה, וזהו — ראו sessions/open-flow.ts.
+ * השאלה אינה מחייבת לשמור: „לא לשמור” הוא אחד משלושת הכפתורים, והוא יוצא
+ * ומשאיר עותק לשחזור — ראו sessions/open-flow.ts ו-sessions/discard-backup.ts.
  */
 async function onExit(): Promise<void> {
   // בזמן פתיחה אין לסגור: `openDocumentInto` כותב לטאב הפעיל לכל אורך ריצתו
   // (ראו `isOpenBusy`), וסגירתו באמצע הייתה משאירה אותה כותבת לתוך מסמך
   // מפורק. הפקד עצמו מנוטרל אז; זה הגיבוי למסלול שיגיע שלא דרכו.
   if (isExiting.value || isOpenBusy()) return;
-  // לפני ה-await הראשון: שתי לחיצות שמגיעות באותו סבב אירועים היו מקבלות
-  // שתיהן את המפה הישנה של הטאבים, ואז מפרקות אותה ונוסעות לספרייה פעמיים.
   isExiting.value = true;
-
   try {
-    // הטאב הפעיל נשאל ראשון: הוא המסמך שעל המסך כשלוחצים „יציאה”, ושאלה על
-    // מסמך שאינו נראה, לפניו, נקראת כשאלה עליו.
-    const active = activeSession.value;
-    const open = Array.from(sessions.values());
-    const order = active ? [active, ...open.filter((session) => session !== active)] : open;
 
-    // כל הטאבים נשאלים **לפני** שנסגר ולו אחד: „ביטול” על השלישי אחרי ששניים
-    // כבר נסגרו הוא ביטול שאינו מבטל.
-    for (const session of order) {
-      if (!(await resolveUnsavedBeforeClose(session, 'exit'))) return;
-    }
+  // הטאב הפעיל נשאל ראשון: הוא המסמך שעל המסך כשלוחצים „יציאה”, ושאלה על
+  // מסמך שאינו נראה, לפניו, נקראת כשאלה עליו.
+  const active = activeSession.value;
+  const open = Array.from(sessions.values());
+  const order = active ? [active, ...open.filter((session) => session !== active)] : open;
 
-    await closeAllSessions();
+  // כל הטאבים נשאלים **לפני** שנסגר ולו אחד: „ביטול” על השלישי אחרי ששניים
+  // כבר נסגרו הוא ביטול שאינו מבטל.
+  const discarded = new Set<DocumentSessionId>();
+  for (const session of order) {
+    const resolution = await resolveUnsavedBeforeClose(session, 'exit');
+    if (!resolution.closable) return;
+    if (resolution.discarded) discarded.add(session.id);
+  }
 
-    // אותו מסלול דיווח כמו „פתח ספרייה” בלשונית „אוצריא”: הודעה בעברית למשתמש
-    // ושורה בלוג של אוצריא. כשל ניווט אינו מחזיר את המסמכים — כל אחד מהם כבר
-    // נשמר או שמחיקתו אושרה במפורש, ומי שנשאר בתוסף נשאר עם עורך נקי והודעה
-    // שאומרת מה נכשל.
+  await closeAllSessions(discarded);
+
+  // אותו מסלול דיווח כמו „פתח ספרייה” בלשונית „אוצריא”: הודעה בעברית למשתמש
+  // ושורה בלוג של אוצריא. כשל ניווט אינו מחזיר את המסמכים — כל אחד מהם כבר
+  // נשמר או שמחיקתו אושרה במפורש, ומי שנשאר בתוסף נשאר עם עורך נקי והודעה
+  // שאומרת מה נכשל.
     reportReader(await openLibrary());
   } finally {
     isExiting.value = false;
@@ -2953,7 +3244,7 @@ async function openPendingTab(session: DocumentSession): Promise<void> {
  * משוכפלת ביניהם: זהו הקוד שקובע אם עבודה של המשתמש נמחקת, ועותק שני שלו הוא
  * עותק שיכול להתפצל בשקט. אותו טעם שבגללו ההחלטה עצמה יושבת ב-open-flow.ts.
  *
- * ## שתי שאלות שונות, לפי מה שיש לטאב לאבד
+ * ## שתי שאלות שונות — לא זו אחר זו, אלא לפי מה שיש לטאב לאבד
  *
  * המסלול הרגיל שואל את המנוע („יש שינויים שלא נשמרו?”), אבל יש שני מצבים
  * שבהם אין מנוע שיענה, ובכל זאת **יש** עבודה: טאב ששוחזר ועוד לא נטען,
@@ -2972,27 +3263,44 @@ async function openPendingTab(session: DocumentSession): Promise<void> {
  * ביציאה: היא שואלת על **כל** הטאבים לפני שהיא סוגרת ולו אחד, ומחיקה כאן
  * הייתה מוחקת את הטיוטה של הראשון גם כשהשאלה על השלישי מבטלת את הכול.
  */
+interface UnsavedResolution {
+  /** האם מותר לסגור. `false` = המשתמש ביטל, או שהשמירה שביקש נכשלה. */
+  closable: boolean;
+  /**
+   * האם המשתמש בחר „לא לשמור” על טאב שהיה בו מה לאבד — כלומר יש מה לגבות.
+   *
+   * מדווח ואינו מטופל כאן, מפני ש„נשאל” ו„נסגר” אינם אותו רגע: היציאה שואלת
+   * על **כל** הטאבים לפני שהיא סוגרת ולו אחד, וגיבוי שהיה נכתב כאן היה נשאר
+   * גם כשהשאלה על הטאב השלישי מבטלת את הכול. הכתיבה עצמה יושבת ליד
+   * `destroy({ removeDraft: true })` — ראו `backupDiscardedDocument`.
+   */
+  discarded: boolean;
+}
+
 async function resolveUnsavedBeforeClose(
   session: DocumentSession,
   intent: 'exit' | 'close-tab',
-): Promise<boolean> {
+): Promise<UnsavedResolution> {
   const recordDraft = activeEntry(session.keeper.state)?.draft != null;
   const engineDirty = session.save.snapshot.isDirty;
   const askFromRecord = recordDraft && !engineDirty;
+
+  // נקרא **לפני** ההחלטה: אחרי „שמור” המסמך כבר נקי, ואז אי אפשר להבחין בין
+  // „לא היה מה לגבות” לבין „המשתמש ביקש למחוק”.
+  const hadUnsaved = engineDirty || recordDraft;
 
   const decision =
     session.pendingRestore || askFromRecord
       ? await decidePendingTabClose({
           hasDraft: () => recordDraft,
-          confirm,
+          ask: unsavedPrompt.ask,
           documentName: () => sessionDisplayTitle(session),
         })
       : await decideDocumentSwitch({
           isDirty: () => session.save.snapshot.isDirty,
           isSaving: () => session.save.snapshot.isSaving,
-          confirm,
+          ask: unsavedPrompt.ask,
           documentName: () => sessionDisplayTitle(session),
-          intent,
         });
 
   /** הפעולה שבוטלה, בנוסח שלה. „היציאה בוטלה” ו„סגירת הטאב בוטלה”. */
@@ -3000,7 +3308,7 @@ async function resolveUnsavedBeforeClose(
 
   if (decision.action === 'cancel') {
     setStatus(decision.reason === 'saving' ? 'השמירה עוד רצה — רגע אחד' : `${what} בוטלה`);
-    return false;
+    return { closable: false, discarded: false };
   }
 
   if (decision.action === 'save-first') {
@@ -3012,11 +3320,13 @@ async function resolveUnsavedBeforeClose(
     if (outcome.status !== 'saved') {
       if (outcome.status === 'failed') setStatus(outcome.message, true);
       else setStatus(`${what} בוטלה — המסמך לא נשמר`);
-      return false;
+      return { closable: false, discarded: false };
     }
   }
 
-  return true;
+  // `switch` על טאב שהיה בו מה לאבד פירושו ש„לא לשמור” נבחר במפורש. הגיבוי
+  // עצמו אינו כאן אלא אצל הסוגר — ראו `discarded` ב-`UnsavedResolution`.
+  return { closable: true, discarded: hadUnsaved && decision.action === 'switch' };
 }
 
 /** סגירת טאב: השאלה על מה שלא נשמר, ואז הפירוק. */
@@ -3024,12 +3334,20 @@ async function onDocumentTabClose(id: DocumentSessionId): Promise<void> {
   if (isOpenBusy()) return;
   const session = sessions.get(id);
   if (!session) return;
-  if (!(await resolveUnsavedBeforeClose(session, 'close-tab'))) return;
+  const resolution = await resolveUnsavedBeforeClose(session, 'close-tab');
+  if (!resolution.closable) return;
+
+  // לפני הפירוק: `destroy` משחרר את המנוע ומוחק את הטיוטה, ואחריו כבר אין
+  // ממה לקרוא את המסמך שהיה בטאב. ראו `closedTabs`.
+  rememberClosedTab(session);
 
   const wasActive = session === activeSession.value;
   sessions.delete(session.id);
   const recentAt = recentTabs.indexOf(session.id);
   if (recentAt >= 0) recentTabs.splice(recentAt, 1);
+  // לפני הפירוק, ורק אחרי שברור שהטאב באמת נסגר: `destroy` מוחק את הטיוטה,
+  // והמנוע שממנו מייצאים הולך איתו.
+  if (resolution.discarded) await backupDiscardedDocument(session);
   await session.destroy({ removeDraft: true });
 
   // הרשומה עצמה אינה נכתבת כאן: `destroy({ removeDraft: true })` קורא
@@ -3046,6 +3364,98 @@ async function onDocumentTabNew(): Promise<void> {
   if (isOpenBusy()) return;
   activateTab(createNewDocumentSession());
   await openDocument();
+}
+
+/**
+ * ## קיצורי הטאבים
+ *
+ * חמש הפעולות שמתחת הן מה שהרג'יסטרי קורא לו `tab-*`, והן **אינן** מסלול
+ * שני: כל אחת מהן נכנסת לאותה פונקציה שהעכבר נכנס אליה — `onDocumentTabNew`,
+ * `onDocumentTabClose`, `onDocumentTabSelect` — ולכן השאלה על „המסמך לא
+ * נשמר”, החסימה בזמן פתיחה (`isOpenBusy`) והטעינה העצלה של טאב ששוחזר
+ * מתרחשות בקיצור בדיוק כמו בלחיצה. זה אותו כלל שכבר קיים לכל הרצועה: קיצור
+ * הוא הדרך השנייה לאותו כפתור, לא דרך עוקפת.
+ *
+ * הסדר שהמעבר נשען עליו הוא **סדר הרצועה** — `sessions` הוא `Map`, והאיטרציה
+ * שלו היא סדר ההכנסה, כלומר בדיוק מה ש-`documentTabs` מרנדר. לא סדר השימוש
+ * (`recentTabs`): הרצועה גלויה, והצירוף שמזיז בה סמן חייב להזיז אותו למקום
+ * שהעין רואה. זו גם ההתנהגות של `Ctrl+Tab` בדפדפנים, ולא זו של `Ctrl+Tab`
+ * ב-VSCode.
+ *
+ * ב-RTL „הבא” הוא שמאלה, מפני ש„הבא” הוא המקום הבא ברצועה — ורצועה עברית
+ * מתחילה מימין. אותו כלל בדיוק כמו בחצי הלשוניות של הרצועה (`nextTabIndex`
+ * ב-ui/ribbon/aria.ts), ומאותו טעם.
+ */
+
+/** מזהי הטאבים בסדר הרצועה. ראו „קיצורי הטאבים”. */
+function tabOrder(): DocumentSessionId[] {
+  return Array.from(sessions.keys());
+}
+
+/** `Ctrl+Tab` / `Ctrl+Page Down` / `Ctrl+F6` — והכיוון ההפוך עם Shift. */
+function stepTab(direction: 'next' | 'prev'): void {
+  const ids = tabOrder();
+  // טאב יחיד: אין לאן. הצירוף עדיין נבלע — ראו „הטאבים” ב-ui/shortcuts/actions.ts.
+  if (ids.length < 2) return;
+
+  const at = activeSession.value ? ids.indexOf(activeSession.value.id) : -1;
+  const delta = direction === 'next' ? 1 : -1;
+  // גלישה מהסוף להתחלה, כמו בדפדפן. `at === -1` (מצב שאין לו מסלול ידוע)
+  // נופל על הטאב הראשון ולא על חישוב שלילי.
+  const target = ids[(((at + delta) % ids.length) + ids.length) % ids.length];
+  if (target !== undefined) onDocumentTabSelect(target);
+}
+
+/**
+ * `Alt+1`…`Alt+8` ו-`Alt+9`. מיקום שאין בו טאב אינו עושה דבר — בדיוק כמו
+ * `Ctrl+7` בדפדפן עם שלוש לשוניות פתוחות.
+ */
+function goToTab(position: number | 'last'): void {
+  const ids = tabOrder();
+  const target = position === 'last' ? ids[ids.length - 1] : ids[position - 1];
+  if (target !== undefined) onDocumentTabSelect(target);
+}
+
+/** `Ctrl+W` / `Ctrl+F4` — סוגר את הטאב שעל המסך. */
+function closeActiveTab(): void {
+  const session = activeSession.value;
+  if (!session) return;
+  void onDocumentTabClose(session.id).catch((error: unknown) => {
+    console.warn('[otzaria-word] סגירת הטאב נכשלה', error);
+  });
+}
+
+/**
+ * `Ctrl+Shift+T` — הטאב האחרון שנסגר, בחזרה.
+ *
+ * מה שנפתח הוא **הקובץ**, לא מצב העריכה שהיה בטאב: הטאב פורק, המנוע שלו
+ * שוחרר, והטיוטה נמחקה במסלול הסגירה (`destroy({ removeDraft: true })`).
+ * זו גם ההתנהגות של דפדפן — לשונית שנפתחת מחדש טוענת את הדף, לא את מה
+ * שהוקלד בטופס — וכל הבטחה אחרת כאן הייתה שקר, כי אין ממה לקיים אותה. מה
+ * שכן שורד את „לסגור בלי לשמור” הוא הגיבוי של sessions/discard-backup.ts,
+ * והוא מסלול אחר עם מסך משלו.
+ *
+ * הרשומה **נשלפת** מהמחסנית לפני הניסיון, גם כשהוא נכשל: token שאינו נפתר
+ * לא ייפתר בלחיצה השנייה, ומחסנית שמחזירה את אותה שגיאה שוב ושוב היא מחסנית
+ * תקועה. אותה הכרעה בדיוק כמו ב-`onOpenDialogRecent`, ששם היא מסירה את
+ * השורה מרשימת האחרונים.
+ */
+async function reopenClosedTab(): Promise<void> {
+  if (isOpenBusy()) return;
+  const closed = closedTabs.shift();
+  if (!closed) {
+    setStatus('אין טאב שנסגר בהפעלה הזאת');
+    return;
+  }
+
+  const file = await resolveFileUrl(closed.token);
+  if (!file) {
+    setStatus(`${closed.name} לא נמצא — ייתכן שהקובץ הוזז או נמחק`, true);
+    return;
+  }
+
+  ensureOpenTargetTab();
+  await openDocument(file);
 }
 
 /**
@@ -3077,11 +3487,13 @@ async function activateAfterClose(): Promise<void> {
  * הטאב החדש נוצר דרך `activateAfterClose`, בדיוק כמו בסגירת הטאב האחרון: אין
  * מצב „תוסף בלי טאבים” — רצועת הטאבים, הרצועה ושורת המצב כולן מניחות מסמך.
  */
-async function closeAllSessions(): Promise<void> {
+async function closeAllSessions(discarded: ReadonlySet<DocumentSessionId> = new Set()): Promise<void> {
   for (const session of Array.from(sessions.values())) {
     sessions.delete(session.id);
     const recentAt = recentTabs.indexOf(session.id);
     if (recentAt >= 0) recentTabs.splice(recentAt, 1);
+    // בדיוק הטאבים שנאמר עליהם „לא לשמור”, ולפני הפירוק שמוחק את הטיוטה.
+    if (discarded.has(session.id)) await backupDiscardedDocument(session);
     await session.destroy({ removeDraft: true });
   }
   await activateAfterClose();
@@ -3205,64 +3617,14 @@ function onPointerMove(event: PointerEvent): void {
  * רב-פסקאות (ראו הראש של engine/search.ts). המימוש שלנו עצמאי לגמרי:
  * `doc.blocks.list`/`doc.replace` של ה-Document API הציבורי.
  */
-function openFindDialog(mode: 'find' | 'replace', initialQuery = ''): void {
+function openFindDialog(mode: 'find' | 'replace'): void {
   findMode.value = mode;
-  findInitialQuery.value = initialQuery;
   isFindOpen.value = true;
   void reportSearch(searchAdapter?.open());
 }
 
-async function onRunCommandFromTellMe(id: string, payload?: unknown): Promise<void> {
-  if (!commandAdapter.value) {
-    setStatus('אין מסמך פתוח לביצוע הפעולה', true);
-    return;
-  }
-  const outcome = await commandAdapter.value.run(id, payload);
-  reportCommand(outcome, id);
-}
-
-function onRunActionFromTellMe(action: ShellAction): void {
-  runShellAction(action);
-}
-
-/**
- * הפעולות הייעודיות של Tell Me (ראו `TellMeCustomAction`). הלוח עובר כאן
- * ב-engine/clipboard.ts ומדווח כמו כפתורי „בית”, כי אין למנוע פקודות
- * `copy`/`cut`/`paste`; כלי שולחן העורך הם כלי MacroKit עם דיאלוגים, ולכן
- * הפעולה פותחת את הלשונית שלהם.
- */
-function onCustomActionFromTellMe(action: TellMeCustomAction): void {
-  switch (action) {
-    case 'export-pdf':
-      void onExportPdf();
-      break;
-    case 'export-otzaria':
-      void onExportOtzaria();
-      break;
-    case 'about':
-      isAboutOpen.value = true;
-      break;
-    case 'clipboard-copy':
-      void copySelection(activeSuperdoc.value).then((outcome) => reportCommand(outcome, 'clipboard-copy'));
-      break;
-    case 'clipboard-cut':
-      void cutSelection(activeSuperdoc.value).then((outcome) => reportCommand(outcome, 'clipboard-cut'));
-      break;
-    case 'clipboard-paste':
-      void pasteFromClipboard(activeSuperdoc.value).then((outcome) => reportCommand(outcome, 'clipboard-paste'));
-      break;
-    case 'ribbon-shulchan':
-      ribbonTab.value = 'shulchan';
-      ribbonCollapsed.value = false;
-      break;
-  }
-}
-
 function closeFindDialog(): void {
   isFindOpen.value = false;
-  // השאילתה שהגיעה מ-Tell Me היא של אותה פתיחה בלבד; בלי האיפוס היא הייתה
-  // נדחפת שוב לשדה בפתיחה הבאה, ודורסת את החיפוש האחרון של המשתמש.
-  findInitialQuery.value = '';
   // סגירה מנקה את ההדגשות במסמך. בלעדיה הן נשארות אחרי שהדיאלוג נעלם.
   searchAdapter?.close();
 }
@@ -3503,6 +3865,12 @@ function returnOrphanedFocus(): void {
  * ואפשר להמשיך לערוך מתחתיו, ולכן הוא נסגר רק כשאין חלון מעליו.
  */
 function closeTopmostLayer(): boolean {
+  // „פתח מסמך” ראשון: הוא נפתח **מעל** כל השאר (מהרצועה או מקיצור), והוא
+  // `aria-modal` — כלומר כל עוד הוא פתוח, שום שכבה מתחתיו אינה זמינה.
+  if (isOpenDialogOpen.value) {
+    isOpenDialogOpen.value = false;
+    return true;
+  }
   if (isShortcutsHelpOpen.value) {
     isShortcutsHelpOpen.value = false;
     return true;
@@ -3558,8 +3926,11 @@ const runShellAction = createShellActionRunner({
   print: () => void onPrint(),
   openFind: (mode) => openFindDialog(mode),
   openLink: () => void linkDialog.open(),
-  newDocument: () => void onNewDocument(),
-  openDocument: () => void onPickAndOpen(),
+  // Ctrl+N ו-Ctrl+O פותחים את אותו דיאלוג בדיוק כמו הכפתורים ברצועה: „מסמך
+  // חדש” ו„פתח קובץ” הם שני חצאי אותו מסך, ולא שתי פעולות שונות. הפעולות
+  // הישירות (`onNewDocument`/`onPickAndOpen`) נשארו בשימוש מתוך הדיאלוג עצמו.
+  newDocument: () => openOpenDialog(),
+  openDocument: () => openOpenDialog(),
   // שני אלה אינם פקודות של ה-controller אלא Document API ישיר, בדיוק כמו
   // הכפתורים המקבילים ברצועה — ולכן אותה פונקציה, ואותו דיווח.
   selectAll: () => void runSelectAll(),
@@ -3599,8 +3970,17 @@ const runShellAction = createShellActionRunner({
     return true;
   },
   moveFocusRegion: (direction) => focusRing.move(direction) !== null,
-  openTellMe: () => titleBarRef.value?.focusTellMe(),
   closeTopmost: closeTopmostLayer,
+  // חמש פעולות הטאבים — ראו „קיצורי הטאבים” ליד `stepTab`. שלוש מהן הן
+  // בדיוק המטפלים של רצועת הטאבים, ולכן הקיצור והעכבר אינם יכולים להתפצל.
+  newTab: () => void onDocumentTabNew(),
+  closeTab: closeActiveTab,
+  reopenClosedTab: () =>
+    void reopenClosedTab().catch((error: unknown) => {
+      console.warn('[otzaria-word] פתיחת הטאב שנסגר נכשלה', error);
+    }),
+  stepTab,
+  goToTab,
 });
 
 /**
@@ -3985,13 +4365,22 @@ onMounted(async () => {
     // שלוש הקריאות במקביל ולא בזו אחר זו: כל אחת היא סבב IPC מלא מול אוצריא,
     // הן קוראות מפתחות שונים ואינן תלויות זו בזו — והן עומדות בין המשתמש לבין
     // פתיחת המסמך הראשון.
-    const [storedAutosave, storedRuler, stored] = await Promise.all([
-      loadAutosaveEnabled(),
-      loadRulerVisible(),
-      loadPreviousSession(),
-    ]);
+    const [storedAutosave, storedRuler, stored, storedRecents, storedDiscarded] =
+      await Promise.all([
+        loadAutosaveEnabled(),
+        loadRulerVisible(),
+        loadPreviousSession(),
+        loadRecentDocuments(),
+        loadDiscardBackups(),
+      ]);
     autosaveEnabled.value = storedAutosave;
     rulerPreference = storedRuler;
+    // ממוינת כבר כאן ולא רק בתצוגה: זו הרשימה שכל שאר הקוד רואה, ורשימה
+    // שמגיעה מ-storage אין לה הבטחת סדר.
+    recentDocuments.value = sortedRecents(normalizeRecents(storedRecents));
+    // אותה הכרעה בדיוק כמו של „אחרונים”: מה שמגיע מ-storage אין לו הבטחת
+    // סדר, והמיון הוא של הרשימה שכל שאר הקוד רואה — לא של התצוגה בלבד.
+    discardedBackups.value = normalizeBackups(storedDiscarded);
 
     // בדיקת האיות — **לא** ב-await: משיכת המילון היא 1.3MB, והעלייה לא
     // תמתין לה. מי שהדליק בהפעלה הקודמת יקבל את הסימון כשהמילון יגיע.
@@ -4053,6 +4442,8 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+  // מי שממתין לתשובה מקבל „ביטול” ואינו נשאר תלוי — ראו use-unsaved-prompt.ts.
+  unsavedPrompt.dispose();
   bookCompletion?.dispose();
   bookCompletion = null;
   zoomCenter?.dispose();
@@ -4331,6 +4722,100 @@ async function recoverDraft(
 async function readDraftBytes(path: string): Promise<Blob | null> {
   const bytes = await readWorkspaceBytes(path);
   return bytes ? new Blob([bytes], { type: DOCX_MIME }) : null;
+}
+
+/**
+ * „לא לשמור” — עם עותק לפני שהוא נמחק.
+ *
+ * שני המסלולים שמוחקים טיוטה מיד („פתח מסמך אחר” ו„מסמך חדש”) עוברים כאן.
+ * מסלול הסגירה אינו עובר כאן אלא קורא ל-`backupDiscardedDocument` בעצמו,
+ * מפני ששם המחיקה היא של `destroy({ removeDraft: true })` ולא של
+ * `discardDraft` — ראו `UnsavedResolution.discarded`.
+ *
+ * הסדר אינו סגנון: הגיבוי קורא את הבייטים, והמחיקה מוחקת את הקובץ שהם
+ * נקראים ממנו במסלול הטאב שלא נטען.
+ */
+async function discardWithBackup(session: DocumentSession | null): Promise<void> {
+  if (!session) return;
+  await backupDiscardedDocument(session);
+  await session.keeper.discardDraft();
+}
+
+/**
+ * כותבת את המסמך שנאמר עליו „לא לשמור” לאחת מחמש המשבצות של הגיבוי.
+ *
+ * ההחלטה מי נדרס — ולמה משבצות ולא מזהים — ב-sessions/discard-backup.ts.
+ * כאן נשארת ההרכבה: לקרוא את הרשומה, לבחור משבצת, לכתוב את הבייטים, ורק אם
+ * הכתיבה הצליחה לרשום אותה. הסדר הזה הוא מה שמונע רשומה שמצביעה לקובץ שלא
+ * נכתב.
+ *
+ * **כשל נאמר ואינו בולע את הפעולה.** המשתמש ביקש לסגור בלי לשמור, וזה מה
+ * שיקרה בכל מקרה; מה שהוא חייב לדעת הוא שההבטחה שהוצגה לו בדיאלוג
+ * (`DISCARD_BACKUP_NOTE`) לא התקיימה הפעם. `setStatus(…, true)` מדווח גם
+ * לשורת המצב וגם כשגיאה של אוצריא — ראו `setStatus`.
+ */
+async function backupDiscardedDocument(session: DocumentSession): Promise<void> {
+  const bytes = await discardedBytes(session);
+  if (!bytes) {
+    setStatus('לא נשמר עותק לשחזור של השינויים שלא נשמרו', true);
+    return;
+  }
+
+  const list = normalizeBackups(await loadDiscardBackups());
+  const slot = nextBackupSlot(list);
+  const written = await writeWorkspaceBytes(backupPathFor(slot), bytes);
+  if (written !== 'written') {
+    setStatus(
+      written === 'too-large'
+        ? 'המסמך גדול מכדי לשמור ממנו עותק לשחזור'
+        : 'שמירת העותק לשחזור נכשלה',
+      true,
+    );
+    return;
+  }
+
+  const next = rememberDiscard(list, {
+    slot,
+    name: sessionDisplayTitle(session),
+    size: bytes.byteLength,
+    discardedAt: Date.now(),
+    // מי שישחזר צריך לדעת מאיזה קובץ זה בא. אחרי הסגירה הידיעה הזאת נעלמת
+    // עם הטאב, ואי אפשר לאסוף אותה מאוחר יותר.
+    token: activeEntry(session.keeper.state)?.document?.token ?? null,
+  });
+  await saveDiscardBackups(next);
+  // הרשימה שבזיכרון היא מה שמזין את המונה על „נסגרו בלי לשמור” ואת מסך
+  // השחזור. בלי השורה הזאת הכפתור היה מופיע רק בהפעלה הבאה — כלומר בדיוק לא
+  // ברגע שבו המשתמש מחפש את מה שהרגע ויתר עליו.
+  discardedBackups.value = sortedBackups(next);
+}
+
+/**
+ * הבייטים שייכנסו לגיבוי, משני מקורות — ולא במקרה בסדר הזה.
+ *
+ * **המנוע קודם.** הטיוטה נכתבת בהשהיה (עד דקה, ראו `DRAFT_MAX_WAIT_MS`),
+ * ולכן היא עשויה להיות ישנה בדקה שלמה מהמסמך שעל המסך. גיבוי שנועד להציל את
+ * מה שהמשתמש הרגע ויתר עליו חייב להיות מה שהוא ראה.
+ *
+ * **הטיוטה כשאין מנוע.** טאב ששוחזר וטרם נטען, וטאב שהטעינה שלו נכשלה, הם
+ * בדיוק המקרים שבהם אין ממה לייצא ובכל זאת יש עבודה — והיא נמצאת רק בקובץ
+ * הטיוטה. זהו המסלול הרגיל שלהם, לא נפילה לאחור.
+ */
+async function discardedBytes(session: DocumentSession): Promise<Uint8Array | null> {
+  const open = session.swap.current;
+  if (open) {
+    try {
+      const exported = await exportDocx(open.superdoc);
+      return new Uint8Array(await exported.arrayBuffer());
+    } catch (error) {
+      // אותה הכרעה כמו ב-`writeDraftNow`: ייצוא שנכשל אינו מפיל את הפעולה.
+      // אם יש טיוטה, היא עדיין עדיפה על כלום.
+      console.warn('[otzaria-word] ייצוא העותק לשחזור נכשל', error);
+    }
+  }
+
+  const path = activeEntry(session.keeper.state)?.draft?.path;
+  return path ? readWorkspaceBytes(path) : null;
 }
 </script>
 

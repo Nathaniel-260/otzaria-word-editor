@@ -150,6 +150,10 @@ vi.mock('../../src/host/settings', () => ({
   saveSpellcheckEnabled: async () => {},
   loadSpellcheckWords: async () => [],
   saveSpellcheckWords: async () => {},
+  loadRecentDocuments: async () => null,
+  saveRecentDocuments: async () => {},
+  loadDiscardBackups: async () => null,
+  saveDiscardBackups: async () => {},
 }));
 
 vi.mock('../../src/host/otzaria-client', async (importOriginal) => ({
@@ -531,24 +535,40 @@ describe('פעולות המעטפת', () => {
     expect(event.defaultPrevented).toBe(false);
   });
 
-  it('Ctrl+O פותח את בורר הקבצים של אוצריא', async () => {
+  it('Ctrl+O פותח את „פתח מסמך”, ו„עיון בקבצים…” מגיע לבורר של אוצריא', async () => {
+    // הקיצור אינו קופץ עוד ישר לבורר: הוא פותח את המסך שבו יושבות גם
+    // התבניות וגם רשימת האחרונים. הבורר עצמו נשאר במרחק לחיצה אחת.
     await mountShell();
 
     press({ code: 'KeyO', ctrlKey: true });
     await settle();
 
+    expect(document.querySelector('.open-dialog'), 'הדיאלוג נפתח').not.toBeNull();
+    expect(stub.pickCalls, 'ועדיין לא נפתח בורר קבצים').toBe(0);
+
+    document.querySelector<HTMLButtonElement>('.open-browse')?.click();
+    await settle();
+
     expect(stub.pickCalls).toBe(1);
   });
 
-  it('Ctrl+N פותח מסמך חדש', async () => {
+  it('Ctrl+N פותח את „פתח מסמך”, ו„מסמך ריק” פותח מסמך', async () => {
     await mountShell();
     stub.resets = 0;
 
     const event = press({ code: 'KeyN', ctrlKey: true });
     await settle();
 
-    expect(stub.resets, 'מסמך חדש נפתח').toBe(1);
     expect(event.defaultPrevented).toBe(true);
+    expect(document.querySelector('.open-dialog'), 'הדיאלוג נפתח').not.toBeNull();
+    expect(stub.resets, 'ועדיין לא נפתח מסמך').toBe(0);
+
+    // הכרטיס הראשון הוא „מסמך ריק” — ראו DOCUMENT_TEMPLATES ב-engine/templates.ts.
+    document.querySelector<HTMLButtonElement>('.tpl-card')?.click();
+    await settle();
+
+    expect(stub.resets, 'מסמך חדש נפתח').toBe(1);
+    expect(document.querySelector('.open-dialog'), 'והדיאלוג נסגר').toBeNull();
   });
 
   it('Ctrl+N על מסמך מלוכלך שואל לפני שהוא מוחק עבודה', async () => {
@@ -561,18 +581,27 @@ describe('פעולות המעטפת', () => {
     press({ code: 'KeyN', ctrlKey: true });
     await settle();
 
-    // אותה שרשרת שאלות בדיוק שהכפתור „מסמך חדש” עובר בה.
-    expect(stub.confirms, 'המשתמש נשאל').toEqual(['המסמך לא נשמר', 'לפתוח בלי לשמור?']);
-    expect(stub.resets, 'ובלי אישור — לא נפתח מסמך חדש').toBe(0);
+    // „מסמך ריק” הוא הכרטיס שמגיע ל-`onNewDocument`, ושם יושבת ההכרעה.
+    document.querySelector<HTMLButtonElement>('.tpl-card')?.click();
+    await settle();
+
+    // שאלה **אחת** עם שלושה כפתורים, לא שתי שאלות של אוצריא זו אחר זו.
+    expect(document.querySelector('.unsaved-dialog'), 'המשתמש נשאל').not.toBeNull();
+    expect(document.querySelectorAll('.unsaved-btn'), 'שמור / לא לשמור / ביטול').toHaveLength(3);
+    expect(stub.confirms, 'ולא דרך הדיאלוג הדו-כפתורי של אוצריא').toEqual([]);
+    expect(stub.resets, 'ובלי תשובה — לא נפתח מסמך חדש').toBe(0);
   });
 
-  it('Ctrl+O עובר באותו מסלול של הכפתור: קודם בורר הקבצים', async () => {
+  it('„עיון בקבצים…” עובר באותו מסלול של הכפתור: קודם בורר הקבצים', async () => {
     // ב-`onPickAndOpen` הבחירה קודמת לשאלה על השינויים שלא נשמרו, ולכן ביטול
-    // בבורר אינו מגיע לשאלה בכלל. הקיצור אינו מקצר את המסלול הזה.
+    // בבורר אינו מגיע לשאלה בכלל. הדיאלוג אינו מקצר את המסלול הזה — הוא רק
+    // הדרך אליו.
     await mountShell();
     stub.isDirty = true;
 
     press({ code: 'KeyO', ctrlKey: true });
+    await settle();
+    document.querySelector<HTMLButtonElement>('.open-browse')?.click();
     await settle();
 
     expect(stub.pickCalls, 'בורר הקבצים נפתח').toBe(1);
