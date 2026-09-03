@@ -2,35 +2,40 @@
  * ההחלטות שקובעות אם עבודה של המשתמש נמחקת. הן יושבות במודול נפרד בדיוק כדי
  * שיהיו כאן: מוטציה שהחליפה את כל הזרימה ב„פשוט תמחק” עברה בעבר את כל
  * הבדיקות, כי היא הייתה בתוך המעטפת שאין עליה כיסוי.
+ *
+ * מאז ששלוש התשובות מגיעות מדיאלוג אחד (`UnsavedChoice`), מה שנמדד כאן הוא
+ * בעיקר **המיפוי**: איזו בחירה הופכת ל„לשמור קודם”, איזו למחיקה, ומה קורה לכל
+ * מה שאינו אחת מהשתיים. הבדיקה האחרונה בכל תיאור היא זו שמגינה על הכיוון:
+ * ברירת המחדל אינה הרסנית.
  */
 import { describe, it, expect, vi } from 'vitest';
 import {
   decideDocumentSwitch,
   decidePendingTabClose,
-  type SwitchIntent,
+  unsavedQuestionText,
+  type UnsavedChoice,
+  type UnsavedQuestion,
 } from '../../src/sessions/open-flow';
 
 function deps(options: {
   dirty?: boolean;
   saving?: boolean;
-  answers?: boolean[];
-  intent?: SwitchIntent;
+  /** מה שהמשתמש בחר. ברירת המחדל — דיאלוג שנסגר בלי בחירה. */
+  choice?: UnsavedChoice;
 }) {
-  const answers = [...(options.answers ?? [])];
-  const asked: string[] = [];
-  const confirm = vi.fn(async (q: { title: string; content: string }) => {
-    asked.push(q.title);
-    return answers.shift() === true;
+  const asked: UnsavedQuestion[] = [];
+  const ask = vi.fn(async (question: UnsavedQuestion) => {
+    asked.push(question);
+    return options.choice ?? 'cancel';
   });
   return {
     asked,
-    confirm,
+    ask,
     deps: {
       isDirty: () => options.dirty ?? false,
       isSaving: () => options.saving ?? false,
-      confirm,
+      ask,
       documentName: () => 'חידושים',
-      ...(options.intent ? { intent: options.intent } : {}),
     },
   };
 }
@@ -40,7 +45,7 @@ describe('decideDocumentSwitch', () => {
     const h = deps({ dirty: false });
 
     await expect(decideDocumentSwitch(h.deps)).resolves.toEqual({ action: 'switch' });
-    expect(h.confirm).not.toHaveBeenCalled();
+    expect(h.ask).not.toHaveBeenCalled();
   });
 
   it('בזמן שמירה — לא מחליפים ולא שואלים', async () => {
@@ -50,26 +55,26 @@ describe('decideDocumentSwitch', () => {
       action: 'cancel',
       reason: 'saving',
     });
-    expect(h.confirm).not.toHaveBeenCalled();
+    expect(h.ask).not.toHaveBeenCalled();
   });
 
-  it('„לשמור?” → כן ⇒ לשמור קודם', async () => {
-    const h = deps({ dirty: true, answers: [true] });
+  it('„שמור” ⇒ לשמור קודם', async () => {
+    const h = deps({ dirty: true, choice: 'save' });
 
     await expect(decideDocumentSwitch(h.deps)).resolves.toEqual({ action: 'save-first' });
-    expect(h.asked).toEqual(['המסמך לא נשמר']);
   });
 
-  it('„לשמור?” → לא, „למחוק?” → כן ⇒ מחליפים', async () => {
-    const h = deps({ dirty: true, answers: [false, true] });
+  it('„לא לשמור” ⇒ מחליפים — בשאלה אחת ולא בשתיים', async () => {
+    // זה הלב של השינוי: עד כאן נדרשה שאלה שנייה („למחוק?”) מפני שהמחיקה
+    // הייתה סופית. הגיבוי (sessions/discard-backup.ts) הוא מה שהחליף אותה.
+    const h = deps({ dirty: true, choice: 'discard' });
 
     await expect(decideDocumentSwitch(h.deps)).resolves.toEqual({ action: 'switch' });
-    // „לא לשמור” אינו „למחוק”, ולכן חייבת לבוא שאלה שנייה.
-    expect(h.asked).toEqual(['המסמך לא נשמר', 'לפתוח בלי לשמור?']);
+    expect(h.ask, 'שאלה אחת בלבד').toHaveBeenCalledTimes(1);
   });
 
-  it('„לשמור?” → לא, „למחוק?” → לא ⇒ ביטול', async () => {
-    const h = deps({ dirty: true, answers: [false, false] });
+  it('„ביטול” ⇒ לא קורה כלום', async () => {
+    const h = deps({ dirty: true, choice: 'cancel' });
 
     await expect(decideDocumentSwitch(h.deps)).resolves.toEqual({
       action: 'cancel',
@@ -77,9 +82,10 @@ describe('decideDocumentSwitch', () => {
     });
   });
 
-  it('דיאלוג שנכשל נחשב „לא” ⇒ ביטול, לא מחיקה', async () => {
-    // confirm מחזירה false גם כשה-Host לא ענה. פייל-קלוז: לא מוחקים.
-    const h = deps({ dirty: true, answers: [] });
+  it('דיאלוג שנסגר בלי בחירה נחשב „ביטול” ⇒ לא מוחקים', async () => {
+    // Esc, לחיצה על הרקע, פירוק המעטפת. פייל-קלוז: הכיוון הבטוח הוא לא לעשות
+    // את הפעולה ההרסנית.
+    const h = deps({ dirty: true });
 
     await expect(decideDocumentSwitch(h.deps)).resolves.toEqual({
       action: 'cancel',
@@ -87,66 +93,36 @@ describe('decideDocumentSwitch', () => {
     });
   });
 
-  it('שם המסמך מופיע בשתי השאלות', async () => {
-    const h = deps({ dirty: true, answers: [false, false] });
+  it('שאלה אחת, שם הקובץ בגרשיים, ו„שמור” מוצע', async () => {
+    const h = deps({ dirty: true, choice: 'cancel' });
 
     await decideDocumentSwitch(h.deps);
 
-    for (const call of h.confirm.mock.calls) {
-      expect(call[0].content).toContain('חידושים');
-    }
+    expect(h.asked[0]?.content).toBe('האם לשמור את השינויים שבוצעו בקובץ „חידושים”?');
+    expect(h.asked[0]?.canSave, 'יש מנוע, ולכן יש מה לשמור').toBe(true);
+  });
+
+  it('אין כותרת לחלון — השאלה היא כל התוכן', async () => {
+    // כותרת „המסמך לא נשמר” מעל שאלה שאומרת את אותו דבר היא אמירה כפולה,
+    // והיא מרחיקה את השאלה מהכפתורים שעונים עליה.
+    const h = deps({ dirty: true, choice: 'cancel' });
+
+    await decideDocumentSwitch(h.deps);
+
+    expect(Object.keys(h.asked[0] ?? {})).toEqual(['content', 'canSave']);
   });
 });
 
-/**
- * `intent` משנה נוסח בלבד. הבדיקות כאן מקבעות בדיוק את זה — שההחלטה זהה
- * ושהנוסח אינו: פונקציה שנייה ליציאה הייתה עותק שני של הקוד שקובע אם עבודה
- * נמחקת, ופיצול שקט בין השניים הוא בדיוק מה שאין דרך לראות.
- */
-describe('decideDocumentSwitch עם intent: exit', () => {
-  it('שואלת על שמירה לפני יציאה, ולא על פתיחת מסמך אחר', async () => {
-    const h = deps({ dirty: true, answers: [true], intent: 'exit' });
-
-    const decision = await decideDocumentSwitch(h.deps);
-
-    expect(decision).toEqual({ action: 'save-first' });
-    expect(h.confirm.mock.calls[0]![0].content).toBe('לשמור את חידושים לפני יציאה?');
+describe('unsavedQuestionText', () => {
+  it('שם הקובץ נעטף בגרשיים', () => {
+    // בלעדיהם שם שיש בו רווח, או שהוא בעצמו מילה במשפט, נבלע בו.
+    expect(unsavedQuestionText('הלכות שבת')).toBe(
+      'האם לשמור את השינויים שבוצעו בקובץ „הלכות שבת”?',
+    );
   });
 
-  it('שאלת המחיקה מנוסחת כיציאה', async () => {
-    const h = deps({ dirty: true, answers: [false, false], intent: 'exit' });
-
-    await decideDocumentSwitch(h.deps);
-
-    expect(h.asked).toEqual(['המסמך לא נשמר', 'לצאת בלי לשמור?']);
-    // תוכן האזהרה זהה בשתי הכוונות: הסיכון הוא אותו סיכון.
-    expect(h.confirm.mock.calls[1]![0].content).toContain('יימחקו ואין דרך לשחזר');
-  });
-
-  it('ההחלטה עצמה זהה לזו של מעבר מסמך', async () => {
-    // אותם קלטים, אותן תשובות, אותה תוצאה — בכל אחד מארבעת המסלולים.
-    const paths: Array<{ dirty: boolean; saving?: boolean; answers: boolean[] }> = [
-      { dirty: false, answers: [] },
-      { dirty: true, saving: true, answers: [] },
-      { dirty: true, answers: [false, true] },
-      { dirty: true, answers: [false, false] },
-    ];
-
-    for (const path of paths) {
-      const asSwitch = await decideDocumentSwitch(deps({ ...path }).deps);
-      const asExit = await decideDocumentSwitch(deps({ ...path, intent: 'exit' }).deps);
-      expect(asExit, JSON.stringify(path)).toEqual(asSwitch);
-    }
-  });
-
-  it('ברירת המחדל בלי `intent` היא הנוסח של מעבר מסמך', async () => {
-    // קריאות קיימות אינן מוסרות `intent`, ואסור שהנוסח שלהן ישתנה.
-    const h = deps({ dirty: true, answers: [false, false] });
-
-    await decideDocumentSwitch(h.deps);
-
-    expect(h.asked).toEqual(['המסמך לא נשמר', 'לפתוח בלי לשמור?']);
-    expect(h.confirm.mock.calls[0]![0].content).toBe('לשמור את חידושים לפני פתיחת מסמך אחר?');
+  it('גם שם ריק אינו שובר את המשפט', () => {
+    expect(unsavedQuestionText('')).toContain('„”');
   });
 });
 
@@ -155,18 +131,18 @@ describe('decideDocumentSwitch עם intent: exit', () => {
  * טיוטה שהסגירה מוחקת — ולכן ההחלטה כאן ולא במעטפת.
  */
 describe('decidePendingTabClose', () => {
-  function pending(options: { hasDraft: boolean; answer?: boolean }) {
-    const asked: Array<{ title: string; content: string }> = [];
-    const confirm = vi.fn(async (question: { title: string; content: string }) => {
+  function pending(options: { hasDraft: boolean; choice?: UnsavedChoice }) {
+    const asked: UnsavedQuestion[] = [];
+    const ask = vi.fn(async (question: UnsavedQuestion) => {
       asked.push(question);
-      return options.answer === true;
+      return options.choice ?? 'cancel';
     });
     return {
       asked,
-      confirm,
+      ask,
       deps: {
         hasDraft: () => options.hasDraft,
-        confirm,
+        ask,
         documentName: () => 'חידושים',
       },
     };
@@ -176,30 +152,31 @@ describe('decidePendingTabClose', () => {
     const h = pending({ hasDraft: false });
 
     expect(await decidePendingTabClose(h.deps)).toEqual({ action: 'switch' });
-    expect(h.confirm).not.toHaveBeenCalled();
+    expect(h.ask).not.toHaveBeenCalled();
   });
 
-  it('יש טיוטה — שואלים, ו„לא” משאיר את הטאב', async () => {
+  it('יש טיוטה — שואלים, ו„ביטול” משאיר את הטאב', async () => {
     // הכשל החמור שהשאלה הזאת מונעת: מחיקה שקטה של עבודה שהמשתמש עוד לא ראה.
-    const h = pending({ hasDraft: true, answer: false });
+    const h = pending({ hasDraft: true, choice: 'cancel' });
 
     expect(await decidePendingTabClose(h.deps)).toEqual({ action: 'cancel', reason: 'user' });
-    expect(h.asked[0]?.title).toBe('לסגור בלי לשמור?');
-    expect(h.asked[0]?.content).toContain('חידושים');
+    expect(h.asked[0]?.content).toBe(
+      'יש שינויים שלא נשמרו בקובץ „חידושים”. לסגור את הטאב בלעדיהם?',
+    );
   });
 
-  it('יש טיוטה, והמשתמש אישר — סוגרים', async () => {
-    const h = pending({ hasDraft: true, answer: true });
+  it('„לא לשמור” סוגר', async () => {
+    const h = pending({ hasDraft: true, choice: 'discard' });
 
     expect(await decidePendingTabClose(h.deps)).toEqual({ action: 'switch' });
-    expect(h.confirm).toHaveBeenCalledTimes(1);
+    expect(h.ask).toHaveBeenCalledTimes(1);
   });
 
-  it('„לשמור קודם” אינו מוצע: אין מסמך פתוח שאפשר לייצא ממנו', async () => {
-    // שאלה שאין לה מסלול ביצוע גרועה משאלה שלא נשאלה.
-    for (const hasDraft of [true, false]) {
-      const h = pending({ hasDraft, answer: true });
-      expect(await decidePendingTabClose(h.deps)).not.toEqual({ action: 'save-first' });
-    }
+  it('„שמור” אינו מוצע — ואפילו אם ייענה, אינו סוגר', async () => {
+    // שאלה שאין לה מסלול ביצוע גרועה משאלה שלא נשאלה: אין מנוע לייצא ממנו.
+    const h = pending({ hasDraft: true, choice: 'save' });
+
+    expect(await decidePendingTabClose(h.deps)).toEqual({ action: 'cancel', reason: 'user' });
+    expect(h.asked[0]?.canSave, 'הכפתור אינו מוצג כלל').toBe(false);
   });
 });
