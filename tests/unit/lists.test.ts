@@ -196,6 +196,163 @@ describe('resolveListItem', () => {
   });
 });
 
+/**
+ * issue #14 ג׳ — „במספור פסקאות – רשימה מופיע ‚יש למקם את הסמן בתוך הרשימה׳”.
+ *
+ * שוחזר (scripts/qa/list-caret-qa.mjs): סמן בפסקה רגילה, תפריט המספור, „א, ב,
+ * ג” — סירוב. המשתמש ביקש למספר את הפסקה; התפריט ענה שאלה טכנית על רשימה
+ * קיימת. עם `createList` הפסקה הופכת קודם לרשימה — הפקודה של הכפתור — ואז
+ * מקבלת את הסגנון.
+ */
+describe('setListNumberStyle — פסקה שאינה רשימה', () => {
+  const IN_PARAGRAPH = { target: { segments: [{ blockId: 'p9' }] } };
+
+  /** בחירה שמתחלפת: פסקה לפני `createList`, פריט רשימה אחריה — כמו במנוע. */
+  function docWithConvertibleParagraph(createOutcome = { ok: true } as const) {
+    let selection: unknown = IN_PARAGRAPH;
+    const { host, calls, doc } = fakeDoc();
+    (doc as { selection: { current: unknown } }).selection.current = vi.fn(async () => selection);
+    const createList = vi.fn(async () => {
+      if (createOutcome.ok) selection = SELECTION_IN_LIST;
+      return createOutcome;
+    });
+    return { host, calls, createList };
+  }
+
+  it('יוצרת רשימה ואז מחילה את הסגנון על הפריט **החדש**', async () => {
+    const { host, calls, createList } = docWithConvertibleParagraph();
+
+    const outcome = await setListNumberStyle(host, 'hebrew1', { createList });
+
+    expect(outcome).toEqual({ ok: true });
+    expect(createList).toHaveBeenCalledTimes(1);
+    expect(calls.get('setLevelNumberStyle')?.[0]).toEqual({
+      target: { kind: 'block', nodeType: 'listItem', nodeId: 'li1' },
+      level: 0,
+      numberStyle: 'hebrew1',
+    });
+  });
+
+  it('כשיצירת הרשימה נכשלה — ההודעה נושאת את קידומת המודול, ה-reason נשמר, והסגנון אינו נשלח', async () => {
+    // ההודעה של `createList` היא של שכבת הפקודות ובלי שם הפעולה שנבחרה
+    // בתפריט; ה-`reason` הוא מה שמאפשר לצרכן להבחין בין הכשלים.
+    const failed = { ok: false, message: 'המנוע אינו מוכן', reason: 'not-ready' } as const;
+    const { host, calls, createList } = docWithConvertibleParagraph(failed as never);
+
+    const outcome = await setListNumberStyle(host, 'hebrew1', { createList });
+
+    expect(outcome).toEqual({
+      ok: false,
+      message: 'שינוי סגנון המספור נכשל: המנוע אינו מוכן',
+      reason: 'not-ready',
+    });
+    expect(calls.get('setLevelNumberStyle')).toEqual([]);
+  });
+
+  it('בלי `createList` — הסירוב המפורש, כמו קודם', async () => {
+    const { host, calls } = fakeDoc({ selection: IN_PARAGRAPH });
+
+    const outcome = await setListNumberStyle(host, 'hebrew1');
+
+    expect(outcome).toMatchObject({ ok: false, reason: 'selection-required' });
+    expect(calls.get('setLevelNumberStyle')).toEqual([]);
+  });
+
+  it('כשהסמן כבר ברשימה — `createList` אינה נקראת', async () => {
+    const { host, calls } = fakeDoc();
+    const createList = vi.fn(async () => ({ ok: true }) as const);
+
+    await setListNumberStyle(host, 'hebrew2', { createList });
+
+    expect(createList).not.toHaveBeenCalled();
+    expect(calls.get('setLevelNumberStyle')).toHaveLength(1);
+  });
+
+  it('הכרעה חיובית „אינה רשימה" דרך lists.getState — הרשימה נוצרת והסגנון מוחל', async () => {
+    // מסלול הייצור: getState עונה success:true עם isListItem:false.
+    let selection: unknown = IN_PARAGRAPH;
+    const { host, calls, doc } = fakeDoc({ listState: { p9: false, li1: true } });
+    (doc as { selection: { current: unknown } }).selection.current = vi.fn(async () => selection);
+    const createList = vi.fn(async () => {
+      selection = SELECTION_IN_LIST;
+      return { ok: true } as const;
+    });
+
+    expect(await setListNumberStyle(host, 'hebrew1', { createList })).toEqual({ ok: true });
+    expect(createList).toHaveBeenCalledTimes(1);
+    expect(calls.get('setLevelNumberStyle')?.[0]).toEqual({
+      target: { kind: 'block', nodeType: 'listItem', nodeId: 'li1' },
+      level: 0,
+      numberStyle: 'hebrew1',
+    });
+  });
+});
+
+/**
+ * `createList` היא הפקודה `numbered-list` של הרצועה (התפריט מוסר אותה לסגנוני
+ * מספור בלבד), והיא **טוגל**: אומת במימוש של superdoc (`executeListCommand`
+ * מנתב ל-`lists.remove` / `lists.removeInStory` כשכל הבלוקים כבר באותה
+ * רשימה), ואומת חי — לחיצה שנייה על „מספור” מחזירה isListItem מ-true
+ * ל-false.
+ *
+ * ולכן אסור לקרוא לה כשהזיהוי לא הכריע. „אינני רואה את הבלוק" אינו „אין
+ * רשימה": פריט רשימה בתא טבלה אינו נמנה ב-blocks.list כלל, ועל מנוע בלי
+ * getState (או כשהוא מחזיר success:false) טוגל היה **מוריד** לו את המספור.
+ */
+describe('setListNumberStyle — זיהוי שלא הכריע אינו מצדיק טוגל', () => {
+  it('פריט בתא טבלה שאינו נמנה ב-blocks.list ו-getState נכשל — `createList` אינה נקראת', async () => {
+    const selection = { target: { segments: [{ blockId: 'li-in-table' }] } };
+    // listState בלי הבלוק → success:false; blocks.list אינו מונה אותו → „לא ידוע".
+    const blocksList = vi.fn(async () => ({ blocks: [{ nodeId: 'p1', nodeType: 'paragraph' }] }));
+    const { host, calls } = fakeDoc({ selection, blocksList, listState: {} });
+    const createList = vi.fn(async () => ({ ok: true }) as const);
+
+    const outcome = await setListNumberStyle(host, 'hebrew1', { createList });
+
+    expect(createList).not.toHaveBeenCalled();
+    expect(outcome).toMatchObject({ ok: false, reason: 'selection-required' });
+    expect(calls.get('setLevelNumberStyle')).toEqual([]);
+  });
+
+  it('`selection.current` זורק — `createList` אינה נקראת', async () => {
+    const { host, calls, doc } = fakeDoc();
+    (doc as { selection: { current: unknown } }).selection.current = vi.fn(async () => {
+      throw new Error('boom');
+    });
+    const createList = vi.fn(async () => ({ ok: true }) as const);
+
+    const outcome = await setListNumberStyle(host, 'hebrew1', { createList });
+
+    expect(createList).not.toHaveBeenCalled();
+    expect(outcome).toMatchObject({ ok: false, reason: 'selection-required' });
+    expect(calls.get('setLevelNumberStyle')).toEqual([]);
+  });
+
+  it('בחירה בלי blockId — `createList` אינה נקראת', async () => {
+    const { host, calls } = fakeDoc({ selection: { target: { segments: [{}] } } });
+    const createList = vi.fn(async () => ({ ok: true }) as const);
+
+    const outcome = await setListNumberStyle(host, 'hebrew1', { createList });
+
+    expect(createList).not.toHaveBeenCalled();
+    expect(outcome).toMatchObject({ ok: false, reason: 'selection-required' });
+    expect(calls.get('setLevelNumberStyle')).toEqual([]);
+  });
+
+  it('`success:true` בלי `isListItem` אינו הכרעה — ואינו מצדיק טוגל', async () => {
+    const selection = { target: { segments: [{ blockId: 'p9' }] } };
+    const { host, calls, doc } = fakeDoc({ selection, blocksList: async () => ({ blocks: [] }) });
+    (doc as { lists: Record<string, unknown> }).lists.getState = async () => ({ success: true });
+    const createList = vi.fn(async () => ({ ok: true }) as const);
+
+    const outcome = await setListNumberStyle(host, 'hebrew1', { createList });
+
+    expect(createList).not.toHaveBeenCalled();
+    expect(outcome).toMatchObject({ ok: false, reason: 'selection-required' });
+    expect(calls.get('setLevelNumberStyle')).toEqual([]);
+  });
+});
+
 describe('restartListAt', () => {
   it('startAt נשלח כמות שהוא', async () => {
     const { host, calls } = fakeDoc();

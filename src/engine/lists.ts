@@ -111,26 +111,27 @@ function docOf(host: ListsTarget): ListsApiShape | null {
 }
 
 /**
- * פותרת את פריט הרשימה שבו הסמן. `blockId` מהבחירה (הבחירה אינה מדווחת
- * listItem), וההכרעה „פריט רשימה או לא” היא של `lists.getState` — סמכות
- * הרשימות של המנוע — ולא של `blocks.list`.
+ * פותרת את הבלוק שבו הסמן לאחד משלושה מצבים (ראו `ListItemResolution`).
+ * `blockId` מהבחירה (הבחירה אינה מדווחת listItem), וההכרעה „פריט רשימה או
+ * לא” היא של `lists.getState` — סמכות הרשימות של המנוע — ולא של `blocks.list`.
+ *
+ * ההפרדה בין „אינו רשימה” ל„לא ידוע” קיימת בשביל `createList` בלבד, והיא
+ * הכרחית: הפקודה ההיא טוגל, ועל „לא ידוע” היא הייתה מסירה מספור מפריט קיים.
  *
  * למה לא `blocks.list` (issue #14 ג׳, נמדד על superdoc 2.11.0): הוא מונה
- * בלוקים **עליונים** בלבד, ולכן פריט רשימה בתוך תא טבלה אינו מופיע בו כלל;
- * וכותרת ממוספרת של Word (Heading1 + numPr) מדווחת בו כ-`heading` ולא
- * `listItem`. בשני המקרים `getState` אומר `isListItem:true`, ו-
- * `setLevelNumberStyle` עם כתובת `listItem` מצליח — כלומר הבלוק כן פריט
- * רשימה, ורק הזיהוי כשל ב„יש למקם את הסמן בתוך רשימה”.
+ * בלוקים **עליונים** בלבד, ולכן פריט רשימה בתוך תא טבלה אינו מופיע בו כלל —
+ * וזה `unknown`, לא „אין רשימה”; וכותרת ממוספרת של Word (Heading1 + numPr)
+ * מדווחת בו כ-`heading` ולא `listItem`. בשני המקרים `getState` אומר
+ * `isListItem:true`, ו-`setLevelNumberStyle` עם כתובת `listItem` מצליח —
+ * כלומר הבלוק כן פריט רשימה, ורק הזיהוי כשל ב„יש למקם את הסמן בתוך רשימה”.
  *
  * `blocks.list` נשאר כנפילה לגרסת מנוע בלי `getState`, בקריאה אחת: בלי
  * ארגומנטים הוא מחזיר את כל הסיפור (אין עמוד של 50, נמדד), ו-
  * `paragraphNumbering` על הבלוק מכסה שם את הכותרת הממוספרת.
- *
- * פסקה שאינה ברשימה היא `null` — ולא כשל, כדי שהפקד יוכל להסביר.
  */
-async function resolveListItem(host: ListsTarget): Promise<ListItemAddress | null> {
+async function resolveListItem(host: ListsTarget): Promise<ListItemResolution> {
   const doc = docOf(host);
-  if (!doc) return null;
+  if (!doc) return { kind: 'unknown' };
 
   let blockId: string | null = null;
   try {
@@ -138,9 +139,9 @@ async function resolveListItem(host: ListsTarget): Promise<ListItemAddress | nul
     blockId =
       info?.target?.segments?.find((s) => typeof s?.blockId === 'string')?.blockId ?? null;
   } catch {
-    return null;
+    return { kind: 'unknown' };
   }
-  if (!blockId) return null;
+  if (!blockId) return { kind: 'unknown' };
   const address: ListItemAddress = { kind: 'block', nodeType: 'listItem', nodeId: blockId };
 
   const getState = doc.lists?.getState;
@@ -148,22 +149,33 @@ async function resolveListItem(host: ListsTarget): Promise<ListItemAddress | nul
     try {
       // `nodeType:'paragraph'` תקף לכל בלוק פסקתי, כולל כותרת; `'heading'` נזרק.
       const state = await getState({ target: { kind: 'block', nodeType: 'paragraph', nodeId: blockId } });
-      if (state?.success === true) return state.isListItem ? address : null;
+      // `=== false` ולא truthiness: `success:true` בלי השדה אינו הכרעה, והוא
+      // אסור להפעלת טוגל.
+      if (state?.success === true && state.isListItem === true) return { kind: 'item', address };
+      if (state?.success === true && state.isListItem === false) return { kind: 'not-list' };
     } catch {
       // נופלים ל-blocks.list.
     }
   }
 
   const list = doc.blocks?.list;
-  if (typeof list !== 'function') return null;
+  if (typeof list !== 'function') return { kind: 'unknown' };
   try {
     const listed = await list();
     const block = (listed?.blocks ?? []).find((b) => b.nodeId === blockId);
-    if (!block) return null;
-    return block.nodeType === 'listItem' || block.paragraphNumbering ? address : null;
+    if (!block) return { kind: 'unknown' };
+    return block.nodeType === 'listItem' || block.paragraphNumbering
+      ? { kind: 'item', address }
+      : { kind: 'not-list' };
   } catch {
-    return null;
+    return { kind: 'unknown' };
   }
+}
+
+/** הכתובת לבדה, לקוראים שמתייחסים ל„לא רשימה” ול„לא ידוע” אותו דבר. */
+async function resolveAddress(host: ListsTarget): Promise<ListItemAddress | null> {
+  const resolution = await resolveListItem(host);
+  return resolution.kind === 'item' ? resolution.address : null;
 }
 
 interface ListItemAddress {
@@ -171,6 +183,17 @@ interface ListItemAddress {
   nodeType: 'listItem';
   nodeId: string;
 }
+
+/**
+ * `not-list` הוא הכרעה חיובית — `getState` ענה `isListItem:false`, או שהבלוק
+ * נמנה ב-`blocks.list` ואינו פריט. כל השאר `unknown`: אין `doc`, הבחירה
+ * זרקה, אין `blockId`, `getState` חסרה/זרקה/לא הכריעה, `blocks.list`
+ * חסרה/זרקה, או שאינה מונה את הבלוק כלל (פריט בתא טבלה).
+ */
+type ListItemResolution =
+  | { kind: 'item'; address: ListItemAddress }
+  | { kind: 'not-list' }
+  | { kind: 'unknown' };
 
 function unsupported(failedAction: string): CommandOutcome {
   return { ok: false, message: `${failedAction}: ${UNAVAILABLE_TEXT}`, reason: 'command-unsupported' };
@@ -190,18 +213,57 @@ async function call(failedAction: string, run: () => MaybePromise<DocReceipt>): 
   return { ok: true };
 }
 
+/**
+ * מוסיפה את קידומת הכשל של המודול להודעה שכבר מנוסחת (כשל שחוזר משכבה
+ * אחרת). ה-`startsWith` מונע קידומת כפולה אם יזרימו לכאן הודעה שכבר נושאת
+ * אותה.
+ */
+function prefixed(failedAction: string, message: string): string {
+  if (!message) return failedAction;
+  return message.startsWith(failedAction) ? message : `${failedAction}: ${message}`;
+}
+
 /** „יש למקם את הסמן ברשימה" — תשובה משותפת לכל הפעולות. */
 function notInList(failedAction: string): CommandOutcome {
   return { ok: false, message: `${failedAction}: יש למקם את הסמן בתוך רשימה`, reason: 'selection-required' };
 }
 
+export interface SetNumberStyleOptions {
+  /**
+   * איך להפוך את הפסקה שבסמן לרשימה כשהיא עדיין אינה כזאת — הפקודה של
+   * הכפתור „מספור”, שיושבת ב-registry של המנוע ולא ב-Document API, ולכן
+   * מוזרקת מהרצועה ולא נקראת מכאן.
+   *
+   * בלעדיה הבחירה בסגנון מסרבת על פסקה רגילה. זה מה שהמשתמש קיבל (issue
+   * #14 ג׳, שוחזר ב-scripts/qa/list-caret-qa.mjs): פתח את תפריט המספור על
+   * פסקה, בחר „א, ב, ג”, וקרא „יש למקם את הסמן בתוך רשימה” — כשכל מה שביקש
+   * הוא למספר את הפסקה, כמו שגלריית המספור של Word עושה.
+   *
+   * הפקודה היא **טוגל**: על בלוק שכבר רשימה מאותו סוג היא מסירה את המספור
+   * (`lists.remove`, ובכותרת/תחתית `lists.removeInStory`). לכן היא נקראת רק
+   * על הכרעה חיובית „אינו רשימה” — ולא כשהזיהוי החזיר „לא ידוע” (פריט
+   * בתא טבלה, מנוע בלי `getState`), שם טוגל היה הורס את המספור הקיים.
+   *
+   * `useCommand.run` מדווח את הכשל בעצמו לפני שהוא מחזיר אותו, והקורא מדווח
+   * שוב את מה שחזר מכאן — ולכן הכתיבה השנייה לפס המצב, זו שנושאת את שם
+   * הפעולה, היא זו שהמשתמש רואה.
+   */
+  createList?: () => Promise<CommandOutcome>;
+}
+
 /**
  * מגדירה את סגנון המספור של רמה 0 ברשימה שבה הסמן. `hebrew1` הוא
  * המספור העברי (א׳ ב׳ ג׳) — נמדד שנכתב ל-numbering.xml.
+ *
+ * על פסקה שאינה רשימה: אם נמסרה `createList`, קודם יוצרים את הרשימה ואז
+ * מחילים את הסגנון — בחירת סגנון היא בקשה למספר, לא שאלה על רשימה קיימת.
+ * בלי `createList` (או כשהיצירה נכשלה) — הסירוב המפורש, כמו קודם. כשהזיהוי
+ * לא הכריע (`unknown`) גם הסירוב, בלי לגעת במסמך: `createList` היא טוגל.
  */
 export async function setListNumberStyle(
   host: ListsTarget,
   numberStyle: string,
+  options: SetNumberStyleOptions = {},
 ): Promise<CommandOutcome> {
   const failedAction = 'שינוי סגנון המספור נכשל';
 
@@ -210,7 +272,18 @@ export async function setListNumberStyle(
     return { ok: false, message: `${failedAction}: סגנון המספור אינו חוקי`, reason: 'invalid-number-style' };
   }
 
-  const item = await resolveListItem(host);
+  const resolution = await resolveListItem(host);
+  let item = resolution.kind === 'item' ? resolution.address : null;
+  if (resolution.kind === 'not-list' && options.createList) {
+    const created = await options.createList();
+    // הכשל חוזר עם הקידומת של המודול: ההודעה של `createList` היא של שכבת
+    // הפקודות („המנוע אינו מוכן”) ובלי שם הפעולה המשתמש אינו יודע מה נכשל.
+    // ה-`reason` נשמר — הוא מה שמבדיל בין הכשלים אצל הצרכן.
+    if (!created.ok) return { ...created, message: prefixed(failedAction, created.message) };
+    // הכתובת יציבה (נמדד: אותו blockId לפני היצירה ואחריה); הפתרון מחדש הוא
+    // אימות שהיצירה אכן תפסה, ולא הסתמכות על יציבות שאינה בחוזה.
+    item = await resolveAddress(host);
+  }
   if (!item) return notInList(failedAction);
 
   const setLevelNumberStyle = docOf(host)?.lists?.setLevelNumberStyle;
@@ -227,7 +300,7 @@ export async function restartListAt(host: ListsTarget, startAt: number): Promise
     return { ok: false, message: `${failedAction}: הערך חייב להיות מספר שלם לא-שלילי`, reason: 'invalid-start' };
   }
 
-  const item = await resolveListItem(host);
+  const item = await resolveAddress(host);
   if (!item) return notInList(failedAction);
 
   const restartAt = docOf(host)?.lists?.restartAt;
@@ -244,7 +317,7 @@ export async function restartListAt(host: ListsTarget, startAt: number): Promise
 export async function continuePreviousList(host: ListsTarget): Promise<CommandOutcome> {
   const failedAction = 'המשך המספור מהרשימה הקודמת נכשל';
 
-  const item = await resolveListItem(host);
+  const item = await resolveAddress(host);
   if (!item) return notInList(failedAction);
 
   const continuePrevious = docOf(host)?.lists?.continuePrevious;
@@ -260,7 +333,7 @@ export async function continuePreviousList(host: ListsTarget): Promise<CommandOu
 export async function convertListToText(host: ListsTarget): Promise<CommandOutcome> {
   const failedAction = 'המרת הרשימה לטקסט נכשלה';
 
-  const item = await resolveListItem(host);
+  const item = await resolveAddress(host);
   if (!item) return notInList(failedAction);
 
   const convertToText = docOf(host)?.lists?.convertToText;

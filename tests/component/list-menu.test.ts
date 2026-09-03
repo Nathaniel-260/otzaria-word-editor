@@ -59,6 +59,16 @@ async function openMenu(wrapper: VueWrapper, index: number): Promise<string[]> {
   return wrapper.findAll('.ribbon-menu__item-label').map((n) => n.text());
 }
 
+/** לוחצת על פריט בתפריט הפתוח לפי התווית שלו. */
+async function clickItem(wrapper: VueWrapper, label: string): Promise<void> {
+  const item = wrapper
+    .findAll('.ribbon-menu__item')
+    .find((node) => node.find('.ribbon-menu__item-label').text() === label);
+  expect(item?.exists(), `הפריט „${label}” לא נמצא בתפריט`).toBe(true);
+  await item!.trigger('click');
+  await settle();
+}
+
 describe('כפתורי הרשימה בלשונית „בית"', () => {
   it('שני הכפתורים מורכבים בפועל ב-DOM — לא אלמנט לא-פתור', async () => {
     const harness = mountUi(HomeTab, { superdoc: withSelection() });
@@ -180,5 +190,57 @@ describe('כפתורי הרשימה בלשונית „בית"', () => {
     await settle();
 
     expect(harness.superdoc.calls.length).toBeGreaterThan(before);
+  });
+});
+
+/**
+ * מי מקבל „צור קודם רשימה” ומי לא (issue #14 ג׳).
+ *
+ * בחירת סגנון מספור על פסקה רגילה ממספרת אותה קודם — ולכן היא מוסרת
+ * ל-`setListNumberStyle` את הפקודה `numbered-list` כ-`createList`. הפריט
+ * שבתפריט התבליטים אינו כזה: הוא „הפוך רשימה ממוספרת לתבליטים”, כלומר
+ * החלפת סגנון של רשימה **קיימת**, ויצירת התבליטים היא הכפתור שמעליו. אם הוא
+ * היה מקבל `createList` הוא היה הופך פסקה רגילה לרשימת תבליטים — כפילות של
+ * אותו כפתור, מתחת לתווית שאינה מתארת את מה שקרה.
+ *
+ * מה שנמדד כאן הוא הפקודה שנשלחה, ולא המסמך: הכפיל אינו מדווח על הבלוק
+ * כפריט רשימה אחרי היצירה, ולכן `lists.setLevelNumberStyle` אינו נקרא בשני
+ * המסלולים. הבחנה בין הכפיל למסמך אמיתי נמדדת ב-tests/unit/lists.test.ts
+ * ובשער `list-caret-qa`.
+ */
+describe('createList מוסרת לסגנוני מספור בלבד', () => {
+  it('בחירת סגנון מספור על פסקה רגילה שולחת את הפקודה `numbered-list`', async () => {
+    const harness = mountUi(HomeTab, { superdoc: withSelection() });
+    await settle();
+
+    await openMenu(harness.wrapper, NUMBER);
+    await clickItem(harness.wrapper, NUMBER_STYLE_LABELS.hebrew1);
+
+    const ids = harness.adapter.calls.map((call) => call.id);
+    expect(ids, 'הפסקה לא קיבלה מספור לפני החלת הסגנון').toContain('numbered-list');
+    expect(ids, 'סגנון מספור יצר רשימת תבליטים').not.toContain('bullet-list');
+  });
+
+  it('„הפוך רשימה ממוספרת לתבליטים” אינו יוצר רשימה על פסקה רגילה', async () => {
+    const harness = mountUi(HomeTab, { superdoc: withSelection() });
+    await settle();
+
+    await openMenu(harness.wrapper, BULLET);
+    await clickItem(harness.wrapper, 'הפוך רשימה ממוספרת לתבליטים');
+
+    const ids = harness.adapter.calls.map((call) => call.id);
+    expect(ids, 'פריט ההמרה יצר רשימת תבליטים — כפילות של הכפתור שמעליו').not.toContain(
+      'bullet-list',
+    );
+    expect(ids).not.toContain('numbered-list');
+    // ובלי לגעת במסמך: הסירוב היחיד שהמשתמש מקבל.
+    expect(harness.superdoc.calls.map((call) => call.op)).not.toContain(
+      'lists.setLevelNumberStyle',
+    );
+    const failures = harness.failures();
+    expect(failures).toHaveLength(1);
+    expect(failures[0]!.outcome.ok === false && failures[0]!.outcome.message).toContain(
+      'יש למקם את הסמן בתוך רשימה',
+    );
   });
 });
