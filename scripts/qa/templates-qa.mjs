@@ -149,7 +149,10 @@ const TEMPLATES = [
     preview: { columns: 1, hasTitleBlock: false, hasRunningHead: true, hasFootnoteBand: true, ratio: 'a4' },
     margins: MARGINS.engineDefault,
     minBlocks: 2,
-    bodyTexts: ['כאן מתחיל גוף הטקסט', 'כאן יתחיל הביאור'],
+    // פסקה אחת בגוף. הביאור אינו פסקה שנייה אלא הערת שוליים אמיתית —
+    // ראו `footnoteTexts` ואת `writeAnnotatedContent` ב-engine/templates.ts.
+    bodyTexts: ['כאן מתחיל גוף הטקסט'],
+    footnoteTexts: ['כאן יתחיל הביאור'],
     /** `ANNOTATED_BODY_FONT_PT` = 14 → 28 חצאי-נקודות ב-`docDefaults`. */
     docDefaultHalfPoints: 28,
   },
@@ -765,6 +768,16 @@ for (const t of wanted) {
           true,
           `${x.footnoteRefs} הפניות, ${x.footnotes.count} הערות: ${JSON.stringify(x.footnotes.texts)}`,
         );
+        // קיום ההערה אינו מספיק: הכרטיס מבטיח **ביאור**, ולכן נבדק גם מה
+        // כתוב בה. הערה ריקה הייתה עוברת את הטענה שמעל.
+        if (t.footnoteTexts?.length) {
+          claim(
+            t,
+            'תוכן הערת השוליים הוא הביאור שהתבנית מבטיחה',
+            t.footnoteTexts.every((want) => x.footnotes.texts.some((got) => got.includes(want))),
+            `נמדד ${JSON.stringify(x.footnotes.texts)}, מובטח ${JSON.stringify(t.footnoteTexts)}`,
+          );
+        }
       } else {
         documentedGap(
           t,

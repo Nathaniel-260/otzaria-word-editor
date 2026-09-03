@@ -40,6 +40,8 @@ function fakeHost(options: FakeOptions = {}) {
   const calls: string[] = [];
   const inserted: string[] = [];
   const pageSetups: { width: number | null; height: number | null }[] = [];
+  const footnoteInserts: { at: unknown; content: unknown }[] = [];
+  const fieldInserts: { at: unknown; instruction: unknown; mode: unknown }[] = [];
   let nextBlock = 1;
 
   function receipt(op: string): { success: boolean; failure?: { code: string; message: string } } {
@@ -117,9 +119,19 @@ function fakeHost(options: FakeOptions = {}) {
 
   const blocks: Record<string, unknown> = {};
   if (!omit.has('blocks.list')) {
-    blocks.list = () => {
-      calls.push('blocks.list');
-      return Promise.resolve({ blocks: [{ nodeId: 'p0', nodeType: 'paragraph' }] });
+    /*
+     * `in` מפריד בין שני זרמים, ולכן הכפיל חייב להבחין ביניהם: בלי ההבחנה
+     * הזאת „הפסקה הראשונה בכותרת” ו„הפסקה הראשונה בגוף” היו אותו מזהה,
+     * והבדיקה הייתה מאשרת הכנסת שדה לגוף כאילו הייתה לכותרת.
+     */
+    blocks.list = (input?: { in?: unknown }) => {
+      const inHeader = input?.in !== undefined;
+      calls.push(inHeader ? 'blocks.list(header)' : 'blocks.list');
+      return Promise.resolve({
+        blocks: inHeader
+          ? [{ nodeId: 'h0', nodeType: 'paragraph' }]
+          : [{ nodeId: 'p0', nodeType: 'paragraph' }],
+      });
     };
   }
 
@@ -136,6 +148,24 @@ function fakeHost(options: FakeOptions = {}) {
 
   const doc: Record<string, unknown> = { sections, headerFooters, styles, blocks, create };
 
+  /** שני המשטחים שהתבניות משתמשות בהם אחרי המדידה מול המנוע הארוז. */
+  if (!omit.has('footnotes.insert')) {
+    doc.footnotes = {
+      insert: (input: { at?: unknown; content?: unknown }) => {
+        footnoteInserts.push({ at: input?.at, content: input?.content });
+        return Promise.resolve(receipt('footnotes.insert'));
+      },
+    };
+  }
+  if (!omit.has('fields.insert')) {
+    doc.fields = {
+      insert: (input: { at?: unknown; instruction?: unknown; mode?: unknown }) => {
+        fieldInserts.push({ at: input?.at, instruction: input?.instruction, mode: input?.mode });
+        return Promise.resolve(receipt('fields.insert'));
+      },
+    };
+  }
+
   if (!omit.has('insert')) {
     doc.insert = (input: { value?: unknown }) => {
       if (typeof input?.value === 'string') inserted.push(input.value);
@@ -150,7 +180,7 @@ function fakeHost(options: FakeOptions = {}) {
   doc.format = { paragraph: formatParagraph };
 
   const host = { activeEditor: { doc } };
-  return { host: host as never, calls, inserted, pageSetups };
+  return { host: host as never, calls, inserted, pageSetups, footnoteInserts, fieldInserts };
 }
 
 function countOf(calls: string[], op: string): number {
@@ -236,7 +266,7 @@ describe('applyTemplate — two-column', () => {
 });
 
 describe('applyTemplate — annotated', () => {
-  it('מחילה A4, גופן גדול, כותרת רצה ומספור, ושתי פסקאות פתיחה', async () => {
+  it('מחילה A4, גופן גדול, כותרת רצה ומספור, ופסקת פנים אחת', async () => {
     const { host, calls, inserted } = fakeHost();
     const outcome = await applyTemplate(host, 'annotated');
 
@@ -246,15 +276,43 @@ describe('applyTemplate — annotated', () => {
     expect(calls).toContain('headerFooters.parts.create');
     expect(calls).toContain('sections.setPageNumbering');
     expect(countOf(calls, 'blocks.list')).toBe(1);
-    expect(countOf(calls, 'create.paragraph')).toBe(1); // פסקה אחת נוספת (הביאור)
-    expect(countOf(calls, 'insert')).toBe(2); // גוף + ביאור
-    expect(inserted).toHaveLength(2);
+    // פסקה **אחת** בגוף: הביאור אינו פסקה שנייה אלא הערת שוליים.
+    expect(calls).not.toContain('create.paragraph');
+    expect(countOf(calls, 'insert')).toBe(1);
+    expect(inserted).toHaveLength(1);
     for (const text of inserted) {
       expect(text.length, text).toBeGreaterThan(0);
       expect(text.length, text).toBeLessThan(40);
     }
     // אין page break בתבנית הזאת.
     expect(calls).not.toContain('format.paragraph.setFlowOptions');
+  });
+
+  /**
+   * הכרטיס מצהיר `hasFootnoteBand: true` ומצייר רצועת הערות עם מפריד. מסמך
+   * בלי הערה אחת הוא „ציור שמשקר”, וזה הכלל שהמפרט קובע.
+   */
+  it('הביאור הוא הערת שוליים אמיתית, מעוגנת בסוף פסקת הפנים', async () => {
+    const { host, calls, footnoteInserts } = fakeHost();
+    await applyTemplate(host, 'annotated');
+
+    expect(calls).toContain('footnotes.insert');
+    expect(footnoteInserts).toHaveLength(1);
+    const [note] = footnoteInserts;
+    expect(note!.content).toBe('כאן יתחיל הביאור');
+    // סוף פסקת הפנים, ולא תחילתה: סימן ההערה בא אחרי הטקסט שהוא מבאר.
+    const offset = 'כאן מתחיל גוף הטקסט'.length;
+    expect(note!.at).toEqual({
+      kind: 'text',
+      segments: [{ blockId: 'p0', range: { start: offset, end: offset } }],
+    });
+  });
+
+  it('בלי footnotes.insert הביאור מדווח ככשל, ולא נעלם בשקט', async () => {
+    const { host } = fakeHost({ omit: ['footnotes.insert'] });
+    const outcome = await applyTemplate(host, 'annotated');
+
+    expect(outcome.ok).toBe(false);
   });
 });
 
@@ -297,6 +355,50 @@ describe('applyTemplate — kuntres-a5', () => {
     expect(calls).toContain('sections.setPageNumbering');
     // אין תוכן פסקאות בתבנית הזאת.
     expect(calls).not.toContain('blocks.list');
+  });
+});
+
+describe('מספר עמוד בכותרת — שדה אמיתי ולא רק הצהרת פורמט', () => {
+  /**
+   * `applyPageNumbering` כותב `w:pgNumType`, שהוא הצהרת **פורמט** לשדה ולא
+   * השדה עצמו, ו-`ensureHeaderFooter` יוצרת כותרת ריקה. עד שהשלב הזה נוסף,
+   * שלוש תבניות ציירו בכרטיס מלבן מספר עמוד וייצרו קובץ בלי מספר עמוד.
+   */
+  it('כל תבנית עם hasRunningHead מכניסה שדה PAGE לפסקה שבכותרת', async () => {
+    for (const template of DOCUMENT_TEMPLATES) {
+      if (!template.preview.hasRunningHead) continue;
+      const { host, calls, fieldInserts } = fakeHost();
+      await applyTemplate(host, template.id);
+
+      expect(calls, template.id).toContain('fields.insert');
+      expect(fieldInserts, template.id).toHaveLength(1);
+      const [field] = fieldInserts;
+      expect(field!.instruction, template.id).toBe('PAGE');
+      expect(field!.mode, template.id).toBe('raw');
+      // **הפסקה שבכותרת** (`h0`), לא זו שבגוף (`p0`) — הכפיל מבחין ביניהן
+      // לפי `in`, וזו ההבחנה שמונעת שדה שנוחת בגוף המסמך.
+      const at = field!.at as { segments: { blockId: string }[]; story?: { storyType?: string } };
+      expect(at.segments[0]!.blockId, template.id).toBe('h0');
+      expect(at.story?.storyType, template.id).toBe('headerFooterSlot');
+    }
+  });
+
+  it('תבנית בלי כותרת רצה אינה מכניסה שדה', async () => {
+    const { calls, fieldInserts } = await (async () => {
+      const fake = fakeHost();
+      await applyTemplate(fake.host, 'title-page');
+      return fake;
+    })();
+
+    expect(calls).not.toContain('fields.insert');
+    expect(fieldInserts).toHaveLength(0);
+  });
+
+  it('בלי fields.insert הפעולה מדווחת ככשל ולא כהצלחה שקטה', async () => {
+    const { host } = fakeHost({ omit: ['fields.insert'] });
+    const outcome = await applyTemplate(host, 'two-column');
+
+    expect(outcome.ok).toBe(false);
   });
 });
 
@@ -348,8 +450,10 @@ describe('כשל בשלב אמצעי: השלבים ממשיכים, והתוצא�
     expect(calls).toContain('sections.setPageNumbering');
   });
 
-  it('כשל בתוכן (create.paragraph) מדווח, ואינו עוצר שלבים מוקדמים שכבר רצו', async () => {
-    const { host, calls } = fakeHost({ failing: ['create.paragraph'] });
+  it('כשל בתוכן (insert) מדווח, ואינו עוצר שלבים מוקדמים שכבר רצו', async () => {
+    // `insert` ולא `create.paragraph`: „מהדורה מבוארת” כותבת פסקה אחת בלבד
+    // מאז שהביאור עבר להערת שוליים, ואינה יוצרת פסקה שנייה.
+    const { host, calls } = fakeHost({ failing: ['insert'] });
     const outcome = await applyTemplate(host, 'annotated');
 
     expect(outcome.ok).toBe(false);

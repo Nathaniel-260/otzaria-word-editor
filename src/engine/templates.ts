@@ -37,10 +37,13 @@
  * שקריאה ל-`footnotes.insert` בטוחה באותו רגע, וגם אין לה צרכן בתוכנית
  * (`open-document-dialog-plan.md` מונה רק `doc.insert`/`doc.create.paragraph`
  * לתוכן). לכן „שני הזרמים” של המהדורה המבוארת ממומשים כשתי פסקאות נפרדות
- * בגוף המסמך עצמו (ראו `writeAnnotatedContent`) — לא כ-`footnotes.xml` נפרד.
- * זה מקיים את הדרישה „הפנים והביאור נשארים בשני זרמים אמיתיים ונפרדים”
- * (§2.4 ב-`open-document-dialog-design.md`) ברמת התוכן, אבל לא ברמת מבנה ה-
- * OOXML. הפער מתועד כאן במפורש ולא מוסתר.
+ * בגוף המסמך עצמו — לא כ-`footnotes.xml` נפרד.
+ *
+ * **הופרך במדידה, והפער נסגר.** `FootnoteInsertInput.at?: TextTarget` קיים
+ * בחוזה, והמדידה מול המנוע הארוז נתנה `<w:footnoteReference>` בגוף והערה
+ * אמיתית ב-`footnotes.xml`. „מהדורה מבוארת” כותבת עכשיו הערת שוליים אמיתית
+ * המעוגנת בסוף פסקת הפנים — ראו `writeAnnotatedContent`. ההנמקה נשמרת כאן
+ * כתיעוד של מה שהיה, כדי שההנחה לא תחזור.
  *
  * **2. אין ריכוז (`w:jc="center"`) לטקסט בדף השער.** יישור פסקה בממשק הזה
  * עובר תמיד דרך `ui.commands` (`alignCmd` ב-HomeTab.vue) — אותה משפחת פקודות
@@ -159,6 +162,16 @@ interface TemplateBlockEntry {
   nodeType?: string;
 }
 
+/**
+ * יעד טקסט של המנוע. `story` אופציונלי ומשמעותו „גוף המסמך” כשהוא נעדר —
+ * זה מה שמפריד הכנסה לכותרת מהכנסה לגוף.
+ */
+interface TemplateTextTarget {
+  kind: 'text';
+  segments: { blockId: string; range: { start: number; end: number } }[];
+  story?: unknown;
+}
+
 interface TemplateCreateParagraphResult {
   success?: boolean;
   insertionPoint?: { blockId?: string; range?: { start?: number } };
@@ -171,7 +184,7 @@ interface TemplateCreateParagraphResult {
  */
 interface TemplateContentDocumentApi {
   blocks?: {
-    list?: () => MaybePromise<{ blocks?: TemplateBlockEntry[] } | undefined>;
+    list?: (input?: { in?: unknown }) => MaybePromise<{ blocks?: TemplateBlockEntry[] } | undefined>;
   };
   create?: {
     paragraph?: (input: {
@@ -179,6 +192,30 @@ interface TemplateContentDocumentApi {
     }) => MaybePromise<TemplateCreateParagraphResult | undefined>;
   };
   insert?: (input: { value: string; type: 'text'; target: unknown }) => MaybePromise<DocReceipt>;
+  /**
+   * שני המשטחים שנוספו אחרי מדידה מול המנוע הארוז (ולא לפיה).
+   *
+   * `blocks.list` כאן מקבל `in` — מאתר זרם — וזה מה שמאפשר להגיע לפסקה
+   * **שבתוך הכותרת הרצה** ולא בגוף. `ensureHeaderFooter` כבר יוצרת שם פסקה
+   * ריקה אחת, ולכן אין צורך ליצור אותה.
+   */
+  sections?: {
+    list?: () => MaybePromise<{ items?: { address?: unknown }[] } | undefined>;
+  };
+  footnotes?: {
+    insert?: (input: {
+      at: TemplateTextTarget;
+      type: 'footnote';
+      content: string;
+    }) => MaybePromise<DocReceipt>;
+  };
+  fields?: {
+    insert?: (input: {
+      at: TemplateTextTarget;
+      instruction: string;
+      mode: 'raw';
+    }) => MaybePromise<DocReceipt>;
+  };
   format?: {
     paragraph?: {
       setFlowOptions?: (input: {
@@ -328,20 +365,117 @@ async function writeParagraphSequence(
 }
 
 /**
- * „מהדורה מבוארת”: שתי פסקאות פתיחה — גוף ואז ביאור. שני זרמים **בתוך גוף
- * המסמך**, לא הערת שוליים אמיתית — ראו הנמקה 1 בהערת הפתיחה של הקובץ.
+ * „מהדורה מבוארת”: פסקת פנים אחת, והביאור **בהערת שוליים אמיתית**.
+ *
+ * עד כאן נכתבו שתי פסקאות בגוף, מפני שהונח שאין דרך לעגן הערה בלי סמן. זה
+ * נמדד והופרך: `footnotes.insert` מקבל `at: TextTarget`, והמדידה מול המנוע
+ * הארוז נתנה `<w:footnoteReference>` בגוף והערה אמיתית ב-`footnotes.xml`.
+ *
+ * זה לא היה שיפור אלא **תיקון**: הכרטיס מצהיר `hasFootnoteBand: true` ומצייר
+ * רצועת הערות עם מפריד, ומסמך בלי הערה אחת הוא בדיוק „ציור שמשקר” — הכלל
+ * שהמפרט קובע ושלושה פערים אחרים כבר תוקנו לפיו.
+ *
+ * ההערה מעוגנת ב**סוף** פסקת הפנים ולא בתחילתה: סימן ההערה בא אחרי הטקסט
+ * שהוא מבאר, וזה גם מה שמגיה מצפה למצוא כשהוא מתחיל להקליד.
  */
 const ANNOTATED_BODY_PLACEHOLDER = 'כאן מתחיל גוף הטקסט';
 const ANNOTATED_COMMENTARY_PLACEHOLDER = 'כאן יתחיל הביאור';
 
 async function writeAnnotatedContent(host: PageSetupTarget): Promise<CommandOutcome> {
   const failedAction = 'הוספת פסקאות הפתיחה של המהדורה המבוארת נכשלה';
-  const result = await writeParagraphSequence(
-    host,
-    [ANNOTATED_BODY_PLACEHOLDER, ANNOTATED_COMMENTARY_PLACEHOLDER],
-    failedAction,
-  );
-  return result.ok ? { ok: true } : result.outcome;
+  const result = await writeParagraphSequence(host, [ANNOTATED_BODY_PLACEHOLDER], failedAction);
+  if (!result.ok) return result.outcome;
+
+  const doc = templateContentDoc(host);
+  const insert = doc?.footnotes?.insert;
+  const blockId = result.blockIds[0];
+  if (typeof insert !== 'function' || !blockId) {
+    return unavailable(failedAction, 'הוספת הערת שוליים אינה זמינה', 'command-unsupported');
+  }
+
+  const offset = ANNOTATED_BODY_PLACEHOLDER.length;
+  try {
+    const receipt = await insert({
+      at: { kind: 'text', segments: [{ blockId, range: { start: offset, end: offset } }] },
+      type: 'footnote',
+      content: ANNOTATED_COMMENTARY_PLACEHOLDER,
+    });
+    if (receipt?.success === false) {
+      return { ok: false, message: receiptFailureText(failedAction, receipt), reason: receipt.failure?.code };
+    }
+  } catch (error) {
+    return { ok: false, message: thrownText(failedAction, error), reason: 'threw' };
+  }
+
+  return { ok: true };
+}
+
+/**
+ * מספר עמוד בכותרת הרצה — שדה `PAGE` אמיתי, לא טקסט.
+ *
+ * ## למה זה שלב נפרד מ-`applyPageNumbering`
+ *
+ * `applyPageNumbering` כותב `<w:pgNumType w:fmt="decimal"/>` על ה-`sectPr`,
+ * וזו **הצהרת פורמט** לשדה — לא השדה עצמו. `ensureHeaderFooter` יוצרת כותרת
+ * ריקה. התוצאה עד כאן: שלוש תבניות שמצהירות `hasRunningHead: true`, מציירות
+ * בכרטיס פס כותרת ומלבן מספר עמוד, ומייצרות קובץ שאין בו מספר עמוד כלל.
+ * נמדד ב-`templates-qa.mjs`: `word/header1.xml` נוצר, `text: ""`,
+ * `hasPageField: false`.
+ *
+ * ## המסלול, שנמדד לפני שנכתב
+ *
+ * `sections.list()` → `section.address` → מאתר זרם `headerFooterSlot` →
+ * `blocks.list({ in: story })` מחזיר את הפסקה הריקה שבכותרת →
+ * `fields.insert` עם `mode: 'raw'` ו-`at` (שהוא **חובה** כאן, בשונה מהערות
+ * שוליים). התוצאה שנמדדה: `<w:fldSimple w:instr="PAGE"><w:r><w:t>1</w:t>
+ * </w:r></w:fldSimple>` — הצורה הפשוטה של שדה, שהיא OOXML תקין.
+ *
+ * אזהרה למי שיבדוק את זה בעתיד: חיפוש `w:fldChar`/`w:instrText` יחזיר
+ * **false** כאן, מפני שאלה הצורה ה*מורכבת*. בדיקה שנשענת עליהם תדווח „לא
+ * עובד” על שדה תקין לחלוטין.
+ */
+async function insertHeaderPageNumber(host: PageSetupTarget): Promise<CommandOutcome> {
+  const failedAction = 'הוספת מספר העמוד לכותרת הרצה נכשלה';
+  const doc = templateContentDoc(host);
+  const list = doc?.sections?.list;
+  const listBlocks = doc?.blocks?.list;
+  const insert = doc?.fields?.insert;
+  if (typeof list !== 'function' || typeof listBlocks !== 'function' || typeof insert !== 'function') {
+    return unavailable(failedAction, 'הוספת שדות אינה זמינה', 'command-unsupported');
+  }
+
+  try {
+    const section = (await list())?.items?.[0];
+    if (!section?.address) {
+      return unavailable(failedAction, 'לא נמצא מקטע', 'no-section');
+    }
+
+    const story = {
+      kind: 'story',
+      storyType: 'headerFooterSlot',
+      section: section.address,
+      headerFooterKind: 'header',
+      variant: 'default',
+    };
+
+    const blockId = (await listBlocks({ in: story }))?.blocks?.[0]?.nodeId;
+    if (!blockId) {
+      return unavailable(failedAction, 'הכותרת הרצה ריקה מפסקאות', 'no-header-block');
+    }
+
+    const receipt = await insert({
+      at: { kind: 'text', segments: [{ blockId, range: { start: 0, end: 0 } }], story },
+      instruction: 'PAGE',
+      mode: 'raw',
+    });
+    if (receipt?.success === false) {
+      return { ok: false, message: receiptFailureText(failedAction, receipt), reason: receipt.failure?.code };
+    }
+  } catch (error) {
+    return { ok: false, message: thrownText(failedAction, error), reason: 'threw' };
+  }
+
+  return { ok: true };
 }
 
 /**
@@ -475,6 +609,8 @@ export async function applyTemplate(host: PageSetupTarget, id: TemplateId): Prom
         () => applyColumns(host, 2),
         () => ensureHeaderFooter(host, 'header'),
         () => applyPageNumbering(host, { format: DEFAULT_PAGE_NUMBER_FORMAT, start: null }),
+        // ההצהרה לבדה אינה מדפיסה מספר — ראו `insertHeaderPageNumber`.
+        () => insertHeaderPageNumber(host),
       ]);
 
     case 'annotated':
@@ -487,6 +623,8 @@ export async function applyTemplate(host: PageSetupTarget, id: TemplateId): Prom
         () => applyDocStyleDefaults(host as unknown as DocDefaultsTarget, { fontSizePt: ANNOTATED_BODY_FONT_PT }),
         () => ensureHeaderFooter(host, 'header'),
         () => applyPageNumbering(host, { format: DEFAULT_PAGE_NUMBER_FORMAT, start: null }),
+        // ההצהרה לבדה אינה מדפיסה מספר — ראו `insertHeaderPageNumber`.
+        () => insertHeaderPageNumber(host),
         () => writeAnnotatedContent(host),
       ]);
 
@@ -510,6 +648,8 @@ export async function applyTemplate(host: PageSetupTarget, id: TemplateId): Prom
         () => applyMarginPreset(host, 'narrow'),
         () => ensureHeaderFooter(host, 'header'),
         () => applyPageNumbering(host, { format: DEFAULT_PAGE_NUMBER_FORMAT, start: null }),
+        // ההצהרה לבדה אינה מדפיסה מספר — ראו `insertHeaderPageNumber`.
+        () => insertHeaderPageNumber(host),
       ]);
   }
 }
