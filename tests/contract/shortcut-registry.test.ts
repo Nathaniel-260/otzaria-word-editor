@@ -163,6 +163,34 @@ describe('חוזה הרשימה', () => {
     }
   });
 
+  it('רשומת tab-goto נושאת מיקום שלם וחיובי', () => {
+    // הפעולה אחת לשמונה רשומות, וההבדל ביניהן הוא ה-payload בלבד. רשומה
+    // בלי מיקום תקין אינה נופלת בשום מקום — `actions.ts` פשוט אינו קורא
+    // למטפל, והצירוף נבלע ולא עושה דבר.
+    const positions = ENTRIES.filter((shortcut) => shortcut.action === 'tab-goto').map(
+      (shortcut) => shortcut.payload,
+    );
+
+    expect(positions.length).toBeGreaterThan(0);
+    for (const position of positions) {
+      expect(typeof position).toBe('number');
+      expect(Number.isInteger(position as number)).toBe(true);
+      expect(position as number).toBeGreaterThanOrEqual(1);
+    }
+  });
+
+  it('אין רשומת Alt על מקש בלוח הספרות', () => {
+    // ב-Windows `Alt`+ספרה בלוח הספרות היא הזנת תו לפי קוד (Alt-code). רשומה
+    // שתופסת אותה גוזלת דרך הקלדה קיימת של תווים, ולא מודיעה על כך לאיש.
+    const numpad = ENTRIES.filter(
+      (shortcut) =>
+        shortcut.alt === true &&
+        combos(shortcut).some((combo) => /Numpad\d/.test(combo)),
+    ).map((shortcut) => shortcut.id);
+
+    expect(numpad).toEqual([]);
+  });
+
   it('הקיבוץ מכסה את כל הרשומות', () => {
     const grouped = shortcutsByGroup().flatMap((entry) => entry.items);
     expect(grouped).toHaveLength(ENTRIES.length);
