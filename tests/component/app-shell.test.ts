@@ -32,6 +32,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { mount } from '@vue/test-utils';
 import {
   autoUnmount,
+  buttonByTip,
   createCommandDouble,
   createSuperdocDouble,
   settle,
@@ -42,6 +43,7 @@ import type { SaveCoordinatorDeps, SaveSnapshot } from '../../src/sessions/save-
 import { COMPLEX_SCRIPT_BOLD_NOTICE } from '../../src/engine/docx-preflight';
 import { NO_VBA, type DocumentVba } from '../../src/engine/vba-import';
 import { COMMAND_REPORTER, STATUS_NOTIFIER, type CommandReporter } from '../../src/composables/keys';
+import type { DocMetrics } from '../../src/engine/doc-metrics';
 
 /**
  * המצב המשותף לכפילים. `vi.hoisted` נדרש: מפעלי ה-`vi.mock` מורמים אל מעל
@@ -77,12 +79,22 @@ const stub = vi.hoisted(() => ({
   adapter: null as unknown,
   /** מה שכל פתיחה קיבלה כמקור: URL, Blob, או undefined למסמך ריק. */
   openSources: [] as unknown[],
-  /** מה ש-`resolveFileUrl` מחזיר — `null` = הקובץ אינו נגיש יותר. */
+  /**
+   * מה ש-`resolveFileUrl` מחזיר — `null` = הקובץ אינו נגיש יותר. פונקציה
+   * כשהתרחיש מבחין בין tokens (ריבוי טאבים): היא מקבלת את ה-token המבוקש.
+   */
   resolvedFile: null as unknown,
   /** בייטי הטיוטה שבמרחב הפרטי, או `null` כשאין. */
   draftBytes: null as Uint8Array | null,
+  /**
+   * טיוטות לפי נתיב — לתרחיש ריבוי הטאבים, שבו לכל טאב נתיב טיוטה משלו
+   * (`draftPathFor`). נתיב שאינו כאן נופל ל-`draftBytes`.
+   */
+  draftsByPath: {} as Record<string, Uint8Array>,
   /** כמה פעמים נמחקה הטיוטה. */
   draftRemovals: 0,
+  /** הנתיבים שנמחקו, לפי הסדר — „איזו טיוטה” ולא רק „כמה”. */
+  removedDrafts: [] as string[],
   /** מה ש-`ui.selection.apply` קיבל — כלומר לאן הסמן הוחזר. */
   caretApplied: [] as unknown[],
   /** המפתח הישן, בשביל מסלול השדרוג. */
@@ -97,6 +109,27 @@ const stub = vi.hoisted(() => ({
    * „פתוח לקריאה”, וסדר העדיפות ביניהם הוא מה שנמדד למטה.
    */
   preflight: { notice: null as string | null, vba: null as DocumentVba | null },
+  /** כמה מנועים שוחררו כדי לעמוד בתקרת הזיכרון (`swap.close`). */
+  closedEngines: 0,
+  /**
+   * כפילים **שונים לכל פתיחה** — לבדיקות הקישוריות בין טאבים.
+   *
+   * ברירת המחדל (`stub.session`, `stub.adapter`) היא אובייקט אחד לכל
+   * הפתיחות, ולכן „הרצועה מדברת עם המנוע של הטאב הפעיל” אינו ניתן למדידה
+   * איתה: מחיקת `commandAdapter.value = ui.commandAdapter` מהשחזור הייתה
+   * עוברת בירוק, כי ה-ref היה מחזיק אותו אובייקט ממילא. כשה-factory מוגדר,
+   * כל `swap.open` וכל `createCommandAdapter` מקבלים מופע חדש.
+   */
+  sessionFactory: null as (() => unknown) | null,
+  adapterFactory: null as (() => unknown) | null,
+  /** מטריקות לכל מודל מטריקות שנוצר — כדי ששני טאבים יראו מספרים שונים בפס. */
+  metricsFactory: null as (() => DocMetrics) | null,
+  /** ה-deps של **כל** קואורדינטור שנוצר, לפי סדר הטאבים — `saveDeps` מחזיק רק את האחרון. */
+  saveDepsList: [] as SaveCoordinatorDeps[],
+  /** סדר השחרור של מודלי המסמך, כפי שהמנוע המזויף הריץ אותם. */
+  disposeOrder: [] as string[],
+  /** קריאות `refreshNow()` על מודלי „גבולות עמוד” ו„מספרי שורות” — מה ש-`reportCommand` מפעיל. */
+  refreshCalls: [] as string[],
 }));
 
 vi.mock('../../src/engine/create-editor', () => ({
@@ -104,24 +137,61 @@ vi.mock('../../src/engine/create-editor', () => ({
   OPEN_TIMEOUT_MS: 1_000,
 }));
 
-vi.mock('../../src/sessions/editor-swap', () => ({
-  createEditorSwap: () => ({
-    get current() {
-      return stub.session;
-    },
-    get isOpening() {
-      return false;
-    },
-    open: async (source?: unknown) => {
-      stub.openSources.push(source);
-      if (stub.openFailures > 0) {
-        stub.openFailures -= 1;
-        return { status: 'failed', error: new Error('worker לא עלה') };
-      }
-      return { status: 'opened', session: stub.session };
-    },
-    destroy: () => {},
-  }),
+/**
+ * כפיל ה-swap. `current` הוא פר-מופע ולא גלובלי, בשונה מהעבר: התקרה על
+ * מספר המנועים החיים (`MAX_LIVE_DOCUMENTS`) נמדדת בדיוק בשאלה „לכמה טאבים
+ * יש `swap.current`”, וגטר משותף היה עונה עליה תמיד „לכולם”.
+ */
+vi.mock('../../src/sessions/editor-swap', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/sessions/editor-swap')>()),
+  createEditorSwap: (container: HTMLElement) => {
+    let current: unknown = null;
+    /**
+     * ה-host שהמנוע יושב בו הוא גם מיכל הגלילה של המסמך (shell.css), והוא
+     * מה שהמעטפת קוראת ממנו את מיקום הגלילה. הכפיל יוצר אותו כמו האמיתי —
+     * בלעדיו „הגלילה נשמרת במעבר טאב” לא היה ניתן למדידה בכלל.
+     */
+    let host: HTMLElement | null = null;
+    const dropHost = (): void => {
+      host?.remove();
+      host = null;
+    };
+    return {
+      get current() {
+        return current;
+      },
+      get isOpening() {
+        return false;
+      },
+      open: async (source?: unknown) => {
+        stub.openSources.push(source);
+        if (stub.openFailures > 0) {
+          stub.openFailures -= 1;
+          return { status: 'failed', error: new Error('worker לא עלה') };
+        }
+        current = stub.sessionFactory ? stub.sessionFactory() : stub.session;
+        if (!host) {
+          host = document.createElement('div');
+          host.className = 'editor-stack__host';
+          container.appendChild(host);
+        }
+        return { status: 'opened', session: current };
+      },
+      // `destroy()` של ה-session המזויף לפני האיפוס — כמו ה-swap האמיתי, שקורא
+      // ל-`session.destroy()` וזה מריץ את ה-disposers שהמעטפת רשמה (create-editor.ts).
+      close: () => {
+        stub.closedEngines += 1;
+        (current as { destroy?: () => void } | null)?.destroy?.();
+        current = null;
+        dropHost();
+      },
+      destroy: () => {
+        (current as { destroy?: () => void } | null)?.destroy?.();
+        current = null;
+        dropHost();
+      },
+    };
+  },
 }));
 
 /**
@@ -141,16 +211,23 @@ vi.mock('../../src/engine/docx-preflight', async (importOriginal) => ({
 
 vi.mock('../../src/host/files', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../src/host/files')>()),
-  resolveFileUrl: async () => stub.resolvedFile,
+  resolveFileUrl: async (token: string) =>
+    typeof stub.resolvedFile === 'function'
+      ? (stub.resolvedFile as (token: string) => unknown)(token)
+      : stub.resolvedFile,
 }));
 
 vi.mock('../../src/host/workspace', () => ({
   MAX_PAYLOAD_BYTES: 10,
   MAX_CONTENT_BYTES: 7,
-  readWorkspaceBytes: async () => stub.draftBytes,
+  readWorkspaceBytes: async (path: string) =>
+    Object.prototype.hasOwnProperty.call(stub.draftsByPath, path)
+      ? stub.draftsByPath[path]
+      : stub.draftBytes,
   writeWorkspaceBytes: async () => true,
-  deleteWorkspaceEntry: async () => {
+  deleteWorkspaceEntry: async (path: string) => {
     stub.draftRemovals += 1;
+    stub.removedDrafts.push(path);
   },
 }));
 
@@ -158,6 +235,7 @@ vi.mock('../../src/sessions/save-coordinator', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../src/sessions/save-coordinator')>()),
   createSaveCoordinator: (deps: SaveCoordinatorDeps) => {
     stub.saveDeps = deps;
+    stub.saveDepsList.push(deps);
     return {
       snapshot: {
         state: 'idle',
@@ -191,7 +269,7 @@ vi.mock('../../src/sessions/save-coordinator', async (importOriginal) => ({
 
 vi.mock('../../src/engine/command-adapter', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../src/engine/command-adapter')>()),
-  createCommandAdapter: () => stub.adapter,
+  createCommandAdapter: () => (stub.adapterFactory ? stub.adapterFactory() : stub.adapter),
 }));
 
 vi.mock('../../src/engine/search', async (importOriginal) => {
@@ -211,7 +289,9 @@ vi.mock('../../src/engine/search', async (importOriginal) => {
       findDebounced: () => {},
       replace: async () => ({ ok: true, snapshot: actual.idleSearchState() }),
       replaceAll: async () => ({ ok: true, snapshot: actual.idleSearchState() }),
-      dispose: () => {},
+      dispose: () => {
+        stub.disposeOrder.push('search');
+      },
     }),
   };
 });
@@ -220,14 +300,46 @@ vi.mock('../../src/engine/doc-metrics', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../src/engine/doc-metrics')>();
   return {
     ...actual,
-    createDocMetrics: () => ({
-      getState: () => actual.emptyDocMetrics(),
-      noteDocumentChanged: () => {},
-      noteSelectionChanged: () => {},
-      notePaginationUpdate: () => {},
-      measureNow: () => {},
-      dispose: () => {},
-    }),
+    createDocMetrics: () => {
+      // מצב לכל מודל ולא קריאה גלובלית: שני טאבים עם מספרים שונים הם מה
+      // שמאפשר לראות בפס המצב איזה מסמך המעטפת מציגה באמת אחרי מעבר.
+      const state = stub.metricsFactory ? stub.metricsFactory() : actual.emptyDocMetrics();
+      return {
+        getState: () => state,
+        noteDocumentChanged: () => {},
+        noteSelectionChanged: () => {},
+        notePaginationUpdate: () => {},
+        measureNow: () => {},
+        dispose: () => {
+          stub.disposeOrder.push('metrics');
+        },
+      };
+    },
+  };
+});
+
+/**
+ * „גבולות עמוד” ו„מספרי שורות” — הכפיל קיים בשביל שני דברים שאין להם עדות
+ * אחרת: `refreshNow()` ש-`reportCommand` מפעיל אחרי בחירה בתפריט (בלעדיו גבול
+ * שנבחר אינו מצטייר עד העריכה הבאה — הערה ב-App.vue), וסדר השחרור בסגירת טאב.
+ * אף בדיקה אחרת בעץ אינה מזכירה `page-borders`; הכיסוי היחיד היה גשש CDP יתום.
+ */
+vi.mock('../../src/engine/page-setup', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/engine/page-setup')>();
+  const model = (name: string) => ({
+    getState: () => null,
+    refreshNow: () => {
+      stub.refreshCalls.push(name);
+    },
+    noteDocumentChanged: () => {},
+    dispose: () => {
+      stub.disposeOrder.push(name);
+    },
+  });
+  return {
+    ...actual,
+    createPageBorderModel: () => model('pageBorders'),
+    createLineNumberingModel: () => model('lineNumbers'),
   };
 });
 
@@ -282,12 +394,15 @@ beforeEach(() => {
   stub.openSources.length = 0;
   stub.resolvedFile = null;
   stub.draftBytes = null;
+  for (const path of Object.keys(stub.draftsByPath)) delete stub.draftsByPath[path];
   stub.draftRemovals = 0;
+  stub.removedDrafts.length = 0;
   stub.caretApplied.length = 0;
   stub.lastDocument = null;
   stub.forgotLastDocument = false;
   stub.openFailures = 0;
   stub.preflight = { notice: null, vba: null };
+  stub.closedEngines = 0;
   stub.markDirtyCalls = 0;
   stub.resetCalls = 0;
   stub.searchOpens = 0;
@@ -295,6 +410,12 @@ beforeEach(() => {
   stub.storedRuler = false;
   stub.persistedRuler.length = 0;
   stub.saveDeps = null;
+  stub.saveDepsList.length = 0;
+  stub.sessionFactory = null;
+  stub.adapterFactory = null;
+  stub.metricsFactory = null;
+  stub.disposeOrder.length = 0;
+  stub.refreshCalls.length = 0;
   stub.adapter = createCommandDouble();
   stub.superdoc = createSuperdocDouble();
   stub.session = {
@@ -354,6 +475,73 @@ describe('הרכבת המעטפת', () => {
 
     expect(stub.resetCalls, 'המסמך החדש אכן נפתח').toBe(2);
     expect(stub.superdoc?.ops(), 'הפוקוס נשאר בשדה החיפוש').not.toContain('focus');
+  });
+});
+
+/**
+ * הקינון שגלון ההדפסה נשען עליו.
+ *
+ * ## הרגרסיה שהבדיקה הזאת הייתה תופסת
+ *
+ * `styles/print.css` מסתיר את המעטפת **לפי מקום בעץ ולא לפי שם**: בכל רמה
+ * בשרשרת אל המסמך שורד רק הילד שמוביל למסמך (`.editor-area > :not(.editor-stack)`
+ * וכן הלאה). כלומר כל כלל שם הוא טענה על עץ ה-DOM שהקובץ הזה מרכיב.
+ *
+ * הכלל נכתב כש-`.editor-stack` היה ילד ישיר של `.word-app-shell`. הוספת
+ * `.editor-area` ביניהם — עטיפה חדשה, שינוי תמים ב-App.vue — הפכה את הכלל
+ * למי שמסתיר את **המסמך**, ו„הדפסה” הוציאה גיליון ריק. אותה זריקה בדיוק
+ * נמדדה שוב מאוחר יותר: עטיפת `.editor-stack` בעוד `<div>` הפילה את הפלט
+ * לגיליון אחד בלי שום זרם תוכן.
+ *
+ * ## ולמה בדיקת טקסט על ה-CSS אינה יכולה
+ *
+ * `tests/unit/print.test.ts` מאמת שהסלקטורים קיימים בקובץ, ו-`css-hygiene`
+ * מאמת שהמחלקות שהם נוקבים בהן קיימות ב-`src`. שתיהן נשארות ירוקות אחרי
+ * הזריקה: הסלקטור לא השתנה, המחלקה לא נעלמה — רק **מי מכיל את מי** השתנה,
+ * וזה קיים אך ורק ב-DOM. שם היא נמדדת, כאן.
+ *
+ * הבדיקה גם אינה עוצרת ב„ההורה הנכון”: היא מאמתת שכל **שאר** הילדים באותה
+ * רמה הם מה שהכלל מצפה לו. ילד חדש שיתווסף ל-`.editor-stack` או ל-
+ * `.document-pane` לא ידפיס את עצמו ולא ייעלם בשקט — מישהו יצטרך להחליט.
+ *
+ * הרמה שאין לה DOM כאן היא `#app` (המעטפת מורכבת ישר ל-body), והיא מקובעת
+ * מול index.html ו-main.ts ב-`tests/unit/print.test.ts`.
+ */
+describe('הקינון שגלון ההדפסה נשען עליו', () => {
+  it('שרשרת ההורות אל המסמך היא בדיוק זו שכללי print.css נוקבים בה', async () => {
+    await mountShell();
+
+    const shell = document.querySelector('.word-app-shell');
+    const area = document.querySelector('.editor-area');
+    const stack = document.querySelector('.editor-stack');
+    const pane = document.querySelector('.document-pane');
+    const host = document.querySelector('.editor-stack__host');
+    for (const [name, element] of [
+      ['.word-app-shell', shell],
+      ['.editor-area', area],
+      ['.editor-stack', stack],
+      ['.document-pane', pane],
+      ['.editor-stack__host', host],
+    ] as const) {
+      expect(element, name).not.toBeNull();
+    }
+
+    // כל חוליה בנפרד, כי כל אחת מהן היא כלל אחר בגלון: עטיפה שתיכנס
+    // באמצע תשבור בדיוק את זו שמעליה.
+    expect(area!.parentElement, '.editor-area הוא ילד ישיר של המעטפת').toBe(shell);
+    expect(stack!.parentElement, '.editor-stack הוא ילד ישיר של .editor-area').toBe(area);
+    expect(pane!.parentElement, '.document-pane הוא ילד ישיר של .editor-stack').toBe(stack);
+    expect(host!.parentElement, 'מיכל המנוע יושב בתוך פאנל הטאב').toBe(pane);
+
+    // ומה ש-`:not()` מסתיר בשתי הרמות הפנימיות הוא באמת רק מה שהוא מתיים.
+    for (const child of stack!.children) {
+      expect(child.className, 'כל ילד של .editor-stack הוא פאנל טאב').toContain('document-pane');
+    }
+    for (const child of pane!.children) {
+      expect(child.className, 'כל ילד של .document-pane הוא מיכל מנוע').toContain(
+        'editor-stack__host',
+      );
+    }
   });
 });
 
@@ -973,5 +1161,548 @@ describe('הודעת-מידע על פקודה שהצליחה', () => {
 
     expect(statusOf(wrapper)).toContain('נכשל');
     expect(wrapper.find('.status-message').classes()).toContain('error');
+  });
+});
+
+/**
+ * שחזור **כל** הטאבים, ולא רק זה שהיה פעיל.
+ *
+ * ## הבאג שהבדיקות כאן שומרות עליו
+ *
+ * הרשומה תמיד שמרה רשומה לכל טאב פתוח, אבל בעלייה נקראה ממנה רשומה אחת —
+ * הפעילה — ושאר הטאבים נעלמו; גרוע מזה, הטיוטות שלהם (עבודה שלא נשמרה
+ * לקובץ!) נמחקו מהמרחב הפרטי כדי שלא יישארו יתומות. כלומר סגירת התוסף עם
+ * שלושה מסמכים פתוחים החזירה מסמך אחד, ומחקה את מה שלא נשמר בשניים.
+ *
+ * ## מה נמדד, ולמה דווקא כך
+ *
+ * שלוש שאלות, וכל אחת מהן היא באג אחר אילו נשברה:
+ *
+ * 1. **כל הטאבים חוזרים** — ברצועה, עם השם שלהם, לפני שנגעו בהם.
+ * 2. **רק הפעיל נטען** — זו הטעינה העצלה; `openSources` הוא מה שמבחין בין
+ *    „הטאב קיים” ל„נפתח לתוכו מנוע”, ובלעדיו הבדיקה הייתה מאשרת בירוק גם
+ *    פתיחה של חמישה מסמכים בעלייה.
+ * 3. **מה שממתין אינו נמחק** — לא הטיוטה ולא הרשומה, וסגירתו שואלת קודם.
+ */
+describe('שחזור כל הטאבים', () => {
+  const FIRST = { token: 'tok-1', name: 'ראשון.docx', writable: true };
+  const SECOND = { token: 'tok-2', name: 'שני.docx', writable: true };
+  const SECOND_DRAFT = {
+    path: 'session-draft-doc-2.docx',
+    savedAt: 1,
+    documentToken: 'tok-2',
+    sourceSize: 200,
+  };
+
+  /** רשומה של שני טאבים פתוחים, כשהראשון הוא הפעיל. */
+  function twoTabs(secondDraft: unknown = null): unknown {
+    return {
+      version: 2,
+      documents: [
+        { id: 'doc-1', document: FIRST, caret: null, draft: null },
+        { id: 'doc-2', document: SECOND, caret: null, draft: secondDraft },
+      ],
+      activeId: 'doc-1',
+      view: { zoom: null, focusMode: false, ribbonTab: null, ribbonCollapsed: false },
+    };
+  }
+
+  const RESOLVED: Record<string, unknown> = {
+    'tok-1': { token: 'tok-1', url: 'loopback://first', name: 'ראשון.docx', size: 100 },
+    'tok-2': { token: 'tok-2', url: 'loopback://second', name: 'שני.docx', size: 200 },
+  };
+
+  beforeEach(() => {
+    // כל token נפתר לקובץ **שלו**: בלי זה „הטאב השני נפתח” היה עובר בירוק
+    // גם אם נפתח בו המסמך של הראשון.
+    stub.resolvedFile = (token: string) => RESOLVED[token] ?? null;
+  });
+
+  /** הרשומה האחרונה שנכתבה. `.at(-1)` אינו ב-lib של הפרויקט. */
+  function lastPersistedSession(): unknown {
+    return stub.persistedSessions[stub.persistedSessions.length - 1];
+  }
+
+  function tabTitles(wrapper: Awaited<ReturnType<typeof mountShell>>): string[] {
+    return wrapper.findAll('.word-doctab-title').map((el) => el.text());
+  }
+
+  it('כל הטאבים שהיו פתוחים חוזרים לרצועה, עם השם שלהם', async () => {
+    stub.storedSession = twoTabs();
+
+    const wrapper = await mountShell();
+
+    expect(tabTitles(wrapper)).toEqual(['ראשון', 'שני']);
+    expect(wrapper.find('.word-doctab.active .word-doctab-title').text()).toBe('ראשון');
+  });
+
+  it('רק המסמך של הטאב הפעיל נטען בעלייה', async () => {
+    // טעינה עצלה: כל מסמך הוא מופע מנוע מלא, וחמישה טאבים פתוחים אינם סיבה
+    // להכפיל פי חמישה את הזמן עד שרואים את המסמך שעובדים עליו.
+    //
+    // הבדיקה הזאת שומרת על הכיוון ההפוך מכל השאר בקובץ הזה, ולכן היא הייתה
+    // עוברת גם לפני השינוי (שם שוחזר טאב אחד בלבד): מה שהיא מונעת הוא
+    // „תיקון” עתידי שיפתח את כל הטאבים בעלייה.
+    stub.storedSession = twoTabs();
+
+    await mountShell();
+
+    expect(stub.openSources).toEqual(['loopback://first']);
+  });
+
+  it('מעבר לטאב שממתין פותח את הקובץ שלו — פעם אחת', async () => {
+    stub.storedSession = twoTabs();
+    const wrapper = await mountShell();
+
+    await wrapper.findAll('.word-doctab')[1]!.trigger('click');
+    await settle(12);
+
+    expect(stub.openSources).toEqual(['loopback://first', 'loopback://second']);
+    expect(wrapper.find('.word-doctab.active .word-doctab-title').text()).toBe('שני');
+
+    // חזרה אליו אינה פותחת אותו שוב: הוא כבר טעון, בדיוק כמו כל טאב אחר.
+    await wrapper.findAll('.word-doctab')[0]!.trigger('click');
+    await settle(8);
+    await wrapper.findAll('.word-doctab')[1]!.trigger('click');
+    await settle(8);
+    expect(stub.openSources).toHaveLength(2);
+  });
+
+  it('הרשומה שנכתבת מחזיקה את שני הטאבים גם לפני שהשני נטען', async () => {
+    // זה מה שהופך את השחזור ליציב על פני כמה הפעלות: טאב שלא נגעו בו חייב
+    // להיכתב חזרה, אחרת הוא נעלם בסגירה הבאה.
+    stub.storedSession = twoTabs();
+
+    await mountShell();
+
+    const last = lastPersistedSession() as { documents: Array<{ id: string }>; activeId: string };
+    expect(last.documents.map((entry) => entry.id)).toEqual(['doc-1', 'doc-2']);
+    expect(last.activeId).toBe('doc-1');
+  });
+
+  it('הטיוטה של טאב שממתין אינה נמחקת בעלייה', async () => {
+    // הבאג שהיה: עבודה שלא נשמרה בטאב שאינו הפעיל נמחקה מהמרחב הפרטי ברגע
+    // העלייה, לפני שהמשתמש בכלל ראה שהטאב קיים.
+    stub.storedSession = twoTabs(SECOND_DRAFT);
+    stub.draftsByPath[SECOND_DRAFT.path] = new Uint8Array([80, 75, 3, 4]);
+
+    const wrapper = await mountShell();
+
+    expect(stub.removedDrafts).toEqual([]);
+    expect(
+      wrapper.findAll('.word-doctab')[1]!.find('.word-doctab-dirty').exists(),
+      'טאב שיש בו עבודה שלא נשמרה מסומן ככזה עוד לפני שנטען',
+    ).toBe(true);
+  });
+
+  it('מעבר לטאב שממתין פותח את הטיוטה שלו, ולא את הקובץ מהדיסק', async () => {
+    stub.storedSession = twoTabs(SECOND_DRAFT);
+    stub.draftsByPath[SECOND_DRAFT.path] = new Uint8Array([80, 75, 3, 4]);
+    const wrapper = await mountShell();
+
+    await wrapper.findAll('.word-doctab')[1]!.trigger('click');
+    await settle(12);
+
+    expect(stub.openSources[1], 'הבייטים של הטיוטה, לא ה-URL').toBeInstanceOf(Blob);
+    expect(wrapper.find('.word-statusbar').text()).toContain('שוחזרו שינויים');
+  });
+
+  it('סגירת טאב שממתין ויש בו עבודה שלא נשמרה — שואלת, ו„לא” משאירה הכול', async () => {
+    // אין `window.Otzaria` בבדיקות, ולכן `confirm` נופל ל„לא” — בדיוק
+    // המשמעות הנכונה: בלי אישור מפורש לא מוחקים.
+    stub.storedSession = twoTabs(SECOND_DRAFT);
+    stub.draftsByPath[SECOND_DRAFT.path] = new Uint8Array([80, 75, 3, 4]);
+    const wrapper = await mountShell();
+
+    await wrapper.findAll('.word-doctab')[1]!.find('.word-doctab-close').trigger('click');
+    await settle(12);
+
+    expect(wrapper.findAll('.word-doctab')).toHaveLength(2);
+    expect(stub.removedDrafts, 'עבודה שלא נשמרה אינה נמחקת בלי אישור').toEqual([]);
+    expect(wrapper.find('.word-statusbar').text()).toContain('סגירת הטאב בוטלה');
+  });
+
+  it('סגירת טאב שממתין ואין בו מה לאבד אינה שואלת, ומורידה אותו מהרשומה', async () => {
+    stub.storedSession = twoTabs();
+    const wrapper = await mountShell();
+
+    await wrapper.findAll('.word-doctab')[1]!.find('.word-doctab-close').trigger('click');
+    await settle(12);
+
+    expect(tabTitles(wrapper)).toEqual(['ראשון']);
+    const last = lastPersistedSession() as { documents: Array<{ id: string }> };
+    expect(last.documents.map((entry) => entry.id)).toEqual(['doc-1']);
+  });
+
+  it('סגירת הטאב הפעיל עוברת לטאב שממתין — וטוענת אותו', async () => {
+    stub.storedSession = twoTabs();
+    const wrapper = await mountShell();
+
+    await wrapper.findAll('.word-doctab')[0]!.find('.word-doctab-close').trigger('click');
+    await settle(14);
+
+    expect(tabTitles(wrapper)).toEqual(['שני']);
+    expect(stub.openSources, 'הטאב שנבחר במקומו נטען, ולא נשאר ריק').toEqual([
+      'loopback://first',
+      'loopback://second',
+    ]);
+  });
+});
+
+/**
+ * התקרה על מספר המנועים החיים — ה-RAM של Issue #26.
+ *
+ * ## מה נמדד
+ *
+ * „טאב נרדם” הוא בדיוק אותו מצב של טאב ששוחזר ולא נטען, ולכן די בשתי שאלות:
+ * האם המנוע באמת שוחרר (`swap.close`), והאם חזרה לטאב פותחת אותו מחדש עם
+ * מה שהיה בו. השאלה השלישית היא הגבול: מסמך שאין לו קובץ אינו נרדם לעולם —
+ * העותק היחיד שלו הוא הטיוטה שלו.
+ */
+describe('תקרת המסמכים החיים', () => {
+  const OPENED = { token: 'tok-open', url: 'loopback://opened', name: 'פתוח.docx', size: 100 };
+
+  /** „+”: טאב חדש, ובתוכו מסמך ריק — בלי קובץ. */
+  async function openEmptyTab(wrapper: Awaited<ReturnType<typeof mountShell>>): Promise<void> {
+    await wrapper.find('.word-doctabs-new').trigger('click');
+    await settle(12);
+  }
+
+  it('ארבעה מסמכים חדשים בלי קובץ — אף אחד אינו נרדם', async () => {
+    // הגבול של המנגנון, ולא היכולת שלו: מסמך שאין לו קובץ הוא מסמך שכל
+    // קיומו תלוי בטיוטה שלו, והוא נשאר בזיכרון גם מעבר לתקרה.
+    const wrapper = await mountShell();
+    for (let index = 0; index < 3; index += 1) await openEmptyTab(wrapper);
+
+    expect(wrapper.findAll('.word-doctab'), 'ארבעה טאבים, מעל התקרה של שלושה').toHaveLength(4);
+    expect(stub.closedEngines).toBe(0);
+  });
+
+  it('מסמך שנפתח מקובץ נרדם, וחזרה אליו פותחת אותו מחדש', async () => {
+    stub.storedSession = {
+      version: 2,
+      documents: [
+        { id: 'doc-1', document: { token: 't1', name: 'א.docx', writable: true }, caret: null, draft: null },
+        { id: 'doc-2', document: { token: 't2', name: 'ב.docx', writable: true }, caret: null, draft: null },
+        { id: 'doc-3', document: { token: 't3', name: 'ג.docx', writable: true }, caret: null, draft: null },
+        { id: 'doc-4', document: { token: 't4', name: 'ד.docx', writable: true }, caret: null, draft: null },
+      ],
+      activeId: 'doc-1',
+      view: { zoom: null, focusMode: false, ribbonTab: null, ribbonCollapsed: false },
+    };
+    const NAMES: Record<string, string> = { t1: 'א.docx', t2: 'ב.docx', t3: 'ג.docx', t4: 'ד.docx' };
+    stub.resolvedFile = (token: string) => ({
+      ...OPENED,
+      token,
+      url: `loopback://${token}`,
+      name: NAMES[token] ?? OPENED.name,
+    });
+
+    const wrapper = await mountShell();
+    // הראשון נטען בעלייה; שלושת האחרים נטענים כשעוברים אליהם — והרביעי הוא
+    // זה שמפיל את התקרה על הראשון.
+    for (const index of [1, 2, 3]) {
+      await wrapper.findAll('.word-doctab')[index]!.trigger('click');
+      await settle(14);
+    }
+
+    expect(stub.closedEngines, 'בדיוק מנוע אחד שוחרר').toBe(1);
+    expect(stub.openSources).toEqual([
+      'loopback://t1',
+      'loopback://t2',
+      'loopback://t3',
+      'loopback://t4',
+    ]);
+
+    // חזרה לטאב שנרדם פותחת אותו שוב, מהקובץ שלו.
+    await wrapper.findAll('.word-doctab')[0]!.trigger('click');
+    await settle(14);
+
+    expect(stub.openSources[4]).toBe('loopback://t1');
+    expect(wrapper.find('.word-doctab.active .word-doctab-title').text()).toBe('א');
+  });
+});
+
+/**
+ * מיקום הגלילה של מסמך במעבר טאב.
+ *
+ * הבאג שדווח: „עוברים טאב וחוזרים — הוא זוכר איפה אני, וברגע שמתחילים לגלול
+ * הוא חוזר לראש”. הסיבה היא שהפאנל של טאב שאינו פעיל מוסתר ב-`display: none`,
+ * וזה מוחק את מיקום הגלילה של מיכל הגלילה שבתוכו (ההנמקה המלאה
+ * ב-sessions/pane-scroll.ts). הבדיקה כאן מודדת את החיווט: שהמעטפת קוראת את
+ * המיקום **לפני** ההסתרה, ומחזירה אותו בכניסה.
+ */
+describe('מיקום הגלילה בין טאבים', () => {
+  /** מיכל הגלילה של הטאב הפעיל, כפי שהמעטפת מוצאת אותו. */
+  function activeHost(): HTMLElement | null {
+    const panes = document.querySelectorAll<HTMLElement>('.document-pane');
+    for (const pane of panes) {
+      if (pane.style.display !== 'none') return pane.querySelector('.editor-stack__host');
+    }
+    return null;
+  }
+
+  it('גלילה בטאב אחד חוזרת אליו אחרי מעבר וחזרה', async () => {
+    const wrapper = await mountShell();
+    const first = activeHost();
+    expect(first, 'למסמך הפתוח יש מיכל גלילה').not.toBeNull();
+    first!.scrollTop = 640;
+
+    // טאב שני, ואז חזרה לראשון.
+    await wrapper.find('.word-doctabs-new').trigger('click');
+    await settle(12);
+    expect(activeHost(), 'הטאב החדש הוא מיכל אחר').not.toBe(first);
+
+    /**
+     * מה שהדפדפן עושה, ידנית.
+     *
+     * `display: none` הורס את קופסת הפריסה, ואיתה את מיקום הגלילה — אבל
+     * ל-jsdom אין פריסה בכלל, ולכן `scrollTop` שורד אצלו בכל מקרה. בלי
+     * האיפוס הזה הבדיקה הייתה עוברת בירוק גם אילו המעטפת לא שמרה דבר,
+     * כלומר בדיקה שאינה מודדת את מה שהיא טוענת למדוד.
+     */
+    first!.scrollTop = 0;
+
+    await wrapper.findAll('.word-doctab')[0]!.trigger('click');
+    await settle(12);
+
+    expect(activeHost()).toBe(first);
+    expect(first!.scrollTop, 'המיקום חזר ולא אופס').toBe(640);
+  });
+
+  it('חזרה מהרקע מתקנת מיקום שאבד — ואינה נוגעת במיקום ששרד', async () => {
+    /**
+     * החיווט של „המשתמש חזר”: `onPluginShown` ← `repairPaneScroll`.
+     *
+     * שני הצדדים נבדקים בבידוד (tests/unit/lifecycle.test.ts,
+     * tests/unit/pane-scroll.test.ts), אבל בדיוק ההרכבה היא מה שהקובץ הזה
+     * קיים בשבילו: מחיקת הבלוק כולו מ-`onMounted` הייתה עוברת בירוק בשניהם.
+     *
+     * ל-jsdom אין פריסה, ולכן האיפוס נעשה כאן ביד — בדיוק כמו בבדיקת מעבר
+     * הטאב שמעל, ומאותו טעם.
+     */
+    const wrapper = await mountShell();
+    const host = activeHost()!;
+    host.scrollTop = 480;
+
+    window.dispatchEvent(new Event('pagehide'));
+    await settle(6);
+    host.scrollTop = 0;
+
+    window.dispatchEvent(new Event('pageshow'));
+    await settle(6);
+
+    expect(host.scrollTop, 'המיקום שאבד תוקן').toBe(480);
+    expect(wrapper.exists()).toBe(true);
+  });
+
+  it('חזרה מהרקע אינה גוררת מסמך שכבר במקום אחר', async () => {
+    // הכלל שמונע את הנזק ההפוך: המסמך התעמד מחדש והמשתמש כבר במקום אחר.
+    await mountShell();
+    const host = activeHost()!;
+    host.scrollTop = 480;
+
+    window.dispatchEvent(new Event('pagehide'));
+    await settle(6);
+    host.scrollTop = 120;
+
+    window.dispatchEvent(new Event('pageshow'));
+    await settle(6);
+
+    expect(host.scrollTop).toBe(120);
+  });
+
+  it('הטאב השני נשאר בראש המסמך שלו', async () => {
+    // הכיוון ההפוך: המיקום שנשמר שייך לטאב שלו, ואינו נגרר לשכן.
+    const wrapper = await mountShell();
+    activeHost()!.scrollTop = 640;
+
+    await wrapper.find('.word-doctabs-new').trigger('click');
+    await settle(12);
+
+    expect(activeHost()!.scrollTop).toBe(0);
+  });
+});
+
+/**
+ * קישוריות בין טאבים — מה שהמעטפת **מציגה** ומי שהיא **מדברת איתו** אחרי מעבר.
+ *
+ * ## למה הבדיקות האלה קיימות
+ *
+ * המעטפת מחזיקה עותק של מצב הטאב הפעיל (28 refs), ובכל מעבר טאב מעתיקה אותו
+ * לסשן וחזרה. הבדיקות שמעל מאמתות כותרות, נקודות ומיקום גלילה — ואף אחת אינה
+ * מפעילה פקד אחרי מעבר, ואף אחת אינה מבחינה בין מנועים: הכפיל הוא אובייקט אחד
+ * לכל הפתיחות. נמדד: מחיקת `commandAdapter.value = ui.commandAdapter` מהשחזור
+ * — כלומר רצועה שמדברת עם המנוע של הטאב הקודם — עוברת את כל 48 הבדיקות בירוק.
+ *
+ * כאן כל פתיחה מקבלת מנוע, אדפטר ומטריקות **משלה**, והאימות הוא דרך ה-DOM
+ * ודרך מה שהאדפטר קיבל — לא דרך `vm`. זה נבנה לפני פיצול `App.vue` ונשאר תקף
+ * אחריו, כי אף אחת מהבדיקות אינה תלויה בשם של פונקציה פנימית.
+ */
+describe('קישוריות בין טאבים', () => {
+  /**
+   * מנוע מזויף שמריץ את ה-disposers שנרשמו בו — בסדר הרשמה, כמו
+   * `createEditor` (create-editor.ts: `disposers.splice(0)`). ברירת המחדל של
+   * הקובץ (`onDispose: () => {}`) בולעת אותם, ולכן סדר השחרור לא היה מדיד.
+   */
+  function engineSession(): unknown {
+    const disposers: Array<() => void> = [];
+    const superdoc = createSuperdocDouble();
+    return {
+      superdoc: superdoc.host,
+      ui: {
+        selection: { observe: () => () => {}, apply: () => ({ ok: true }) },
+        viewport: { scrollIntoView: async () => ({ success: true }) },
+      },
+      onDispose: (dispose: () => void) => {
+        disposers.push(dispose);
+      },
+      destroy: () => {
+        for (const dispose of disposers.splice(0)) dispose();
+      },
+    };
+  }
+
+  const metricsOf = (totalPages: number): DocMetrics => ({ words: totalPages * 100, totalPages, currentPage: 1 });
+
+  /** מה שפס המצב מציג בתא „עמודי המסמך”. */
+  function pageStatus(wrapper: Awaited<ReturnType<typeof mountShell>>): string {
+    return wrapper.find('[data-tip-title="עמודי המסמך"]').text();
+  }
+
+  /** שני טאבים חיים עם כפילים נפרדים; מחזירה את האדפטרים לפי סדר הפתיחה. */
+  async function twoLiveTabs(): Promise<{
+    wrapper: Awaited<ReturnType<typeof mountShell>>;
+    adapters: CommandDouble[];
+  }> {
+    const adapters: CommandDouble[] = [];
+    const pages = [3, 7];
+    stub.sessionFactory = engineSession;
+    stub.adapterFactory = () => {
+      const adapter = createCommandDouble();
+      adapters.push(adapter);
+      return adapter;
+    };
+    stub.metricsFactory = () => metricsOf(pages[adapters.length - 1] ?? 1);
+
+    const wrapper = await mountShell();
+    await wrapper.find('.word-doctabs-new').trigger('click');
+    await settle(12);
+    return { wrapper, adapters };
+  }
+
+  it('אחרי חזרה לטאב, פס המצב והרצועה מחוברים למסמך **שלו** ולא לזה שנעזב', async () => {
+    const { wrapper, adapters } = await twoLiveTabs();
+    expect(adapters, 'שני מנועים נפרדים').toHaveLength(2);
+    expect(pageStatus(wrapper), 'הטאב השני פעיל ומציג את המספרים שלו').toContain('7');
+
+    await wrapper.findAll('.word-doctab')[0]!.trigger('click');
+    await settle(8);
+
+    expect(pageStatus(wrapper), 'הפס חזר למספרים של הטאב הראשון').toContain('3');
+    expect(pageStatus(wrapper)).not.toContain('7');
+
+    // הלחיצה ברצועה מגיעה למנוע של הטאב הפעיל — ולא לזה שנעזב.
+    const before = adapters.map((adapter) => adapter.calls.length);
+    await buttonByTip(wrapper, 'מודגש').trigger('click');
+    await settle();
+
+    expect(adapters[0]!.calls.length - before[0]!, 'המנוע של הטאב הראשון קיבל את הפקודה').toBe(1);
+    expect(adapters[0]!.calls[adapters[0]!.calls.length - 1]!.id).toBe('bold');
+    expect(adapters[1]!.calls.length - before[1]!, 'המנוע של הטאב השני לא קיבל דבר').toBe(0);
+  });
+
+  it('בחירה ב„גבולות עמוד” וב„מספרי שורות” מרעננת את המודל מיד', async () => {
+    // `applyPageBorders`/`applyLineNumbering` אינן מפעילות `onUpdate` של המנוע,
+    // ולכן בלי `refreshNow()` המפורש ב-`reportCommand` הבחירה אינה מצטיירת עד
+    // העריכה הבאה — „גבול רפאים”. הבדיקה עוברת את המסלול האמיתי: לשונית,
+    // תפריט, פריט, `report` שהרצועה מזריקה, ואז המודל.
+    const wrapper = await mountShell();
+    stub.refreshCalls.length = 0;
+
+    const layoutTab = wrapper.findAll('[role="tab"]').find((tab) => tab.text().includes('פריסה'));
+    expect(layoutTab, 'לשונית „פריסה” קיימת').toBeDefined();
+    await layoutTab!.trigger('click');
+    await settle();
+
+    for (const [tip, model] of [
+      ['מסגרת סביב העמוד', 'pageBorders'],
+      ['מספור השורות בשולי הדף', 'lineNumbers'],
+    ] as const) {
+      await buttonByTip(wrapper, tip).trigger('click');
+      await settle();
+      const item = wrapper.find('.ribbon-menu__item');
+      expect(item.exists(), `התפריט של „${tip}” נפתח`).toBe(true);
+      await item.trigger('click');
+      await settle();
+      expect(stub.refreshCalls, `המודל ${model} רוענן אחרי הבחירה`).toContain(model);
+    }
+  });
+
+  it('ה-refs של התבנית מאוכלסים — המעטפת, ערימת העורכים ושכבת האיות', async () => {
+    // `ref="name"` בתבנית נפתר מול הקישורים של App.vue עצמה. שם שמפסיק להיות
+    // קישור ברמה העליונה (למשל אחרי העברה לקומפוזבל) משאיר את האובייקט `null`
+    // לנצח, בשקט — ו„הוסף למילון” בתפריט ההקשר מת בלי אף שגיאה.
+    const wrapper = await mountShell();
+    const vm = wrapper.vm as unknown as Record<string, unknown>;
+
+    expect(vm.shellRef, 'shellRef').not.toBeNull();
+    expect(vm.editorStackRef, 'editorStackRef').not.toBeNull();
+    expect(vm.spellingOverlayRef, 'spellingOverlayRef').not.toBeNull();
+  });
+
+  it('סגירת טאב ברקע משחררת את המודלים **שלו**, בסדר הרשמה, ואינה נוגעת בטאב הגלוי', async () => {
+    const { wrapper } = await twoLiveTabs();
+    await wrapper.findAll('.word-doctab')[0]!.trigger('click');
+    await settle(8);
+    expect(pageStatus(wrapper)).toContain('3');
+    stub.disposeOrder.length = 0;
+
+    // סגירת הטאב השני בזמן שהראשון פעיל — התרחיש שהשומרים הא-סימטריים
+    // ב-`openDocumentInto` קיימים בשבילו, ושאף בדיקה לא הפעילה.
+    await wrapper.findAll('.word-doctab')[1]!.find('.word-doctab-close').trigger('click');
+    await settle(12);
+
+    expect(wrapper.findAll('.word-doctab'), 'נשאר טאב אחד').toHaveLength(1);
+    // בדיוק המודלים של הטאב שנסגר, ובסדר שבו `openDocumentInto` רשם אותם.
+    expect(stub.disposeOrder).toEqual(['metrics', 'pageBorders', 'lineNumbers', 'search']);
+    // והטאב הגלוי לא הרגיש דבר: הפס עדיין מציג את המסמך **שלו**.
+    expect(pageStatus(wrapper)).toContain('3');
+  });
+
+  /**
+   * באג חי, שנמדד ומתועד כאן עד שיתוקן: הנקודה של טאב **ברקע** אינה מתנקה
+   * (ואינה מופיעה) כשהקואורדינטור שלו מדווח — עד מעבר הטאב הבא.
+   *
+   * הסיבה: `documentTabs` קורא `session.ui.saveSnapshot.isDirty` של טאב רקע
+   * מאובייקט פשוט שאין לו תלות ריאקטיבית, בעוד הקואורדינטור כותב אליו
+   * `session.ui.saveSnapshot = snapshot`.
+   *
+   * **תוקן.** `tabStripRevision` ב-App.vue הוא התלות המפורשת שהייתה חסרה,
+   * ו-`onStateChange` מקדם אותו — כלומר הקואורדינטור של טאב ברקע מזיז את
+   * הנקודה שלו מיד. הבדיקה עברה מ-`it.fails` ל-`it` יחד עם התיקון.
+   */
+  it('שמירה אוטומטית של טאב ברקע מעדכנת את הנקודה שלו', async () => {
+    const { wrapper } = await twoLiveTabs();
+    await wrapper.findAll('.word-doctab')[0]!.trigger('click');
+    await settle(8);
+    expect(stub.saveDepsList, 'קואורדינטור לכל טאב').toHaveLength(2);
+
+    // `state` הוא שלב הפעולה (idle/exporting/…), לא „מלוכלך”: זה `isDirty`.
+    const dirty: SaveSnapshot = {
+      state: 'idle',
+      isDirty: true,
+      isSaving: false,
+      targetToken: null,
+      name: null,
+      lastError: null,
+    };
+    stub.saveDepsList[1]!.onStateChange?.(dirty);
+    await settle();
+
+    expect(
+      wrapper.findAll('.word-doctab')[1]!.find('.word-doctab-dirty').exists(),
+      'הטאב ברקע מסומן כשהקואורדינטור שלו דיווח',
+    ).toBe(true);
   });
 });

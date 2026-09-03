@@ -29,6 +29,11 @@ export interface ComboOption {
   preview?: string;
   /** כותרת הקבוצה. ריק או חסר = בראש, בלי כותרת. */
   group?: string;
+  /**
+   * הגופן מכסה עברית — ואז נוספת לשורה דגימה של אותיות עבריות בגופן עצמו.
+   * הדירוג והניווט אינם מבחינים בו: הוא מראה בלבד. ראו `RibbonCombo`.
+   */
+  hebrew?: boolean;
 }
 
 /** שורה ברשימה הנפתחת: כותרת קבוצה, או אפשרות עם המספר שלה לניווט מקלדת. */
@@ -145,15 +150,28 @@ export function nextOptionIndex(key: string, current: number, count: number): nu
  * השלישי הוא מה ש-Word עושה, וזה לא קפריזה: גופן שמותקן ואינו ברשימת
  * המועמדים (ובלי מארח שמונה — זה קורה) לא היה נגיש בשום דרך אחרת. המשתמש
  * יודע מה שמו, והבורר אינו אמור להתווכח איתו.
+ *
+ * ## `normalize` — כשהרשימה היא הצעה ולא מלאי
+ *
+ * בבורר הגודל הטקסט שהוקלד הוא **תמיד** ערך לגיטימי: 13pt אינו „גודל שאינו
+ * קיים”, הוא פשוט אינו בסולם שהרשימה מציעה. פקד שמקבל `normalize` מוסר את
+ * הכרעת המצב השלישי לקורא — שם יושבים גם ההידוק לטווח והעיגול לחצי נקודה
+ * (`parseFontSizeInput`) — ומחיל את מה שהוקלד גם כשיש התאמות ברשימה.
+ *
+ * בלי זה „13” היה מוחל כ„10”: החיפוש מדרג כל אפשרות ש**מכילה** את הספרה,
+ * ו-Enter היה בוחר את ראש הדירוג במקום את המספר שהוקלד.
  */
 export function commitValue(
   rows: ComboRows,
   activeIndex: number,
   query: string,
+  normalize?: (typed: string) => string | null,
 ): string | null {
   for (const row of rows.rows) {
     if (row.type === 'option' && row.index === activeIndex) return row.option.value;
   }
   const typed = query.trim();
-  return rows.count === 0 && typed !== '' ? typed : null;
+  if (typed === '') return null;
+  if (normalize) return normalize(typed);
+  return rows.count === 0 ? typed : null;
 }

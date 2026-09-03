@@ -243,7 +243,6 @@ async function sectionFileTab() {
         'פתח קובץ',
         'שמור',
         'שמור בשם...',
-        'ייצוא ל-Word',
         'הדפסה',
         'יציאה',
         'אודות',
@@ -254,7 +253,7 @@ async function sectionFileTab() {
       log('מיקומים:', JSON.stringify(results));
       const off = Object.entries(results).filter(([, r]) => !r.ok);
       if (off.length) report.fail('מיקום הפקדים', off.map(([n, r]) => `${n}: ${r.why}`).join('; '));
-      else report.pass('מיקום הפקדים', 'כל תשעת הפקדים בתוך החלון');
+      else report.pass('מיקום הפקדים', 'כל שמונת הפקדים בתוך החלון');
     });
 
     await step('אודות', async () => {
@@ -437,24 +436,6 @@ async function sectionFileTab() {
       if (picked && opened && !bad)
         report.pass('פתח קובץ', 'fs.pickUserFile נקרא, ומסמך אמיתי (עם התוכן הישן) נטען תחת השם החדש');
       else report.fail('פתח קובץ', `picked=${picked} opened=${opened}; רעש: ${bad || 'אין'}`);
-    });
-
-    await step('ייצוא ל-Word', async () => {
-      await app.js(
-        `(function(){if(window.__origAnchorClick)return;` +
-          `window.__origAnchorClick=HTMLAnchorElement.prototype.click;window.__downloads=[];` +
-          `HTMLAnchorElement.prototype.click=function(){if(this.download){window.__downloads.push({name:this.download,href:this.href.slice(0,30)})}` +
-          `return window.__origAnchorClick.call(this)};})()`,
-      );
-      await app.reset();
-      const clicked = await app.click('ייצוא ל-Word', { after: 1500 });
-      const downloads = await app.js('JSON.stringify(window.__downloads||[])').then(JSON.parse);
-      const bad = await noise(app);
-      const st = await app.status();
-      log('נלחץ:', clicked, '| הורדות:', JSON.stringify(downloads), '| status:', JSON.stringify(st), '| רעש:', bad || '(אין)');
-      if (clicked && downloads.length === 1 && /^blob:/.test(downloads[0].href) && !bad)
-        report.pass('ייצוא ל-Word', `הורדת "${downloads[0].name}" הופעלה מ-blob: מקומי`);
-      else report.fail('ייצוא ל-Word', `downloads=${JSON.stringify(downloads)}; רעש: ${bad || 'אין'}`);
     });
 
     await step('הדפסה', async () => {

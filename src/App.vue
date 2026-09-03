@@ -10,83 +10,90 @@
     @pointerleave="revealed = null"
     @contextmenu="contextMenu.handleContextMenu"
   >
-    <!-- פס עליון -->
-    <TitleBar
-      :title="title"
-      :is-dirty="saveSnapshot.isDirty"
-      :is-saving="saveSnapshot.isSaving"
-      :is-save-error="saveSnapshot.state === 'error'"
-      :save-state-text="saveStateMessage"
-      :autosave-enabled="autosaveEnabled"
-      :can-undo="canUndo"
-      :can-redo="canRedo"
-      @save="onSave(false)"
-      @undo="onUndo"
-      @redo="onRedo"
-      @open-find="openFindDialog('find')"
-      @toggle-autosave="toggleAutosave"
-      @update-title="onTitleUpdate"
-    />
-
-    <!-- רצועת טאבים — אחד ל-`DocumentSession` פתוח. ראו „ריבוי מסמכים” ליד `sessions` בסקריפט. -->
-    <DocumentTabsBar
-      :tabs="documentTabs"
-      :active-id="documentIdView"
-      @select-tab="onDocumentTabSelect"
-      @close-tab="onDocumentTabClose"
-      @new-tab="onDocumentTabNew"
-    />
-
-    <!-- רצועת הכלים (Ribbon) -->
-    <Ribbon
-      v-model:active-tab="ribbonTab"
-      v-model:collapsed="ribbonCollapsed"
-      :has-document="hasDocument"
-      :has-pdf-export="supportsPdfExport"
-      :is-saving="saveSnapshot.isSaving"
-      :is-opening="isOpening"
-      :book-completion-enabled="bookCompletionEnabled"
-      @new-doc="onNewDocument"
-      @open-doc="onPickAndOpen"
-      @save-doc="onSave(false)"
-      @save-as-doc="onSave(true)"
-      @export-doc="onExportDocx"
-      @print-doc="onPrint"
-      @export-pdf="onExportPdf"
-      @export-otzaria="onExportOtzaria"
-      @about="isAboutOpen = true"
-      @shortcuts-help="isShortcutsHelpOpen = true"
-      @exit-app="onExit"
-      @open-find="openFindDialog('find')"
-      @open-replace="openFindDialog('replace')"
-      @open-link="() => void linkDialog.open()"
-      @toggle-focus-mode="toggleFocusMode"
-      @insert-citation="onInsertCitation"
-      @search-otzaria="onSearchOtzaria"
-      @open-library="onOpenLibrary"
-      @manage-macros="isMacrosOpen = true"
-      @macro-record="onMacroRecord"
-      @macro-play="onMacroPlay"
-      @toggle-book-completion="onToggleBookCompletion"
-    />
-
-    <!-- שורת הסרגל האופקי. הפינה שלפניו רחבה כמו הסרגל האנכי, וכך שניהם
-         מתחילים בדיוק במקום שבו אזור המסמך מתחיל — כמו ב-Word. -->
-    <div class="ruler-row">
-      <div
-        v-show="isRulerVisible"
-        class="ruler-corner"
+    <!--
+      הפסים העליונים כקבוצה אחת: כותרת, טאבי מסמכים, רצועה וסרגל אופקי.
+      העטיפה אינה קוסמטית — היא מה שמאפשר למצב מיקוד להוציא את כולם
+      מהזרימה במכה אחת ולהחזיר אותם כלוח צף אחד, בלי שהמסמך יזוז. ראו
+      `.shell-top` ב-`<style>`.
+    -->
+    <div class="shell-top">
+      <!-- פס עליון -->
+      <TitleBar
+        :title="title"
+        :is-dirty="saveSnapshot.isDirty"
+        :is-saving="saveSnapshot.isSaving"
+        :is-save-error="saveSnapshot.state === 'error'"
+        :save-state-text="saveStateMessage"
+        :autosave-enabled="autosaveEnabled"
+        :can-undo="canUndo"
+        :can-redo="canRedo"
+        @save="onSave(false)"
+        @undo="onUndo"
+        @redo="onRedo"
+        @open-find="openFindDialog('find')"
+        @toggle-autosave="toggleAutosave"
+        @update-title="onTitleUpdate"
       />
-      <DocumentRuler
-        :visible="isRulerVisible"
-        :reading="rulerReading"
-        :host="rulerHost"
-        :viewport-source="rulerViewport"
-        :unit="rulerUnit"
-        :zoom="zoom.value"
-        :editable="isDocumentEditable"
-        @changed="onRulerChanged"
+
+      <!-- רצועת טאבים — אחד ל-`DocumentSession` פתוח. ראו „ריבוי מסמכים” ליד `sessions` בסקריפט. -->
+      <DocumentTabsBar
+        :tabs="documentTabs"
+        :active-id="documentIdView"
+        @select-tab="onDocumentTabSelect"
+        @close-tab="onDocumentTabClose"
+        @new-tab="onDocumentTabNew"
       />
+
+      <!-- רצועת הכלים (Ribbon) -->
+      <Ribbon
+        v-model:active-tab="ribbonTab"
+        v-model:collapsed="ribbonCollapsed"
+        :has-document="hasDocument"
+        :has-pdf-export="supportsPdfExport"
+        :is-saving="saveSnapshot.isSaving"
+        :is-opening="isOpening"
+        :book-completion-enabled="bookCompletionEnabled"
+        @new-doc="onNewDocument"
+        @open-doc="onPickAndOpen"
+        @save-doc="onSave(false)"
+        @save-as-doc="onSave(true)"
+        @print-doc="onPrint"
+        @export-pdf="onExportPdf"
+        @export-otzaria="onExportOtzaria"
+        @about="isAboutOpen = true"
+        @shortcuts-help="isShortcutsHelpOpen = true"
+        @exit-app="onExit"
+        @open-find="openFindDialog('find')"
+        @open-replace="openFindDialog('replace')"
+        @open-link="() => void linkDialog.open()"
+        @toggle-focus-mode="toggleFocusMode"
+        @insert-citation="onInsertCitation"
+        @search-otzaria="onSearchOtzaria"
+        @open-library="onOpenLibrary"
+        @manage-macros="isMacrosOpen = true"
+        @macro-record="onMacroRecord"
+        @macro-play="onMacroPlay"
+        @toggle-book-completion="onToggleBookCompletion"
+      />
+
+      <!-- שורת הסרגל האופקי. הפינה שלפניו רחבה כמו הסרגל האנכי, וכך שניהם
+           מתחילים בדיוק במקום שבו אזור המסמך מתחיל — כמו ב-Word. -->
+      <div class="ruler-row">
+        <div
+          v-show="isRulerVisible"
+          class="ruler-corner"
+        />
+        <DocumentRuler
+          :visible="isRulerVisible"
+          :reading="rulerReading"
+          :host="rulerHost"
+          :viewport-source="rulerViewport"
+          :unit="rulerUnit"
+          :zoom="zoom.value"
+          :editable="isDocumentEditable"
+          @changed="onRulerChanged"
+        />
+      </div>
     </div>
 
     <!-- אזור המסמך: הסרגל האנכי ולצדו ה-stack שהמנוע מצייר בתוכו -->
@@ -129,6 +136,31 @@
         :revision="spellcheckRevision"
       />
     </div>
+
+    <!--
+      דרך יציאה שרואים. `Esc` ו-`F11` עובדים, אבל שניהם דורשים לדעת אותם —
+      ובמצב מיקוד אין על המסך אף פקד שרומז עליהם. הכפתור יושב בפינה התחתונה
+      של החלון — **מעל העמוד ולא לצדו**: העמוד מרוכז ורחב כמעט כמו החלון,
+      ובחלון של 800 פיקסלים (וגם של 400) `elementFromPoint` מתחתיו מחזיר
+      `.superdoc-page`. לכן הוא נשאר עמום עד ריחוף, וזה כל מה שמפריד אותו
+      מהטקסט. המיקום, השכבה וההנמקה המלאה — ב-`.focus-exit` שב-`<style>`.
+    -->
+    <button
+      v-if="isFocusMode"
+      type="button"
+      class="focus-exit"
+      aria-label="יציאה ממצב מיקוד"
+      data-tip-title="יציאה ממצב מיקוד"
+      data-tip-shortcut="Esc"
+      @pointerdown.prevent
+      @click="toggleFocusMode"
+    >
+      <SvgIcon
+        name="focusMode"
+        :size="16"
+      />
+      <span>יציאה ממצב מיקוד</span>
+    </button>
 
     <!-- תפריט הלחצן הימני. אחרי אזור המסמך ולפני הדיאלוגים, כמו ה-z-index שלו. -->
     <ContextMenu
@@ -213,6 +245,7 @@
 import {
   ref,
   provide,
+  nextTick,
   onMounted,
   onUnmounted,
   computed,
@@ -243,6 +276,7 @@ import {
   COMMAND_REPORTER,
   STATUS_NOTIFIER,
   DOCUMENT_GENERATION,
+  FONT_MEMORY,
   FONT_OPTIONS,
   READOUT_SELECTION,
   SPELLCHECK,
@@ -297,8 +331,26 @@ import {
   type SearchOutcome,
   type SearchState,
 } from './engine/search';
-import { createEditorSwap, type EditorSwap, type OpenEditor } from './sessions/editor-swap';
-import { createDocumentSession, type DocumentSession } from './sessions/document-session';
+import {
+  createEditorSwap,
+  HOST_CLASS,
+  PENDING_CLASS,
+  type EditorSwap,
+  type OpenEditor,
+} from './sessions/editor-swap';
+import {
+  applyPaneScroll,
+  guardPaneScroll,
+  readPaneScroll,
+  repairPaneScroll,
+  type PaneScroll,
+} from './sessions/pane-scroll';
+import {
+  createDocumentSession,
+  emptyUiSnapshot,
+  type DocumentSession,
+  type DocumentUiSnapshot,
+} from './sessions/document-session';
 import {
   createDocumentLoad,
   idleLoadSnapshot,
@@ -369,7 +421,6 @@ import {
 import { NO_VBA, type DocumentVba } from './engine/vba-import';
 import { exportPdfDocument, pdfSuggestedName, printDocument } from './engine/print';
 import { buildOtzariaBook, otzariaBookFileName } from './engine/otzaria-book';
-import { downloadBlob } from './host/download';
 import {
   beginBinaryWrite,
   uploadBytes,
@@ -380,7 +431,8 @@ import {
   type UserFile,
   type WriteTicket,
 } from './host/files';
-import { decideDocumentSwitch } from './sessions/open-flow';
+import { decideDocumentSwitch, decidePendingTabClose } from './sessions/open-flow';
+import { decideSleep, type SleepCandidate } from './sessions/sleep-policy';
 import { call, confirm, isAvailable, notifyError, on, tryCall } from './host/otzaria-client';
 import { supportsPdfExport } from './host/host-capabilities';
 import { splashDone } from './host/splash';
@@ -400,14 +452,19 @@ import {
   activeEntry,
   createDocumentSessionId,
   decideDraftRecovery,
+  defaultView,
   documentViewFor,
   draftAgeLabel,
   draftPathFor,
+  emptyDocumentEntry,
   normalizeSession,
+  sessionForEntry,
   sessionFromLastDocument,
   SESSION_VERSION,
   type DocumentSessionId,
+  type SessionDocumentEntry,
   type SessionState,
+  type SessionView,
 } from './sessions/session-state';
 import { createSessionKeeper, type SessionKeeper } from './sessions/session-keeper';
 import {
@@ -423,8 +480,10 @@ import {
   readWorkspaceBytes,
   writeWorkspaceBytes,
 } from './host/workspace';
-import { onPluginHidden } from './host/lifecycle';
+import { onPluginHidden, onPluginShown } from './host/lifecycle';
 import { revealZone, type RevealBounds, type RevealZone } from './composables/focus-mode';
+import { enterFullscreen, exitFullscreen, isFullscreen, watchFullscreen } from './composables/window-fullscreen';
+import SvgIcon from './ui/icons/SvgIcon.vue';
 import { selectWholeDocument } from './engine/clipboard';
 import {
   DEFAULT_FONT_SIZE_PT,
@@ -436,6 +495,7 @@ import {
 import { toggleVertAlign } from './engine/vert-align';
 import { insertNote } from './engine/footnotes';
 import { startParagraphOnNewPage, pageBreakTracker } from './engine/page-break';
+import { createFontMemory } from './composables/use-font-controls';
 import { createLinkDialog } from './composables/use-link-dialog';
 import { createShellActionRunner } from './ui/shortcuts/actions';
 import { useContextMenu } from './composables/use-context-menu';
@@ -463,6 +523,13 @@ provide(COMMAND_ADAPTER, commandAdapter);
  */
 const fontOptions = shallowRef<FontOptions>(fallbackFontOptions());
 provide(FONT_OPTIONS, fontOptions);
+
+/**
+ * הזיכרון של בוררי הגופן. מסופק מכאן ולא נוצר בפקד, מפני שאותם שני בוררים
+ * מופיעים בשני מקומות — הרצועה ותפריט הלחצן הימני — וזיכרון פרטי לכל אחד מהם
+ * פירושו שהם מציגים ערכים שונים באותו רגע. ראו composables/use-font-controls.ts.
+ */
+provide(FONT_MEMORY, createFontMemory());
 
 /**
  * שני המקורות שמרכיבים את הבורר, ולמה הם נפרדים.
@@ -613,7 +680,7 @@ const ribbonCollapsed = ref(false);
 // חצים, ולחיצה כפולה שמכווצת — ומטפל היה צריך להיקרא בכל אחד מהם. השינוי
 // עצמו הוא מה שמעניין, ולכן מאזינים לו ולא למי שגרם לו.
 watch([ribbonTab, ribbonCollapsed], ([tab, collapsed]) => {
-  keeper?.updateView({ ribbonTab: tab, ribbonCollapsed: collapsed });
+  updateShellView({ ribbonTab: tab, ribbonCollapsed: collapsed });
 });
 
 const isFindOpen = ref(false);
@@ -830,9 +897,128 @@ const saveSnapshot = ref<SaveSnapshot>({
 const sessions = shallowReactive(new Map<DocumentSessionId, DocumentSession>());
 const activeSession = shallowRef<DocumentSession | null>(null);
 
+/**
+ * מה שמקדם את רצועת הטאבים כשמצב של טאב **ברקע** משתנה.
+ *
+ * `sessions` הוא `shallowReactive` בכוונה (ראו שם: הרשומות מחזיקות
+ * `HTMLElement`/`SuperDoc` שאסור לעטוף ב-Proxy), ולכן כתיבה **לתוך**
+ * `session.ui` אינה תלות ריאקטיבית של אף `computed`. לטאב הפעיל זה אינו
+ * מורגש — `documentTabs` קורא עליו את הסינגלטונים (`title`, `saveSnapshot`)
+ * שהם `ref` אמיתיים — אבל טאב ברקע נקרא מ-`session.ui`, ואיש לא מרנדר מחדש
+ * כשהוא משתנה.
+ *
+ * זה נמדד ולא הונח: שמירה אוטומטית של טאב ברקע דיווחה `isDirty` דרך
+ * `onStateChange` שלו, והנקודה על הטאב הופיעה רק במעבר הטאב הבא — כלומר
+ * המשתמש רואה „נשמר” על מסמך שיש בו שינויים, עד שהוא במקרה יעבור.
+ *
+ * מונה ולא הפיכת `ui` ל-`reactive`: רצועת הטאבים קוראת ממנו בדיוק שני
+ * שדות (שם ונקודה), והעטיפה הייתה נוגעת בשלושים אתרי כתיבה ובאובייקטים
+ * שדווקא אסור לעטוף.
+ */
+const tabStripRevision = ref(0);
+
+/** מסמנת שמה שרצועת הטאבים מציגה על טאב ברקע השתנה. */
+function notifyTabStrip(): void {
+  tabStripRevision.value += 1;
+}
+
+/**
+ * כמה מסמכים מותר שיחזיקו מנוע חי בו-זמנית.
+ *
+ * ## למה יש תקרה בכלל
+ *
+ * כל מסמך פתוח הוא מופע SuperDoc מלא — חבילת מנוע, workers, ועותק מפורס של
+ * המסמך. עשרה טאבים פתוחים בלי תקרה הם עשרה מופעים כאלה בזיכרון, גם אם
+ * המשתמש נגע בשניים מהם בשעה האחרונה. מי שעובד על מכונה צנועה משלם על זה
+ * בכל התוסף, לא רק בטאב שהוא שכח.
+ *
+ * ## למה דווקא שלושה
+ *
+ * שלושה הם „זה שאני עליו, וזה שאני מדלג אליו וחוזר, ועוד אחד” — התרחיש
+ * שבגללו ריבוי המסמכים קיים (מצטטים ממאמר אחד לשני). כל טאב מעבר לזה כמעט
+ * תמיד ממתין דקות, ופתיחתו מחדש עולה פחות מלהחזיק אותו. משתמש עם שלושה
+ * טאבים או פחות — הרוב המוחלט — אינו פוגש את המנגנון הזה כלל.
+ *
+ * מה שקורה לטאב הרביעי מתואר ב-`sleepTab`, ובראשי תיבות: הוא הופך לבדיוק
+ * אותו „ממתין לטעינה” של טאב ששוחזר מהפעלה קודמת — אותו מסלול, אותה רשומה,
+ * אותה טיוטה — ונפתח מחדש כשחוזרים אליו.
+ */
+const MAX_LIVE_DOCUMENTS = 3;
+
+/**
+ * מזהי הטאבים לפי סדר השימוש, החדש בראש. זה מה שקובע מי נרדם ראשון, ולכן
+ * הוא מתעדכן ב-`activateTab` — הרגע היחיד שבו „מתי השתמשו בו” משתנה.
+ */
+const recentTabs: DocumentSessionId[] = [];
+
+/** סבב הרדמה אחד בכל רגע: הוא ממתין ל-`flush`, ושניים היו נכנסים זה בזה. */
+let trimming = false;
+
 /** ראו את ההסבר ליד `sessions`. עוטפת כתיבה שמקורה בטאב שעלול כבר להיות ברקע. */
 function guardIfActive(session: DocumentSession, run: () => void): void {
   if (activeSession.value === session) run();
+}
+
+/**
+ * מיכל הגלילה של הטאב — ה-host שה-swap יצר בתוך הפאנל שלו
+ * (sessions/editor-swap.ts). `null` כשאין מסמך פתוח בטאב, למשל טאב שממתין
+ * לטעינה או כזה שנרדם.
+ */
+function documentScrollHost(session: DocumentSession): HTMLElement | null {
+  // `:not(PENDING_CLASS)` ולא ה-host הראשון: בזמן פתיחה יושבים בפאנל שניים —
+  // הפעיל, והמועמד שעדיין נבנה (sessions/editor-swap.ts). מיקום גלילה שנקרא
+  // מהמועמד הוא תמיד אפס, וכתיבה אליו נמחקת כשהוא מוסר.
+  const host = session.pane.querySelector(`.${HOST_CLASS}:not(.${PENDING_CLASS})`);
+  return host instanceof HTMLElement ? host : null;
+}
+
+/**
+ * מפרק את השומר של הגלילה בטאב הפעיל. אחד בכל רגע — ראו `restorePaneScroll`.
+ */
+let paneScrollGuard: (() => void) | null = null;
+
+/**
+ * מחזירה לטאב שנכנס את מיקום הגלילה שנשמר בו.
+ *
+ * ## שלוש פעולות, ולא אחת
+ *
+ * **השמה, ועוד אחת בפריים הבא.** הפאנל בדיוק יצא מ-`display: none`, והדפדפן
+ * מחשב את גובה התוכן שלו מחדש. השמה שקורית לפני שהחישוב הזה הסתיים נחתכת
+ * לגובה שעדיין אינו נכון (`scrollTop` נצמד למקסימום האפשרי באותו רגע). שתיהן
+ * אידמפוטנטיות — ראו `applyPaneScroll`.
+ *
+ * **ואחריהן שומר על אירוע הגלילה הראשון**, וזה מה שמתקן את הבאג שנשאר פתוח:
+ * שתי ההשמות נמדדו כמצליחות (`scrollTop` הוא 720 בכל נקודות הזמן — מיד,
+ * מיקרו-משימה, rAF, rAF שני ו-150ms), ואז **גלגלת אחת** החזירה אפס. הכתיבה
+ * היא של המנוע ולא של הדפדפן, והיא קורית מתוך הגלגלת עצמה — כלומר אחרי כל
+ * מה שאנחנו יכולים לעשות מכאן. ההנמקה המלאה והמדידה: `sessions/pane-scroll.ts`
+ * ו-`docs/engine-gaps.md`.
+ *
+ * ## למה השומר נדרך בתוך ה-rAF ולא לפניו
+ *
+ * ההשמה הראשונה עלולה להיחתך (ראו למעלה), ואירוע הגלילה שהיא יורה היה נראה
+ * לשומר בדיוק כמו „המשתמש גלל למקום אחר” — כלומר מכבה אותו לפני שהמנוע כתב
+ * בכלל. אירועי גלילה נורים לפני קריאות ה-rAF של אותו פריים, ולכן דריכה בתוך
+ * ה-rAF היא הרגע הראשון שבו כבר אין הד תלוי באוויר.
+ */
+function restorePaneScroll(session: DocumentSession, scroll: PaneScroll): void {
+  const arm = (): void => {
+    paneScrollGuard?.();
+    paneScrollGuard = guardPaneScroll(documentScrollHost(session), scroll);
+  };
+
+  applyPaneScroll(documentScrollHost(session), scroll);
+  if (typeof requestAnimationFrame !== 'function') {
+    arm();
+    return;
+  }
+  requestAnimationFrame(() => {
+    // רק אם הוא עדיין הפעיל: מעבר טאב מהיר יותר מפריים היה מחזיר את הגלילה
+    // של הטאב הקודם לתוך זה שנכנס אחריו.
+    if (activeSession.value !== session) return;
+    applyPaneScroll(documentScrollHost(session), scroll);
+    arm();
+  });
 }
 
 let swap: EditorSwap | null = null;
@@ -872,7 +1058,27 @@ let documentId: DocumentSessionId = createDocumentSessionId();
 const documentIdView = ref<DocumentSessionId>(documentId);
 /** מבטל את ההאזנה למעבר לרקע. */
 let hiddenListener: (() => void) | null = null;
+/** מבטל את ההאזנה לחזרה מהרקע. ראו `onPluginShown` ב-host/lifecycle.ts. */
+let shownListener: (() => void) | null = null;
+/**
+ * טאב שממתין לטעינה נפתח כרגע. ראו `openPendingTab` — הוא מכסה את החלון
+ * שלפני ש-`openDocument` מרימה את `isOpening` בעצמה.
+ */
+let pendingTabLoad = false;
+
+/**
+ * האם אסור להתחיל פתיחה או להחליף טאב כרגע.
+ *
+ * `openDocumentInto` כותב לטאב הפעיל לכל אורך ריצתו, ולכן כל מי שיכול להחליף
+ * את הטאב הפעיל או להתחיל פתיחה שנייה חייב לשאול כאן — לא את `isOpening`
+ * לבדו, שאינו מכסה את שלב ההכנה של `openPendingTab`.
+ */
+function isOpenBusy(): boolean {
+  return isOpening.value || pendingTabLoad;
+}
 let contextMenuListener: (() => void) | null = null;
+/** מבטל את ההאזנה ליציאה ממסך מלא שלא באה מאיתנו. */
+let fullscreenListener: (() => void) | null = null;
 
 const saveStateMessage = computed(() => {
   const state = saveSnapshot.value.state;
@@ -999,6 +1205,9 @@ function initSaveCoordinator(getSession: () => DocumentSession): SaveCoordinator
     onStateChange: (snapshot) => {
       const session = getSession();
       session.ui.saveSnapshot = snapshot;
+      // הקואורדינטור של טאב ברקע מדווח על **המסמך שלו**, וזה מה שמזיז את
+      // הנקודה שברצועה. ראו `tabStripRevision`.
+      notifyTabStrip();
       guardIfActive(session, () => {
         saveSnapshot.value = snapshot;
       });
@@ -1072,10 +1281,13 @@ function initSessionKeeper(getSession: () => DocumentSession, id: DocumentSessio
 
 /**
  * הרשומה הנשמרת בין הפעלות היא של **כל** הטאבים הפתוחים, לא רק של מי שכתב —
- * כל `SessionKeeper` יודע לכתוב רק את הרשומה שלו (`withActiveEntry` על
- * `emptySession()`, ראו session-state.ts), ולכן כאן מרכיבים מחדש את המערך
- * המלא מכל הטאבים בכל פעם שאחד מהם משנה משהו. `activeId`/`view` הם תמיד
- * של הטאב הפעיל — ראו את ההחלטה על שחזור בדוח.
+ * כל `SessionKeeper` מחזיק את הרשומה שלו בלבד (`sessionForEntry`, ראו
+ * session-state.ts), ולכן כאן מרכיבים מחדש את המערך המלא מכל הטאבים בכל פעם
+ * שאחד מהם משנה משהו. זו גם הצורה שממנה `restoreTabs` בונה את הטאבים בעלייה
+ * הבאה, וזו הסיבה שהיא חייבת להיות שלמה: מה שאינו כאן פשוט לא ייפתח.
+ *
+ * `activeId` ו-`view` נלקחים מהטאב הפעיל. `view` משותף לכל הטאבים (ראו
+ * `updateShellView`), ולכן זו אינה בחירה שרירותית אלא קריאה של אותו ערך.
  */
 function persistCombinedSession(session: DocumentSession, state: SessionState): Promise<void> {
   const documents: SessionState['documents'] = [];
@@ -1095,6 +1307,25 @@ function persistCombinedSession(session: DocumentSession, state: SessionState): 
     view: active.keeper.state.view,
   };
   return saveSessionRecord(combined);
+}
+
+/**
+ * מצב המעטפת — הלשונית ברצועה, הכיווץ, מצב המיקוד — לכל הטאבים.
+ *
+ * ## למה לכולם ולא לפעיל בלבד
+ *
+ * ההפרדה שבראש sessions/session-state.ts אומרת ש-`view` שייך למי שיושב מול
+ * המסך ואחת לכל ההפעלה, בשונה מהמסמך והסמן ששייכים לטאב. אבל הזוכר הוא
+ * פר-טאב, וכל אחד מחזיק עותק משלו — ומה שנכתב ל-storage הוא של הטאב הפעיל
+ * (`persistCombinedSession`). כתיבה לפעיל בלבד פירושה שהעדפה שנבחרה בטאב א'
+ * נעלמת אם המשתמש סוגר את התוסף כשהוא עומד על טאב ב': ב' מעולם לא שמע עליה,
+ * והוא זה שכותב. נמדד בשער `check:session` — הלשונית „הפניות” חזרה כ„בית”.
+ *
+ * `zoom` **אינו** עובר כאן, ובכוונה: „150%” הוא משפט על מסמך מסוים (ראו
+ * `documentViewFor`), והוא מדווח פר-מסמך מהמנוע עצמו.
+ */
+function updateShellView(patch: Partial<SessionView>): void {
+  for (const session of sessions.values()) session.keeper.updateView(patch);
 }
 
 /**
@@ -1132,11 +1363,46 @@ function createOpenEditorForSession(session: DocumentSession): OpenEditor {
 }
 
 /**
+ * תמונת המצב שטאב ששוחזר מציג **לפני** שהמסמך שלו נטען.
+ *
+ * שלושת השדות הם בדיוק מה שרצועת הטאבים קוראת (`sessionDisplayTitle`,
+ * `sessionIsDirty`) ומה שהפס העליון יראה אם יעברו אליו לפני שהפתיחה הסתיימה.
+ * „לא נשמר” נגזר מקיום הטיוטה ברשומה, וזו אמת ולא קישוט: טיוטה פירושה עבודה
+ * שאינה בדיסק, בדיוק כמו הנקודה שמופיעה על טאב פתוח.
+ */
+function restoredUiSnapshot(entry: SessionDocumentEntry, fallbackTitle?: string): DocumentUiSnapshot {
+  const base = emptyUiSnapshot();
+  const remembered = entry.document;
+  return {
+    ...base,
+    title: remembered ? stripWordExtension(remembered.name) : (fallbackTitle ?? base.title),
+    saveSnapshot: {
+      ...base.saveSnapshot,
+      isDirty: entry.draft !== null,
+      targetToken: remembered?.writable ? remembered.token : null,
+      name: remembered?.name ?? null,
+    },
+  };
+}
+
+interface NewTabOptions {
+  /** ברירת המחדל: מזהה חדש. נמסר בפירוש כשהטאב נוצר מרשומה שמורה. */
+  id?: DocumentSessionId;
+  /**
+   * הרשומה שהטאב נוצר ממנה בשחזור ההפעלה, ומצב התצוגה המשותף שלצידה. נוכחותה
+   * היא שהופכת אותו ל„ממתין לטעינה” — ראו „טעינה עצלה” ב-`restoreTabs`.
+   */
+  restore?: { entry: SessionDocumentEntry; view: SessionView };
+}
+
+/**
  * טאב חדש, ריק — עדיין בלי מסמך פתוח בתוכו. `pane` נוצר מוסתר: `activateTab`
  * הוא מי שחושף אותו, ולא היצירה עצמה — טאב שנוצר ברקע (למשל בזמן שחזור
  * ההפעלה) אסור לו להבליח לרגע לפני שההחלטה מי פעיל נופלת.
  */
-function createNewDocumentSession(id: DocumentSessionId = createDocumentSessionId()): DocumentSession {
+function createNewDocumentSession(options: NewTabOptions = {}): DocumentSession {
+  const restore = options.restore;
+  const id = options.id ?? createDocumentSessionId();
   const pane = document.createElement('div');
   pane.className = 'document-pane';
   pane.style.display = 'none';
@@ -1155,7 +1421,23 @@ function createNewDocumentSession(id: DocumentSessionId = createDocumentSessionI
     ),
     save: initSaveCoordinator(getSession),
     keeper: initSessionKeeper(getSession, id),
+    pendingRestore: restore !== undefined,
+    ui: restore ? restoredUiSnapshot(restore.entry) : undefined,
   });
+  // הזוכר מאמץ את הרשומה **של הטאב הזה בלבד** — ההנמקה ליד `sessionForEntry`
+  // ב-session-state.ts. לפני `sessions.set`, כדי שהרשומה המשולבת שתיכתב
+  // בעקבות טאב אחר לא תתפוס אותו רגע אחד עם רשומה ריקה במקומו.
+  if (restore) session.keeper.adopt(sessionForEntry(restore.entry, restore.view));
+  // טאב חדש נולד עם `defaultView()`, ומרגע שהוא הפעיל **הוא** זה שכותב את
+  // `view` לרשומה (`persistCombinedSession`) — כלומר פתיחת טאב הייתה מוחקת
+  // מה-storage את הלשונית, הכיווץ ומצב המיקוד שהמשתמש בחר. ראו `updateShellView`.
+  else {
+    session.keeper.updateView({
+      ribbonTab: ribbonTab.value,
+      ribbonCollapsed: ribbonCollapsed.value,
+      focusMode: isFocusMode.value,
+    });
+  }
   session.save.setAutosaveEnabled(autosaveEnabled.value);
   sessions.set(session.id, session);
   // ידית QA: כל הטאבים הפתוחים, לפי מזהה — ראו התיוג הבודד ב-create-editor.ts
@@ -1196,6 +1478,9 @@ function stashActiveInto(session: DocumentSession): void {
     engineFontSlice: engineFontSlice.value,
     readoutSelection: readoutSelection.value,
     documentVba: documentVba.value,
+    // נקרא **לפני** ש-`activateTab` מסתיר את הפאנל: ברגע שהוא
+    // `display: none` המספר הזה כבר אבד. ראו sessions/pane-scroll.ts.
+    scroll: readPaneScroll(documentScrollHost(session)),
     saveExtension: saveExtension.value,
   };
   swap = null;
@@ -1211,7 +1496,11 @@ function stashActiveInto(session: DocumentSession): void {
 
 /**
  * טוענת לתוך הסינגלטונים ברמת המודול את מה שהטאב הזה מציג — ההופכי המדויק
- * של `stashActiveInto`.
+ * של `stashActiveInto`, בשדה אחד למעט: **מיקום הגלילה**.
+ *
+ * הוא נשמר ב-`stashActiveInto` אבל מוחזר ב-`activateTab` ולא כאן, ולא מטעמי
+ * נוחות: החזרה שלו חייבת לקרות **אחרי** ש-`display` של הפאנל חוזר, כי לפני
+ * כן אין לו קופסה שאפשר לגלול בה. ראו `restorePaneScroll`.
  */
 function restoreFromSession(session: DocumentSession): void {
   const ui = session.ui;
@@ -1266,6 +1555,10 @@ function restoreFromSession(session: DocumentSession): void {
 function activateTab(session: DocumentSession): void {
   if (activeSession.value === session) return;
 
+  // השומר שייך לטאב שיוצא, והוא מאזין ל-host שלו. ראו `restorePaneScroll`.
+  paneScrollGuard?.();
+  paneScrollGuard = null;
+
   const previous = activeSession.value;
   if (previous) {
     stashActiveInto(previous);
@@ -1275,6 +1568,148 @@ function activateTab(session: DocumentSession): void {
   session.pane.style.display = '';
   restoreFromSession(session);
   activeSession.value = session;
+  // אחרי החשיפה ואחרי ההשמה ל-`activeSession`: הראשונה מחזירה לפאנל קופסה
+  // שאפשר לגלול בה, והשנייה היא מה שהבדיקה שבפריים הבא נשענת עליה.
+  restorePaneScroll(session, session.ui.scroll);
+  // ובמצב מיקוד — גם הפוקוס. הלחיצה על הטאב באה מהלוח שנחשף, והפוקוס נשאר על
+  // כפתור הטאב; ברגע שהלוח נסגר `visibility: hidden` מבריח אותו ל-`<body>`
+  // (נמדד `active: BODY`), וההקלדה נעלמת בלי שום סימן על המסך. אותו טעם בדיוק
+  // כמו ב-`toggleFocusMode`, ורק שם: מחוץ למצב מיקוד רצועת הטאבים נשארת
+  // גלויה, ופוקוס שממשיך לשבת על הטאב שנלחץ הוא ההתנהגות הנכונה.
+  const opened = activeSuperdoc.value;
+  if (isFocusMode.value && opened) focusOpenedDocument(opened);
+  noteTabUsed(session);
+  void trimLiveDocuments();
+
+  // „מי היה פעיל” הוא חלק מהרשומה, והוא משתנה בדיוק כאן. בלי הכתיבה הזאת
+  // הוא נשמר רק כשמשהו אחר גרם לכתיבה (עריכה, יציאה מסודרת), ומעבר טאב
+  // שלא לווה בעריכה היה חוזר בהפעלה הבאה לטאב הקודם.
+  //
+  // מיידית ולא מושהית, בשונה מ-`schedulePersist` של הזוכר: ההשהיה שם קיימת
+  // כדי לא לכתוב על כל תו שנקלד, וכאן המקור הוא מחווה בודדת של המשתמש —
+  // ואחריה עלול לבוא מיד המעבר שסוגר את התוסף. כתיבה אחת ל-storage, בלי
+  // ייצוא ובלי טיוטה (ראו „שני קצבים” ב-session-keeper.ts).
+  void persistCombinedSession(session, session.keeper.state).catch((error: unknown) => {
+    console.warn('[otzaria-word] שמירת הטאב הפעיל נכשלה', error);
+  });
+}
+
+/** מסמנת את הטאב כאחרון שהשתמשו בו. ראו `recentTabs`. */
+function noteTabUsed(session: DocumentSession): void {
+  const at = recentTabs.indexOf(session.id);
+  if (at >= 0) recentTabs.splice(at, 1);
+  recentTabs.unshift(session.id);
+}
+
+/** כמה טאבים מחזיקים כרגע מנוע חי. ראו `MAX_LIVE_DOCUMENTS`. */
+function liveDocumentCount(): number {
+  let live = 0;
+  for (const session of sessions.values()) if (session.swap.current) live += 1;
+  return live;
+}
+
+/**
+ * מה שידוע על הטאב, בצורה שההחלטה מבינה. ההחלטה עצמה ב-sessions/sleep-policy.ts
+ * ולא כאן — היא קובעת אם עבודה של המשתמש נמחקת מהזיכרון, וקוד כזה חייב
+ * להיבדק.
+ */
+function sleepCandidate(session: DocumentSession, hasUnwrittenWork: boolean): SleepCandidate {
+  return {
+    isActive: session === activeSession.value,
+    isPending: session.pendingRestore,
+    hasEngine: session.swap.current !== null,
+    isOpening: session.swap.isOpening,
+    isSaving: session.save.snapshot.isSaving === true,
+    hasFile: activeEntry(session.keeper.state)?.document != null,
+    hasUnwrittenWork,
+  };
+}
+
+/**
+ * סינון מוקדם, לפני שמשקיעים `flush` שלם.
+ *
+ * `hasUnwrittenWork: false` כאן אינו טענה אלא „עוד לא ידוע”: לפני ה-`flush`
+ * כל מסמך שנערך מדווח שיש בו עבודה שלא נכתבה, וזו בדיוק העבודה שה-`flush`
+ * הולך לכתוב. השאלה האמיתית נשאלת אחריו, ב-`sleepTab`.
+ */
+function canSleepTab(session: DocumentSession): boolean {
+  return decideSleep(sleepCandidate(session, false)).action === 'sleep';
+}
+
+/**
+ * „טאב נרדם”: משחררת את המנוע של טאב ברקע, ומשאירה אותו ברצועה בדיוק כפי
+ * שנראה טאב ששוחזר מהפעלה קודמת — שם, סימון „לא נשמר”, ורשומה מלאה.
+ *
+ * ## למה זה בטוח, ואיפה הגבול
+ *
+ * שחרור מנוע הוא מחיקה של כל מה שיש בו בזיכרון. מה שמאפשר אותה הוא שהכול
+ * כבר נמצא במקום שאפשר לקרוא ממנו בחזרה: הקובץ בדיסק, העבודה שלא נשמרה
+ * בטיוטה, והסמן והזום ברשומה. `flush()` הוא מה שמוודא שזה נכון **עכשיו**
+ * ולא „בעוד עשר שניות”, ו-`decideSleep` הוא מי שבודק שהוא הצליח.
+ *
+ * שני דברים **אינם** חוזרים לטאב שנרדם, וזה כל המחיר: **היסטוריית ה-Undo**
+ * ומיקום הגלילה המדויק — לשניהם אין ייצוג לא בקובץ ולא ברשומה (הסמן כן
+ * חוזר, וממילא מחזיר את התצוגה לאזור הנכון). לכן התקרה אינה 1 ולכן הסדר
+ * הוא לפי שימוש אחרון: הטאב שנרדם הוא זה שהמשתמש לא נגע בו הכי הרבה זמן,
+ * ולא זה שהוא הרגע עזב.
+ *
+ * ההחלטה נשאלת שוב אחרי ה-`flush` ולא רק לפניו: הוא `await`, והמצב עשוי
+ * להשתנות בתוכו — המשתמש עבר לטאב הזה, שמירה התחילה בו, או שהוא נסגר.
+ */
+async function sleepTab(session: DocumentSession): Promise<void> {
+  await session.keeper.flush();
+
+  const decision = decideSleep(sleepCandidate(session, session.keeper.hasUnwrittenWork));
+  if (decision.action === 'keep') {
+    // רק הסיבה הזאת ראויה לשורה בלוג: כל השאר הן „לא עכשיו”, וזו אומרת
+    // שרשת הביטחון של הטיוטה אינה פרושה על המסמך הזה.
+    if (decision.reason === 'unwritten-work') {
+      console.info(`[otzaria-word] ${session.ui.title} נשאר בזיכרון — יש בו עבודה שלא נכתבה`);
+    }
+    return;
+  }
+
+  const entry = activeEntry(session.keeper.state);
+  if (!entry) return;
+
+  const title = session.ui.title;
+  session.pendingRestore = true;
+  session.slept = true;
+  session.swap.close();
+  // אחרי `close` ולא לפניו: הפירוק עצמו כותב לתמונת המצב של הטאב (ראו
+  // `editor.onDispose` ב-openDocumentInto), וכאן היא נקבעת סופית — נקייה
+  // ובלי הפניות למנוע שכבר אינו קיים.
+  session.ui = restoredUiSnapshot(entry, title);
+  // תמונת מצב חדשה לטאב שברקע — אותו טעם כמו ב-`onStateChange`.
+  notifyTabStrip();
+}
+
+/**
+ * מרדימה טאבים מעבר לתקרה, מהוותיק שבהם. ראו `MAX_LIVE_DOCUMENTS`.
+ *
+ * נקראת אחרי מעבר טאב ואחרי פתיחת מסמך — שתי הנקודות שבהן מספר המנועים
+ * החיים או סדר השימוש משתנים. שקטה לחלוטין כשאין מה לעשות, וזה המצב אצל
+ * כמעט כל משתמש.
+ */
+async function trimLiveDocuments(): Promise<void> {
+  if (trimming) return;
+  trimming = true;
+  try {
+    // עותק, ולא המערך עצמו: `sleepTab` ממתין, ומעבר טאב באמצע ההמתנה מזיז
+    // איברים ב-`recentTabs` (`noteTabUsed`) — סריקה על המערך החי הייתה
+    // מדלגת על מועמד או סורקת אותו פעמיים. מי שכבר אינו במפה מדולג ממילא.
+    const candidates = [...recentTabs].reverse();
+    for (const id of candidates) {
+      if (liveDocumentCount() <= MAX_LIVE_DOCUMENTS) return;
+      const candidate = sessions.get(id);
+      if (candidate && canSleepTab(candidate)) await sleepTab(candidate);
+    }
+  } catch (error) {
+    // שחרור זיכרון הוא שיפור, לא תנאי לשום דבר: כשל כאן משאיר מסמך פתוח.
+    console.warn('[otzaria-word] שחרור מסמך שברקע נכשל', error);
+  } finally {
+    trimming = false;
+  }
 }
 
 /**
@@ -1360,6 +1795,9 @@ async function openDocument(file?: UserFile, options: OpenOptions = {}): Promise
     // נקרא מה-swap ולא נקבע ל-false, כדי שפתיחה חדשה יותר שכבר בדרך לא
     // תיראה כמי שהסתיימה.
     isOpening.value = swap?.isOpening ?? false;
+    // מנוע חי נוסף נולד כאן — הנקודה השנייה שבה התקרה יכולה להישבר (הראשונה
+    // היא מעבר טאב). ראו `MAX_LIVE_DOCUMENTS`.
+    void trimLiveDocuments();
   }
 }
 
@@ -1429,8 +1867,12 @@ async function openDocumentInto(
       activeSuperdoc.value = null;
       activeEditorContainer.value = null;
     }
-    // בלי האיפוס הרצועה הייתה ממשיכה להחזיק את הקריאה של המסמך שנסגר.
-    readoutSelection.value = UNSETTLED_SELECTION;
+    // בלי האיפוס הרצועה הייתה ממשיכה להחזיק את הקריאה של המסמך שנסגר. מותנה
+    // בטאב: פירוק יכול לקרות גם על טאב שברקע (סגירת טאב, טאב שנרדם — ראו
+    // „ריבוי מסמכים” ליד `sessions`), ואיפוס גורף היה מוחק את הקריאה של
+    // המסמך שהמשתמש מסתכל עליו דווקא.
+    if (session) session.ui.readoutSelection = UNSETTLED_SELECTION;
+    if (!session || session === activeSession.value) readoutSelection.value = UNSETTLED_SELECTION;
   });
 
   // החיפוש שייך ל-session: ה-handle הוא של ה-controller של המופע, ומסמך חדש
@@ -1533,7 +1975,11 @@ async function openDocumentInto(
     readPage: () => readPageMargins(editor.superdoc),
     readIndents: () => readParagraphIndents(editor.superdoc),
     onChange: (next) => {
-      rulerReading.value = next;
+      // מושהה (`RULER_*_DEBOUNCE_MS`) ולכן עשוי לנחות אחרי מעבר טאב — ראו
+      // „ריבוי מסמכים” ליד `sessions`. בלי ההגנה, הסרגל של הטאב שעל המסך
+      // היה מציג את השוליים של מסמך אחר, וגרירת ידית הייתה מחשבת מהם.
+      if (session) session.ui.rulerReading = next;
+      if (!session || session === activeSession.value) rulerReading.value = next;
     },
   });
   ruler = sessionRuler;
@@ -1584,7 +2030,10 @@ async function openDocumentInto(
   const sessionPageBorders = createPageBorderModel({
     read: () => readPageBorders(editor.superdoc),
     onChange: (next) => {
-      pageBorders.value = next;
+      // מושהה, כמו הסרגל — ומכאן אותה הגנה בדיוק. שכבת הציור היא מופע יחיד
+      // מעל הפאנל הפעיל, ולכן קריאה של מסמך אחר נראית מיד על המסך.
+      if (session) session.ui.pageBorders = next;
+      if (!session || session === activeSession.value) pageBorders.value = next;
     },
   });
   pageBorderModel = sessionPageBorders;
@@ -1592,6 +2041,10 @@ async function openDocumentInto(
   sessionPageBorders.refreshNow();
   editor.onDispose(() => {
     sessionPageBorders.dispose();
+    // גם השדה שב-session, ולא רק הסינגלטון: טאב שנרדם (`sleepTab`) היה
+    // ממשיך להחזיק דרכו מודל מפורק שסגירתו לוכדת את ה-SuperDoc ההרוס —
+    // כלומר בדיוק הזיכרון שהשחרור נועד לפנות.
+    if (session && session.pageBorders === sessionPageBorders) session.pageBorders = null;
     if (pageBorderModel === sessionPageBorders) {
       pageBorderModel = null;
       pageBorders.value = null;
@@ -1606,7 +2059,8 @@ async function openDocumentInto(
   const sessionLineNumbering = createLineNumberingModel({
     read: () => readLineNumbering(editor.superdoc),
     onChange: (next) => {
-      lineNumbering.value = next;
+      if (session) session.ui.lineNumbering = next;
+      if (!session || session === activeSession.value) lineNumbering.value = next;
     },
   });
   lineNumberModel = sessionLineNumbering;
@@ -1614,6 +2068,7 @@ async function openDocumentInto(
   sessionLineNumbering.refreshNow();
   editor.onDispose(() => {
     sessionLineNumbering.dispose();
+    if (session && session.lineNumbers === sessionLineNumbering) session.lineNumbers = null;
     if (lineNumberModel === sessionLineNumbering) {
       lineNumberModel = null;
       lineNumbering.value = null;
@@ -1630,13 +2085,15 @@ async function openDocumentInto(
   const sessionFormattingMarks = createFormattingMarksModel({
     read: () => readFormattingMarksBlocks(editor.superdoc),
     onChange: (next) => {
-      formattingMarksBlocks.value = next;
+      if (session) session.ui.formattingMarksBlocks = next;
+      if (!session || session === activeSession.value) formattingMarksBlocks.value = next;
     },
   });
   formattingMarksModel = sessionFormattingMarks;
   if (session) session.formattingMarks = sessionFormattingMarks;
   editor.onDispose(() => {
     sessionFormattingMarks.dispose();
+    if (session && session.formattingMarks === sessionFormattingMarks) session.formattingMarks = null;
     if (formattingMarksModel === sessionFormattingMarks) {
       formattingMarksModel = null;
       formattingMarksBlocks.value = null;
@@ -1680,8 +2137,15 @@ async function openDocumentInto(
     sessionRuler.setEnabled(active);
   };
 
-  /** ההחלפה הייתה בחירה של המשתמש, ולכן היא זו שנשמרת להפעלה הבאה. */
+  /**
+   * ההחלפה הייתה בחירה של המשתמש, ולכן היא זו שנשמרת להפעלה הבאה.
+   *
+   * רק כשהטאב הזה על המסך: `void adapter.run('ruler')` שמתחת אינו מומתן,
+   * והדיווח שלו עשוי לנחות אחרי שהמשתמש כבר עבר טאב. העדפה שנכתבת ממסמך
+   * שאינו מוצג היא בדיוק „כיביתי את הסרגל והוא חזר לבד”.
+   */
   const rememberRulerVisible = (active: boolean): void => {
+    if (session && session !== activeSession.value) return;
     if (rulerPreference === active) return;
     rulerPreference = active;
     void saveRulerVisible(active);
@@ -1720,7 +2184,10 @@ async function openDocumentInto(
     editor.ui.selection.observe(() => {
       sessionMetrics.noteSelectionChanged();
       sessionRuler.noteSelectionChanged();
-      keeper?.noteChange();
+      // הזוכר **של הטאב הזה**, בדיוק כמו ב-`observeZoom` שמתחת: הסינגלטון
+      // מתאפס למשך מעבר טאב (`stashActiveInto`), ובטאב שברקע הוא כבר של
+      // מסמך אחר — כלומר תזוזת הסמן הייתה נרשמת אצל השכן, או נבלעת.
+      (session?.keeper ?? keeper)?.noteChange();
     })
   );
 
@@ -1775,8 +2242,10 @@ async function openDocumentInto(
   searchState.value = sessionSearch.getState();
   editor.onDispose(
     sessionSearch.subscribe((state) => {
+      // „3 מתוך 12” של מסמך אחר הוא בדיוק מה שההערה ליד `searchState` מזהירה
+      // ממנו: החיפוש-בזמן-הקלדה מושהה, והדיווח עשוי לנחות אחרי מעבר טאב.
       if (session) session.ui.searchState = state;
-      searchState.value = state;
+      if (!session || session === activeSession.value) searchState.value = state;
     })
   );
   editor.onDispose(() => {
@@ -1967,6 +2436,12 @@ async function restoreDocumentView(
 
 async function onSave(forceSaveAs = false): Promise<void> {
   if (!swap?.current || !save) return;
+  // כמו כל שאר מתחילי הפעולה בקובץ (`onPickAndOpen`, `onNewDocument`,
+  // `onDocumentTabSelect`): בזמן פתיחה `swap.current` הוא עדיין המסמך
+  // **הקודם**, ושמירה כאן הייתה מייצאת אותו — ועל מסמך חדש היא גם פותחת
+  // „שמור בשם” על מה שעומד להימחק בעוד רגע. אין כאן „לחיצה שנבלעת”: מסך
+  // הטעינה על המסך, והמשתמש רואה שהתוסף עסוק.
+  if (isOpenBusy()) return;
   // ההצעה נושאת את הסיומת: זה מה שהמשתמש רואה בדיאלוג „שמור בשם”, וכאן נקבע
   // אם מסמך המאקרו שלו יישאר `.docm`.
   const outcome = await save.saveNow({
@@ -2008,7 +2483,7 @@ function ensureOpenTargetTab(): void {
 }
 
 async function onPickAndOpen(): Promise<void> {
-  if (isOpening.value) return;
+  if (isOpenBusy()) return;
   try {
     const file = await pickDocxFile();
     if (!file) return;
@@ -2060,7 +2535,7 @@ async function onNewDocument(): Promise<void> {
   // כמו שאר מתחילי הפתיחה (onPickAndOpen/onDocumentTab*): הכפתור ברצועה
   // מנוטרל בזמן isOpening, אבל Ctrl+N מגיע דרך runShellAction ועוקף אותו —
   // בלי הבדיקה הזאת הוא היה פותח מסמך שני לתוך אותו טאב באמצע פתיחה ראשונה.
-  if (isOpening.value) return;
+  if (isOpenBusy()) return;
   ensureOpenTargetTab();
   if (save && swap && save.snapshot.isDirty) {
     const decision = await decideDocumentSwitch({
@@ -2130,19 +2605,6 @@ async function onExit(): Promise<void> {
   reportReader(await openLibrary());
 }
 
-async function onExportDocx(): Promise<void> {
-  const active = swap?.current;
-  if (!active) return;
-  try {
-    const extension = saveExtension.value;
-    const blob = retypeBlob(await exportDocx(active.superdoc), extension);
-    downloadBlob(blob, documentFileName(title.value, extension));
-    setStatus(`${title.value} יוצא ל-Word`);
-  } catch (error) {
-    setStatus(error instanceof Error ? error.message : 'הייצוא נכשל', true);
-  }
-}
-
 /**
  * הדפסה. הכפתור קרא ל-`window.print()` בלבד, ולא היה בפרויקט אף `@media print`
  * — כלומר הוא הדפיס את הממשק (נמדד ב-CDP). הגלון ב-styles/print.css, וקביעת
@@ -2208,8 +2670,9 @@ async function onExportPdf(): Promise<void> {
  * engine/otzaria-book.ts; כאן רק מסלול השמירה והדיווח.
  *
  * המסלול הוא מסלול השמירה הבינארית הרגיל (begin ← PUT ← commit עם דיאלוג
- * „שמור בשם”), עם סיומת `txt` — לא `downloadBlob`: הורדה לתיקיית ההורדות
- * הייתה מפספסת את הנקודה, שהיא לשים את הקובץ בתיקייה אישית של אוצריא.
+ * „שמור בשם”), עם סיומת `txt` — ולא הורדה דרך `<a download>`: תיקיית
+ * ההורדות הייתה מפספסת את הנקודה, שהיא לשים את הקובץ בתיקייה אישית של
+ * אוצריא. (זה גם מה שהוריד את „ייצוא ל-Word” מלשונית „קובץ” — ראו FileTab.vue.)
  *
  * אחרי שמירה מוצלחת נקרא `library.refreshUserBooks`: אם המשתמש שמר
  * לתיקייה אישית רשומה, הספר נקלט מיד; אחרת הסריקה פשוט לא תמצא דבר,
@@ -2344,22 +2807,79 @@ function sessionSaveExtension(session: DocumentSession): WordExtension {
 }
 
 /** רצועת הטאבים האמיתית — אחד לכל `DocumentSession` פתוח, לפי סדר הפתיחה. */
-const documentTabs = computed<DocumentTabItem[]>(() =>
-  Array.from(sessions.values()).map((session) => ({
+const documentTabs = computed<DocumentTabItem[]>(() => {
+  // התלות המפורשת, ראו `tabStripRevision`: שני השדות שמתחת נקראים על טאב
+  // ברקע מאובייקט פשוט, ובלי השורה הזאת שינוי בו אינו מרנדר מחדש.
+  void tabStripRevision.value;
+  return Array.from(sessions.values()).map((session) => ({
     id: session.id,
     title: sessionDisplayTitle(session),
     isDirty: sessionIsDirty(session),
-  })),
-);
+  }));
+});
 
 /**
  * מעבר טאב. חסום בזמן פתיחה: `openDocumentInto` כותב סינכרונית לתוך הטאב
  * הפעיל לכל אורך ריצתה (ראו ההערה שם), ומעבר באמצע היה כותב לטאב הלא נכון.
+ *
+ * טאב ששוחזר ועדיין לא נטען נפתח כאן, ברגע שעוברים אליו — זו „הטעינה
+ * העצלה” של `restoreTabs`, וזה הרגע היחיד שבה היא מתרחשת.
  */
 function onDocumentTabSelect(id: DocumentSessionId): void {
-  if (isOpening.value) return;
+  if (isOpenBusy()) return;
   const session = sessions.get(id);
-  if (session) activateTab(session);
+  if (!session) return;
+  activateTab(session);
+  if (session.pendingRestore) {
+    void openPendingTab(session).catch((error: unknown) => {
+      console.warn('[otzaria-word] טעינת הטאב נכשלה', error);
+    });
+  }
+}
+
+/**
+ * פותחת את המסמך של טאב ששוחזר, ברגע שעברו אליו.
+ *
+ * הדגל מכובה **לפני** ה-`await` הראשון ולא אחריו: הפתיחה מתחילה בפתירת
+ * ה-token, ורק אחריה `openDocument` מרימה את `isOpening` שחוסמת מעבר נוסף.
+ * בחלון שביניהן לחיצה חוזרת על אותו טאב הייתה מתחילה פתיחה שנייה של אותו
+ * מסמך לתוך אותו טאב.
+ *
+ * `keeper.state` הוא רשומת הטאב הזה בלבד (`sessionForEntry`, אומצה ביצירה),
+ * ולכן זו אותה פונקציה בדיוק שפותחת את הטאב הפעיל בעלייה — כולל שחזור
+ * הטיוטה, הסמן והזום, וכולל המסלול של קובץ שאינו נגיש יותר.
+ */
+async function openPendingTab(session: DocumentSession): Promise<void> {
+  session.pendingRestore = false;
+  /**
+   * הנעילה מורמת **לפני** ה-`await` הראשון, ולא נשענת על `isOpening` של
+   * `openDocument`.
+   *
+   * הפתיחה כאן מתחילה בשני סבבי גשר — פתירת ה-token וקריאת בייטי הטיוטה —
+   * ורק אחריהם `openDocument` מרימה את הדגל שלה. בחלון הזה שום דבר לא חסם
+   * מעבר טאב, ומעבר כזה מחליף את הסינגלטונים ברמת המודול (`restoreFromSession`):
+   * המסמך שנפתח היה נוחת בפאנל של הטאב **האחר**, מפרק את המסמך שהיה בו,
+   * ומצמיד את יעד השמירה שלו לקובץ הלא נכון. נמדד בביקורת; זה המסלול היחיד
+   * בקובץ שבו פתיחה מתחילה בלי שדבר מגן עליה.
+   */
+  pendingTabLoad = true;
+  try {
+    // `slept` ולא „ממתין”: טאב ששוחזר מהפעלה קודמת ונטען כאן לראשונה מקבל את
+    // הנוסח על ההפעלה הקודמת, וטאב שנרדם באותה הפעלה — את זה שמדבר על עכשיו.
+    await reopenPreviousSession(session.keeper.state, session.slept);
+    session.slept = false;
+  } finally {
+    pendingTabLoad = false;
+  }
+
+  // והמיקום השמור, עכשיו. `activateTab` כבר קרא ל-`restorePaneScroll` — אבל
+  // הוא רץ **לפני** כאן, כשלטאב עוד לא היה host כלל (טאב ששוחזר או שנרדם),
+  // ולכן לא היה לו למה לכתוב. בלי הקריאה הזאת המיקום שנשמר בטאב שנרדם נזרק,
+  // והוא נפתח בראש המסמך.
+  //
+  // עטופה בבדיקת „עוד הפעיל”: הפתיחה אורכת שניות, והמשתמש עשוי להיות בטאב
+  // אחר מזמן — ואז זו הייתה כתיבה לתוך המסמך הלא נכון.
+  if (activeSession.value === session) restorePaneScroll(session, session.ui.scroll);
 }
 
 /**
@@ -2368,18 +2888,42 @@ function onDocumentTabSelect(id: DocumentSessionId): void {
  * מחיקת טיוטה: „החלף”/„סגור” אחרי „לא לשמור” הוא אישור מפורש למחיקה.
  */
 async function onDocumentTabClose(id: DocumentSessionId): Promise<void> {
-  if (isOpening.value) return;
+  if (isOpenBusy()) return;
   const session = sessions.get(id);
   if (!session) return;
 
-  const hadUnsaved = session.save.snapshot.isDirty;
-  const decision = await decideDocumentSwitch({
-    isDirty: () => session.save.snapshot.isDirty,
-    isSaving: () => session.save.snapshot.isSaving,
-    confirm,
-    documentName: () => sessionDisplayTitle(session),
-    intent: 'close-tab',
-  });
+  /**
+   * שתי שאלות שונות, לפי מה שיש לטאב לאבד.
+   *
+   * המסלול הרגיל שואל את המנוע („יש שינויים שלא נשמרו?”), אבל יש שני מצבים
+   * שבהם אין מנוע שיענה, ובכל זאת **יש** עבודה: טאב ששוחזר ועוד לא נטען,
+   * וטאב שהטעינה שלו **נכשלה** ונפל לתוכו מסמך ריק (`remember: false`,
+   * `reopenPreviousSession`). השני הוא המסוכן: הוא נראה „נקי” לגמרי — המנוע
+   * שבתוכו באמת ריק — בעוד הרשומה שלו עדיין מחזיקה טיוטה עם העבודה שלא
+   * נשמרה, וסגירתו הייתה מוחקת אותה **בלי אף שאלה** (`destroy({removeDraft})`).
+   *
+   * לכן השאלה נגזרת מהרשומה ולא מהדגל: כל טאב שיש טיוטה ברשומה שלו והמנוע
+   * שבו אינו מציג אותה (כלומר אינו „מלוכלך”) נשאל לפני שמוחקים.
+   */
+  const recordDraft = activeEntry(session.keeper.state)?.draft != null;
+  const engineDirty = session.save.snapshot.isDirty;
+  const askFromRecord = recordDraft && !engineDirty;
+
+  const hadUnsaved = engineDirty || recordDraft;
+  const decision =
+    session.pendingRestore || askFromRecord
+      ? await decidePendingTabClose({
+          hasDraft: () => recordDraft,
+          confirm,
+          documentName: () => sessionDisplayTitle(session),
+        })
+      : await decideDocumentSwitch({
+          isDirty: () => session.save.snapshot.isDirty,
+          isSaving: () => session.save.snapshot.isSaving,
+          confirm,
+          documentName: () => sessionDisplayTitle(session),
+          intent: 'close-tab',
+        });
 
   if (hadUnsaved && decision.action === 'switch') await session.keeper.discardDraft();
 
@@ -2401,25 +2945,38 @@ async function onDocumentTabClose(id: DocumentSessionId): Promise<void> {
 
   const wasActive = session === activeSession.value;
   sessions.delete(session.id);
+  const recentAt = recentTabs.indexOf(session.id);
+  if (recentAt >= 0) recentTabs.splice(recentAt, 1);
   await session.destroy({ removeDraft: true });
 
+  // הרשומה עצמה אינה נכתבת כאן: `destroy({ removeDraft: true })` קורא
+  // ל-`keeper.discardDraft`, וזה כותב דרך `persistCombinedSession` — שמרכיבה
+  // את האוסף מהטאבים ש**נשארו** במפה (הטאב הזה כבר הוסר ממנה). כלומר טאב
+  // שנסגר יורד מהרשומה מיד, ואינו חוזר בעלייה הבאה.
   if (!wasActive) return;
 
-  // הטאב הפעיל נסגר: לבחור טאב אחר, או לפתוח טאב ריק חדש אם זה היה האחרון —
-  // בדיוק כמו VSCode/דפדפנים. `next()` על `Map.values()` היא הטאב הראשון
-  // שנשאר, לפי סדר הפתיחה.
-  const next = sessions.values().next().value ?? createNewDocumentSession();
-  activateTab(next);
-  // טאב שנבחר כבר יש בו מסמך (הוא היה פתוח); טאב חדש-לגמרי (המקרה „היה
-  // האחרון”) עדיין ריק — צריך לפתוח בו מסמך, בדיוק כמו „+”.
-  if (next.swap.current === null) await openDocument();
+  await activateAfterClose();
 }
 
 /** כפתור „+”: תמיד טאב ריק חדש — לא בודק „שינויים לא שמורים”, כי אין מה לאבד. */
 async function onDocumentTabNew(): Promise<void> {
-  if (isOpening.value) return;
+  if (isOpenBusy()) return;
   activateTab(createNewDocumentSession());
   await openDocument();
+}
+
+/**
+ * הטאב שעובר אליו מי שסגר את הפעיל. `next()` על `Map.values()` הוא הטאב
+ * הראשון שנשאר, לפי סדר הפתיחה — כמו ב-VSCode/דפדפנים.
+ */
+async function activateAfterClose(): Promise<void> {
+  const next = sessions.values().next().value ?? createNewDocumentSession();
+  activateTab(next);
+  // שלושה מצבים, ורק אחד מהם כבר מוכן: טאב שהיה פתוח (יש בו מסמך), טאב
+  // ששוחזר וטרם נטען (נטען עכשיו, בדיוק כמו מעבר רגיל אליו), וטאב חדש-לגמרי
+  // שנוצר כאן מפני שהאחרון נסגר — צריך לפתוח בו מסמך, בדיוק כמו „+”.
+  if (next.pendingRestore) await openPendingTab(next);
+  else if (next.swap.current === null) await openDocument();
 }
 
 /**
@@ -2434,12 +2991,35 @@ function toggleAutosave(): void {
   void saveAutosaveEnabled(autosaveEnabled.value);
 }
 
+/**
+ * מצב מיקוד — והמסך המלא שנלווה אליו.
+ *
+ * הפסים שלנו נעלמים ב-CSS (ראו „מצב מיקוד” ב-`<style>`), אבל סביבנו יושבת
+ * אוצריא: פס הכותרת שלה, שורת הטאבים וסרגל הניווט. „מיקוד” שמשאיר אותם על
+ * המסך מסתיר שליש ממה שמפריע. הבקשה למסך מלא היא הדרך היחידה שיש לתוסף
+ * לבקש את החלון כולו — ההנמקה המלאה ב-composables/window-fullscreen.ts.
+ *
+ * הבקשה נשלחת **מכאן ולא מ-`watch`** על הדגל: הדפדפן מקבל מסך מלא רק מתוך
+ * מחווה של המשתמש, וכאן זו תמיד לחיצה או `F11`. שחזור מצב מיקוד מהפעלה
+ * קודמת (`applyShellPreferences`) אינו מחווה, והוא בכוונה אינו עובר כאן.
+ *
+ * כישלון אינו מבטל את מצב המיקוד: מאחז שאינו מרשה מסך מלא עדיין מקבל מעטפת
+ * נקייה, וזה הרוב של מה שהמצב הזה נותן.
+ */
 function toggleFocusMode(): void {
   isFocusMode.value = !isFocusMode.value;
-  keeper?.updateView({ focusMode: isFocusMode.value });
-  // יציאה ממצב מיקוד מאפסת את החשיפה: אחרת המחלקה נשארת והפסים מקבלים
-  // opacity מיותר ברגע שחוזרים למצב הרגיל.
-  if (!isFocusMode.value) revealed.value = null;
+  updateShellView({ focusMode: isFocusMode.value });
+  // יציאה ממצב מיקוד מאפסת את החשיפה: אחרת המחלקה `reveal-*` נשארת, והפסים
+  // חוזרים למצב הרגיל כשהם עדיין מסומנים כחשופים.
+  // הכניסה מתחילה **פתוחה**: מצב מיקוד שמתחיל בהעלמת כל הפקדים בבת אחת נראה
+  // כמו תקלה, ולא כמו מצב שנבחר. הלוח נשאר עד תנועת העכבר הראשונה אל גוף
+  // המסמך, ומשם והלאה החשיפה היא בקצה בלבד — כרגיל.
+  revealed.value = isFocusMode.value ? 'top' : null;
+  // הפוקוס היה יכול להישאר על הכפתור שהרגע נלחץ — והוא בתוך רצועה שברגע הזה
+  // יצאה מהמסך. `visibility: hidden` מוציא אותו משם ממילא, אבל אל ה-`<body>`
+  // ולא אל הטקסט: המשתמש היה מקבל מסך מיקוד שאי אפשר להקליד בו עד שילחץ.
+  if (isFocusMode.value) focusRing.toDocument();
+  void (isFocusMode.value ? enterFullscreen() : exitFullscreen());
 }
 
 function onToggleBookCompletion(): void {
@@ -2467,36 +3047,24 @@ watch([activeEditorContainer, activeSuperdoc, bookCompletionEnabled, documentGen
 });
 
 /**
- * הפסים שנחשפים בקצה העליון, לפי הסלקטורים שה-CSS של מצב המיקוד מסתיר.
- *
- * הסרגל האנכי (`.doc-vruler`) חסר מהרשימה בכוונה, למרות שהוא נחשף יחד איתם:
- * הוא נמתח לכל גובה המסמך, וגובל שנגזר ממנו היה הופך את „קרוב לקצה העליון”
- * לכל המסך.
- */
-const TOP_BAR_SELECTORS = ['.word-titlebar', '.word-ribbon-container', '.doc-ruler', '.ruler-corner'];
-
-/**
- * עד איפה מגיעים הפסים בפועל.
+ * עד איפה מגיעים הפסים בפועל — הגובל שמחזיק את החשיפה פתוחה.
  *
  * נמדד ולא קבוע: הגובה תלוי במה שמוצג — רצועה מכונסת, סרגל מידות כבוי, שורת
- * מצב בגופן אחר. ההסתרה במצב מיקוד היא `opacity` ולא `display`, ולכן הפסים
- * תופסים את מקומם גם כשאינם נראים והמדידה תקפה בשני המצבים.
+ * מצב בגופן אחר.
+ *
+ * המדידה נקראת **רק כשמשהו חשוף** (ראו `onPointerMove`), וזה מה שהופך אותה
+ * לנכונה גם אחרי שהפסים יצאו מהזרימה: לוח מוסתר מוזז ב-`translateY(-100%)`
+ * ומלבנו יושב מעל הקצה העליון, כלומר `bottom` שלילי — והנפילה ל-0 מחזירה את
+ * ההחלטה לרצועת הקצה בלבד, שזה בדיוק הסף הנכון כשאין מה להחזיק פתוח.
  */
 function measureRevealBounds(): RevealBounds | null {
   const shell = shellRef.value;
   if (!shell) return null;
 
-  let top = 0;
-  for (const selector of TOP_BAR_SELECTORS) {
-    for (const element of shell.querySelectorAll(selector)) {
-      const rect = element.getBoundingClientRect();
-      // פס שאינו מצויר כרגע אינו מרחיב את האזור.
-      if (rect.height > 0) top = Math.max(top, rect.bottom);
-    }
-  }
+  const topRect = shell.querySelector('.shell-top')?.getBoundingClientRect();
+  const top = topRect ? Math.max(0, topRect.bottom) : 0;
 
-  const statusbar = shell.querySelector('.word-statusbar');
-  const statusRect = statusbar?.getBoundingClientRect();
+  const statusRect = shell.querySelector('.word-statusbar')?.getBoundingClientRect();
   const bottom = statusRect && statusRect.height > 0 ? statusRect.top : window.innerHeight;
 
   return { top, bottom };
@@ -2724,9 +3292,7 @@ async function onOpenLibrary(): Promise<void> {
  */
 const contextMenu = useContextMenu({
   superdoc: activeSuperdoc,
-  shell: shellRef,
   isDocumentSurface,
-  isFocusMode,
   isModalOpen: isModalDialogOpen,
   runAction: (action) => runShellAction(action),
   report: reportCommand,
@@ -2744,6 +3310,88 @@ const contextMenu = useContextMenu({
 function closeContextMenu(): void {
   contextMenu.close();
   focusDocument(activeSuperdoc.value);
+}
+
+/**
+ * מחזירה את הפוקוס למסמך אם הוא התייתם — כלומר אם השכבה שנסגרה לקחה איתה את
+ * האלמנט שהחזיק אותו, והדפדפן השאיר אותו על ה-`<body>`.
+ *
+ * הבדיקה על `body` היא מה שהופך את זה לבטוח: מי שסוגר שכבה ומחזיר את הפוקוס
+ * בעצמו אינו נגרר לכאן.
+ */
+function returnOrphanedFocus(): void {
+  // אחרי שה-DOM התעדכן, ולא באותה שורה: ברגע שהדגל כובה השדה עדיין בעץ ועדיין
+  // מחזיק את הפוקוס, ו-`activeElement` היה מראה אותו במקום את ה-`<body>` —
+  // כלומר הבדיקה הייתה תמיד יוצאת מוקדם.
+  void nextTick(() => {
+    const active = document.activeElement;
+    if (active !== null && active !== document.body) return;
+    const opened = activeSuperdoc.value;
+    if (opened) focusOpenedDocument(opened);
+  });
+}
+
+/**
+ * מה ש-`Escape` סוגר, לפי שכבות. מחזירה `true` אם משהו נסגר בפועל.
+ *
+ * **מוצאת לפונקציה בשם ולא נשארת בתוך `closeTopmost` מפני שיש לה קורא שני:**
+ * יציאה ממסך מלא שלא באה מאיתנו (`watchFullscreen` ב-`onMounted`). בתוך מסך
+ * מלא ה-`Escape` שסוגר אותו **נבלע** ואינו מגיע לדף כלל — נמדד ב-Chrome
+ * אמיתי `keys: []` מול `fullscreenchange: [false]` — ולכן אין למאזין ההוא שום
+ * דרך אחרת לדעת שהמשתמש הקיש `Escape`. שני הקוראים חייבים לעבור באותן שכבות
+ * בדיוק, אחרת אותו מקש עושה שני דברים שונים לפי מה שהמשתמש אינו יכול לראות.
+ *
+ * „אודות” הוא `aria-modal`, ולכן הוא זה שנסגר כשהוא פתוח. החיפוש אינו מודאלי
+ * ואפשר להמשיך לערוך מתחתיו, ולכן הוא נסגר רק כשאין חלון מעליו.
+ */
+function closeTopmostLayer(): boolean {
+  if (isShortcutsHelpOpen.value) {
+    isShortcutsHelpOpen.value = false;
+    return true;
+  }
+  if (isMacrosOpen.value) {
+    isMacrosOpen.value = false;
+    return true;
+  }
+  if (isAboutOpen.value) {
+    isAboutOpen.value = false;
+    return true;
+  }
+  if (linkDialog.isOpen.value) {
+    linkDialog.close();
+    return true;
+  }
+  // התפריט **אחרי** החלונות המודאליים ולא לפניהם: הוא אמנם השכבה העליונה,
+  // אבל מודאל פתוח חוסם את פתיחתו מלכתחילה — ולכן „תפריט פתוח מעל מודאל”
+  // הוא מצב שלא אמור להתקיים. ענף ראשון היה מסכן בדיוק את מה שאינו אמור
+  // לקרות: `Escape` שסוגר תפריט תקוע במקום את הדיאלוג שהמשתמש רואה.
+  if (contextMenu.isOpen.value) {
+    closeContextMenu();
+    return true;
+  }
+  if (isFindOpen.value) {
+    closeFindDialog();
+    // השדה שהיה בדיאלוג הוסר מה-DOM, והדפדפן מבריח את הפוקוס ל-`<body>` —
+    // נמדד `active: BODY`. במצב מיקוד זו הקלדה שנעלמת בלי שום סימן, כמו
+    // במעבר טאב. רק כשהפוקוס באמת התייתם: שכבה שמחזירה אותו בעצמה (דיאלוג
+    // הקיצורים, למשל) לא תיגרר מכאן.
+    returnOrphanedFocus();
+    return true;
+  }
+  // מצב מיקוד הוא „חלון” גם הוא: הוא מסתיר את הרצועה ואת שורת המצב, ו-
+  // `Escape` הוא המקש הראשון שכל משתמש מנסה כדי לצאת ממנו. בלי הענף הזה
+  // היציאה היחידה הייתה למצוא שוב את F11 או לרחף מעל קצה המסך.
+  //
+  // **אחרי** כל השכבות שמעליו, וזה עיקר העניין: שכבה פתוחה נסגרת קודם, ומצב
+  // המיקוד נשאר. זה נכון גם כשהקורא הוא מאזין המסך המלא — מצב מיקוד בלי מסך
+  // מלא הוא מצב נתמך ממילא (המאחז עשוי לסרב לבקשה, ראו `enterFullscreen`).
+  if (isFocusMode.value) {
+    toggleFocusMode();
+    return true;
+  }
+  // אין מה לסגור: `Escape` מאחד מפסי המעטפת מחזיר את הפוקוס למסמך.
+  // כשהוא כבר שם — `false`, והאירוע ממשיך למנוע ולדפדפן.
+  return focusRing.toDocument();
 }
 
 const runShellAction = createShellActionRunner({
@@ -2793,48 +3441,7 @@ const runShellAction = createShellActionRunner({
     return true;
   },
   moveFocusRegion: (direction) => focusRing.move(direction) !== null,
-  // „אודות” הוא `aria-modal`, ולכן הוא זה שנסגר כשהוא פתוח. החיפוש אינו מודאלי
-  // ואפשר להמשיך לערוך מתחתיו, ולכן הוא נסגר רק כשאין חלון מעליו.
-  closeTopmost: () => {
-    if (isShortcutsHelpOpen.value) {
-      isShortcutsHelpOpen.value = false;
-      return true;
-    }
-    if (isMacrosOpen.value) {
-      isMacrosOpen.value = false;
-      return true;
-    }
-    if (isAboutOpen.value) {
-      isAboutOpen.value = false;
-      return true;
-    }
-    if (linkDialog.isOpen.value) {
-      linkDialog.close();
-      return true;
-    }
-    // התפריט **אחרי** החלונות המודאליים ולא לפניהם: הוא אמנם השכבה העליונה,
-    // אבל מודאל פתוח חוסם את פתיחתו מלכתחילה — ולכן „תפריט פתוח מעל מודאל”
-    // הוא מצב שלא אמור להתקיים. ענף ראשון היה מסכן בדיוק את מה שאינו אמור
-    // לקרות: `Escape` שסוגר תפריט תקוע במקום את הדיאלוג שהמשתמש רואה.
-    if (contextMenu.isOpen.value) {
-      closeContextMenu();
-      return true;
-    }
-    if (isFindOpen.value) {
-      closeFindDialog();
-      return true;
-    }
-    // מצב מיקוד הוא „חלון” גם הוא: הוא מסתיר את הרצועה ואת שורת המצב, ו-
-    // `Escape` הוא המקש הראשון שכל משתמש מנסה כדי לצאת ממנו. בלי הענף הזה
-    // היציאה היחידה הייתה למצוא שוב את F11 או לרחף מעל קצה המסך.
-    if (isFocusMode.value) {
-      toggleFocusMode();
-      return true;
-    }
-    // אין מה לסגור: `Escape` מאחד מפסי המעטפת מחזיר את הפוקוס למסמך.
-    // כשהוא כבר שם — `false`, והאירוע ממשיך למנוע ולדפדפן.
-    return focusRing.toDocument();
-  },
+  closeTopmost: closeTopmostLayer,
 });
 
 /**
@@ -3015,28 +3622,43 @@ function focusOpenedDocument(superdoc: SuperDoc): void {
  * את הפוקוס אבל אינו מחזיר את הסמן לטקסט, כלומר המשתמש היה מקבל „חזרה למסמך”
  * שאי אפשר להקליד אחריה.
  *
- * שלושת פסי המעטפת מסומנים כלא-זמינים במצב מיקוד. הם עדיין בעץ — ההסתרה היא
- * `opacity: 0` — ולכן בלי הסימון `F6` היה ממקד פקד בלתי נראה. זה גם מה שנותן
- * לשדה שם המסמך דרך יציאה: `Escape` ממנו מזהה שהפוקוס בסרגל הכותרת ומחזיר
- * אותו למסמך.
+ * פסי המעטפת מסומנים כלא-זמינים במצב מיקוד **כל זמן שהם מחוץ למסך**. הם
+ * עדיין בעץ — הם רק יצאו מהזרימה והוזזו החוצה — ולכן בלי הסימון `F6` היה
+ * מעביר את המשתמש לפס שאינו נראה. זה גם מה שנותן לשדה שם המסמך דרך יציאה:
+ * `Escape` ממנו מזהה שהפוקוס בסרגל הכותרת ומחזיר אותו למסמך.
  */
 function shellRegion(selector: string): HTMLElement | null {
   return shellRef.value?.querySelector<HTMLElement>(selector) ?? null;
 }
 
-const outsideFocusMode = () => !isFocusMode.value;
+/**
+ * האם פס המעטפת של האזור הזה זמין ל-`F6` עכשיו.
+ *
+ * מחוץ למצב מיקוד — תמיד. בתוכו — רק אם הוא **נחשף בפועל**, וזה מה שהתיקון
+ * הזה הוסיף: הדגל הקודם היה `!isFocusMode` לבדו, ולכן רצועה פרושה על המסך
+ * במלוא רוחבה (הכניסה למצב מיקוד מתחילה ב-`reveal-top`, בלי שום ריחוף) לא
+ * הייתה נגישה למקלדת כלל — נמדד שהפוקוס נשאר במשטח ההקלדה של המנוע. זה גם
+ * מה ש-`FocusRegion.isAvailable` מבטיח בתיעוד שלו.
+ *
+ * לפי אזור ולא דגל אחד: החשיפה היא של קבוצה אחת בכל רגע (`reveal-top` או
+ * `reveal-bottom`), וסימון שניהם כזמינים היה מחזיר בדיוק את הבאג — הפעם
+ * לשורת המצב שמחוץ למסך.
+ */
+function revealedBarAvailable(zone: Exclude<RevealZone, null>): () => boolean {
+  return () => !isFocusMode.value || revealed.value === zone;
+}
 
 const focusRing = createFocusRing({
   regions: [
     {
       id: 'titlebar',
       element: () => shellRegion('.word-titlebar'),
-      isAvailable: outsideFocusMode,
+      isAvailable: revealedBarAvailable('top'),
     },
     {
       id: 'ribbon',
       element: () => shellRegion('.word-ribbon-container'),
-      isAvailable: outsideFocusMode,
+      isAvailable: revealedBarAvailable('top'),
     },
     {
       id: 'document',
@@ -3044,9 +3666,28 @@ const focusRing = createFocusRing({
       focus: () => focusDocument(activeSuperdoc.value),
     },
     {
+      /*
+       * כפתור היציאה ממצב מיקוד. אזור, למרות שהוא פקד בודד: הוא הפקד היחיד
+       * שנראה במצב מיקוד, והמנוע בולע `Tab` — כלומר בלי הכניסה הזאת אין אליו
+       * שום דרך מהמקלדת (נמדד בדפדפן). מחוץ למצב מיקוד הוא אינו בעץ בכלל,
+       * ואז `element()` הוא `null` והמעגל מדלג עליו מאליו.
+       *
+       * `focus` משלו ולא נפילה ל-`querySelector`: החיפוש הגנרי סורק **צאצאים**,
+       * והאזור כאן הוא הכפתור עצמו.
+       */
+      id: 'focus-exit',
+      element: () => shellRegion('.focus-exit'),
+      focus: () => {
+        const button = shellRegion('.focus-exit');
+        if (!button) return false;
+        button.focus();
+        return true;
+      },
+    },
+    {
       id: 'statusbar',
       element: () => shellRegion('.word-statusbar'),
-      isAvailable: outsideFocusMode,
+      isAvailable: revealedBarAvailable('bottom'),
     },
   ],
 });
@@ -3113,6 +3754,31 @@ onMounted(async () => {
     installedFonts.value = snapshot;
   });
 
+  /*
+   * יציאה ממסך מלא שלא באה מאיתנו — `Escape` או `F11` של הדפדפן.
+   *
+   * **האירוע הזה הוא ה-`Escape` עצמו, ואין דרך אחרת לדעת שהוא הוקש.** נמדד
+   * ב-Chrome אמיתי: `Escape` שמשמש ליציאה ממסך מלא **נבלע** — הדף קיבל
+   * `keys: []` ורק `fullscreenchange: [false]`. כלומר בתוך מסך מלא אין שום
+   * `keydown` שאפשר לתלות בו את הסגירה, ומאזין ששולח את המקש הזה ישר לכיבוי
+   * מצב המיקוד הפך את השכבות: `Ctrl+F` ואחריו `Escape` אחד נמדדו כ-
+   * `{focus:false, fs:false, find:true}` — הדיאלוג נשאר פתוח ומצב המיקוד כבה,
+   * בדיוק ההיפך ממה שהמקש מבטיח.
+   *
+   * לכן דרך `closeTopmostLayer` ולא ישר ל-`toggleFocusMode`: אותן שכבות
+   * בדיוק שהמקלדת עוברת בהן. שכבה פתוחה נסגרת והמצב נשאר — מצב מיקוד בלי
+   * מסך מלא נתמך ממילא, כי המאחז עשוי לסרב לבקשה מלכתחילה.
+   *
+   * `isFocusMode` בלבד ולא בשני הכיוונים: כניסה למסך מלא מכל סיבה אחרת אינה
+   * אמורה להדליק מצב מיקוד. ויציאה שכן באה מאיתנו כבר כיבתה את הדגל לפני
+   * הקריאה ל-`exitFullscreen`, ולכן היא נופלת כאן על התנאי ואינה סוגרת שכבה
+   * בטעות.
+   */
+  fullscreenListener = watchFullscreen((fullscreen) => {
+    if (fullscreen || !isFocusMode.value) return;
+    closeTopmostLayer();
+  });
+
   // „שלח למסמך” — לפני כל `await` שבהמשך. אוצריא מוסרת את אירוע הלחיצה מיד
   // אחרי ה-boot, וכל שלב שנכשל לפני הרישום היה מפיל אותו לבור: ה-latch היה
   // ממשיך לצבור ואיש לא היה מרוקן אותו. אינו תלוי בכלום כאן — קיומו של מסמך
@@ -3176,45 +3842,46 @@ onMounted(async () => {
       });
     }
 
-    // הרשומה, לפני יצירת הטאב הראשון: נתיב הטיוטה של הזוכר תלוי במזהה הטאב,
-    // וזה חייב להיות מזהה המסמך **שנטען עכשיו** — לא מזהה חדש שאין לו קשר
-    // לטיוטה הקודמת של אותו מסמך.
+    // הרשומה, לפני יצירת הטאבים: נתיב הטיוטה של כל זוכר תלוי במזהה הטאב שלו,
+    // וזה חייב להיות המזהה **שברשומה** — לא מזהה חדש שאין לו קשר לטיוטה
+    // הקודמת של אותו מסמך. `stored` עצמו נטען למעלה, במקביל לשאר ההעדפות.
     //
-    // שחזור: רק הטאב שהיה פעיל בהפעלה הקודמת. הרשומה (`persistCombinedSession`
-    // למעלה) כן שומרת רשומה לכל טאב שהיה פתוח, אבל שחזור **כל** הטאבים —
-    // כולל פתיחת קבצים מרובים בעלייה — נדחה לשלב הבא: `activeEntry` כבר
-    // מחזירה רק את רשומת הטאב הפעיל, וזה בדיוק מה שמשוחזר כאן. משתמש עם טאב
-    // יחיד (הרוב המוחלט היום) אינו מבחין בהבדל.
-    const restoredId = activeEntry(stored)?.id ?? createDocumentSessionId();
-
-    // טיוטות של טאבים שלא שוחזרו (רק הפעיל משוחזר, ראו למעלה) לעולם לא
-    // ייקראו שוב — בלי המחיקה כאן הן נשארות במרחב הפרטי לצמיתות. Best-effort
-    // ואינו חוסם עלייה: כשל מחיקה משאיר קובץ יתום, לא נתון פגום.
-    if (stored) {
-      for (const entry of stored.documents) {
-        if (entry.id !== restoredId && entry.draft) void deleteWorkspaceEntry(entry.draft.path);
-      }
-    }
-
-    const firstSession = createNewDocumentSession(restoredId);
-    activateTab(firstSession);
-
-    keeper!.adopt(stored);
+    // ניקוי הטיוטות ה„יתומות” שהיה כאן **נמחק בכוונה**: הוא מחק את הטיוטה של
+    // כל טאב שלא שוחזר, ומהרגע שכל הטאבים חוזרים אין טאב כזה — הלולאה הזאת
+    // הייתה מוחקת בדיוק את העבודה שלא נשמרה, של כל טאב שאינו הפעיל.
+    const restored = restoreTabs(stored);
     applyShellPreferences(stored);
 
     // ההאזנה למעבר לרקע נרשמת כאן, אחרי שיש למי לדווח. שלושת המקורות
     // וההנמקה — ב-host/lifecycle.ts. `flush` על **כל** הטאבים הפתוחים —
     // לא רק הפעיל — כי לכולם יש עבודה שעלולה לא להיות בדיסק.
-    hiddenListener = onPluginHidden(() => void Promise.all(
-      Array.from(sessions.values()).map((s) => s.keeper.flush()),
-    ));
+    hiddenListener = onPluginHidden(() => {
+      // מיקום הגלילה נלכד כאן, בזמן שהמיכל עוד קיים ועוד יודע אותו. ראו
+      // sessions/pane-scroll.ts — במסלולים מסוימים המעבר לרקע מאפס אותו.
+      const active = activeSession.value;
+      if (active) active.ui.scroll = readPaneScroll(documentScrollHost(active));
+      void Promise.all(Array.from(sessions.values()).map((s) => s.keeper.flush()));
+    });
+
+    // והחזרה: תיקון בלבד, ורק למה שבאמת אבד — `repairPaneScroll` אינה נוגעת
+    // במיכל ששרד. בפריים הבא, כי המנוע עשוי לעמד מחדש בחזרה למסך.
+    shownListener = onPluginShown(() => {
+      const active = activeSession.value;
+      if (!active) return;
+      const remembered = active.ui.scroll;
+      const repair = (): void => {
+        if (activeSession.value === active) repairPaneScroll(documentScrollHost(active), remembered);
+      };
+      repair();
+      if (typeof requestAnimationFrame === 'function') requestAnimationFrame(repair);
+    });
 
     // טעינת מסמך אחרון או פתיחת מסמך ריק. תחנת „פותח את המסמך” מדווחת
     // מ-createEditor ולא מכאן: כאן היא הייתה מוקדמת בשנייה ויותר — הפתיחה
     // ממתינה קודם לחבילת המנוע, ומסך טעינה שאומר „פותח” בזמן שהוא מוריד
     // 9MB מתאר את השלב הלא נכון.
     try {
-      await reopenPreviousSession(stored);
+      await reopenPreviousSession(restored.keeper.state);
     } finally {
       // גם פתיחה שנכשלה מסירה את מסך הטעינה, ולא רק כדי „לא להיתקע”: הודעת
       // הכשל יושבת בשורת המצב שמתחת, ומסך טעינה שנשאר פרוש מסתיר בדיוק את
@@ -3242,12 +3909,26 @@ onUnmounted(() => {
   }
   hiddenListener?.();
   hiddenListener = null;
+  shownListener?.();
+  shownListener = null;
   contextMenuListener?.();
   contextMenuListener = null;
+  fullscreenListener?.();
+  fullscreenListener = null;
+  paneScrollGuard?.();
+  paneScrollGuard = null;
+  // מעטפת שנפרקת בזמן מסך מלא הייתה משאירה את החלון מורחב בלי מי שיצא ממנו.
+  if (isFullscreen()) void exitFullscreen();
   // הפריט עצמו אינו מוסר כאן: אוצריא מסירה את רישומי המופע בעצמה בפירוק,
   // וההסרה הידנית רק מסתכנת במחיקת העותק ההצהרתי — הפריט שאמור להישאר
   // בתפריט גם כשהתוסף סגור. ההנמקה המלאה ב-host/otzaria-reader.ts.
   for (const s of sessions.values()) {
+    // המנוע וטיימרי השמירה של **כל** טאב, לא רק הפעיל: לפני ריבוי המסמכים
+    // היה כאן אחד, ומאז כל טאב מחזיק מופע SuperDoc משלו עם ה-workers שלו.
+    // `destroy()` של ה-session אינו מתאים כאן — הוא מוחק גם את הטיוטה, ופירוק
+    // המעטפת אינו „המשתמש ביקש למחוק”.
+    s.swap.destroy();
+    s.save.dispose();
     s.keeper.dispose();
   }
   keeper = null;
@@ -3285,6 +3966,56 @@ async function loadPreviousSession(): Promise<SessionState | null> {
 }
 
 /**
+ * בונה טאב לכל רשומת מסמך שהייתה פתוחה, ומחזירה את זה שיהיה פעיל.
+ *
+ * ## מה נפתח מיד ומה לא — „טעינה עצלה”
+ *
+ * עד כאן שוחזר טאב אחד בלבד — הפעיל — ושאר הטאבים שהמשתמש הותיר פתוחים פשוט
+ * נעלמו, וטיוטותיהם נמחקו. עכשיו **כל** רשומה שבאוסף מקבלת טאב, בסדר שהיה,
+ * עם השם שלה ועם הנקודה של „לא נשמר”; מה שנטען לתוך מנוע מיד הוא המסמך הפעיל
+ * בלבד, וכל טאב אחר נטען ברגע שעוברים אליו (`openPendingTab`).
+ *
+ * ההחלטה הזאת אינה קיצור דרך אלא מה שנכון גם לכשעצמו. כל מסמך פתוח הוא מופע
+ * SuperDoc מלא עם ה-workers שלו; פתיחת חמישה מסמכים בעלייה הייתה מכפילה פי
+ * חמישה את הזמן עד שהמשתמש רואה את המסמך שהוא באמת עובד עליו, ואת הזיכרון —
+ * בלי שביקש דבר. זה גם בדיוק מה ש-VSCode ודפדפנים עושים בשחזור לשוניות.
+ * המסמך שממתין אינו „פחות פתוח”: הרשומה שלו, הסמן שלו והטיוטה שלו יושבים
+ * בזוכר שלו מהרגע הראשון, נכתבים חזרה בסגירה, ואינם תלויים בכך שייטען.
+ *
+ * ## מה שאסור היה להישבר כאן
+ *
+ * המזהה של הטאב הוא המזהה שברשומה, ולא מזהה חדש: הוא מה שקושר את הטאב לקובץ
+ * הטיוטה שלו (`draftPathFor`) ולרשומה שלו. רשומה שאין בה מסמכים כלל, או
+ * שאין בה בכלל, נותנת טאב ריק אחד — בדיוק ההתנהגות של הפעלה ראשונה.
+ */
+function restoreTabs(stored: SessionState | null): DocumentSession {
+  const view = stored?.view ?? defaultView();
+  // רשומה ריקה (אין `documents`) אינה מצב חריג: זו כל הפעלה ראשונה, וגם
+  // רשומה שנפסלה בקריאה. טאב אחד, חדש, בדיוק כמו קודם.
+  const entries = stored && stored.documents.length > 0 ? stored.documents : [emptyDocumentEntry()];
+  const activeId = entries.some((entry) => entry.id === stored?.activeId)
+    ? stored!.activeId
+    : entries[0]!.id;
+
+  let active: DocumentSession | null = null;
+  for (const entry of entries) {
+    const tab = createNewDocumentSession({ id: entry.id, restore: { entry, view } });
+    if (entry.id === activeId) active = tab;
+  }
+
+  // ה-`!` בטוח: `activeId` נבחר מתוך `entries`, וכל רשומה שבו יצרה טאב.
+  const activeTab = active!;
+  activateTab(activeTab);
+  // הטאב הפעיל נפתח מיד (`reopenPreviousSession` ב-onMounted) ולכן אינו ממתין.
+  activeTab.pendingRestore = false;
+
+  // אין כאן ניקוי טיוטות יתומות, ובכוונה: כל רשומה שהגיעה לכאן קיבלה טאב.
+  // רשומה שנשמטה בקריאה (מזהה כפול, ראו `readDocuments`) כבר אינה ב-`stored`
+  // ואי אפשר לדעת עליה מכאן — וזו גם הסיבה שהיא נשמטת שם ולא כאן.
+  return activeTab;
+}
+
+/**
  * מצב המעטפת — מיקוד, לשונית, כיווץ — מוחל מיד ולא ממתין למסמך.
  *
  * זו העדפה של מי שיושב מול המסך ולא תכונה של המסמך (ראו `documentViewFor`),
@@ -3295,6 +4026,11 @@ async function loadPreviousSession(): Promise<SessionState | null> {
 function applyShellPreferences(session: SessionState | null): void {
   if (!session) return;
   isFocusMode.value = session.view.focusMode;
+  // ואיתו הלוח העליון, בדיוק כמו בכניסה דרך `toggleFocusMode`: מצב מיקוד
+  // שנפתח כשכל הפקדים מוסתרים נראה כמו תקלה ולא כמו מצב שנבחר. עלייה עם
+  // ההעדפה דלוקה היא בדיוק הרגע הזה — ובלי השורה הזאת השחזור נתן את מה
+  // שהכניסה הידנית הוגדרה כבר כתקלה.
+  if (isFocusMode.value) revealed.value = 'top';
   if (session.view.ribbonTab) ribbonTab.value = session.view.ribbonTab;
   ribbonCollapsed.value = session.view.ribbonCollapsed;
 }
@@ -3315,7 +4051,10 @@ function applyShellPreferences(session: SessionState | null): void {
  * הטיוטה נבדקת גם כשאין קובץ כלל: מסמך חדש שמעולם לא נשמר הוא בדיוק המקרה
  * שבו אין שום דבר אחר לחזור אליו.
  */
-async function reopenPreviousSession(session: SessionState | null): Promise<void> {
+async function reopenPreviousSession(
+  session: SessionState | null,
+  fromThisRun = false,
+): Promise<void> {
   const entry = activeEntry(session);
   const remembered = entry?.document ?? null;
   const file = remembered ? await resolveRememberedFile(remembered) : null;
@@ -3343,7 +4082,7 @@ async function reopenPreviousSession(session: SessionState | null): Promise<void
   const restore = documentViewFor(session, file?.token ?? null);
 
   if (await openDocument(file ?? undefined, { draft: draft ?? undefined, restore })) {
-    if (draft) setStatus(restoredDraftMessage(session));
+    if (draft) setStatus(restoredDraftMessage(session, fromThisRun));
     return;
   }
 
@@ -3362,8 +4101,13 @@ async function reopenPreviousSession(session: SessionState | null): Promise<void
  * הסגירה (ראו `draftAgeLabel`). המספר הוא מה שמאפשר למשתמש לדעת מיד אם
  * חסר לו משהו, במקום לגלות זאת מאוחר יותר.
  */
-function restoredDraftMessage(session: SessionState | null): string {
-  const base = 'שוחזרו שינויים שלא נשמרו מההפעלה הקודמת';
+function restoredDraftMessage(session: SessionState | null, fromThisRun = false): string {
+  // „מההפעלה הקודמת” אינו נכון לטאב שנרדם ונפתח מחדש באותה הפעלה (`sleepTab`)
+  // — שם השינויים הם של המשתמש מלפני דקה. משפט שאינו נכון בשורת המצב שוחק
+  // את האמון בכל השאר שנאמר בה.
+  const base = fromThisRun
+    ? 'שוחזרו השינויים שלא נשמרו'
+    : 'שוחזרו שינויים שלא נשמרו מההפעלה הקודמת';
   const draft = activeEntry(session)?.draft;
   const age = draft ? draftAgeLabel(draft.savedAt, Date.now()) : null;
   return age ? `${base} (נשמרו ${age})` : base;
@@ -3442,6 +4186,17 @@ async function readDraftBytes(path: string): Promise<Blob | null> {
   color: var(--color-on-surface);
   font-family: var(--font-main);
   direction: rtl;
+  /* מסגרת ההתייחסות של הפסים במצב מיקוד — שם הם יוצאים מהזרימה. */
+  position: relative;
+}
+
+/* קבוצת הפסים העליונים: כותרת, טאבי מסמכים, רצועה ושורת הסרגל. מחוץ למצב
+   מיקוד זו עמודה רגילה, והפריסה זהה למה שהיה כשארבעתם היו ילדים ישירים של
+   המעטפת. הקבוצה קיימת בשביל מצב מיקוד — ראו למטה. */
+.shell-top {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
 }
 
 /* אזור המסמך: שורה של הסרגל האנכי וה-stack. `min-width: 0` על ה-stack הוא מה
@@ -3493,28 +4248,140 @@ async function readDraftBytes(path: string): Promise<Blob | null> {
   border-inline-end: 1px solid var(--color-outline-variant);
 }
 
-/* מצב מיקוד. הסרגל מצטרף לפסים העליונים: הוא חלק מאותה קבוצה שנחשפת בקצה
-   העליון, ומצב מיקוד שמשאיר סרגל מידות על המסך אינו מצב מיקוד. */
-.word-app-shell.focus-mode :deep(.word-titlebar),
-.word-app-shell.focus-mode :deep(.word-ribbon-container),
-.word-app-shell.focus-mode :deep(.doc-ruler),
-.word-app-shell.focus-mode :deep(.doc-vruler),
-.word-app-shell.focus-mode .ruler-corner,
+/**
+ * ## מצב מיקוד
+ *
+ * ההסתרה הייתה `opacity: 0`, והיא לא הסתירה: הפסים שמרו על מקומם בפריסה,
+ * כלומר אזור המסמך נשאר בדיוק באותו גובה ומעליו נמתחה רצועה לבנה (נמדד:
+ * 194 פיקסלים בחלון של 429 — כמעט מחצית מהגובה). מצב מיקוד שמלבין את הפסים
+ * במקום להעלים אותם אינו מצב מיקוד, אלא מסמך קטן עם שוליים ריקים.
+ *
+ * לכן הפסים **יוצאים מהזרימה**: `position: absolute` מוציא אותם מעמודת
+ * ה-flex, ואזור המסמך גדל מיד לכל גובה החלון. החשיפה בקצה מחזירה אותם כלוח
+ * צף מעל המסמך ולא כפס שדוחף אותו — ולכן ריחוף על הקצה אינו מזיז את הטקסט
+ * ואינו מכריח את המנוע לפרוס את המסמך מחדש בכל תנועת עכבר.
+ *
+ * `visibility: hidden` ולא רק ההזזה: פס שהוזז אל מחוץ למסך עדיין נמצא בסדר
+ * ה-Tab ובעץ הנגישות. ההשהיה עליו (`0s linear 0.24s`) היא מה שמשאיר אותו
+ * נראה לכל אורך ההחלקה החוצה ומעלים אותו רק בסופה.
+ *
+ * `z-index` מפני ש-`.editor-area` בא אחרי הפסים ב-DOM וגם הוא ממוקם
+ * (`position: relative`) — בלעדיו אזור המסמך היה נצבע **מעל** הלוח שנחשף.
+ */
+.word-app-shell.focus-mode .shell-top,
 .word-app-shell.focus-mode :deep(.word-statusbar) {
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.3s ease;
+  position: absolute;
+  inset-inline: 0;
+  z-index: 2;
+  visibility: hidden;
+  transition:
+    transform 0.24s ease,
+    visibility 0s linear 0.24s;
+}
+
+.word-app-shell.focus-mode .shell-top {
+  top: 0;
+  transform: translateY(-100%);
+}
+
+.word-app-shell.focus-mode :deep(.word-statusbar) {
+  bottom: 0;
+  transform: translateY(100%);
+}
+
+/* הסרגל האנכי הוא היחיד שאינו מצטרף לחשיפה: הוא עמודה לכל גובה המסמך, והחזרה
+   שלו בכל ריחוף הייתה משנה את **רוחב** אזור העריכה — כלומר פורסת את המסמך
+   מחדש בדיוק במצב שנועד להשקיט אותו. במצב מיקוד הוא פשוט אינו שם, ורוחבו
+   נוסף למסמך. */
+.word-app-shell.focus-mode :deep(.doc-vruler) {
+  display: none;
 }
 
 /* החשיפה לפי קצה, ולא `:hover` על השורש: השורש הוא כל החלון, ולכן כל תנועת
-   עכבר החזירה את שלושת הפסים — ומצב המיקוד לא הסתיר כלום. */
-.word-app-shell.focus-mode.reveal-top :deep(.word-titlebar),
-.word-app-shell.focus-mode.reveal-top :deep(.word-ribbon-container),
-.word-app-shell.focus-mode.reveal-top :deep(.doc-ruler),
-.word-app-shell.focus-mode.reveal-top :deep(.doc-vruler),
-.word-app-shell.focus-mode.reveal-top .ruler-corner,
+   עכבר החזירה את הפסים — ומצב המיקוד לא הסתיר כלום. ההחלטה עצמה
+   ב-composables/focus-mode.ts, כדי שתהיה נבדקת. */
+.word-app-shell.focus-mode.reveal-top .shell-top,
 .word-app-shell.focus-mode.reveal-bottom :deep(.word-statusbar) {
+  transform: none;
+  visibility: visible;
+  transition:
+    transform 0.24s ease,
+    visibility 0s;
+}
+
+/* הצל הוא מה שאומר „זה צף מעל המסמך” ולא „זה חלק מהעמוד”. אותו ערך כמו כל
+   משטח צף אחר בתוכנה (ContextMenu.vue, RibbonMenuButton.vue). */
+.word-app-shell.focus-mode.reveal-top .shell-top {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.16);
+}
+
+.word-app-shell.focus-mode.reveal-bottom :deep(.word-statusbar) {
+  box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.16);
+}
+
+/**
+ * כפתור היציאה ממצב מיקוד.
+ *
+ * `Esc` ו-`F11` עובדים, אבל מצב מיקוד הוא בדיוק המצב שבו אין על המסך שום פקד
+ * שרומז עליהם — ומשתמש שנכנס בטעות נשאר בפנים. הכפתור עמום ולא נעלם: תפקידו
+ * להימצא כשמחפשים אותו, לא להתחרות בטקסט.
+ *
+ * המיקום אינו שרירותי: **בפינה התחתונה**, ו-32 פיקסלים מהתחתית. הקצה העליון
+ * הוא המקום שהלוח נחשף בו — כפתור שם היה נעלם מתחתיו בדיוק כשנכנסים למצב
+ * (הכניסה מתחילה פתוחה), ושורת המצב בגובה 24 פיקסלים היא הסיבה ל-32.
+ *
+ * **והוא יושב מעל העמוד, לא לצדו.** נמדד: `overlapsPage: true`, ו-
+ * `elementFromPoint` מתחתיו מחזיר `DIV.superdoc-page` — גם בחלון של 800
+ * פיקסלים וגם ב-400. אין שוליים אפורים לשבת עליהם: העמוד מרוכז ורחב כמעט
+ * כמו החלון בכל רוחב סביר. זו הסיבה ל-`opacity: 0.5` ולגודל הקטן, וזה גם
+ * הגבול שלהם — הכפתור אינו „מחוץ לתוכן”, הוא **עמום מעל התוכן**.
+ *
+ * `z-index: 1` — מעל שכבות המסמך (PageBorderOverlay ואחיותיה, שגם הן 1, והוא
+ * אחריהן ב-DOM) ומתחת ללוח שנחשף בקצה (2).
+ */
+.focus-exit {
+  position: absolute;
+  bottom: 32px;
+  inset-inline-end: 12px;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border: 1px solid var(--color-outline-variant);
+  border-radius: 999px;
+  background: var(--color-surface-container-highest);
+  color: var(--color-on-surface-variant);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.5;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.16);
+  transition:
+    opacity 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+
+/* `:focus-visible` אינו קוד מת למרות ה-`@pointerdown.prevent`: הכפתור הוא אזור
+   במעגל ה-`F6` (ראו `focusRing`), וזו הדרך היחידה להגיע אליו מהמקלדת — המנוע
+   בולע `Tab`. ה-`prevent` חוסם רק את המיקוד שבא מלחיצה. */
+.focus-exit:hover,
+.focus-exit:focus-visible {
   opacity: 1;
-  pointer-events: auto;
+  border-color: var(--color-outline);
+  color: var(--color-on-surface);
+}
+
+/* מי שביקש פחות תנועה מקבל את אותה חשיפה בלי ההחלקה — ולא חשיפה שנעלמת. */
+@media (prefers-reduced-motion: reduce) {
+  .word-app-shell.focus-mode .shell-top,
+  .word-app-shell.focus-mode :deep(.word-statusbar),
+  .word-app-shell.focus-mode.reveal-top .shell-top,
+  .word-app-shell.focus-mode.reveal-bottom :deep(.word-statusbar),
+  .focus-exit {
+    transition: none;
+  }
 }
 </style>

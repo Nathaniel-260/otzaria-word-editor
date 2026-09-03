@@ -58,6 +58,44 @@ describe('גופן', () => {
     expect(harness.superdoc.ops().filter((op) => op === 'focus')).toEqual(['focus']);
   });
 
+  it('גודל שהוקלד ואינו בסולם מגיע למנוע כפי שהוקלד', async () => {
+    // סולם Word מדלג: אחרי 12 בא 14, ואחרי 48 בא 72. הגדלים שבין לבין —
+    // 13, 71, וגם 10.5 — קיימים במסמכים אמיתיים, ובבורר סגור לא הייתה שום
+    // דרך להגיע אליהם. 71 במיוחד: הוא שכן של 72 שברשימה, ולכן קל להניח
+    // שהוא „כמעט” נגיש דרכה, והוא אינו.
+    const harness = mountUi(HomeTab);
+    await settle();
+
+    await setPicker(harness.wrapper, 'גודל גופן', '13');
+    await setPicker(harness.wrapper, 'גודל גופן', '71');
+    await setPicker(harness.wrapper, 'גודל גופן', '10.5');
+    await settle();
+
+    expect(harness.adapter.payloads('font-size')).toEqual([13, 71, 10.5]);
+    expect(harness.adapter.rejected).toEqual([]);
+  });
+
+  it('גודל שהוקלד מהודק לטווח שהמסמך מכיר', async () => {
+    const harness = mountUi(HomeTab);
+    await settle();
+
+    await setPicker(harness.wrapper, 'גודל גופן', '5000');
+    await settle();
+
+    expect(harness.adapter.payloads('font-size')).toEqual([1638]);
+  });
+
+  it('הקלדה שאינה גודל אינה שולחת דבר', async () => {
+    const harness = mountUi(HomeTab);
+    await settle();
+
+    await setPicker(harness.wrapper, 'גודל גופן', 'גדול');
+    await settle();
+
+    expect(harness.adapter.payloads('font-size')).toEqual([]);
+    expect(harness.adapter.rejected).toEqual([]);
+  });
+
   it('„הגדל גופן” מחשב מהערך שהמנוע דיווח, ולא ממספר מקומי', async () => {
     // זו הייתה תקלה נפרדת: הבורר היה ref שאותחל ל-12 ולא התעדכן, ולכן על טקסט
     // ב-20pt הלחיצה שלחה 14.

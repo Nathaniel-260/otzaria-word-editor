@@ -36,6 +36,20 @@
  * פיקסל מוליד עמוד נוסף ריק על כל עמוד במסמך. עיגול למעלה מוסיף פחות מעשירית
  * פיקסל של לבן ואינו יכול לשבור עמוד.
  *
+ * ## וכשהקריאה נכשלת: מודדים, לא מוותרים
+ *
+ * `readPrintPageSize` מחזירה `null` בכל מקרה שאינו מידה שאפשר להישען עליה —
+ * אין מסמך, אין `sections.list`, הקריאה זרקה. עד כה זה הסתיים ב-`@page`
+ * שנושא `margin: 0` **בלי** `size`, ומשמעותו „הנייר של דיאלוג ההדפסה”:
+ * ברירת המחדל של Chrome היא Letter (1056px), תיבת עמוד A4 היא 1122.53px,
+ * ולכן מסמך A4 של עמוד אחד יצא **שני גיליונות** — השני ריק. כלומר בדיוק
+ * הבאג שכל הקובץ הזה בא לתקן, במסלול הכשל שלו.
+ *
+ * לכן יש מקור שני, זול ובטוח: `measurePrintPageSize` מודדת את תיבת העמוד
+ * **המצוירת** (`.superdoc-page`). היא אינה שואלת את המנוע דבר, ולכן היא
+ * עובדת גם כשה-API שלו הוא מה שנכשל. `@page { margin: 0 }` לבדו נשאר רק
+ * למקרה שגם אין מה למדוד — כלומר אין מסמך על המסך בכלל.
+ *
  * ## מה אינו מטופל, במפורש
  *
  * מסמך עם כמה מקטעים בגדלים שונים מקבל את הגודל של המקטע הראשון: ל-CSS יש
@@ -164,6 +178,38 @@ export async function readPrintPageSize(host: PrintTarget): Promise<PrintPageSiz
   return null;
 }
 
+/** פיקסלים ל-אינץ' ב-CSS. 96 **בהגדרה** (`1in == 96px`), ולא מידה של מסך. */
+const CSS_PX_PER_INCH = 96;
+
+/**
+ * מידות הדף כפי שהן מצוירות בפועל — המקור השני, כש-`readPrintPageSize` לא
+ * החזירה מידה. ראו „וכשהקריאה נכשלת” בראש הקובץ: בלי זה הפלט הוא נייר
+ * ברירת המחדל של הדפדפן, וגיליון ריק על כל עמוד.
+ *
+ * **`offsetWidth/offsetHeight` ולא `getBoundingClientRect`**, וזה לא עניין של
+ * טעם: המלבן כולל את ה-transform, וה-transform כאן הוא הזום (`.superdoc-layout`
+ * נושא `matrix(0.5, …)` ב-50%). מדידה דרכו הייתה מייצרת `@page` בחצי גודל
+ * הדף — כלומר בדיוק תקלת הזום שהגלון מבטל. `offset*` הן קופסת הפריסה
+ * ואינן רואות transform.
+ *
+ * המחיר: `offset*` הן מספרים שלמים, ולכן A4 (793.733×1122.53) נמדד 794×1123
+ * ומתורגם ל-8.271×11.698 אינץ' במקום 8.269×11.694. ההפרש הוא כחמישית פיקסל
+ * של לבן לכל עמוד, ובכיוון הבטוח בלבד — גיליון גדול מתיבת העמוד אינו יכול
+ * לשבור עמוד, וזו אותה הנמקה כמו העיגול כלפי מעלה.
+ */
+export function measurePrintPageSize(root: Document): PrintPageSize | null {
+  const page = root.querySelector<HTMLElement>(`.${ENGINE_PAGE_CLASS}`);
+  if (!page) return null;
+
+  const widthIn = page.offsetWidth / CSS_PX_PER_INCH;
+  const heightIn = page.offsetHeight / CSS_PX_PER_INCH;
+  // אותו סינון כמו בקריאה מהמנוע: 0 (אלמנט שאינו מצויר, וגם jsdom) או מידה
+  // מופרכת אינם מידה, ו-`@page` כזה היה גרוע מהיעדרו.
+  if (!isSaneInches(widthIn) || !isSaneInches(heightIn)) return null;
+
+  return { widthIn: ceilTo3(widthIn), heightIn: ceilTo3(heightIn) };
+}
+
 /** „8.269in 11.694in”. מיוצאת כדי שהשער ב-CDP ישווה מול אותו נוסח בדיוק. */
 export function pageSizeText(size: PrintPageSize): string {
   return `${size.widthIn}in ${size.heightIn}in`;
@@ -227,7 +273,8 @@ export async function printDocument(
   const root = options.root ?? document;
   const print = options.print ?? (() => window.print());
 
-  const size = await readPrintPageSize(host);
+  // שני מקורות, בסדר הזה: המסמך מדויק, המדידה זמינה גם כשהמנוע אינו עונה.
+  const size = (await readPrintPageSize(host)) ?? measurePrintPageSize(root);
   applyPrintPageSize(size, root);
 
   try {
@@ -377,7 +424,9 @@ export async function exportPdfDocument(
 ): Promise<ExportPdfOutcome> {
   const root = options.root ?? document;
 
-  const size = await readPrintPageSize(host);
+  // כמו בהדפסה, ומאותה סיבה בדיוק: ה-PDF נוצר מדף התוסף עצמו, ו-`@page` בלי
+  // `size` מייצר בו גיליון ריק על כל עמוד.
+  const size = (await readPrintPageSize(host)) ?? measurePrintPageSize(root);
   applyPrintPageSize(size, root);
 
   const base = {

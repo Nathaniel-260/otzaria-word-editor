@@ -10,11 +10,11 @@
  * ריצה מקבילה: כל שער חייב `port` משלו. שני שערים על אותה יציאה מדברים עם
  * אותו דפדפן ומשחיתים זה את מדידתו.
  */
-import { readFileSync, writeFileSync, existsSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, readdirSync, rmSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { inflateRawSync } from 'node:zlib';
-import { openPage, requireChrome, sleep } from '../cdp.mjs';
+import { onInterrupt, openPage, requireChrome, sleep } from '../cdp.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const ROOT = join(HERE, '..', '..');
@@ -46,6 +46,15 @@ function writeProbe(name, extra = '') {
     console.error('לא נמצא ה-latch ב-dist/index.html — אין לאן להזריק את הבדיקה');
     process.exit(1);
   }
+  /*
+   * דף בדיקה שנשאר משער שמת לפני `close()` נארז לתוך התוסף, ולכן `check:dist`
+   * נכשל עליו — גם כשהריצה הנוכחית נקייה. נמדד: `dist/__qa-fp-p5.html` שנשכח
+   * הפיל את השער הבא, וההרצה שאחריו עברה בלי ששום דבר השתנה. מנקים את מה
+   * שנשאר **לפני** שכותבים, ולא סומכים על ה-`finally` של הריצה שמתה.
+   */
+  for (const stale of readdirSync(DIST)) {
+    if (stale.startsWith('__qa-') && stale.endsWith('.html')) rmSync(join(DIST, stale), { force: true });
+  }
   const probe = join(DIST, `__qa-${name}.html`);
   const inject = `\n<script>${HOST_STUB}</script>\n<script>${QA_API}</script>\n${extra}\n`;
   writeFileSync(probe, html.slice(0, cut) + inject + html.slice(cut));
@@ -60,6 +69,12 @@ function writeProbe(name, extra = '') {
 export async function openApp({ name = 'qa', port = Number(process.env.QA_PORT ?? 9350), extra = '', settle = 3_000 } = {}) {
   requireChrome();
   const probe = writeProbe(name, extra);
+  // Ctrl+C באמצע: הדפדפן נסגר דרך `cdp.mjs`, אבל דף הבדיקה שייך לכאן.
+  const forgetProbe = onInterrupt(() => rmSync(probe, { force: true }));
+  const removeProbe = () => {
+    forgetProbe();
+    rmSync(probe, { force: true });
+  };
   const { cdp, close } = await openPage(`file:///${probe.split('\\').join('/')}`, { port, label: name });
 
   const api = makeApi(cdp);
@@ -78,7 +93,7 @@ export async function openApp({ name = 'qa', port = Number(process.env.QA_PORT ?
     await sleep(settle);
   } catch (error) {
     close();
-    rmSync(probe, { force: true });
+    removeProbe();
     throw error;
   }
 
@@ -92,7 +107,7 @@ export async function openApp({ name = 'qa', port = Number(process.env.QA_PORT ?
         /* הדפדפן ממילא נהרג מיד אחרי */
       }
       close();
-      rmSync(probe, { force: true });
+      removeProbe();
     },
   };
 }

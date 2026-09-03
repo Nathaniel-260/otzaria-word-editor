@@ -501,6 +501,17 @@ describe('repairComplexScriptBold', () => {
     expect(repairComplexScriptBold(runProps('<w:bCs/><w:bCs w:val="0"/>'))).toBeNull();
   });
 
+  it('שתי `bCs` — ההוספה לפני ה**ראשונה**, מפני ה-`xsd:sequence`', () => {
+    // הבדיקה שמעל מודדת איזה **ערך** מכריע; זו מודדת **איפה** ההוספה נוחתת,
+    // וזה חצי אחר של אותה החלטה. `CT_RPr` היא `xsd:sequence` שבו `b` בא לפני
+    // `bCs`, ולכן הוספה לפני ה-`bCs` השנייה מציבה `b` אחרי `bCs` — חלק
+    // שהסכימה של Word פוסלת. קלט עם שתי `bCs` פסול מלכתחילה, אבל התוצאה אסור
+    // לה להיות פסולה יותר ממנו.
+    const repaired = repairComplexScriptBold(runProps('<w:bCs w:val="0"/><w:bCs/>'));
+    expect(repaired).toContain('<w:rPr><w:b/><w:bCs w:val="0"/><w:bCs/></w:rPr>');
+    expect(repaired, 'ולא בין השתיים').not.toContain('<w:bCs w:val="0"/><w:b/>');
+  });
+
   /* ---------------- אינווריאנטים ---------------- */
 
   it('אינה משנה דבר מלבד ה-`b` שהוסיפה', () => {
@@ -634,6 +645,23 @@ describe('CONTENT_PARTS', () => {
 });
 
 describe('preflightDocx', () => {
+  it('BOM של חלק שתוקן אינו נמחק', async () => {
+    // ההבטחה בכותרת הקובץ היא „זהה למקור בכל מה שאינו התיקון עצמו”, ו-BOM הוא
+    // חלק ממנה. ברירת המחדל של `TextDecoder` פושטת U+FEFF ו-`TextEncoder`
+    // אינו מחזיר אותו, ולכן חלק שהתחיל ב-BOM היה נכתב מחדש בלעדיו.
+    const repaired = await preflightDocx(
+      buildZip([
+        { name: SETTINGS_PART, content: SETTINGS_WITH_ZERO },
+        { name: 'word/styles.xml', content: `\ufeff<w:styles xmlns:w="ns"><w:style><w:rPr><w:bCs/></w:rPr></w:style></w:styles>` },
+      ]),
+    );
+
+    expect(repaired).not.toBeNull();
+    const styles = await readDocxPart(repaired!.bytes, 'word/styles.xml');
+    expect(styles?.startsWith('\ufeff'), 'ה-BOM שרד את הכתיבה מחדש').toBe(true);
+    expect(styles).toContain('<w:b/><w:bCs/>');
+  });
+
   it('מתקנת את ההגדרות ומשאירה את שאר החלקים כפי שהיו', async () => {
     const original = buildZip([
       { name: '[Content_Types].xml', content: '<Types/>' },

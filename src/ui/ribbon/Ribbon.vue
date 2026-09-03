@@ -68,7 +68,6 @@
         @open-doc="$emit('open-doc')"
         @save-doc="$emit('save-doc')"
         @save-as-doc="$emit('save-as-doc')"
-        @export-doc="$emit('export-doc')"
         @print-doc="$emit('print-doc')"
         @export-pdf="$emit('export-pdf')"
         @about="$emit('about')"
@@ -202,7 +201,6 @@ defineEmits<{
   (e: 'open-doc'): void;
   (e: 'save-doc'): void;
   (e: 'save-as-doc'): void;
-  (e: 'export-doc'): void;
   (e: 'print-doc'): void;
   (e: 'export-pdf'): void;
   (e: 'export-otzaria'): void;

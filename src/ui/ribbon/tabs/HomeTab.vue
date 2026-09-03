@@ -59,20 +59,32 @@
           שמות, ובבורר נייטיב אין חיפוש. ראו common/RibbonCombo.vue.
         -->
         <RibbonCombo
-          :model-value="selectedFontFamily"
-          :options="familySelectOptions"
-          :disabled="!fontFamilyCmd.enabled.value"
+          :model-value="fonts.family.value"
+          :options="fonts.familyOptions.value"
+          :disabled="!fonts.familyEnabled.value"
+          :sample="fonts.sampleText.value"
           width="130px"
           title="גופן"
-          @update:model-value="onFontFamilyChange"
+          @update:model-value="fonts.setFamily"
+          @preview="fonts.hoverFamily"
+          @preview-end="fonts.endHoverFamily"
         />
-        <RibbonSelect
-          :model-value="selectedFontSize"
-          :options="sizeSelectOptions"
-          :disabled="!fontSizeCmd.enabled.value"
-          width="50px"
+        <!--
+          גם הגודל הוא RibbonCombo, ולא `<select>` שהיה כאן: בסולם של Word יש
+          ארבעה עשר גדלים, והמסמכים שנערכים כאן משתמשים גם ב-13, ב-15 וב-10.5.
+          בבורר סגור הם היו נגישים רק דרך „הגדל/הקטן” — כלומר לא נגישים.
+          `normalize` הוא מה שהופך את התיבה לתיבת ערך: ראו common/RibbonCombo.vue.
+        -->
+        <RibbonCombo
+          :model-value="fonts.size.value"
+          :options="fonts.sizeOptions.value"
+          :disabled="!fonts.sizeEnabled.value"
+          :normalize="fonts.normalizeSize"
+          empty-text="Enter מחיל את הגודל שהוקלד"
+          list-min-width="52px"
+          width="54px"
           title="גודל גופן"
-          @update:model-value="onFontSizeChange"
+          @update:model-value="fonts.setSize"
         />
         <RibbonButton
           icon="growFont"
@@ -80,8 +92,8 @@
           tooltip="הגדל גופן"
           description="מגדיל את הטקסט המסומן בדרגה אחת בכל לחיצה"
           shortcut-id="font-grow"
-          :disabled="!fontSizeCmd.enabled.value"
-          @click="growFontSize"
+          :disabled="!fonts.sizeEnabled.value"
+          @click="fonts.grow"
         />
         <RibbonButton
           icon="shrinkFont"
@@ -89,8 +101,8 @@
           tooltip="הקטן גופן"
           description="מקטין את הטקסט המסומן בדרגה אחת בכל לחיצה"
           shortcut-id="font-shrink"
-          :disabled="!fontSizeCmd.enabled.value"
-          @click="shrinkFontSize"
+          :disabled="!fonts.sizeEnabled.value"
+          @click="fonts.shrink"
         />
         <RibbonButton
           icon="clearFormatting"
@@ -444,7 +456,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, inject, onUnmounted, ref, shallowRef, watch, type Ref } from 'vue';
+import { computed, inject, onUnmounted, ref, shallowRef, watch } from 'vue';
 import type { SuperDoc } from 'superdoc';
 import RibbonGroup from '../common/RibbonGroup.vue';
 import RibbonStack from '../common/RibbonStack.vue';
@@ -455,7 +467,8 @@ import RibbonCombo from '../common/RibbonCombo.vue';
 import ColorPickerPopover from '../common/ColorPickerPopover.vue';
 import StyleGallery from '../common/StyleGallery.vue';
 import { useCommand } from '../../../composables/useCommand';
-import { useFontOptions } from '../../../composables/useFontOptions';
+import { useFontControls } from '../../../composables/use-font-controls';
+import { applyOptimistically, withCurrent } from '../../../composables/picker-value';
 import { COMMAND_REPORTER, type CommandReporter } from '../../../composables/keys';
 import type { CommandOutcome } from '../../../engine/command-adapter';
 import { ACTIVE_SUPERDOC } from '../../../engine/document-api';
@@ -500,19 +513,12 @@ import {
   setListNumberStyle,
 } from '../../../engine/lists';
 import {
-  DEFAULT_FONT_SIZE_PT,
   DEFAULT_LINE_HEIGHT,
   alignmentPayload,
   colorPayload,
-  fontFamilyPayload,
-  fontSizePayload,
-  grownFontSize,
   lineHeightPayload,
   parseColor,
-  parseFontFamily,
-  parseFontSizePt,
   parseLineHeight,
-  shrunkFontSize,
   stylePayload,
   type ParagraphAlignment,
 } from '../../../engine/payloads';
@@ -531,12 +537,6 @@ const SPACING_OPTIONS: SelectOption[] = [
   { value: '3.0', label: '3.0' },
 ];
 
-/**
- * מה שהבורר מציג לפני שהמנוע דיווח על גופן. Assistant הוא הגופן הארוז, כלומר
- * היחיד שבטוח קיים בכל פלטפורמה.
- */
-const DEFAULT_FONT_FAMILY = 'Assistant';
-
 // פקודות SuperDoc
 const boldCmd = useCommand('bold');
 const italicCmd = useCommand('italic');
@@ -545,8 +545,6 @@ const strikeCmd = useCommand('strikethrough');
 const clearFormatCmd = useCommand('clear-formatting');
 const formatPainterCmd = useCommand('copy-format');
 
-const fontFamilyCmd = useCommand('font-family');
-const fontSizeCmd = useCommand('font-size');
 const fontColorCmd = useCommand('text-color');
 const highlightCmd = useCommand('highlight-color');
 
@@ -562,22 +560,23 @@ const lineSpacingCmd = useCommand('line-height');
 const styleCmd = useCommand('linked-style');
 
 /**
- * אפשרויות הגופן מהמנוע (`ui.fonts`), ממוזגות עם שלנו. ראו
- * engine/font-options.ts — הרשימה הקשיחה שהייתה כאן לא ידעה מה יש במסמך.
+ * בורר הגופן ובורר הגודל. המצב שלהם אינו כאן אלא ב-use-font-controls.ts, ומאותו
+ * טעם שבו האפשרויות אינן כאן: אותם שני בוררים מופיעים גם בתפריט הלחצן הימני,
+ * ועותק פרטי לכל אחד מהם היה מציג בהם ערכים שונים באותו רגע — בדיוק ברגע שבו
+ * המנוע אינו מדווח ערך.
  */
-const { families: fontFamilyOptions, sizes: fontSizeOptions } = useFontOptions();
+const fonts = useFontControls();
 
 /* ------------------------------------------------------------------ */
 /* מה שהמנוע מדווח על הבחירה                                            */
 /* ------------------------------------------------------------------ */
 
 /**
- * `CommandState.value` הוא המקור לערך שהבורר מציג — לא ref מקומי. עד עכשיו
- * שלושת הבוררים היו refs שאותחלו לערך קשיח ולעולם לא התעדכנו: לחיצה על טקסט
- * ב-20pt השאירה „12” בתיבה, ו-`growFontSize` חישב מהמספר השגוי הזה.
+ * `CommandState.value` הוא המקור לערך שהפקד מציג — לא ref מקומי. שלושת
+ * הבוררים היו פעם refs שאותחלו לערך קשיח ולעולם לא התעדכנו: לחיצה על טקסט
+ * ב-20pt השאירה „12” בתיבה. בורר הגופן והגודל עברו ל-use-font-controls.ts;
+ * מה שנשאר כאן הוא מרווח השורות ושני הצבעים.
  */
-const engineFamily = computed(() => parseFontFamily(fontFamilyCmd.value.value));
-const engineSize = computed(() => parseFontSizePt(fontSizeCmd.value.value));
 const engineLineHeight = computed(() => parseLineHeight(lineSpacingCmd.value.value));
 const engineTextColor = computed(() => parseColor(fontColorCmd.value.value));
 const engineHighlight = computed(() => parseColor(highlightCmd.value.value));
@@ -589,8 +588,6 @@ const engineHighlight = computed(() => parseColor(highlightCmd.value.value));
  * עם יותר מערך אחד, ורגע שבו הוא עוד לא פתר את הבחירה. הבורר הוא **פקד**, ולא
  * דוח; לרוקן אותו בכל תנועת סמן היה גרוע יותר מלהציג את הערך האחרון שכן ידענו.
  */
-const lastFamily = ref(DEFAULT_FONT_FAMILY);
-const lastSize = ref(DEFAULT_FONT_SIZE_PT);
 const lastLineHeight = ref(DEFAULT_LINE_HEIGHT);
 
 /**
@@ -599,8 +596,8 @@ const lastLineHeight = ref(DEFAULT_LINE_HEIGHT);
  * למה שכבה נפרדת ולא כתיבה לזיכרון שלמעלה, וזה **הבאג שהיה כאן**: הזיכרון
  * נכתב לפני `run()` ולא הוחזר בכשל, ולכן הבורר הציג גופן שלא הוחל על שום דבר —
  * אותה תקלה בדיוק שתוקנה בזום, שבה הסרגל הזיז את התווית ורוחב העמוד לא זז.
- * מסוכן ממנה היה „הגדל גופן”, שמחשב מהערך הזה: שלוש לחיצות על מסמך שדוחה שלחו
- * 14, 16, 18 — הפקד התרחק מהמסמך בכל לחיצה.
+ * מסוכן ממנה היה „הגדל גופן” (שעבר מכאן ל-use-font-controls.ts), שמחשב מהערך
+ * הזה: שלוש לחיצות על מסמך שדוחה שלחו 14, 16, 18 — הפקד התרחק מהמסמך בכל לחיצה.
  *
  * ההפרדה גם מה שמתקן את המקרה הקשה יותר, שבו למנוע **יש** ערך: כתיבה לזיכרון
  * לא שינתה שם את הערך המוצג בכלל (המנוע גובר עליו), ולכן לא היה רינדור חוזר —
@@ -608,16 +605,8 @@ const lastLineHeight = ref(DEFAULT_LINE_HEIGHT);
  * נשארה על המסך עד לרינדור חוזר מסיבה אחרת לגמרי. עם שכבת ה-`pending` הערך
  * המוצג משתנה בשני הכיוונים, והסנכרון נקשר לתשובה עצמה.
  */
-const pendingFamily = ref<string | null>(null);
-const pendingSize = ref<number | null>(null);
 const pendingLineHeight = ref<number | null>(null);
 
-watch(engineFamily, (value) => {
-  if (value) lastFamily.value = value;
-});
-watch(engineSize, (value) => {
-  if (value) lastSize.value = value;
-});
 watch(engineLineHeight, (value) => {
   if (value) lastLineHeight.value = value;
 });
@@ -626,16 +615,9 @@ watch(engineLineHeight, (value) => {
  * סדר העדיפויות: מה שנבחר וטרם נענה, אחר כך מה שהמנוע מדווח, ולבסוף האחרון
  * שידענו. בקשה שנדחתה נעלמת מהשכבה הראשונה, ואז המסמך חוזר להיות מה שמוצג.
  */
-const selectedFontFamily = computed(
-  () => pendingFamily.value ?? engineFamily.value ?? lastFamily.value,
-);
-const currentSize = computed(() => pendingSize.value ?? engineSize.value ?? lastSize.value);
 const currentLineHeight = computed(
   () => pendingLineHeight.value ?? engineLineHeight.value ?? lastLineHeight.value,
 );
-
-/** „12” ולא „12.0”, אבל „20.5” נשמר — המנוע מדווח חצאי נקודות. */
-const selectedFontSize = computed(() => String(currentSize.value));
 
 /** „1.5” ולא „1.50”, כדי שהערך יתאים לאפשרות בבורר. */
 const selectedLineSpacing = computed(() => currentLineHeight.value.toFixed(2).replace(/0$/, ''));
@@ -643,39 +625,6 @@ const selectedLineSpacing = computed(() => currentLineHeight.value.toFixed(2).re
 /** צבע הפקד תמיד משקף את המסמך; ברירת המחדל היא מה שהכפתור יחיל בלחיצה. */
 const textColor = computed(() => engineTextColor.value ?? '');
 const highlightColor = computed(() => engineHighlight.value ?? '');
-
-/**
- * הערך הנוכחי חייב להיות אחת האפשרויות, אחרת `<select>` מציג את הראשונה
- * ומשקר. גופן או גודל שאינם ברשימה (מסמך שנכתב בגופן שהמנוע לא הציע, טקסט
- * ב-20.5pt) מתווספים בראשה — בדיוק מה ש-Word עושה.
- */
-function withCurrent(
-  options: readonly SelectOption[],
-  current: string,
-): readonly SelectOption[] {
-  if (current === '' || options.some((option) => option.value === current)) return options;
-  return [{ value: current, label: current, preview: current }, ...options];
-}
-
-const familySelectOptions = computed(() =>
-  withCurrent(
-    fontFamilyOptions.value.map((option) => ({
-      value: option.value,
-      label: option.label,
-      preview: option.previewFamily,
-      // הקיבוץ נקבע במיזוג ולא כאן — ראו engine/font-options.ts.
-      group: option.group,
-    })),
-    selectedFontFamily.value,
-  ),
-);
-
-const sizeSelectOptions = computed(() =>
-  withCurrent(
-    fontSizeOptions.value.map((option) => ({ value: option.value, label: option.label })),
-    selectedFontSize.value,
-  ),
-);
 
 const spacingSelectOptions = computed(() =>
   withCurrent(SPACING_OPTIONS, selectedLineSpacing.value),
@@ -688,57 +637,6 @@ const spacingSelectOptions = computed(() =>
 // כל ה-payloads נבנים ב-engine/payloads.ts, ולא כליטרל כאן: מה שנשלח לפקודה
 // הוא חוזה מול ולידטור בתוך המנוע, והוולידטור נכשל **סגור**. ראו את הטבלה
 // שם, ואת בדיקת החוזה ב-tests/contract/command-payloads.test.ts.
-/**
- * שולחת את הבחירה ומחזיקה אותה על המסך עד לתשובה: בהצלחה היא נשמרת כ„אחרון
- * שידענו”, ובכשל היא נעלמת — כלומר מה שלא קרה במסמך אינו מוצג.
- *
- * למה אופטימי ולא „להמתין לתשובה”: הבורר חייב להגיב מיד, והמנוע אינו מדווח
- * ערך בכלל על בחירה מעורבת — תיבה שממתינה לו הייתה נראית קפואה גם בהצלחה
- * מלאה.
- *
- * הבדיקה `pending.value !== next` לפני העדכון: אם המשתמש בחר שוב בזמן
- * ההמתנה, הבקשה שבאוויר אינה שלנו יותר, ותשובה מאוחרת אינה אמורה למחוק בחירה
- * טרייה.
- */
-async function applyOptimistically<T>(
-  pending: Ref<T | null>,
-  memo: Ref<T>,
-  next: T,
-  run: () => Promise<CommandOutcome>,
-): Promise<void> {
-  pending.value = next;
-  const outcome = await run();
-  if (pending.value !== next) return;
-  if (outcome.ok) memo.value = next;
-  pending.value = null;
-}
-
-function onFontFamilyChange(font: string): void {
-  const payload = fontFamilyPayload(font);
-  if (payload === null) return;
-  void applyOptimistically(pendingFamily, lastFamily, payload, () => fontFamilyCmd.run(payload));
-}
-
-function applyFontSize(pt: number): void {
-  const payload = fontSizePayload(pt);
-  if (payload === null) return;
-  void applyOptimistically(pendingSize, lastSize, payload, () => fontSizeCmd.run(payload));
-}
-
-function onFontSizeChange(size: string): void {
-  const pt = parseFontSizePt(size);
-  if (pt !== null) applyFontSize(pt);
-}
-
-/** הגדל/הקטן עובדים על **הערך מהמנוע**, על סולם הגדלים של Word. */
-function growFontSize(): void {
-  applyFontSize(grownFontSize(currentSize.value));
-}
-
-function shrinkFontSize(): void {
-  applyFontSize(shrunkFontSize(currentSize.value));
-}
-
 function onTextColorChange(color: string | null): void {
   void fontColorCmd.run(colorPayload(color));
 }
@@ -781,6 +679,7 @@ const fallbackReporter: CommandReporter = (outcome, id) => {
 };
 
 const superdoc = inject(ACTIVE_SUPERDOC, shallowRef<SuperDoc | null>(null));
+
 const report = inject(COMMAND_REPORTER, fallbackReporter);
 
 /* ------------------------------------------------------------------ */

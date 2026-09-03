@@ -4,7 +4,11 @@
  * הבדיקות, כי היא הייתה בתוך המעטפת שאין עליה כיסוי.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { decideDocumentSwitch, type SwitchIntent } from '../../src/sessions/open-flow';
+import {
+  decideDocumentSwitch,
+  decidePendingTabClose,
+  type SwitchIntent,
+} from '../../src/sessions/open-flow';
 
 function deps(options: {
   dirty?: boolean;
@@ -143,5 +147,59 @@ describe('decideDocumentSwitch עם intent: exit', () => {
 
     expect(h.asked).toEqual(['המסמך לא נשמר', 'לפתוח בלי לשמור?']);
     expect(h.confirm.mock.calls[0]![0].content).toBe('לשמור את חידושים לפני פתיחת מסמך אחר?');
+  });
+});
+
+/**
+ * סגירת טאב ששוחזר ועדיין לא נטען. אין בו מנוע שיענה „יש שינויים?”, ויש בו
+ * טיוטה שהסגירה מוחקת — ולכן ההחלטה כאן ולא במעטפת.
+ */
+describe('decidePendingTabClose', () => {
+  function pending(options: { hasDraft: boolean; answer?: boolean }) {
+    const asked: Array<{ title: string; content: string }> = [];
+    const confirm = vi.fn(async (question: { title: string; content: string }) => {
+      asked.push(question);
+      return options.answer === true;
+    });
+    return {
+      asked,
+      confirm,
+      deps: {
+        hasDraft: () => options.hasDraft,
+        confirm,
+        documentName: () => 'חידושים',
+      },
+    };
+  }
+
+  it('אין טיוטה — אין מה לאבד, ואין שאלה', async () => {
+    const h = pending({ hasDraft: false });
+
+    expect(await decidePendingTabClose(h.deps)).toEqual({ action: 'switch' });
+    expect(h.confirm).not.toHaveBeenCalled();
+  });
+
+  it('יש טיוטה — שואלים, ו„לא” משאיר את הטאב', async () => {
+    // הכשל החמור שהשאלה הזאת מונעת: מחיקה שקטה של עבודה שהמשתמש עוד לא ראה.
+    const h = pending({ hasDraft: true, answer: false });
+
+    expect(await decidePendingTabClose(h.deps)).toEqual({ action: 'cancel', reason: 'user' });
+    expect(h.asked[0]?.title).toBe('לסגור בלי לשמור?');
+    expect(h.asked[0]?.content).toContain('חידושים');
+  });
+
+  it('יש טיוטה, והמשתמש אישר — סוגרים', async () => {
+    const h = pending({ hasDraft: true, answer: true });
+
+    expect(await decidePendingTabClose(h.deps)).toEqual({ action: 'switch' });
+    expect(h.confirm).toHaveBeenCalledTimes(1);
+  });
+
+  it('„לשמור קודם” אינו מוצע: אין מסמך פתוח שאפשר לייצא ממנו', async () => {
+    // שאלה שאין לה מסלול ביצוע גרועה משאלה שלא נשאלה.
+    for (const hasDraft of [true, false]) {
+      const h = pending({ hasDraft, answer: true });
+      expect(await decidePendingTabClose(h.deps)).not.toEqual({ action: 'save-first' });
+    }
   });
 });
