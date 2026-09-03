@@ -232,7 +232,7 @@ describe('createList מוסרת לסגנוני מספור בלבד', () => {
     expect(ids).not.toContain('numbered-list');
     // ובלי לגעת במסמך: הסירוב היחיד שהמשתמש מקבל.
     const ops = harness.superdoc.calls.map((call) => call.op);
-    expect(ops).not.toContain('lists.setType');
+    expect(ops).not.toContain('lists.applyStyle');
     expect(ops).not.toContain('lists.setLevelNumberStyle');
     const failures = harness.failures();
     expect(failures).toHaveLength(1);

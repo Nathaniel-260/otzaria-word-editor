@@ -38,7 +38,7 @@ function fakeDoc(
 ) {
   const calls = new Map<string, unknown[]>();
   const impls: Record<string, (input: unknown) => unknown> = {};
-  for (const name of ['setLevelNumberStyle', 'setType', 'restartAt', 'continuePrevious', 'convertToText']) {
+  for (const name of ['setLevelNumberStyle', 'applyStyle', 'restartAt', 'continuePrevious', 'convertToText']) {
     calls.set(name, []);
     const receipt = options.receipts?.[name] ?? { success: true };
     impls[name] = (input: unknown) => {
@@ -66,16 +66,25 @@ function fakeDoc(
 }
 
 describe('setListToBullets', () => {
-  it('lists.setType עם kind:bullet — ולא numFmt לבדו', async () => {
+  it('lists.applyStyle עם תבליט בכל תשע הרמות — ולא setType', async () => {
     const { host, calls } = fakeDoc();
 
     expect(await setListToBullets(host)).toEqual({ ok: true });
-    expect(calls.get('setType')?.[0]).toEqual({
-      target: { kind: 'block', nodeType: 'listItem', nodeId: 'li1' },
-      kind: 'bullet',
-    });
-    // `setLevelNumberStyle({numberStyle:'bullet'})` כותב numFmt בלי lvlText,
-    // והסמן שמצטייר הוא „%1.” — נמדד.
+    const input = calls.get('applyStyle')?.[0] as {
+      target: unknown;
+      style: { version: number; levels: Array<Record<string, unknown>> };
+    };
+    expect(input.target).toEqual({ kind: 'block', nodeType: 'listItem', nodeId: 'li1' });
+    expect(input.style.version).toBe(1);
+    // תשע הרמות ולא רמה 0 לבדה: רשימה מקוננת שרמה 1 שלה נשארת lowerLetter
+    // מציירת „a.” מתחת לתבליט.
+    expect(input.style.levels.map((l) => l.level)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8]);
+    for (const level of input.style.levels) {
+      // `lvlText` ולא `numFmt` לבדו: הסמן נגזר מ-`lvlText`, ו-„%1.” שנשאר הוא הבאג.
+      expect(level).toMatchObject({ numFmt: 'bullet', lvlText: '\u2022', markerFont: 'Symbol' });
+      // מה שלא נמסר נשאר כשהיה — ההזחות של הרשימה אינן נדרסות.
+      expect(Object.keys(level).sort()).toEqual(['level', 'lvlText', 'markerFont', 'numFmt']);
+    }
     expect(calls.get('setLevelNumberStyle')).toHaveLength(0);
   });
 
@@ -98,12 +107,12 @@ describe('setListToBullets', () => {
 
     expect(outcome.ok).toBe(false);
     expect(outcome.ok === false && outcome.message).toContain('יש למקם את הסמן בתוך רשימה');
-    expect(calls.get('setType')).toHaveLength(0);
+    expect(calls.get('applyStyle')).toHaveLength(0);
   });
 
-  it('מנוע בלי lists.setType — „אינו זמין בגרסה זו”', async () => {
+  it('מנוע בלי lists.applyStyle — „אינו זמין בגרסה זו”', async () => {
     const { host, doc } = fakeDoc();
-    delete (doc as unknown as { lists: Record<string, unknown> }).lists.setType;
+    delete (doc as unknown as { lists: Record<string, unknown> }).lists.applyStyle;
 
     const outcome = await setListToBullets(host);
 

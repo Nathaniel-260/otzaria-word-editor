@@ -85,7 +85,7 @@ interface ListsApiShape {
       target: { kind: 'block'; nodeType: 'paragraph' | 'listItem'; nodeId: string };
     }) => MaybePromise<{ success?: boolean; isListItem?: boolean } | undefined>;
     setLevelNumberStyle?: (input: Record<string, unknown>) => MaybePromise<DocReceipt>;
-    setType?: (input: Record<string, unknown>) => MaybePromise<DocReceipt>;
+    applyStyle?: (input: Record<string, unknown>) => MaybePromise<DocReceipt>;
     restartAt?: (input: Record<string, unknown>) => MaybePromise<DocReceipt>;
     continuePrevious?: (input: Record<string, unknown>) => MaybePromise<DocReceipt>;
     convertToText?: (input: Record<string, unknown>) => MaybePromise<DocReceipt>;
@@ -293,9 +293,21 @@ export async function setListNumberStyle(
   return call(failedAction, () => setLevelNumberStyle({ target: item, level: 0, numberStyle }));
 }
 
+/** רק שדות הסמן, ובכל תשע הרמות — שדה שאינו נמסר נשאר כשהיה, כולל ההזחות. */
+const BULLET_STYLE = {
+  version: 1,
+  levels: Array.from({ length: 9 }, (_, level) => ({
+    level,
+    numFmt: 'bullet',
+    lvlText: '•',
+    markerFont: 'Symbol',
+  })),
+};
+
 /**
- * `setType` ולא `setLevelNumberStyle({numberStyle:'bullet'})`: האחרון כותב
- * `numFmt` בלבד, ו-`lvlText` שנשאר „%1.” הוא הסמן שמצטייר בפועל.
+ * `applyStyle` ולא `setType`: `setType` כותב ל-`abstractNum` המשותף, והפך גם
+ * את השכנה שחולקת אותו (`numId` נפרד מ„התחל מחדש מ-1”); `applyStyle` הוא
+ * sequence-local בחוזה — הגדרה משותפת משובטת לפני הכתיבה.
  */
 export async function setListToBullets(host: ListsTarget): Promise<CommandOutcome> {
   const failedAction = 'המרת הרשימה לתבליטים נכשלה';
@@ -303,10 +315,10 @@ export async function setListToBullets(host: ListsTarget): Promise<CommandOutcom
   const item = await resolveAddress(host);
   if (!item) return notInList(failedAction);
 
-  const setType = docOf(host)?.lists?.setType;
-  if (typeof setType !== 'function') return unsupported(failedAction);
+  const applyStyle = docOf(host)?.lists?.applyStyle;
+  if (typeof applyStyle !== 'function') return unsupported(failedAction);
 
-  return call(failedAction, () => setType({ target: item, kind: 'bullet' }));
+  return call(failedAction, () => applyStyle({ target: item, style: BULLET_STYLE }));
 }
 
 /** „התחל מחדש": מגדיר את ערך ההתחלה של הרשימה שבה הסמן. */
