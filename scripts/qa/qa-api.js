@@ -107,18 +107,25 @@
     return exact ? n === name : n.indexOf(name) === 0;
   }
 
-  /** מאתר פקד לפי שם. מחפש בכל הדף — תפריטים נפתחים מחוץ לגוף הלשונית. */
+  /**
+   * מאתר פקד לפי שם. מחפש בכל הדף — תפריטים נפתחים מחוץ לגוף הלשונית.
+   *
+   * נראה קודם, ומוסתר רק כשאין נראה: יש שערים שמודדים פקד לפני שהתפריט
+   * שמחזיק אותו נפתח, ולכן אי אפשר להתעלם ממוסתר לגמרי.
+   */
   Q.el = function (name, opts) {
     opts = opts || {};
     var scope = document.querySelector(opts.scope || 'body');
     if (!scope) return null;
     var nodes = scope.querySelectorAll(opts.selector || 'button, select, input, [role="menuitem"], [role="option"]');
-    var hits = [];
+    var shown = [];
+    var hidden = [];
     Array.prototype.forEach.call(nodes, function (el) {
-      if (match(el, name, opts.exact)) hits.push(el);
+      if (!match(el, name, opts.exact)) return;
+      (Q.rectOf(el) ? shown : hidden).push(el);
     });
-    if (!hits.length) return null;
-    return hits[opts.index || 0];
+    var hits = shown.length ? shown : hidden;
+    return hits[opts.index || 0] || null;
   };
 
   Q.state = function (name, opts) {
