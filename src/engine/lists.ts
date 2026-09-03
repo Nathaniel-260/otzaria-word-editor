@@ -38,8 +38,7 @@ const UNAVAILABLE_TEXT = 'אינו זמין בגרסה זו';
  * שה**סמן צויר ריק**: על superdoc@2.8.0 המשתמש קיבל „. ” בלי אות, כלומר
  * מסמך נכון ומסך ריק. במעבר ל-2.10.0 הסמנים מצוירים, ולכן `hebrew2` מצטרף.
  *
- * `bullet` **אינו** כאן: הוא היה נכתב כ-`numFmt` בלי `lvlText`, והסמן שהצטייר
- * היה „%1.” (נמדד). תבליטים הם `setListToBullets` — `lists.setType`.
+ * `bullet` אינו סגנון מספור: כ-`numFmt` בלי `lvlText` הסמן שהצטייר היה „%1.”.
  */
 export const NUMBER_STYLES: readonly string[] = [
   'decimal',
@@ -295,15 +294,8 @@ export async function setListNumberStyle(
 }
 
 /**
- * „הפוך רשימה ממוספרת לתבליטים” — `lists.setType`, ולא
- * `setLevelNumberStyle({numberStyle:'bullet'})`: החוזה של האחרון הוא
- * `{target, level, numberStyle}` בלבד, ונמדד שהוא כותב `w:numFmt="bullet"`
- * ומשאיר את `w:lvlText` על `"%1."` — כלומר הסמן שמצטייר הוא „%1.”.
- * `setType({kind:'bullet'})` כותב את שלושתם: numFmt, `lvlText="•"` ו-Symbol
- * ב-`rPr/rFonts`, באותו `numId` (המרה במקום, בלי לפרק את הרשימה).
- *
- * אינו יוצר רשימה על פסקה רגילה — לא כאן (אין `createList`) וגם לא במנוע,
- * שמחזיר `TARGET_NOT_FOUND` על בלוק שאינו פריט.
+ * `setType` ולא `setLevelNumberStyle({numberStyle:'bullet'})`: האחרון כותב
+ * `numFmt` בלבד, ו-`lvlText` שנשאר „%1.” הוא הסמן שמצטייר בפועל.
  */
 export async function setListToBullets(host: ListsTarget): Promise<CommandOutcome> {
   const failedAction = 'המרת הרשימה לתבליטים נכשלה';
