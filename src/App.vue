@@ -2608,52 +2608,49 @@ async function onNewDocument(): Promise<void> {
 }
 
 /**
- * „יציאה”.
+ * „יציאה”: סוגרת את המסמכים הפתוחים, ומחזירה את המשתמש למסך הספרייה.
  *
  * מה „יציאה” אומרת כאן, וזה אינו מובן מאליו: התוסף הוא לשונית בתוך אוצריא,
  * ולא אפליקציה שנסגרת. `navigation.goTo` מוציא את המשתמש מהמסך, ואוצריא
- * **משהה** את ה-WebView (`plugin.suspended`) במקום להרוס אותו — כלומר המסמך
- * ממתין כפי שהיה כשחוזרים. לכן היציאה אינה סוגרת את המסמך ואינה מוחקת דבר:
- * לסגור אותו היה מוחק עבודה שהמשתמש רק ביקש להתרחק ממנה, ודווקא בענף
- * „בלי לשמור” — שבו הוא אמר „אל תכתוב לדיסק”, ולא „תמחק לי את הטקסט”.
+ * **משהה** את ה-WebView (`plugin.suspended`) במקום להרוס אותו — כלומר בלי
+ * סגירה מפורשת המסמך ממשיך לחכות פתוח כפי שהיה.
  *
- * מה שהכפתור כן קונה הוא השאלה: השמירה האוטומטית פועלת רק כשיש יעד כתיבה,
- * ומסמך חדש שטרם נשמר אין לו יעד — כלומר עד כאן הדרך היחידה לצאת ממנו הייתה
- * „פתח ספרייה” בלשונית „אוצריא”, שהוא כפתור ניווט ואינו שואל דבר. עכשיו יש
- * מסלול שמציע לשמור לפני שהולכים.
+ * זה מה שהכפתור עשה עד כאן, וזו הייתה סתירה שהמשתמש פוגש בלחיצה אחת: הוא
+ * נשאל „לשמור לפני יציאה?”, ואם ענה „לא” גם „לצאת בלי לשמור? השינויים
+ * יימחקו” — ואז דבר לא נסגר ודבר לא נמחק. כפתור ששאלותיו מתארות פעולה שאינה
+ * קורית מלמד לא להאמין לשאלות שלו, וזו בדיוק השאלה שאסור שילמדו להתעלם ממנה.
  *
- * ההחלטה עצמה היא `decideDocumentSwitch` עם `intent: 'exit'` — אותו קוד בדיוק
- * שמחליט על מעבר מסמך, כי „לצאת בלי לשמור” ו„לפתוח בלי לשמור” הם אותו סיכון.
+ * לכן היציאה סוגרת. „פתח ספרייה” בלשונית „אוצריא” נשאר מה שהיה — כפתור ניווט
+ * שאינו סוגר ואינו שואל — ועכשיו ההבדל בין שני הכפתורים הוא בדיוק ההבדל
+ * שהתוויות שלהם מבטיחות.
+ *
+ * השאלה אינה מחייבת לשמור: „לא” על „לשמור לפני יציאה?” מוביל לשאלת אישור
+ * שנייה, וזהו — ראו sessions/open-flow.ts.
  */
 async function onExit(): Promise<void> {
-  if (save && save.snapshot.isDirty) {
-    const decision = await decideDocumentSwitch({
-      isDirty: () => save!.snapshot.isDirty,
-      isSaving: () => save!.snapshot.isSaving,
-      confirm,
-      documentName: () => title.value,
-      intent: 'exit',
-    });
-    if (decision.action === 'cancel') {
-      // בזמן שמירה אין לצאת: הסבב שרץ עוד לא כתב לדיסק. ההודעה היא זו של
-      // מעבר מסמך, מאותו טעם ובאותו נוסח.
-      if (decision.reason === 'saving') setStatus('השמירה עוד רצה — רגע אחד');
-      return;
-    }
-    if (decision.action === 'save-first') {
-      const outcome = await save.saveNow({ suggestedName: documentFileName(title.value, saveExtension.value) });
-      // שמירה שנכשלה או שבוטלה עוצרת את היציאה: המשתמש ביקש לשמור, וללכת
-      // בכל זאת היה מתעלם ממה שביקש.
-      if (outcome.status !== 'saved') {
-        if (outcome.status === 'failed') setStatus(outcome.message, true);
-        else setStatus('היציאה בוטלה — המסמך לא נשמר');
-        return;
-      }
-    }
+  // בזמן פתיחה אין לסגור: `openDocumentInto` כותב לטאב הפעיל לכל אורך ריצתו
+  // (ראו `isOpenBusy`), וסגירתו באמצע הייתה משאירה אותה כותבת לתוך מסמך
+  // מפורק. הפקד עצמו מנוטרל אז; זה הגיבוי למסלול שיגיע שלא דרכו.
+  if (isOpenBusy()) return;
+
+  // הטאב הפעיל נשאל ראשון: הוא המסמך שעל המסך כשלוחצים „יציאה”, ושאלה על
+  // מסמך שאינו נראה, לפניו, נקראת כשאלה עליו.
+  const active = activeSession.value;
+  const open = Array.from(sessions.values());
+  const order = active ? [active, ...open.filter((session) => session !== active)] : open;
+
+  // כל הטאבים נשאלים **לפני** שנסגר ולו אחד: „ביטול” על השלישי אחרי ששניים
+  // כבר נסגרו הוא ביטול שאינו מבטל.
+  for (const session of order) {
+    if (!(await resolveUnsavedBeforeClose(session, 'exit'))) return;
   }
 
+  await closeAllSessions();
+
   // אותו מסלול דיווח כמו „פתח ספרייה” בלשונית „אוצריא”: הודעה בעברית למשתמש
-  // ושורה בלוג של אוצריא. כשל ניווט אינו מבטל את השמירה שכבר נעשתה.
+  // ושורה בלוג של אוצריא. כשל ניווט אינו מחזיר את המסמכים — כל אחד מהם כבר
+  // נשמר או שמחיקתו אושרה במפורש, ומי שנשאר בתוסף נשאר עם עורך נקי והודעה
+  // שאומרת מה נכשל.
   reportReader(await openLibrary());
 }
 
@@ -2935,33 +2932,41 @@ async function openPendingTab(session: DocumentSession): Promise<void> {
 }
 
 /**
- * סגירת טאב. אותה בדיקת „שינויים לא שמורים” כמו פתיחת מסמך אחר —
- * `decideDocumentSwitch` עם `intent: 'close-tab'` לנוסח בלבד — ואותו מסלול
- * מחיקת טיוטה: „החלף”/„סגור” אחרי „לא לשמור” הוא אישור מפורש למחיקה.
+ * מה קורה למה שלא נשמר בטאב, לפני שהוא נסגר. מחזירה האם מותר לסגור: `false`
+ * פירושו שהמשתמש ביטל או שהשמירה שביקש נכשלה, ובשני המקרים ההודעה כבר
+ * בשורת המצב.
+ *
+ * משותפת לשני הסוגרים — „×” על טאב בודד ו„יציאה” שסוגרת את כולם — ואינה
+ * משוכפלת ביניהם: זהו הקוד שקובע אם עבודה של המשתמש נמחקת, ועותק שני שלו הוא
+ * עותק שיכול להתפצל בשקט. אותו טעם שבגללו ההחלטה עצמה יושבת ב-open-flow.ts.
+ *
+ * ## שתי שאלות שונות, לפי מה שיש לטאב לאבד
+ *
+ * המסלול הרגיל שואל את המנוע („יש שינויים שלא נשמרו?”), אבל יש שני מצבים
+ * שבהם אין מנוע שיענה, ובכל זאת **יש** עבודה: טאב ששוחזר ועוד לא נטען,
+ * וטאב שהטעינה שלו **נכשלה** ונפל לתוכו מסמך ריק (`remember: false`,
+ * `reopenPreviousSession`). השני הוא המסוכן: הוא נראה „נקי” לגמרי — המנוע
+ * שבתוכו באמת ריק — בעוד הרשומה שלו עדיין מחזיקה טיוטה עם העבודה שלא
+ * נשמרה, וסגירתו הייתה מוחקת אותה **בלי אף שאלה** (`destroy({removeDraft})`).
+ *
+ * לכן השאלה נגזרת מהרשומה ולא מהדגל: כל טאב שיש טיוטה ברשומה שלו והמנוע
+ * שבו אינו מציג אותה (כלומר אינו „מלוכלך”) נשאל לפני שמוחקים.
+ *
+ * ## הטיוטה נמחקת בסגירה, לא כאן
+ *
+ * „לסגור בלי לשמור” הוא אישור מפורש למחיקת הטיוטה, אבל המחיקה עצמה היא
+ * `destroy({ removeDraft: true })` של הסוגר — נקודה אחת ולא שתיים. זה משנה
+ * ביציאה: היא שואלת על **כל** הטאבים לפני שהיא סוגרת ולו אחד, ומחיקה כאן
+ * הייתה מוחקת את הטיוטה של הראשון גם כשהשאלה על השלישי מבטלת את הכול.
  */
-async function onDocumentTabClose(id: DocumentSessionId): Promise<void> {
-  if (isOpenBusy()) return;
-  const session = sessions.get(id);
-  if (!session) return;
-
-  /**
-   * שתי שאלות שונות, לפי מה שיש לטאב לאבד.
-   *
-   * המסלול הרגיל שואל את המנוע („יש שינויים שלא נשמרו?”), אבל יש שני מצבים
-   * שבהם אין מנוע שיענה, ובכל זאת **יש** עבודה: טאב ששוחזר ועוד לא נטען,
-   * וטאב שהטעינה שלו **נכשלה** ונפל לתוכו מסמך ריק (`remember: false`,
-   * `reopenPreviousSession`). השני הוא המסוכן: הוא נראה „נקי” לגמרי — המנוע
-   * שבתוכו באמת ריק — בעוד הרשומה שלו עדיין מחזיקה טיוטה עם העבודה שלא
-   * נשמרה, וסגירתו הייתה מוחקת אותה **בלי אף שאלה** (`destroy({removeDraft})`).
-   *
-   * לכן השאלה נגזרת מהרשומה ולא מהדגל: כל טאב שיש טיוטה ברשומה שלו והמנוע
-   * שבו אינו מציג אותה (כלומר אינו „מלוכלך”) נשאל לפני שמוחקים.
-   */
+async function resolveUnsavedBeforeClose(
+  session: DocumentSession,
+  intent: 'exit' | 'close-tab',
+): Promise<boolean> {
   const recordDraft = activeEntry(session.keeper.state)?.draft != null;
   const engineDirty = session.save.snapshot.isDirty;
   const askFromRecord = recordDraft && !engineDirty;
 
-  const hadUnsaved = engineDirty || recordDraft;
   const decision =
     session.pendingRestore || askFromRecord
       ? await decidePendingTabClose({
@@ -2974,26 +2979,39 @@ async function onDocumentTabClose(id: DocumentSessionId): Promise<void> {
           isSaving: () => session.save.snapshot.isSaving,
           confirm,
           documentName: () => sessionDisplayTitle(session),
-          intent: 'close-tab',
+          intent,
         });
 
-  if (hadUnsaved && decision.action === 'switch') await session.keeper.discardDraft();
+  /** הפעולה שבוטלה, בנוסח שלה. „היציאה בוטלה” ו„סגירת הטאב בוטלה”. */
+  const what = intent === 'exit' ? 'היציאה' : 'סגירת הטאב';
 
   if (decision.action === 'cancel') {
-    setStatus(decision.reason === 'saving' ? 'השמירה עוד רצה — רגע אחד' : 'סגירת הטאב בוטלה');
-    return;
+    setStatus(decision.reason === 'saving' ? 'השמירה עוד רצה — רגע אחד' : `${what} בוטלה`);
+    return false;
   }
 
   if (decision.action === 'save-first') {
     const outcome = await session.save.saveNow({
       suggestedName: documentFileName(sessionDisplayTitle(session), sessionSaveExtension(session)),
     });
+    // שמירה שנכשלה או שבוטלה עוצרת את הסגירה: המשתמש ביקש לשמור, ולסגור בכל
+    // זאת היה מתעלם ממה שביקש.
     if (outcome.status !== 'saved') {
       if (outcome.status === 'failed') setStatus(outcome.message, true);
-      else setStatus('סגירת הטאב בוטלה — המסמך לא נשמר');
-      return;
+      else setStatus(`${what} בוטלה — המסמך לא נשמר`);
+      return false;
     }
   }
+
+  return true;
+}
+
+/** סגירת טאב: השאלה על מה שלא נשמר, ואז הפירוק. */
+async function onDocumentTabClose(id: DocumentSessionId): Promise<void> {
+  if (isOpenBusy()) return;
+  const session = sessions.get(id);
+  if (!session) return;
+  if (!(await resolveUnsavedBeforeClose(session, 'close-tab'))) return;
 
   const wasActive = session === activeSession.value;
   sessions.delete(session.id);
@@ -3029,6 +3047,31 @@ async function activateAfterClose(): Promise<void> {
   // שנוצר כאן מפני שהאחרון נסגר — צריך לפתוח בו מסמך, בדיוק כמו „+”.
   if (next.pendingRestore) await openPendingTab(next);
   else if (next.swap.current === null) await openDocument();
+}
+
+/**
+ * סוגרת את כל הטאבים ומשאירה במקומם מסמך חדש-ריק. „יציאה” בלבד קוראת לה,
+ * ורק אחרי שכל טאב נשאל (`resolveUnsavedBeforeClose`).
+ *
+ * הפירוק זהה לזה של סגירת טאב בודד, לכל טאב בתורו: הסרה מהמפה ומ-`recentTabs`,
+ * ואז `destroy({ removeDraft: true })` — שמוחק גם את הטיוטה, כי לא נשאר טאב
+ * שיפתח אותה (ראו `DocumentSession.destroy`).
+ *
+ * מה שנכתב לרשומה בסוף הוא האוסף שנשאר, כלומר הטאב החדש בלבד — וזו המשמעות
+ * המעשית של „המסמך נסגר”: גם מי שיפתח את התוסף מחדש, ולא רק מי שחוזר אליו
+ * מהספרייה, יקבל עורך נקי.
+ *
+ * הטאב החדש נוצר דרך `activateAfterClose`, בדיוק כמו בסגירת הטאב האחרון: אין
+ * מצב „תוסף בלי טאבים” — רצועת הטאבים, הרצועה ושורת המצב כולן מניחות מסמך.
+ */
+async function closeAllSessions(): Promise<void> {
+  for (const session of Array.from(sessions.values())) {
+    sessions.delete(session.id);
+    const recentAt = recentTabs.indexOf(session.id);
+    if (recentAt >= 0) recentTabs.splice(recentAt, 1);
+    await session.destroy({ removeDraft: true });
+  }
+  await activateAfterClose();
 }
 
 /**

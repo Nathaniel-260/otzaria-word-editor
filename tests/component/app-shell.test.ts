@@ -1362,6 +1362,49 @@ describe('שחזור כל הטאבים', () => {
       'loopback://second',
     ]);
   });
+
+  /**
+   * „יציאה” סוגרת — וזה מה שלא היה נכון קודם: הכפתור שאל „לצאת בלי לשמור?
+   * השינויים יימחקו”, ואז ניווט לספרייה בלבד; המסמכים המשיכו לחכות פתוחים
+   * (ה-WebView מושהה ואינו נהרס), ושום דבר לא נמחק. שאלה שמתארת פעולה שאינה
+   * קורית היא שאלה שלומדים להתעלם ממנה, ודווקא זו.
+   *
+   * שלוש טענות בבדיקה אחת, כי „נסגר” הוא צירוף שלהן: הרצועה, הרשומה שההפעלה
+   * הבאה תקרא (הטאב שברקע יורד ממנה גם הוא — לא רק זה שעל המסך), והמעבר
+   * לספרייה שקורה רק אחרי הסגירה.
+   */
+  it('„יציאה” סוגרת את כל הטאבים ואז עוברת לספרייה', async () => {
+    stub.storedSession = twoTabs();
+    const wrapper = await mountShell();
+
+    // ה-SDK מוזרק לרגע הזה בלבד: בשאר הקובץ `window.Otzaria` אינו קיים
+    // בכוונה (ראו ראש הקובץ), וכאן צריך למדוד שהמעבר לספרייה אכן נקרא —
+    // סגירה שאינה מוציאה את המשתמש מהמסך אינה „יציאה”.
+    const hostCalls: string[] = [];
+    window.Otzaria = {
+      call: (method: string) => {
+        hostCalls.push(method);
+        return Promise.resolve({ success: true, data: true });
+      },
+    } as never;
+
+    try {
+      const fileTab = wrapper.findAll('[role="tab"]').find((tab) => tab.text().includes('קובץ'));
+      await fileTab!.trigger('click');
+      await settle();
+
+      await buttonByTip(wrapper, 'סגירת המסמך').trigger('click');
+      await settle(16);
+
+      expect(tabTitles(wrapper), 'נשאר מסמך פתוח אחרי היציאה').toEqual(['מסמך חדש']);
+      const last = lastPersistedSession() as { documents: Array<{ id: string }> };
+      expect(last.documents.map((entry) => entry.id)).not.toContain('doc-1');
+      expect(last.documents.map((entry) => entry.id)).not.toContain('doc-2');
+      expect(hostCalls, 'היציאה לא הוציאה מהמסך').toContain('navigation.goTo');
+    } finally {
+      window.Otzaria = undefined as never;
+    }
+  });
 });
 
 /**

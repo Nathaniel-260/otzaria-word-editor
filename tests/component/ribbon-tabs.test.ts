@@ -332,17 +332,35 @@ describe('לשונית „קובץ” נשענת על מצב המעטפת', () =
     expect(ribbon.wrapper.emitted('exit-app'), 'הרצועה לא העבירה את exit-app').toHaveLength(1);
   });
 
-  it('ה-tooltip של „יציאה” מסביר שהמסמך נשאר פתוח', async () => {
+  it('ה-tooltip של „יציאה” אומר שהמסמך נסגר', async () => {
     // „יציאה” מלשונית בתוך אוצריא אינו מובן מאליו: `navigation.goTo` משהה את
-    // ה-WebView ואינו הורס אותו, ולכן המסמך ממתין כפי שהיה. tooltip שלא אומר
-    // את זה היה משאיר את המשתמש בהנחה שהוא מאבד את העבודה.
+    // ה-WebView ואינו הורס אותו, ולכן היציאה סוגרת את המסמכים בעצמה (`onExit`
+    // ב-App.vue). כל עוד ה-tooltip הבטיח „המסמך יישאר פתוח” הוא סתר את השאלה
+    // שהלחיצה שואלת („לצאת בלי לשמור?”), וזו הטענה שנמדדת כאן.
     const harness = mountUi(FileTab, { superdoc: withSelection(), props: { hasDocument: true } });
     await settle();
 
     const exitButton = harness.wrapper
       .findAll('button')
       .find((button) => button.text().trim() === 'יציאה');
-    expect(tipMessage(exitButton!)).toContain('המסמך יישאר פתוח');
+    expect(tipMessage(exitButton!)).toContain('סגירת המסמך');
+  });
+
+  it('„יציאה” מנוטרל בזמן פתיחה, ואומר למה', async () => {
+    // סגירה באמצע פתיחה משאירה את `openDocumentInto` כותב לתוך טאב מפורק —
+    // `onExit` חוסם אותה ב-`isOpenBusy`, וכפתור שנלחץ ולא קורה בו דבר הוא
+    // בדיוק מה שהלשונית הזאת נמנעת ממנו בשאר הפקדים.
+    const harness = mountUi(FileTab, {
+      superdoc: withSelection(),
+      props: { hasDocument: true, isOpening: true },
+    });
+    await settle();
+
+    const exitButton = harness.wrapper
+      .findAll('button')
+      .find((button) => button.text().trim() === 'יציאה');
+    expect(exitButton!.attributes('disabled')).not.toBeUndefined();
+    expect(tipMessage(exitButton!)).toContain('פתיחת מסמך רצה כרגע');
   });
 
   it('הרצועה מעבירה את שלושת המצבים — אחרת ה-props כאן הם קוד מת', async () => {
