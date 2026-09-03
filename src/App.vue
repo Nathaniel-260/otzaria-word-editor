@@ -795,7 +795,16 @@ const recentSearch = ref('');
  * הכתיבה ל-storage אינה ב-await אצל הקוראים: רשימת אחרונים שלא נשמרה אינה
  * סיבה לעכב פתיחת מסמך, ו-`saveRecentDocuments` בולעת כשל ממילא.
  */
-function rememberRecentDocument(entry: { token: string; name: string; size: number }): void {
+function rememberRecentDocument(entry: {
+  token: string;
+  name: string;
+  size: number;
+  /**
+   * חייב להירשם, ואי-אפשר לגזור אותו מחדש: `fs.resolveFileUrl` — המסלול
+   * שפתיחה מהרשימה עוברת בו — אינו מחזיר `access`. ראו `RecentDocument`.
+   */
+  writable: boolean;
+}): void {
   recentDocuments.value = rememberRecent(recentDocuments.value, { ...entry, openedAt: Date.now() });
   void saveRecentDocuments(recentDocuments.value);
 }
@@ -1085,8 +1094,26 @@ const recentTabs: DocumentSessionId[] = [];
  *
  * המזהה הוא ה-token ולא הנתיב, מאותו טעם שבגללו רשימת האחרונים בנויה עליו
  * (ראו sessions/recent-documents.ts): ה-URL של אוצריא תקף לריצה אחת בלבד.
+ *
+ * ## למה `writable` נשמר כאן, ולא נקרא מחדש בפתיחה
+ *
+ * `resolveFileUrl` מחזירה `{token, url, name, size}` — **בלי `access`**.
+ * פתיחה דרכה נראית מוצלחת לגמרי ובשקט הופכת את המסמך לקריאה-בלבד: `save`
+ * מאבד את יעד הכתיבה, שורת המצב מבטיחה „„שמור” יבקש מקום חדש”, והזוכר כותב
+ * `writable: false` לרשומת ההפעלה — כלומר זה **נשמר**, ומלווה את המסמך גם
+ * אחרי הפעלה מחדש. התרחיש: קובץ פתוח בכתיבה → `Ctrl+W` → `Ctrl+Shift+T` →
+ * `Ctrl+S` פותח „שמור בשם”.
+ *
+ * לכן ההרשאה נלקחת ממה שהטאב **עצמו** ידע עליה (`SessionDocument.writable`)
+ * ומורכבת בחזרה ב-`resolveRememberedFile`. זה בדיוק הדפוס של שחזור ההפעלה,
+ * והוא היחיד שנמדד כעובד: אין שום עדות ש-`fs.resolveFileUrl` של אוצריא
+ * מחזירה `access` בכלל — התיעוד תולה את השדה ב-`fs.pick`, לא בה.
+ *
+ * שאלת „רשומה ישנה בלי השדה” אינה קיימת כאן: המחסנית בזיכרון בלבד ונולדת
+ * ריקה בכל הפעלה, ו-`SessionDocument.writable` אינו אופציונלי. ברשימת
+ * „האחרונים”, ששורדת הפעלות, אותה שאלה כן קיימת ושם נבחרה נפילה סגורה.
  */
-const closedTabs: { token: string; name: string }[] = [];
+const closedTabs: { token: string; name: string; writable: boolean }[] = [];
 
 /**
  * התקרה. עשרה כמו ברוב הדפדפנים; מעבר לזה מדובר בזיכרון ולא בפעולת „ביטול”,
@@ -1103,7 +1130,11 @@ function rememberClosedTab(session: DocumentSession): void {
   const at = closedTabs.findIndex((entry) => entry.token === document.token);
   if (at >= 0) closedTabs.splice(at, 1);
 
-  closedTabs.unshift({ token: document.token, name: sessionDisplayTitle(session) });
+  closedTabs.unshift({
+    token: document.token,
+    name: sessionDisplayTitle(session),
+    writable: document.writable,
+  });
   closedTabs.splice(MAX_CLOSED_TABS);
 }
 
@@ -1386,7 +1417,14 @@ function initSaveCoordinator(getSession: () => DocumentSession): SaveCoordinator
         // „שמור בשם” הוא קובץ חדש שהמשתמש בחר בעצמו — בדיוק מה שרשימת
         // האחרונים אמורה להחזיק. שמירה רגילה אינה נכנסת לכאן (התנאי מעל),
         // ולכן היא אינה מקפיצה את המסמך לראש הרשימה בכל סבב אוטומטי.
-        rememberRecentDocument({ token: info.token, name: info.name, size: info.size });
+        // „שמור בשם” כותב לקובץ שהמשתמש בחר עכשיו, ולכן הוא כתיב בהגדרה —
+        // זה גם מה ש-`setDocument` שמעליו כותב לרשומת ההפעלה.
+        rememberRecentDocument({
+          token: info.token,
+          name: info.name,
+          size: info.size,
+          writable: true,
+        });
       }
       // הגודל הוא של מה שנכתב עכשיו, ולכן הוא הבסיס להשוואה הבאה מול
       // הדיסק — בלעדיו „הקובץ השתנה מבחוץ” היה נשאל אחרי כל שמירה רגילה.
@@ -2469,7 +2507,14 @@ async function openDocumentInto(
     // אותו תנאי בדיוק כמו הזוכר שמעל: `remember: false` הוא „אל תרשום את
     // הפתיחה הזאת בשום מקום”, וזה כולל את רשימת האחרונים. מסמך חדש (`!file`)
     // אין לו token, ואין מה לרשום.
-    if (file) rememberRecentDocument({ token: file.token, name: file.name, size: file.size });
+    if (file) {
+      rememberRecentDocument({
+        token: file.token,
+        name: file.name,
+        size: file.size,
+        writable: file.access === 'readwrite',
+      });
+    }
   }
 
   if (!file && !options.draft) {
@@ -2672,7 +2717,33 @@ function ensureOpenTargetTab(): void {
  * פותחים נקי תמיד, וזו הסיבה שאין שם שאלה שנייה לשאול.
  */
 function openOpenDialog(): void {
-  if (isOpenBusy()) return;
+  /*
+   * שקט הוא לא תשובה. הכפתור ברצועה מנוטרל בזמן פתיחה ויש לו tooltip, אבל
+   * `Ctrl+N`/`Ctrl+O` מגיעים לכאן דרך מפעיל הפעולות — שמדווח „טופל” ובולע
+   * את ברירת המחדל של הדפדפן. כלומר מי שפותח docx גדול ולוחץ `Ctrl+O` ראה
+   * מסך שאינו מגיב ושורת מצב שותקת, בניגוד להצהרה שבראש
+   * ui/shortcuts/registry.ts: „קיצור שנכשל מדבר עברית בשורת המצב בדיוק כמו
+   * כפתור שנכשל”. אותה הכרעה בדיוק כמו בענף השמירה שמתחת.
+   */
+  if (isOpenBusy()) {
+    setStatus('הפתיחה עוד רצה — רגע אחד');
+    return;
+  }
+  /*
+   * שמירה שרצה עוצרת את הפתיחה **לפני** שהדיאלוג נפתח, ולא אחריה.
+   *
+   * ה-prop `busy` הוא `isOpening || saveSnapshot.isSaving`, ולכן דיאלוג
+   * שנפתח בזמן שמירה נפתח כשכל הכרטיסים וכל השורות `disabled` — מסך שלם
+   * שאי-אפשר ללחוץ בו על דבר, בלי שנאמר למה. גרוע מזה: המיקוד ההתחלתי הולך
+   * לכרטיס הראשון, ומיקוד על כפתור מנוטרל הוא no-op — כלומר המיקוד נשאר
+   * מאחורי המודאל ומלכודת ה-Tab אינה יכולה לתפוס אותו.
+   *
+   * ההודעה היא זו שכבר קיימת לאותו מצב בדיוק ב-`onPickAndOpen`.
+   */
+  if (saveSnapshot.value.isSaving) {
+    setStatus('השמירה עוד רצה — רגע אחד');
+    return;
+  }
   recentSearch.value = '';
   isOpenDialogOpen.value = true;
 }
@@ -2718,21 +2789,57 @@ async function onOpenDialogCreate(id: string): Promise<void> {
  * שההרשאה בוטלה — ואז השורה **מוסרת מהרשימה**: שורה שנכשלת ונשארת היא שורה
  * שהמשתמש ילחץ עליה שוב.
  */
+/**
+ * האם פתיחה משורת „אחרונים” כבר בדרך.
+ *
+ * `isOpenBusy()` אינו מכסה את החלון הזה: הוא נדלק רק כש-`openDocument`
+ * מתחיל, ולפניו יש `await resolveFileUrl` שלם — סבב IPC מלא מול אוצריא.
+ * לחיצה על שורה שנייה בתוכו הייתה מוציאה פתיחה שנייה, ושתיהן היו כותבות
+ * לאותו טאב.
+ */
+let recentOpenPending = false;
+
 async function onOpenDialogRecent(token: string): Promise<void> {
-  if (isOpenBusy()) return;
+  if (isOpenBusy() || recentOpenPending) return;
   const known = recentDocuments.value.find((item) => item.token === token);
   const name = known?.name ?? 'המסמך';
 
-  const file = await resolveFileUrl(token);
+  recentOpenPending = true;
+  let file: UserFile | null;
+  try {
+    file = await resolveFileUrl(token);
+  } finally {
+    recentOpenPending = false;
+  }
+
   if (!file) {
     onOpenDialogForget(token);
     setStatus(`${name} לא נמצא — ייתכן שהקובץ הוזז או נמחק. הוא הוסר מהרשימה`, true);
     return;
   }
 
+  // הדיאלוג נסגר בזמן ההמתנה — Escape, „סגור”, או לחיצה על הרקע. סגירה היא
+  // ביטול, ופתיחה שממשיכה אחריה מחליפה למשתמש את המסמך אחרי שהוא כבר אמר
+  // „לא”. אותו כלל בדיוק כמו `attempt.cancelled` ב-`openDocumentInto`.
+  if (!isOpenDialogOpen.value) return;
+
   isOpenDialogOpen.value = false;
   ensureOpenTargetTab();
-  await openDocument(file);
+  /*
+   * ה-`access` מורכב ממה שנשמר, ואינו מגיע מהגשר.
+   *
+   * `fs.resolveFileUrl` מחזירה `{token, url, name, size}` **בלי** `access`
+   * (host/files.ts) — השדה מתועד על בורר הקבצים, לא עליה. בלי ההרכבה כאן
+   * הקובץ נפתח כקריאה-בלבד: `save.reset` לא מקבל יעד כתיבה, המשתמש מקבל
+   * „פתוח לקריאה” על קובץ שהוא כן יכול לכתוב אליו, ו-`keeper.setDocument`
+   * **כותב את זה לרשומת ההפעלה** — כך שהמצב שורד הפעלות והופך קבוע.
+   *
+   * זה בדיוק מה ש-`resolveRememberedFile` עושה למסלול שחזור ההפעלה, ומאותה
+   * סיבה; ההבדל היחיד הוא מאיפה מגיע הדגל — שם מרשומת ההפעלה, כאן מרשומת
+   * „האחרונים”. שורה שנשמרה לפני שהשדה קיים נקראת כקריאה-בלבד, וזו הנפילה
+   * הבטוחה: „שמור בשם” על קובץ כתיב מטריד, כתיבה ל-token בלי הרשאה נכשלת.
+   */
+  await openDocument({ ...file, access: known?.writable ? 'readwrite' : 'read' });
 }
 
 function onOpenDialogTogglePin(token: string, pinned: boolean): void {
@@ -2839,9 +2946,18 @@ async function onPickAndOpen(): Promise<void> {
         documentName: () => title.value,
       });
 
-      // „החלף” על מסמך שהיו בו שינויים פירושו שהמשתמש בחר „לא לשמור”
-      // במפורש (ראו open-flow.ts). זה המסלול היחיד שבו הטיוטה נמחקת מלבד
-      // שמירה מוצלחת — ולכן זה גם המסלול שכותב עותק לגיבוי לפני המחיקה.
+      /*
+       * שומר, ולא מסלול חי — וזה נאמר כאן כדי שהקורא הבא לא יחפש אותו.
+       *
+       * `ensureOpenTargetTab` שלמעלה רץ **לפני** ההחלטה, והוא פותח טאב חדש
+       * בכל פעם שהפעיל אינו „ריק במובן שאפשר להחליף” — כלומר גם כשהוא
+       * מלוכלך. מכאן והלאה הטאב שאליו פותחים נקי תמיד, `hadUnsaved` הוא
+       * `false`, ו-`decideDocumentSwitch` מקצר על `!isDirty()` בלי לשאול
+       * דבר. השאלה על עבודה שלא נשמרה חיה היום בסגירת טאב וביציאה בלבד.
+       *
+       * לא נמחק בכוונה: הוא הקוד שיציל את המסלול הזה אם „פותחים לטאב חדש”
+       * ישתנה אי-פעם, והוא עולה שורת תנאי אחת.
+       */
       if (hadUnsaved && decision.action === 'switch') {
         await discardWithBackup(activeSession.value);
       }
@@ -2892,7 +3008,8 @@ async function onNewDocument(): Promise<boolean> {
       ask: unsavedPrompt.ask,
       documentName: () => title.value,
     });
-    // ראו onPickAndOpen: „החלף” כאן פירושו ש„לא לשמור” נבחר במפורש.
+    // ראו onPickAndOpen: גם כאן זה שומר ולא מסלול חי — `ensureOpenTargetTab`
+    // כבר העביר אותנו לטאב נקי, ולכן הבלוק הזה כולו אינו נכנס היום.
     if (decision.action === 'switch') await discardWithBackup(activeSession.value);
     if (decision.action === 'cancel') return false;
     if (decision.action === 'save-first') {
@@ -2937,8 +3054,16 @@ async function onExit(): Promise<void> {
   const open = Array.from(sessions.values());
   const order = active ? [active, ...open.filter((session) => session !== active)] : open;
 
-  // כל הטאבים נשאלים **לפני** שנסגר ולו אחד: „ביטול” על השלישי אחרי ששניים
-  // כבר נסגרו הוא ביטול שאינו מבטל.
+  /*
+   * כל הטאבים נשאלים **לפני** שנסגר ולו אחד: „ביטול” על השלישי אחרי ששניים
+   * כבר נסגרו הוא ביטול שאינו מבטל.
+   *
+   * מה ש„ביטול” כן משאיר מאחוריו, ונאמר כאן במפורש: **שמירות שכבר בוצעו**.
+   * „שמור” על הטאב הראשון כותב לדיסק מיד, ו„ביטול” על השלישי אינו מחזיר את
+   * הכתיבה הזאת — ואינו אמור: המשתמש ביקש לשמור את המסמך הראשון, וקיבל את
+   * מה שביקש. מה שבוטל הוא היציאה, לא השמירה. „ביטול” על סגירה אף פעם אינו
+   * הורס עבודה, וזו התכונה היחידה שחייבת להתקיים כאן.
+   */
   const discarded = new Set<DocumentSessionId>();
   for (const session of order) {
     const resolution = await resolveUnsavedBeforeClose(session, 'exit');
@@ -3448,7 +3573,10 @@ async function reopenClosedTab(): Promise<void> {
     return;
   }
 
-  const file = await resolveFileUrl(closed.token);
+  // `resolveRememberedFile` ולא `resolveFileUrl` הגולמית: היא מחזירה את
+  // ההרשאה שהטאב ידע עליה, ובלעדיה הטאב שנפתח מחדש הוא קריאה-בלבד לתמיד.
+  // ההנמקה המלאה ליד `closedTabs`.
+  const file = await resolveRememberedFile(closed);
   if (!file) {
     setStatus(`${closed.name} לא נמצא — ייתכן שהקובץ הוזז או נמחק`, true);
     return;
@@ -3865,7 +3993,34 @@ function returnOrphanedFocus(): void {
  * ואפשר להמשיך לערוך מתחתיו, ולכן הוא נסגר רק כשאין חלון מעליו.
  */
 function closeTopmostLayer(): boolean {
-  // „פתח מסמך” ראשון: הוא נפתח **מעל** כל השאר (מהרצועה או מקיצור), והוא
+  /**
+   * „המסמך לא נשמר” ראשון, לפני כולם: הוא נפתח מעל כל שכבה אחרת (כולל „פתח
+   * מסמך”, שממנו מגיעים אליו), ומאחוריו יושבת החלטה שממתינה לתשובה.
+   *
+   * הענף הזה אינו כפילות של ה-`Escape` שבקומפוננטה עצמה. שם הוא תלוי בכך
+   * שהמיקוד בתוך החלון, וכאן זה נשבר: הכפתור שהיה ממוקד עשוי לרדת מה-DOM
+   * (ראו מסך השחזור למטה), ואז ההקשה מגיעה ל-`window` — ומשם, בלי הענף,
+   * היא הייתה נופלת עד `focusRing.toDocument()`, כלומר מיקוד לתוך המסמך
+   * שמאחורי מודאל פתוח, בעוד ההבטחה תלויה לנצח.
+   *
+   * „ביטול” ולא „לא לשמור”: `Escape` הוא נסיגה, לא אישור למחיקה.
+   */
+  if (unsavedPrompt.question.value) {
+    unsavedPrompt.answer('cancel');
+    return true;
+  }
+  /**
+   * מסך השחזור, מעל „פתח מסמך” שממנו נכנסים אליו.
+   *
+   * הוא **חייב** להיות כאן ולא להסתמך על ה-`Escape` שבקומפוננטה: „הסר” מוריד
+   * את ה-`<li>` שהמיקוד עליו מה-DOM, המיקוד נופל ל-`body`, ומאותו רגע ההקשה
+   * אינה מגיעה לחלון כלל.
+   */
+  if (isDiscardedOpen.value) {
+    isDiscardedOpen.value = false;
+    return true;
+  }
+  // „פתח מסמך”: הוא נפתח **מעל** כל השאר (מהרצועה או מקיצור), והוא
   // `aria-modal` — כלומר כל עוד הוא פתוח, שום שכבה מתחתיו אינה זמינה.
   if (isOpenDialogOpen.value) {
     isOpenDialogOpen.value = false;
@@ -4802,6 +4957,32 @@ async function backupDiscardedDocument(session: DocumentSession): Promise<void> 
  * הטיוטה. זהו המסלול הרגיל שלהם, לא נפילה לאחור.
  */
 async function discardedBytes(session: DocumentSession): Promise<Uint8Array | null> {
+  const draftPath = activeEntry(session.keeper.state)?.draft?.path ?? null;
+
+  /**
+   * „יש מנוע” אינו „המנוע מחזיק את העבודה”, וזה ההבדל שבין גיבוי לבין מסמך
+   * ריק בשם הנכון.
+   *
+   * המסלול ששבר את זה: פתיחה שנכשלה. `reopenPreviousSession` שנכשל פותח
+   * `openDocument(undefined, { remember: false })` — מסמך **ריק** — ולטאב יש
+   * מעכשיו `swap.current` אמיתי ש-`exportDocx` עליו **מצליח**. הרשומה שלו
+   * עדיין מחזיקה את הטיוטה עם העבודה, `destroy({ removeDraft: true })` עומד
+   * למחוק אותה, וגיבוי שמעדיף את המנוע היה כותב את הריקנות ומאבד את הכול —
+   * בדיוק במסלול שהתכונה הזאת קיימת בשבילו.
+   *
+   * `isDirty` הוא ההבחנה, וזו אותה הבחנה בדיוק ש-`askFromRecord` עושה
+   * ב-`resolveUnsavedBeforeClose` (שם היא קובעת **איזו שאלה** נשאלת, וכאן
+   * **מה מגובה”): מנוע מלוכלך מחזיק עבודה שאינה בשום מקום אחר, ולכן הוא
+   * המקור; מנוע נקי שיש לצדו טיוטה אינו יכול להיות המקור — טיוטה נמחקת
+   * בכל שמירה מוצלחת (`noteSaved`), ולכן „נקי ויש טיוטה” פירושו תמיד
+   * שהטיוטה היא העבודה.
+   */
+  if (!session.save.snapshot.isDirty && draftPath) {
+    const fromDraft = await readWorkspaceBytes(draftPath);
+    if (fromDraft) return fromDraft;
+    // הטיוטה לא נקראה — הקובץ נעלם או שהגשר נפל. המנוע שלמטה עדיף על כלום.
+  }
+
   const open = session.swap.current;
   if (open) {
     try {
@@ -4814,8 +4995,7 @@ async function discardedBytes(session: DocumentSession): Promise<Uint8Array | nu
     }
   }
 
-  const path = activeEntry(session.keeper.state)?.draft?.path;
-  return path ? readWorkspaceBytes(path) : null;
+  return draftPath ? readWorkspaceBytes(draftPath) : null;
 }
 </script>
 

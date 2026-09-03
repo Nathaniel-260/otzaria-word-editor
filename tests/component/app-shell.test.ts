@@ -1602,6 +1602,95 @@ describe('שחזור כל הטאבים', () => {
     expect(wrapper.find('.word-statusbar').text()).toContain('נפתח מהעותק שנשמר בסגירה');
   });
 
+  it('טאב שיש בו מנוע נקי וטיוטה — הגיבוי לוקח את הטיוטה, לא את מה שבמנוע', async () => {
+    /*
+     * המסלול שאבד בו מידע, והוא היחיד שבו הגיבוי יכול להיכשל בשקט: טאב שיש
+     * בו מנוע שאינו „מלוכלך” בעוד הרשומה מחזיקה טיוטה עם העבודה. כך נראה טאב
+     * שהטעינה שלו נכשלה ונפל לתוכו מסמך ריק (`remember: false`), וכך נראה גם
+     * טאב שנפתח מהטיוטה. `exportDocx` עליו **מצליח** ומחזיר את מה שבמנוע —
+     * ולכן גיבוי שמעדיף את המנוע היה כותב את הריקנות ומוחק את העבודה
+     * ב-`destroy({ removeDraft: true })` שבא אחריו.
+     *
+     * הכפיל חייב לייצא בהצלחה, אחרת הבדיקה עוברת מהסיבה הלא נכונה: בלי
+     * `export` על המופע, `exportDocx` זורק והמעטפת נופלת לטיוטה ממילא.
+     */
+    stub.storedSession = twoTabs(SECOND_DRAFT);
+    stub.draftsByPath[SECOND_DRAFT.path] = new Uint8Array([80, 75, 3, 4]);
+    const wrapper = await mountShell();
+    /*
+     * `arrayBuffer` מוזרק ידנית, ובלעדיו הבדיקה חסרת ערך.
+     *
+     * **jsdom אינו מממש `Blob.prototype.arrayBuffer` כלל** (נמדד: אפס אזכורים
+     * ב-`node_modules/jsdom/lib/jsdom/living/generated/Blob.js`). בלי ההזרקה
+     * הזאת `exportDocx` מצליח, המעטפת נופלת בשורה שאחריו על
+     * `exported.arrayBuffer is not a function`, ה-`catch` שלה נופל לטיוטה —
+     * והבדיקה עוברת **גם על הקוד השבור**. זה נמדד בפועל בסבב מוטציה, ולא
+     * הונח: בדיקה שעוברת על הקוד השבור גרועה מאין בדיקה.
+     */
+    const engineBytes = new Uint8Array([0, 0, 0, 0]);
+    const engineDoc = Object.assign(new Blob([engineBytes]), {
+      arrayBuffer: () => Promise.resolve(engineBytes.buffer),
+    });
+    (stub.superdoc!.host as unknown as { export: () => Promise<Blob> }).export = () =>
+      Promise.resolve(engineDoc);
+
+    // מעבר לטאב טוען את הטיוטה לתוך מנוע אמיתי, והמצביע ברשומה נשאר
+    // (`keepDraft`) — כלומר מכאן והלאה יש גם מנוע וגם טיוטה.
+    await wrapper.findAll('.word-doctab')[1]!.trigger('click');
+    await settle(14);
+
+    await wrapper.findAll('.word-doctab')[1]!.find('.word-doctab-close').trigger('click');
+    await settle(12);
+    await answerUnsaved('discard');
+
+    const backup = stub.workspaceWrites.find((write) => write.path.startsWith('discarded-'));
+    expect([...(backup?.bytes ?? [])], 'העבודה שבטיוטה — ולא המסמך שבמנוע').toEqual([
+      80, 75, 3, 4,
+    ]);
+  });
+
+  it('Escape סוגר את מסך השחזור גם כשהמיקוד כבר לא בתוכו', async () => {
+    // „הסר” מוריד את הכפתור הממוקד מה-DOM, המיקוד נופל ל-`body`, ומאותו רגע
+    // ההקשה מגיעה ל-`window` ולא לחלון. בלי ענף במעטפת היא הייתה ממקדת את
+    // המסמך שמאחורי מודאל פתוח, והחלון היה נשאר על המסך.
+    stub.storedDiscardBackups = [
+      { slot: 0, name: 'ראשון', size: 4, discardedAt: Date.now(), token: null },
+      { slot: 1, name: 'שני', size: 4, discardedAt: Date.now() - 1000, token: null },
+    ];
+    await mountShell();
+
+    pressCtrl('KeyO');
+    await settle(8);
+    document.querySelector<HTMLButtonElement>('.open-discarded')!.click();
+    await settle(8);
+    document.querySelector<HTMLButtonElement>('.discarded-forget')!.click();
+    await settle(12);
+    expect(document.querySelector('.discarded-dialog'), 'עדיין פתוח — נשארה שורה').not.toBeNull();
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Escape', key: 'Escape', bubbles: true }));
+    await settle(8);
+
+    expect(document.querySelector('.discarded-dialog'), 'נסגר').toBeNull();
+  });
+
+  it('Escape על „המסמך לא נשמר” הוא „ביטול” — גם מ-window', async () => {
+    // הכיוון הבטוח: הקשה שאיש לא תפס אינה יכולה להיות אישור למחיקה.
+    stub.storedSession = twoTabs(SECOND_DRAFT);
+    stub.draftsByPath[SECOND_DRAFT.path] = new Uint8Array([80, 75, 3, 4]);
+    const wrapper = await mountShell();
+
+    await wrapper.findAll('.word-doctab')[1]!.find('.word-doctab-close').trigger('click');
+    await settle(12);
+    expect(unsavedDialog()).not.toBeNull();
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Escape', key: 'Escape', bubbles: true }));
+    await settle(12);
+
+    expect(unsavedDialog(), 'נסגר').toBeNull();
+    expect(wrapper.findAll('.word-doctab'), 'והטאב נשאר').toHaveLength(2);
+    expect(stub.removedDrafts, 'ולא נמחק דבר').toEqual([]);
+  });
+
   it('„הסר” מוחק את העותק מהדיסק ומהרשומה', async () => {
     stub.storedDiscardBackups = [
       { slot: 3, name: 'ישן', size: 4, discardedAt: Date.now() - 60_000, token: null },
@@ -2223,6 +2312,63 @@ describe('קיצורי הטאבים', () => {
     expect(tabCount(wrapper)).toBe(1);
     expect(stub.openSources).toHaveLength(opened);
     expect(wrapper.text()).toContain('אין טאב שנסגר');
+  });
+
+  it('טאב שנפתח מחדש נשאר בר-כתיבה — הבאג שהיה', async () => {
+    /*
+     * הבאג: `reopenClosedTab` פתח דרך `resolveFileUrl`, שמחזירה
+     * `{token, url, name, size}` **בלי `access`**. הפתיחה נראתה מוצלחת
+     * לגמרי, והמסמך הפך בשקט לקריאה-בלבד — `save` בלי יעד כתיבה, ו-
+     * `writable: false` שנכתב לרשומת ההפעלה, כלומר גם אחרי הפעלה מחדש.
+     *
+     * הסימן הנצפה הוא „פתוח לקריאה” בשורת המצב, אותו אחד שנמדד ב„הודעת
+     * השלב המקדים”. ה-stub מחזיר כאן בדיוק את מה שהגשר האמיתי מחזיר — בלי
+     * `access` — ולכן הבדיקה נופלת על התיקון ולא על זיוף.
+     */
+    stub.storedSession = {
+      version: 2,
+      documents: [{ id: 'doc-1', document: FIRST_DOC, caret: null, draft: null }],
+      activeId: 'doc-1',
+      view: { zoom: null, focusMode: false, ribbonTab: null, ribbonCollapsed: false },
+    };
+    stub.resolvedFile = (token: string) => TAB_FILES[token] ?? null;
+
+    const wrapper = await mountShell();
+    const status = () => wrapper.find('.word-statusbar').text();
+    expect(status(), 'נפתח בכתיבה מלכתחילה').not.toContain('פתוח לקריאה');
+
+    await press({ code: 'KeyW', ctrlKey: true });
+    await press({ code: 'KeyT', ctrlKey: true, shiftKey: true });
+
+    expect(stub.openSources, 'הקובץ אכן נפתח מחדש').toContain('loopback://first');
+    expect(status(), 'ההרשאה שרדה את הסגירה והפתיחה').not.toContain('פתוח לקריאה');
+  });
+
+  it('טאב שהיה קריאה-בלבד נפתח מחדש כקריאה-בלבד', async () => {
+    // הכיוון ההפוך, ומאותה סיבה: ההרשאה נלקחת ממה שהטאב ידע, ולכן היא חייבת
+    // לשמר גם „לא” ולא רק „כן”. בלי זה התיקון היה יכול להיות „תמיד כתיב”,
+    // וזה כשל חמור יותר — ניסיון כתיבה ל-token שאין עליו הרשאה.
+    stub.storedSession = {
+      version: 2,
+      documents: [
+        {
+          id: 'doc-1',
+          document: { ...FIRST_DOC, writable: false },
+          caret: null,
+          draft: null,
+        },
+      ],
+      activeId: 'doc-1',
+      view: { zoom: null, focusMode: false, ribbonTab: null, ribbonCollapsed: false },
+    };
+    stub.resolvedFile = (token: string) => TAB_FILES[token] ?? null;
+
+    const wrapper = await mountShell();
+
+    await press({ code: 'KeyW', ctrlKey: true });
+    await press({ code: 'KeyT', ctrlKey: true, shiftKey: true });
+
+    expect(wrapper.find('.word-statusbar').text()).toContain('פתוח לקריאה');
   });
 
   it('טאב חדש שלא נשמר מעולם אינו נכנס למחסנית „נסגר”', async () => {
