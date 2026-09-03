@@ -160,9 +160,12 @@ describe('decidePendingTabClose', () => {
     const h = pending({ hasDraft: true, choice: 'cancel' });
 
     expect(await decidePendingTabClose(h.deps)).toEqual({ action: 'cancel', reason: 'user' });
+    // „להמשיך” ולא „לסגור את הטאב”: אותה החלטה נשאלת גם ביציאה, ונוסח שמדבר
+    // על טאב היה שקרי במחצית מהמקרים.
     expect(h.asked[0]?.content).toBe(
-      'יש שינויים שלא נשמרו בקובץ „חידושים”. לסגור את הטאב בלעדיהם?',
+      'יש שינויים שלא נשמרו בקובץ „חידושים”, והם עדיין לא נפתחו. להמשיך בלעדיהם?',
     );
+    expect(h.asked[0]?.content, 'הנוסח אינו מניח סגירת טאב').not.toContain('הטאב');
   });
 
   it('„לא לשמור” סוגר', async () => {
