@@ -1676,10 +1676,13 @@ describe('קישוריות בין טאבים', () => {
    *
    * הסיבה: `documentTabs` קורא `session.ui.saveSnapshot.isDirty` של טאב רקע
    * מאובייקט פשוט שאין לו תלות ריאקטיבית, בעוד הקואורדינטור כותב אליו
-   * `session.ui.saveSnapshot = snapshot`. `it.fails` ולא `it.skip`: ברגע
-   * שהבאג יתוקן הבדיקה תיכשל על „עברה בלי שציפינו”, וזה הסימן להפוך אותה.
+   * `session.ui.saveSnapshot = snapshot`.
+   *
+   * **תוקן.** `tabStripRevision` ב-App.vue הוא התלות המפורשת שהייתה חסרה,
+   * ו-`onStateChange` מקדם אותו — כלומר הקואורדינטור של טאב ברקע מזיז את
+   * הנקודה שלו מיד. הבדיקה עברה מ-`it.fails` ל-`it` יחד עם התיקון.
    */
-  it.fails('שמירה אוטומטית של טאב ברקע מעדכנת את הנקודה שלו', async () => {
+  it('שמירה אוטומטית של טאב ברקע מעדכנת את הנקודה שלו', async () => {
     const { wrapper } = await twoLiveTabs();
     await wrapper.findAll('.word-doctab')[0]!.trigger('click');
     await settle(8);

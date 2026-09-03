@@ -898,6 +898,31 @@ const sessions = shallowReactive(new Map<DocumentSessionId, DocumentSession>());
 const activeSession = shallowRef<DocumentSession | null>(null);
 
 /**
+ * מה שמקדם את רצועת הטאבים כשמצב של טאב **ברקע** משתנה.
+ *
+ * `sessions` הוא `shallowReactive` בכוונה (ראו שם: הרשומות מחזיקות
+ * `HTMLElement`/`SuperDoc` שאסור לעטוף ב-Proxy), ולכן כתיבה **לתוך**
+ * `session.ui` אינה תלות ריאקטיבית של אף `computed`. לטאב הפעיל זה אינו
+ * מורגש — `documentTabs` קורא עליו את הסינגלטונים (`title`, `saveSnapshot`)
+ * שהם `ref` אמיתיים — אבל טאב ברקע נקרא מ-`session.ui`, ואיש לא מרנדר מחדש
+ * כשהוא משתנה.
+ *
+ * זה נמדד ולא הונח: שמירה אוטומטית של טאב ברקע דיווחה `isDirty` דרך
+ * `onStateChange` שלו, והנקודה על הטאב הופיעה רק במעבר הטאב הבא — כלומר
+ * המשתמש רואה „נשמר” על מסמך שיש בו שינויים, עד שהוא במקרה יעבור.
+ *
+ * מונה ולא הפיכת `ui` ל-`reactive`: רצועת הטאבים קוראת ממנו בדיוק שני
+ * שדות (שם ונקודה), והעטיפה הייתה נוגעת בשלושים אתרי כתיבה ובאובייקטים
+ * שדווקא אסור לעטוף.
+ */
+const tabStripRevision = ref(0);
+
+/** מסמנת שמה שרצועת הטאבים מציגה על טאב ברקע השתנה. */
+function notifyTabStrip(): void {
+  tabStripRevision.value += 1;
+}
+
+/**
  * כמה מסמכים מותר שיחזיקו מנוע חי בו-זמנית.
  *
  * ## למה יש תקרה בכלל
@@ -1180,6 +1205,9 @@ function initSaveCoordinator(getSession: () => DocumentSession): SaveCoordinator
     onStateChange: (snapshot) => {
       const session = getSession();
       session.ui.saveSnapshot = snapshot;
+      // הקואורדינטור של טאב ברקע מדווח על **המסמך שלו**, וזה מה שמזיז את
+      // הנקודה שברצועה. ראו `tabStripRevision`.
+      notifyTabStrip();
       guardIfActive(session, () => {
         saveSnapshot.value = snapshot;
       });
@@ -1652,6 +1680,8 @@ async function sleepTab(session: DocumentSession): Promise<void> {
   // `editor.onDispose` ב-openDocumentInto), וכאן היא נקבעת סופית — נקייה
   // ובלי הפניות למנוע שכבר אינו קיים.
   session.ui = restoredUiSnapshot(entry, title);
+  // תמונת מצב חדשה לטאב שברקע — אותו טעם כמו ב-`onStateChange`.
+  notifyTabStrip();
 }
 
 /**
@@ -2777,13 +2807,16 @@ function sessionSaveExtension(session: DocumentSession): WordExtension {
 }
 
 /** רצועת הטאבים האמיתית — אחד לכל `DocumentSession` פתוח, לפי סדר הפתיחה. */
-const documentTabs = computed<DocumentTabItem[]>(() =>
-  Array.from(sessions.values()).map((session) => ({
+const documentTabs = computed<DocumentTabItem[]>(() => {
+  // התלות המפורשת, ראו `tabStripRevision`: שני השדות שמתחת נקראים על טאב
+  // ברקע מאובייקט פשוט, ובלי השורה הזאת שינוי בו אינו מרנדר מחדש.
+  void tabStripRevision.value;
+  return Array.from(sessions.values()).map((session) => ({
     id: session.id,
     title: sessionDisplayTitle(session),
     isDirty: sessionIsDirty(session),
-  })),
-);
+  }));
+});
 
 /**
  * מעבר טאב. חסום בזמן פתיחה: `openDocumentInto` כותב סינכרונית לתוך הטאב
