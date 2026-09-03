@@ -3179,14 +3179,14 @@ function onCustomActionFromTellMe(action: string): void {
     case 'about':
       isAboutOpen.value = true;
       break;
-    case 'manage-macros':
-      isMacrosOpen.value = true;
-      break;
   }
 }
 
 function closeFindDialog(): void {
   isFindOpen.value = false;
+  // השאילתה שהגיעה מ-Tell Me היא של אותה פתיחה בלבד; בלי האיפוס היא הייתה
+  // נדחפת שוב לשדה בפתיחה הבאה, ודורסת את החיפוש האחרון של המשתמש.
+  findInitialQuery.value = '';
   // סגירה מנקה את ההדגשות במסמך. בלעדיה הן נשארות אחרי שהדיאלוג נעלם.
   searchAdapter?.close();
 }

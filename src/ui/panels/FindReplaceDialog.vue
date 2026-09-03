@@ -177,7 +177,7 @@ const props = withDefaults(
     resultText?: string;
     /** האם המנוע יכול להחליט כרגע. `false` = אין להציג את פקדי ההחלפה. */
     canReplace?: boolean;
-    /** שאילתת חיפוש התחלתית אופציונלית (מ-Tell Me) */
+    /** שאילתה שהגיעה מבחוץ — „חפש במסמך” של Tell Me. ריקה = אין. */
     initialQuery?: string;
     /** החלפה שנשלחה למנוע וטרם הסתיימה. */
     isReplacing?: boolean;
@@ -203,7 +203,7 @@ const emit = defineEmits<{
 }>();
 
 const mode = ref<'find' | 'replace'>(props.initialMode);
-const searchQuery = ref(props.initialQuery ?? '');
+const searchQuery = ref(props.initialQuery);
 const replaceQuery = ref('');
 const searchInputRef = ref<HTMLInputElement | null>(null);
 
@@ -222,31 +222,25 @@ watch(
   }
 );
 
-watch(
-  () => props.initialQuery,
-  (newQuery) => {
-    if (newQuery !== undefined) {
-      searchQuery.value = newQuery;
-      if (newQuery) {
-        emit('query-change', newQuery);
-      }
-    }
-  }
-);
+/**
+ * השאילתה מבחוץ נכנסת לשדה בפתיחה, וגם כשהיא משתנה בדיאלוג שכבר פתוח.
+ * שאילתה ריקה אינה מוחקת את מה שהמשתמש חיפש קודם: `Ctrl+F` רגיל נפתח על
+ * החיפוש האחרון, כמו ב-Word.
+ */
+watch([() => props.isOpen, () => props.initialQuery], () => {
+  if (!props.isOpen || props.initialQuery === '') return;
+  searchQuery.value = props.initialQuery;
+  emit('query-change', props.initialQuery);
+});
 
 watch(
   () => props.isOpen,
   (open) => {
-    if (open) {
-      if (props.initialQuery) {
-        searchQuery.value = props.initialQuery;
-        emit('query-change', props.initialQuery);
-      }
-      nextTick(() => {
-        searchInputRef.value?.focus();
-        searchInputRef.value?.select();
-      });
-    }
+    if (!open) return;
+    nextTick(() => {
+      searchInputRef.value?.focus();
+      searchInputRef.value?.select();
+    });
   }
 );
 
