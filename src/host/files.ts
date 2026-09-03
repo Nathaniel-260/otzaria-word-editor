@@ -224,20 +224,41 @@ export async function beginBinaryWrite(expectedSize: number): Promise<WriteTicke
  * token שאינו קיים מחזיר 404 מהשרת עצמו — וזו ההוכחה שהוא נגיש.
  *
  * הבדיקה עצמה נעשית פעם אחת לכל חיי הדף: שמירה אוטומטית רצה כל כמה שניות,
- * ובדיקה בכל כשל הייתה מציפה את הלוג ואת השרת. **הממצא, לעומת זאת, נשמר
- * ומוחזר בכל כשל.** קודם עמד כאן דגל בוליאני, ולכן הכשל השני והלאה קיבל
- * „העלאת המסמך נכשלה: Failed to fetch” חשוף — אותה תקלה בדיוק, בהודעה
- * שאינה אומרת דבר, ותלוי רק בשאלה אם זה הניסיון הראשון. צילום מסך של שורת
- * המצב הוא ערוץ הדיווח בפועל, ולכן הממצא חייב להיות בו בכל פעם.
+ * ובדיקה בכל כשל הייתה מציפה את הלוג ואת השרת. **הממצא, לעומת זאת, מוצמד
+ * לכל כשל.** קודם עמד כאן דגל בוליאני, ולכן הכשל השני והלאה קיבל „העלאת
+ * המסמך נכשלה: Failed to fetch” חשוף — אותה תקלה בדיוק, בהודעה שאינה אומרת
+ * דבר, ותלוי רק בשאלה אם זה הניסיון הראשון. צילום מסך של שורת המצב הוא ערוץ
+ * הדיווח בפועל, ולכן הממצא חייב להיות בו בכל פעם.
+ *
+ * מה נשמר בין כשלים הוא רק מה שקבוע לכל חיי הדף: תוצאת ה-GET, המסקנה ממנה
+ * (`blockedByHost`) וה-`דף`. ה-`יעד` **אינו** נשמר ומורכב מחדש בכל כשל, כי
+ * לכל שמירה יש `uploadUrl` משלה — write-token אחר, ולעיתים מסמך אחר לגמרי.
+ * כששמרנו את מחרוזת האבחון כולה, שורת המצב של הכשל החמישי הציגה את היעד של
+ * הכשל הראשון; ומכיוון שצילום המסך הוא הדיווח, זה שלח את המפתח לרדוף אחרי
+ * כתיבה ל-token ישן שמעולם לא קרתה.
  */
-let uploadDiagnosis: Promise<string> | undefined;
-
-function uploadFailureDetail(uploadUrl: string): Promise<string> {
-  uploadDiagnosis ??= diagnoseUploadFailure(uploadUrl);
-  return uploadDiagnosis;
+interface UploadProbe {
+  /** הדף שממנו יצא ה-PUT. */
+  page: string;
+  /** תיאור תוצאת ה-GET — הוכחת נגישות, או הכשל שלה. */
+  probe: string;
+  /** השרת נגיש ודווקא ה-PUT נחסם, כלומר שער הבקשות של אוצריא. */
+  blockedByHost: boolean;
 }
 
-async function diagnoseUploadFailure(uploadUrl: string): Promise<string> {
+let uploadProbe: Promise<UploadProbe> | undefined;
+
+async function uploadFailureDetail(uploadUrl: string): Promise<string> {
+  uploadProbe ??= probeUploadHost(uploadUrl);
+  const { page, probe, blockedByHost } = await uploadProbe;
+  const detail = `דף=${page}, יעד=${uploadUrl}, ${probe}`;
+  // שרת נגיש ו-PUT חסום פירושו שער הבקשות של אוצריא, ולא תקלת רשת: התוסף
+  // אינו יכול לעקוף אותו, ולכן ההודעה אומרת מה כן אפשר לעשות.
+  const advice = blockedByHost ? ' — גרסת אוצריא הזאת חוסמת את כתיבת המסמך; נדרש עדכון' : '';
+  return `${advice} [${detail}]`;
+}
+
+async function probeUploadHost(uploadUrl: string): Promise<UploadProbe> {
   let probe: string;
   let blockedByHost = false;
   try {
@@ -251,12 +272,12 @@ async function diagnoseUploadFailure(uploadUrl: string): Promise<string> {
     }) — השרת אינו נגיש מהדף`;
   }
 
-  const detail = `דף=${window.location.origin || window.location.protocol}, יעד=${uploadUrl}, ${probe}`;
-  console.error('[otzaria-word] אבחון כשל העלאה:', detail);
-  // שרת נגיש ו-PUT חסום פירושו שער הבקשות של אוצריא, ולא תקלת רשת: התוסף
-  // אינו יכול לעקוף אותו, ולכן ההודעה אומרת מה כן אפשר לעשות.
-  const advice = blockedByHost ? ' — גרסת אוצריא הזאת חוסמת את כתיבת המסמך; נדרש עדכון' : '';
-  return `${advice} [${detail}]`;
+  const page = window.location.origin || window.location.protocol;
+  // לוג אחד לכל חיי הדף, כמו הבדיקה עצמה — שמירה אוטומטית שנכשלת שוב ושוב
+  // הייתה מציפה אותו. ה-`יעד` אינו כאן דווקא משום שהוא משתנה בין כשל לכשל:
+  // הוא נמצא בהודעת השגיאה של כל כשל בנפרד.
+  console.error('[otzaria-word] אבחון כשל העלאה:', `דף=${page}, ${probe}`);
+  return { page, probe, blockedByHost };
 }
 
 /**
