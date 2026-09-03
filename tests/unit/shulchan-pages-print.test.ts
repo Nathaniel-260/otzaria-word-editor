@@ -200,6 +200,29 @@ describe('shulchan/crop-marks', () => {
     expect(await loadCropMarks(store, documentKey([{ blockId: 'p1' }]))).toBeNull();
   });
 
+  it('הסרה מוצאת את הרשומה גם אחרי הוספה או מחיקה של פסקאות', async () => {
+    const store = memoryStore();
+    const section = {
+      address: 's1',
+      pageSetup: { width: 8, height: 11 },
+      margins: { top: 1, right: 1, bottom: 1, left: 1 },
+    };
+    const { host, calls, blocks } = fakeShulchanHost({
+      blocks: [{ blockId: 'p1', text: 'ראשונה' }, { blockId: 'p2', text: 'שנייה' }],
+      sections: [section],
+    });
+
+    expect((await addCropMarks(host, 10, store, document)).ok).toBe(true);
+    // Enter, מחיקת פסקה והדבקה כולם יכולים לשנות את רשימת הבלוקים — אבל
+    // מזהי הפסקאות המקוריות נשארים, ולכן אסור לאבד את המידה שנשמרה להסרה.
+    blocks.unshift({ blockId: 'new', text: 'פסקה שנוספה' });
+    blocks.splice(2, 1);
+
+    expect((await removeCropMarks(host, store, document)).ok).toBe(true);
+    expect(calls.setPageSetup).toHaveLength(2);
+    expect((calls.setPageSetup[1] as { width: number }).width).toBeCloseTo(8 - 2 * inch(10));
+  });
+
   it('טווח המ"מ של המקור נאכף, וכיבוי מנקה את המשתנים', async () => {
     const { host } = fakeShulchanHost({ blocks: [{ blockId: 'p1', text: 'א' }], sections: [] });
     expect((await addCropMarks(host, 3, memoryStore(), document)).ok).toBe(false);

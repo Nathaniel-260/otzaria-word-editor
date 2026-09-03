@@ -59,6 +59,20 @@ export interface CropMarksRecord {
   mm: number;
 }
 
+/**
+ * רשומה שנשמרת גם באינדקס. מזהי הפסקאות אינם זהות מוחלטת של המסמך, אבל הם
+ * נשארים כשהמשתמש מוסיף או מוחק פסקאות אחרות. כך „הסר” עדיין מוצא את המידה
+ * המקורית ולא משאיר דף מוגדל אחרי עריכה רגילה.
+ */
+interface IndexedCropMarksRecord extends CropMarksRecord {
+  blockIds: readonly string[];
+}
+
+interface CropMarksIdentity {
+  docKey: string;
+  blockIds: readonly string[];
+}
+
 export interface CropMarksResult {
   ok: boolean;
   message?: string;
@@ -86,6 +100,9 @@ export function isValidCropMm(value: unknown): value is number {
 /* ---------- אחסון ---------- */
 
 const KEY_PREFIX = 'shulchan-crop-marks:';
+const INDEX_KEY = 'shulchan-crop-marks-index';
+const MAX_IDENTITY_BLOCKS = 64;
+const MIN_SHARED_BLOCK_RATIO = 0.5;
 
 export function cropMarksKey(docKey: string): string {
   return `${KEY_PREFIX}${docKey}`;
@@ -109,6 +126,84 @@ async function saveCropMarks(store: SettingsStore, docKey: string, record: CropM
   } catch {
     /* זיכרון — כשל שקט */
   }
+}
+
+function isIndexedRecord(raw: unknown): raw is IndexedCropMarksRecord {
+  if (!raw || typeof raw !== 'object') return false;
+  const record = raw as Partial<IndexedCropMarksRecord>;
+  return (
+    typeof record.docKey === 'string' &&
+    isValidCropMm(record.mm) &&
+    Array.isArray(record.blockIds) &&
+    record.blockIds.every((id) => typeof id === 'string' && id !== '')
+  );
+}
+
+async function loadCropMarksIndex(store: SettingsStore): Promise<IndexedCropMarksRecord[]> {
+  try {
+    const raw = await store.load(INDEX_KEY);
+    return Array.isArray(raw) ? raw.filter(isIndexedRecord) : [];
+  } catch {
+    return [];
+  }
+}
+
+async function saveCropMarksIndex(store: SettingsStore, records: readonly IndexedCropMarksRecord[]): Promise<void> {
+  try {
+    await store.save(INDEX_KEY, records);
+  } catch {
+    /* זיכרון — כשל שקט */
+  }
+}
+
+function sharedBlockRatio(record: IndexedCropMarksRecord, identity: CropMarksIdentity): number {
+  if (record.blockIds.length === 0) return 0;
+  const current = new Set(identity.blockIds);
+  let shared = 0;
+  for (const id of record.blockIds) if (current.has(id)) shared += 1;
+  return shared / record.blockIds.length;
+}
+
+/**
+ * התאמה מדויקת עדיפה תמיד. אחרי עריכה מבנית, התאמה של לפחות מחצית ממזהי
+ * הפסקאות המקוריים היא אותה רשומה; מזהי `w14:paraId` ייחודיים למסמך, ולכן
+ * זה אינו ניחוש לפי תוכן שעלול להתאים למסמך אחר בעל אותה לשון.
+ */
+async function indexedCropMarks(
+  store: SettingsStore,
+  identity: CropMarksIdentity,
+): Promise<IndexedCropMarksRecord | null> {
+  const records = await loadCropMarksIndex(store);
+  const exact = records.find((record) => record.docKey === identity.docKey);
+  if (exact) return exact;
+
+  let best: IndexedCropMarksRecord | null = null;
+  let bestRatio = MIN_SHARED_BLOCK_RATIO;
+  for (const record of records) {
+    const ratio = sharedBlockRatio(record, identity);
+    if (ratio >= bestRatio && (best === null || ratio > bestRatio)) {
+      best = record;
+      bestRatio = ratio;
+    }
+  }
+  return best;
+}
+
+async function addToCropMarksIndex(
+  store: SettingsStore,
+  record: IndexedCropMarksRecord,
+): Promise<void> {
+  const records = await loadCropMarksIndex(store);
+  const kept = records.filter((candidate) => candidate.docKey !== record.docKey);
+  await saveCropMarksIndex(store, [...kept, record]);
+}
+
+async function removeFromCropMarksIndex(
+  store: SettingsStore,
+  record: CropMarksRecord,
+): Promise<void> {
+  const records = await loadCropMarksIndex(store);
+  await saveCropMarksIndex(store, records.filter((candidate) => candidate.docKey !== record.docKey));
 }
 
 /* ---------- הציור: משתני CSS על שורש הדף ---------- */
@@ -223,9 +318,13 @@ async function resizeSections(
   return { ok: true, sections: changed };
 }
 
-async function keyOf(host: ShulchanTarget): Promise<string | null> {
+async function identityOf(host: ShulchanTarget): Promise<CropMarksIdentity | null> {
   const blocks = await readShulchanBlocks(host);
-  return blocks === null ? null : documentKey(blocks);
+  if (blocks === null) return null;
+  return {
+    docKey: documentKey(blocks),
+    blockIds: blocks.slice(0, MAX_IDENTITY_BLOCKS).map((block) => block.blockId),
+  };
 }
 
 /** מוסיפה סימני חיתוך: מגדילה את הדפים, רושמת את המידה, ומדליקה את הציור. */
@@ -238,17 +337,19 @@ export async function addCropMarks(
   if (!isValidCropMm(mm)) {
     return { ok: false, message: `${ADD_FAILED}: יש להזין בין ${CROP_MARKS_MIN_MM} ל-${CROP_MARKS_MAX_MM} מ"מ`, sections: 0, mm };
   }
-  const docKey = await keyOf(host);
-  if (docKey === null) {
+  const identity = await identityOf(host);
+  if (identity === null) {
     const outcome = unavailableOutcome(ADD_FAILED);
     return { ok: false, message: outcome.ok ? undefined : outcome.message, sections: 0, mm };
   }
-  if ((await loadCropMarks(store, docKey)) !== null) {
+  if ((await loadCropMarks(store, identity.docKey)) !== null || (await indexedCropMarks(store, identity)) !== null) {
     return { ok: false, message: `${ADD_FAILED}: ${CROP_MARKS_EXIST_TEXT}`, sections: 0, mm };
   }
   const resized = await resizeSections(host, mm, ADD_FAILED);
   if (!resized.ok) return { ok: false, message: resized.message, sections: 0, mm };
-  await saveCropMarks(store, docKey, { docKey, mm });
+  const record = { docKey: identity.docKey, mm };
+  await saveCropMarks(store, identity.docKey, record);
+  await addToCropMarksIndex(store, { ...record, blockIds: identity.blockIds });
   if (root) applyCropMarksStyle(mm, root);
   return { ok: true, sections: resized.sections, mm };
 }
@@ -259,16 +360,17 @@ export async function removeCropMarks(
   store: SettingsStore,
   root: Document | null = typeof document === 'undefined' ? null : document,
 ): Promise<CropMarksResult> {
-  const docKey = await keyOf(host);
-  if (docKey === null) {
+  const identity = await identityOf(host);
+  if (identity === null) {
     const outcome = unavailableOutcome(REMOVE_FAILED);
     return { ok: false, message: outcome.ok ? undefined : outcome.message, sections: 0, mm: 0 };
   }
-  const record = await loadCropMarks(store, docKey);
+  const record = (await loadCropMarks(store, identity.docKey)) ?? (await indexedCropMarks(store, identity));
   if (record === null) return { ok: false, message: `${REMOVE_FAILED}: ${NO_CROP_MARKS_TEXT}`, sections: 0, mm: 0 };
   const resized = await resizeSections(host, -record.mm, REMOVE_FAILED);
   if (!resized.ok) return { ok: false, message: resized.message, sections: 0, mm: record.mm };
-  await saveCropMarks(store, docKey, null);
+  await saveCropMarks(store, record.docKey, null);
+  await removeFromCropMarksIndex(store, record);
   if (root) applyCropMarksStyle(null, root);
   return { ok: true, sections: resized.sections, mm: record.mm };
 }
@@ -282,8 +384,10 @@ export async function restoreCropMarksStyle(
   store: SettingsStore,
   root: Document | null = typeof document === 'undefined' ? null : document,
 ): Promise<number | null> {
-  const docKey = await keyOf(host);
-  const record = docKey === null ? null : await loadCropMarks(store, docKey);
+  const identity = await identityOf(host);
+  const record = identity === null
+    ? null
+    : (await loadCropMarks(store, identity.docKey)) ?? (await indexedCropMarks(store, identity));
   if (root) applyCropMarksStyle(record?.mm ?? null, root);
   return record?.mm ?? null;
 }
