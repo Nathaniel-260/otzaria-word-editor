@@ -257,7 +257,10 @@ describe('מילון תורני שלם (torah-dictionary.txt)', () => {
     const fs = await import('node:fs');
     const path = await import('node:path');
     // יחסית ל-cwd של vitest (שורש הפרויקט), כמו ב-tests/component/dialogs.test.ts.
-    const text = fs.readFileSync(path.resolve('src/data/torah-dictionary.txt'), 'utf8');
+    // כמו ב-vite.config.ts: checkout עם autocrlf מביא CRLF, והאריזה מניחה \n.
+    const text = fs
+      .readFileSync(path.resolve('src/data/torah-dictionary.txt'), 'utf8')
+      .replace(/\r\n?/g, '\n');
     const dictionary = createDictionary(text.trim());
 
     expect(dictionary.has('זצ״ל')).toBe(true);
