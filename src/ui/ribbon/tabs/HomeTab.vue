@@ -1143,6 +1143,8 @@ const numberMenuItems = computed(() => [
  * התפריט של „תבליטים”. `style:bullet` אינו כפילות של הכפתור שמעליו: הכפתור
  * מחיל רשימה על פסקאות, וזה מחליף את סגנון המספור של רשימה **קיימת** —
  * כלומר הדרך להפוך רשימה ממוספרת לתבליטים בלי לפרק אותה ולבנות מחדש.
+ * לכן `style:bullet` אינו מקבל `createList` ב-`onListMenuSelect`, בשונה
+ * מסגנוני המספור: על פסקה רגילה הוא מסרב ואינו נוגע במסמך.
  */
 const bulletMenuItems = computed(() => [
   { id: 'style:bullet', label: 'הפוך רשימה ממוספרת לתבליטים' },
@@ -1184,10 +1186,11 @@ function onListMenuSelect(id: string): void {
 
   if (id.startsWith('style:')) {
     const style = id.slice('style:'.length);
-    // פסקה שעדיין אינה רשימה מקבלת קודם רשימה — הפקודה של הכפתור המפוצל
-    // עצמו — ואז את הסגנון. ראו `SetNumberStyleOptions.createList` ב-engine/lists.ts.
-    const createList = (style === 'bullet' ? bulletCmd : numberedCmd).run;
-    void runList(() => setListNumberStyle(superdoc.value, style, { createList: () => createList() }));
+    // סגנון **מספור** על פסקה שאינה רשימה ממספר אותה קודם (issue #14 ג׳). `bullet`
+    // אינו מקבל זאת: הוא מחליף את סגנון המספור של רשימה קיימת, ויצירת תבליטים היא
+    // הכפתור שמעליו. ראו `SetNumberStyleOptions.createList` ב-engine/lists.ts.
+    const options = style === 'bullet' ? {} : { createList: numberedCmd.run };
+    void runList(() => setListNumberStyle(superdoc.value, style, options));
     return;
   }
 

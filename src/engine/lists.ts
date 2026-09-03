@@ -221,8 +221,8 @@ function notInList(failedAction: string): CommandOutcome {
 export interface SetNumberStyleOptions {
   /**
    * איך להפוך את הפסקה שבסמן לרשימה כשהיא עדיין אינה כזאת — הפקודה של
-   * הכפתור („מספור”/„תבליטים”), שיושבת ב-registry של המנוע ולא ב-Document
-   * API, ולכן מוזרקת מהרצועה ולא נקראת מכאן.
+   * הכפתור „מספור”, שיושבת ב-registry של המנוע ולא ב-Document API, ולכן
+   * מוזרקת מהרצועה ולא נקראת מכאן.
    *
    * בלעדיה הבחירה בסגנון מסרבת על פסקה רגילה. זה מה שהמשתמש קיבל (issue
    * #14 ג׳, שוחזר ב-scripts/qa/list-caret-qa.mjs): פתח את תפריט המספור על

@@ -283,10 +283,11 @@ describe('setListNumberStyle — פסקה שאינה רשימה', () => {
 });
 
 /**
- * `createList` היא הפקודה `numbered-list`/`bullet-list` של הרצועה, והיא
- * **טוגל**: אומת במימוש של superdoc (`executeListCommand` מנתב ל-`lists.remove`
- * / `lists.removeInStory` כשכל הבלוקים כבר באותה רשימה), ואומת חי — לחיצה
- * שנייה על „מספור” מחזירה isListItem מ-true ל-false.
+ * `createList` היא הפקודה `numbered-list` של הרצועה (התפריט מוסר אותה לסגנוני
+ * מספור בלבד), והיא **טוגל**: אומת במימוש של superdoc (`executeListCommand`
+ * מנתב ל-`lists.remove` / `lists.removeInStory` כשכל הבלוקים כבר באותה
+ * רשימה), ואומת חי — לחיצה שנייה על „מספור” מחזירה isListItem מ-true
+ * ל-false.
  *
  * ולכן אסור לקרוא לה כשהזיהוי לא הכריע. „אינני רואה את הבלוק" אינו „אין
  * רשימה": פריט רשימה בתא טבלה אינו נמנה ב-blocks.list כלל, ועל מנוע בלי
