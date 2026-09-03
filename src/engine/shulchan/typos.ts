@@ -339,8 +339,6 @@ export async function runTypos(host: ShulchanTarget, options: TyposOptions): Pro
  */
 const LINE_BREAK_CHARS = new Set(['\n', '\r', String.fromCharCode(0x0b)]);
 
-/** רווח קשיח — U+00A0. `fromCharCode` ולא ליטרל, כדי שהתו הבלתי-נראה לא יאבד בעריכה. */
-const NBSP_PATTERN = new RegExp(String.fromCharCode(0xa0), 'g');
 
 /**
  * העריכות של „תיקון העתקה מתוכנות” על טקסט בלוק אחד — `FixHebrewPunctuation`
@@ -353,7 +351,11 @@ const NBSP_PATTERN = new RegExp(String.fromCharCode(0xa0), 'g');
  * מחדש את מאפייני הכיוון של התו; אצלנו `doc.replace` באותו טקסט הוא no-op.
  */
 export function copyFixEdits(text: string): TextEdit[] {
-  return collectRegexEdits(text, NBSP_PATTERN, (match) => {
+  // התבנית נבנית בכל קריאה: RegExp עם `g` נושא `lastIndex`, ומופע משותף
+  // בין קריאות הוא בדיוק סוג התלות שהופכת סדר קריאות לבאג.
+  // `fromCharCode` ולא ליטרל, כדי שהתו הבלתי-נראה (U+00A0) לא יאבד בעריכה.
+  const nbsp = new RegExp(String.fromCharCode(0xa0), 'g');
+  return collectRegexEdits(text, nbsp, (match) => {
     const before = text[match.index - 1];
     return before !== undefined && LINE_BREAK_CHARS.has(before) ? match[0] : ' ';
   });

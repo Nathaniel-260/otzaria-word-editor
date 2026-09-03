@@ -209,9 +209,8 @@ export async function readColumnsProfiles(
   const groups = new Map<string, ColumnsProfileGroup>();
   for (const item of sections.items) {
     if (!isUniformCandidate(item)) continue;
-    const count = UNIFORM_COLUMN_COUNT;
     const profile: ColumnsProfile = {
-      count,
+      count: UNIFORM_COLUMN_COUNT,
       gapIn: roundIn(item.columns?.gap, 0.5),
       equalWidth: item.columns?.equalWidth !== false,
     };
