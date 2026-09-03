@@ -723,6 +723,53 @@ export function normalizeSearchTerm(text: string): string {
     .toLowerCase();
 }
 
+/** פעולה עם השדות שלה מנורמלים — הצורה שהחיפוש באמת קורא. */
+interface IndexedAction {
+  readonly action: TellMeAction;
+  readonly title: string;
+  readonly titleWords: readonly string[];
+  readonly category: string;
+  readonly description: string;
+  readonly keywords: readonly string[];
+}
+
+interface CatalogIndex {
+  readonly entries: readonly IndexedAction[];
+  readonly suggested: readonly TellMeAction[];
+}
+
+/**
+ * האינדקס המנורמל של קטלוג. הנרמול קבוע — ולכן הוא נעשה פעם אחת לקטלוג ולא
+ * מחדש בכל הקשה: בלעדיו כל תו שהמשתמש מקליד היה מריץ מאות `replace` של regex
+ * על כותרות, תיאורים ומילות מפתח שאינם משתנים.
+ */
+const CATALOG_INDEX = new WeakMap<readonly TellMeAction[], CatalogIndex>();
+
+function catalogIndex(actions: readonly TellMeAction[]): CatalogIndex {
+  const cached = CATALOG_INDEX.get(actions);
+  if (cached) return cached;
+
+  const entries = actions.map((action): IndexedAction => {
+    const title = normalizeSearchTerm(action.title);
+    return {
+      action,
+      title,
+      titleWords: title.split(/\s+/).filter(Boolean),
+      category: normalizeSearchTerm(action.category),
+      description: action.description ? normalizeSearchTerm(action.description) : '',
+      keywords: action.keywords.map(normalizeSearchTerm),
+    };
+  });
+  const byId = new Map(actions.map((action) => [action.id, action]));
+  const suggested = DEFAULT_SUGGESTED_IDS.map((id) => byId.get(id)).filter(
+    (action): action is TellMeAction => action !== undefined,
+  );
+
+  const index: CatalogIndex = { entries, suggested };
+  CATALOG_INDEX.set(actions, index);
+  return index;
+}
+
 /**
  * מחפש ומדרג פעולות מתוך קטלוג ה-Tell Me.
  *
@@ -734,47 +781,38 @@ export function searchTellMeActions(
   query: string,
   actions: readonly TellMeAction[] = TELL_ME_ACTIONS,
 ): TellMeAction[] {
+  const index = catalogIndex(actions);
   const normalized = normalizeSearchTerm(query);
-  if (!normalized) {
-    // כשאין שאילתה, מחזירים את הפעולות המוצעות לפי סדר ההגדרה שלהן
-    const suggestedMap = new Map(actions.map((a) => [a.id, a]));
-    return DEFAULT_SUGGESTED_IDS.map((id) => suggestedMap.get(id)).filter(
-      (a): a is TellMeAction => Boolean(a),
-    );
-  }
+  // כשאין שאילתה, מחזירים את הפעולות המוצעות לפי סדר ההגדרה שלהן
+  if (!normalized) return [...index.suggested];
 
   const queryWords = normalized.split(/\s+/).filter(Boolean);
 
   const scored: { action: TellMeAction; score: number }[] = [];
 
-  for (const action of actions) {
-    const titleNorm = normalizeSearchTerm(action.title);
-    const categoryNorm = normalizeSearchTerm(action.category);
-    const descNorm = action.description ? normalizeSearchTerm(action.description) : '';
-    const keywordsNorm = action.keywords.map(normalizeSearchTerm);
-
+  for (const entry of index.entries) {
     let score = 0;
 
     // התאמה מדויקת לכותרת
-    if (titleNorm === normalized) {
+    if (entry.title === normalized) {
       score += 120;
-    } else if (titleNorm.startsWith(normalized)) {
+    } else if (entry.title.startsWith(normalized)) {
       // תחילית של הכותרת
       score += 90;
-    } else if (titleNorm.includes(normalized)) {
+    } else if (entry.title.includes(normalized)) {
       // מוכלת בכותרת
       score += 60;
     }
 
     // בדיקת מילים בתוך הכותרת
     for (const qWord of queryWords) {
-      if (titleNorm.split(/\s+/).some((w) => w.startsWith(qWord))) {
+      if (entry.titleWords.some((w) => w.startsWith(qWord))) {
         score += 35;
       }
     }
 
     // מילות מפתח
-    for (const kw of keywordsNorm) {
+    for (const kw of entry.keywords) {
       if (kw === normalized) {
         score += 80;
       } else if (kw.startsWith(normalized)) {
@@ -785,17 +823,17 @@ export function searchTellMeActions(
     }
 
     // קטגוריה
-    if (categoryNorm.includes(normalized)) {
+    if (entry.category.includes(normalized)) {
       score += 20;
     }
 
     // תיאור
-    if (descNorm.includes(normalized)) {
+    if (entry.description.includes(normalized)) {
       score += 15;
     }
 
     if (score > 0) {
-      scored.push({ action, score });
+      scored.push({ action: entry.action, score });
     }
   }
 

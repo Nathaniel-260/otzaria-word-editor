@@ -4,6 +4,7 @@ import {
   DEFAULT_SUGGESTED_IDS,
   searchTellMeActions,
   normalizeSearchTerm,
+  type TellMeAction,
 } from '../../src/ui/shell/tell-me-actions';
 import { ICONS } from '../../src/ui/icons/icons';
 
@@ -96,5 +97,16 @@ describe('אלגוריתם חיפוש Tell Me (searchTellMeActions)', () => {
   it('שאילתה שאינה קיימת מחזירה רשימה ריקה', () => {
     const results = searchTellMeActions('xyznonexistentquery123');
     expect(results).toEqual([]);
+  });
+
+  /** האינדקס המנורמל נשמר לכל קטלוג בנפרד — קטלוג משלו אינו מקבל את של ברירת המחדל. */
+  it('קטלוג שנמסר במפורש נחפש לעצמו ולא מהאינדקס של ברירת המחדל', () => {
+    const own: TellMeAction[] = [
+      { id: 'own-1', title: 'צבע גופן', category: 'בדיקה', keywords: ['צבע'], icon: 'bold' },
+    ];
+    expect(searchTellMeActions('צבע', own).map((a) => a.id)).toEqual(['own-1']);
+    expect(searchTellMeActions('הדפסה', own)).toEqual([]);
+    // ברירת המחדל לא נפגעה
+    expect(searchTellMeActions('הדפסה')[0]?.id).toBe('file-print');
   });
 });
