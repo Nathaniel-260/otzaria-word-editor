@@ -20,8 +20,9 @@
  *   ('a. ') והפריט הופך לפסקה — בלתי-הפיך למעשה, ולכן הפקד דורש אישור
  *   דו-לחיצה בממשק.
  * - כתובת פריט היא `{kind:'block', nodeType:'listItem', nodeId}`; פסקה
- *   שאינה פריט מחזירה `TARGET_NOT_FOUND`. היעד נפתר מהבחירה + `blocks.list`
- *   (ה-nodeType של הבלוק קובע).
+ *   שאינה פריט מחזירה `TARGET_NOT_FOUND`. היעד נפתר מהבחירה + `lists.getState`
+ *   (ראו `resolveListItem`: `blocks.list` לבדו מפספס רשימות בטבלה וכותרות
+ *   ממוספרות).
  */
 import type { SuperDoc } from 'superdoc';
 import type { CommandOutcome } from './command-adapter';
@@ -75,12 +76,14 @@ interface ListsApiShape {
     current?: () => MaybePromise<SelectionInfoLike | undefined>;
   };
   blocks?: {
-    list?: (input?: { offset?: number; limit?: number }) => MaybePromise<{
-      total?: number;
-      blocks?: Array<{ nodeId?: string; nodeType?: string }>;
+    list?: () => MaybePromise<{
+      blocks?: Array<{ nodeId?: string; nodeType?: string; paragraphNumbering?: unknown }>;
     }>;
   };
   lists?: {
+    getState?: (input: {
+      target: { kind: 'block'; nodeType: 'paragraph' | 'listItem'; nodeId: string };
+    }) => MaybePromise<{ success?: boolean; isListItem?: boolean } | undefined>;
     setLevelNumberStyle?: (input: Record<string, unknown>) => MaybePromise<DocReceipt>;
     restartAt?: (input: Record<string, unknown>) => MaybePromise<DocReceipt>;
     continuePrevious?: (input: Record<string, unknown>) => MaybePromise<DocReceipt>;
@@ -108,19 +111,22 @@ function docOf(host: ListsTarget): ListsApiShape | null {
 }
 
 /**
- * כמה פסקאות לבקש בכל קריאה, וכמה קריאות לכל היותר.
+ * פותרת את פריט הרשימה שבו הסמן. `blockId` מהבחירה (הבחירה אינה מדווחת
+ * listItem), וההכרעה „פריט רשימה או לא” היא של `lists.getState` — סמכות
+ * הרשימות של המנוע — ולא של `blocks.list`.
  *
- * כמו ב-caret-anchor.ts ו-search.ts: קריאה בלי דפדוף קיבלה את העמוד הראשון
- * בלבד (ברירת המחדל של המנוע היא 50 בלוקים), ורשימה שהחלה מעבר לו נדחתה
- * ב„יש למקם את הסמן בתוך רשימה” למרות שהסמן היה בתוכה.
- */
-const PAGE_SIZE = 500;
-const MAX_PAGES = 50;
-
-/**
- * פותרת את פריט הרשימה מתוך הבחירה: ה-`blockId` מהבחירה חייב להיות `listItem`
- * ב-`blocks.list` (הבחירה אינה מדווחת listItem). פסקה שאינה ברשימה היא
- * `null` — ולא כשל, כדי שהפקד יוכל להסביר „יש למקם את הסמן ברשימה".
+ * למה לא `blocks.list` (issue #14 ג׳, נמדד על superdoc 2.11.0): הוא מונה
+ * בלוקים **עליונים** בלבד, ולכן פריט רשימה בתוך תא טבלה אינו מופיע בו כלל;
+ * וכותרת ממוספרת של Word (Heading1 + numPr) מדווחת בו כ-`heading` ולא
+ * `listItem`. בשני המקרים `getState` אומר `isListItem:true`, ו-
+ * `setLevelNumberStyle` עם כתובת `listItem` מצליח — כלומר הבלוק כן פריט
+ * רשימה, ורק הזיהוי כשל ב„יש למקם את הסמן בתוך רשימה”.
+ *
+ * `blocks.list` נשאר כנפילה לגרסת מנוע בלי `getState`, בקריאה אחת: בלי
+ * ארגומנטים הוא מחזיר את כל הסיפור (אין עמוד של 50, נמדד), ו-
+ * `paragraphNumbering` על הבלוק מכסה שם את הכותרת הממוספרת.
+ *
+ * פסקה שאינה ברשימה היא `null` — ולא כשל, כדי שהפקד יוכל להסביר.
  */
 async function resolveListItem(host: ListsTarget): Promise<ListItemAddress | null> {
   const doc = docOf(host);
@@ -135,27 +141,26 @@ async function resolveListItem(host: ListsTarget): Promise<ListItemAddress | nul
     return null;
   }
   if (!blockId) return null;
+  const address: ListItemAddress = { kind: 'block', nodeType: 'listItem', nodeId: blockId };
+
+  const getState = doc.lists?.getState;
+  if (typeof getState === 'function') {
+    try {
+      // `nodeType:'paragraph'` תקף לכל בלוק פסקתי, כולל כותרת; `'heading'` נזרק.
+      const state = await getState({ target: { kind: 'block', nodeType: 'paragraph', nodeId: blockId } });
+      if (state?.success === true) return state.isListItem ? address : null;
+    } catch {
+      // נופלים ל-blocks.list.
+    }
+  }
 
   const list = doc.blocks?.list;
   if (typeof list !== 'function') return null;
-
   try {
-    let offset = 0;
-    for (let page = 0; page < MAX_PAGES; page += 1) {
-      const listed = await list({ offset, limit: PAGE_SIZE });
-      const blocks = Array.isArray(listed?.blocks) ? listed.blocks : [];
-      if (blocks.length === 0) break;
-
-      const block = blocks.find((b) => b.nodeId === blockId);
-      if (block) {
-        if (block.nodeType !== 'listItem') return null;
-        return { kind: 'block', nodeType: 'listItem', nodeId: block.nodeId as string };
-      }
-
-      offset += blocks.length;
-      if (typeof listed?.total === 'number' && offset >= listed.total) break;
-    }
-    return null;
+    const listed = await list();
+    const block = (listed?.blocks ?? []).find((b) => b.nodeId === blockId);
+    if (!block) return null;
+    return block.nodeType === 'listItem' || block.paragraphNumbering ? address : null;
   } catch {
     return null;
   }

@@ -135,9 +135,14 @@ export interface ParagraphFormatDocumentApi extends SelectionDocumentApi {
   };
   get?: () => MaybePromise<unknown>;
   blocks?: {
-    list?: (input?: { offset?: number; limit?: number }) => MaybePromise<
-      { blocks?: readonly { nodeId?: string; nodeType?: string }[]; total?: number } | undefined
+    list?: () => MaybePromise<
+      { blocks?: readonly { nodeId?: string; nodeType?: string }[] } | undefined
     >;
+  };
+  lists?: {
+    getState?: (input: {
+      target: { kind: 'block'; nodeType: 'paragraph' | 'listItem'; nodeId: string };
+    }) => MaybePromise<{ success?: boolean; isListItem?: boolean } | undefined>;
   };
 }
 
@@ -158,45 +163,48 @@ export interface ParagraphTarget {
   story?: unknown;
 }
 
-const PAGE_SIZE = 500;
-const MAX_PAGES = 50;
-
 /**
- * סוג הבלוק בפועל של המזהה — פסקה, כותרת או פריט רשימה — לפי `blocks.list`.
+ * סוג הבלוק בפועל של המזהה — פסקה, כותרת או פריט רשימה — לפי `blocks.list`,
+ * ולפריט שאינו מופיע שם — לפי `lists.getState`.
  *
  * החוזה (`ParagraphTarget` ב-paragraphs.types.d.ts) דורש את הסוג האמיתי,
  * ולא ליטרל מקובע: כתובת עם `nodeType:'paragraph'` על בלוק שהוא בפועל
- * `heading` או `listItem` היא כתובת פסולה, וכתיבה חזרה אליה נכשלת. הפתרון
- * כאן הוא אותו דפוס בדיוק כמו `resolveListItem` ב-lists.ts.
+ * `heading` או `listItem` היא כתובת פסולה, וכתיבה חזרה אליה נכשלת.
  *
- * ברירת המחדל `'paragraph'` — גם כשאין `blocks.list`, וגם כשהמזהה לא נמצא
- * בעמודים שנקראו — היא התאמה לאחור: פסקה היא הסוג הנפוץ, וגרסת מנוע ישנה
- * שאינה חושפת את הפעולה לא הייתה מפסיקה לעבוד על המקרה הרגיל.
+ * `blocks.list` מונה בלוקים עליונים בלבד (בקריאה אחת — בלי ארגומנטים הוא
+ * מחזיר את כל הסיפור, נמדד), ולכן פריט רשימה בתוך תא טבלה אינו שם; שם
+ * מכריע `lists.getState`, כמו ב-`resolveListItem` ב-lists.ts. כותרת
+ * ממוספרת נשארת `heading`: זה מה ש-`blocks.list` מדווח, וכתובת ההפסקה
+ * שלה היא כתובת כותרת.
+ *
+ * ברירת המחדל `'paragraph'` — כשאין אף אחת מהפעולות, וכשהמזהה לא נמצא —
+ * היא התאמה לאחור: פסקה היא הסוג הנפוץ, וגרסת מנוע ישנה שאינה חושפת את
+ * הפעולות לא הייתה מפסיקה לעבוד על המקרה הרגיל.
  */
 async function resolveBlockType(
   doc: ParagraphFormatDocumentApi,
   blockId: string,
 ): Promise<ParagraphBlockType> {
   const list = doc.blocks?.list;
-  if (typeof list !== 'function') return 'paragraph';
-  try {
-    let offset = 0;
-    for (let page = 0; page < MAX_PAGES; page += 1) {
-      const listed = await list({ offset, limit: PAGE_SIZE });
-      const blocks = Array.isArray(listed?.blocks) ? listed.blocks : [];
-      if (blocks.length === 0) break;
-
-      const found = blocks.find((b) => b.nodeId === blockId);
+  if (typeof list === 'function') {
+    try {
+      const listed = await list();
+      const found = (listed?.blocks ?? []).find((b) => b.nodeId === blockId);
       if (found) {
         return found.nodeType === 'heading' || found.nodeType === 'listItem'
           ? found.nodeType
           : 'paragraph';
       }
-
-      offset += blocks.length;
-      if (typeof listed?.total === 'number' && offset >= listed.total) break;
+    } catch {
+      // נופלים ל-lists.getState.
     }
-    return 'paragraph';
+  }
+
+  const getState = doc.lists?.getState;
+  if (typeof getState !== 'function') return 'paragraph';
+  try {
+    const state = await getState({ target: { kind: 'block', nodeType: 'paragraph', nodeId: blockId } });
+    return state?.success === true && state.isListItem ? 'listItem' : 'paragraph';
   } catch {
     return 'paragraph';
   }
