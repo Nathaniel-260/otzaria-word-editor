@@ -34,12 +34,20 @@ function setup(over: Partial<ShellActionDeps> = {}) {
     toggleShortcutsHelp: vi.fn(() => true),
     openContextMenu: vi.fn(() => true),
     moveFocusRegion: vi.fn(() => true),
+    openTellMe: vi.fn(),
     ...over,
   };
   return { deps, run: createShellActionRunner(deps) };
 }
 
 describe('createShellActionRunner', () => {
+  it('tell-me קורא ל-openTellMe ומחזיר true', () => {
+    const { deps, run } = setup();
+
+    expect(run('tell-me')).toBe(true);
+    expect(deps.openTellMe).toHaveBeenCalledOnce();
+  });
+
   it('shortcuts-help מחליף את מצב רשימת הקיצורים', () => {
     const { deps, run } = setup();
 

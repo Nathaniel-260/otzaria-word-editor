@@ -177,6 +177,8 @@ const props = withDefaults(
     resultText?: string;
     /** האם המנוע יכול להחליט כרגע. `false` = אין להציג את פקדי ההחלפה. */
     canReplace?: boolean;
+    /** שאילתת חיפוש התחלתית אופציונלית (מ-Tell Me) */
+    initialQuery?: string;
     /** החלפה שנשלחה למנוע וטרם הסתיימה. */
     isReplacing?: boolean;
   }>(),
@@ -186,6 +188,7 @@ const props = withDefaults(
     resultText: '',
     canReplace: false,
     isReplacing: false,
+    initialQuery: '',
   }
 );
 
@@ -200,7 +203,7 @@ const emit = defineEmits<{
 }>();
 
 const mode = ref<'find' | 'replace'>(props.initialMode);
-const searchQuery = ref('');
+const searchQuery = ref(props.initialQuery ?? '');
 const replaceQuery = ref('');
 const searchInputRef = ref<HTMLInputElement | null>(null);
 
@@ -220,9 +223,25 @@ watch(
 );
 
 watch(
+  () => props.initialQuery,
+  (newQuery) => {
+    if (newQuery !== undefined) {
+      searchQuery.value = newQuery;
+      if (newQuery) {
+        emit('query-change', newQuery);
+      }
+    }
+  }
+);
+
+watch(
   () => props.isOpen,
   (open) => {
     if (open) {
+      if (props.initialQuery) {
+        searchQuery.value = props.initialQuery;
+        emit('query-change', props.initialQuery);
+      }
       nextTick(() => {
         searchInputRef.value?.focus();
         searchInputRef.value?.select();

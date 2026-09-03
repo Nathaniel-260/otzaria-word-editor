@@ -19,6 +19,7 @@
     <div class="shell-top">
       <!-- פס עליון -->
       <TitleBar
+        ref="titleBarRef"
         :title="title"
         :is-dirty="saveSnapshot.isDirty"
         :is-saving="saveSnapshot.isSaving"
@@ -30,7 +31,10 @@
         @save="onSave(false)"
         @undo="onUndo"
         @redo="onRedo"
-        @open-find="openFindDialog('find')"
+        @open-find="(q) => openFindDialog('find', q)"
+        @run-command="onRunCommandFromTellMe"
+        @run-action="onRunActionFromTellMe"
+        @custom-action="onCustomActionFromTellMe"
         @toggle-autosave="toggleAutosave"
         @update-title="onTitleUpdate"
       />
@@ -200,6 +204,7 @@
     <FindReplaceDialog
       :is-open="isFindOpen"
       :initial-mode="findMode"
+      :initial-query="findInitialQuery"
       :result-text="searchCounter"
       :can-replace="canShowReplace"
       :is-replacing="searchState.isReplacing"
@@ -498,6 +503,7 @@ import { startParagraphOnNewPage, pageBreakTracker } from './engine/page-break';
 import { createFontMemory } from './composables/use-font-controls';
 import { createLinkDialog } from './composables/use-link-dialog';
 import { createShellActionRunner } from './ui/shortcuts/actions';
+import type { ShellAction } from './ui/shortcuts/registry';
 import { useContextMenu } from './composables/use-context-menu';
 import ContextMenu from './ui/menu/ContextMenu.vue';
 import {
@@ -685,6 +691,8 @@ watch([ribbonTab, ribbonCollapsed], ([tab, collapsed]) => {
 
 const isFindOpen = ref(false);
 const findMode = ref<'find' | 'replace'>('find');
+const findInitialQuery = ref('');
+const titleBarRef = ref<InstanceType<typeof TitleBar> | null>(null);
 const isAboutOpen = ref(false);
 const isShortcutsHelpOpen = ref(false);
 
@@ -3097,10 +3105,41 @@ function onPointerMove(event: PointerEvent): void {
  * רב-פסקאות (ראו הראש של engine/search.ts). המימוש שלנו עצמאי לגמרי:
  * `doc.blocks.list`/`doc.replace` של ה-Document API הציבורי.
  */
-function openFindDialog(mode: 'find' | 'replace'): void {
+function openFindDialog(mode: 'find' | 'replace', initialQuery = ''): void {
   findMode.value = mode;
+  findInitialQuery.value = initialQuery;
   isFindOpen.value = true;
   void reportSearch(searchAdapter?.open());
+}
+
+async function onRunCommandFromTellMe(id: string, payload?: unknown): Promise<void> {
+  if (!commandAdapter.value) {
+    setStatus('אין מסמך פתוח לביצוע הפעולה', true);
+    return;
+  }
+  const outcome = await commandAdapter.value.run(id, payload);
+  reportCommand(outcome, id);
+}
+
+function onRunActionFromTellMe(action: ShellAction): void {
+  runShellAction(action);
+}
+
+function onCustomActionFromTellMe(action: string): void {
+  switch (action) {
+    case 'export-pdf':
+      void onExportPdf();
+      break;
+    case 'export-otzaria':
+      void onExportOtzaria();
+      break;
+    case 'about':
+      isAboutOpen.value = true;
+      break;
+    case 'manage-macros':
+      isMacrosOpen.value = true;
+      break;
+  }
 }
 
 function closeFindDialog(): void {
@@ -3441,6 +3480,7 @@ const runShellAction = createShellActionRunner({
     return true;
   },
   moveFocusRegion: (direction) => focusRing.move(direction) !== null,
+  openTellMe: () => titleBarRef.value?.focusTellMe(),
   closeTopmost: closeTopmostLayer,
 });
 

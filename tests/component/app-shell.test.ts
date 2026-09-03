@@ -677,15 +677,30 @@ describe('שמירה', () => {
 });
 
 describe('חיפוש', () => {
-  it('כפתור החיפוש בפס פותח session במנוע ולא רק דיאלוג', async () => {
+  it('פתיחת חיפוש דרך Tell Me פותחת session במנוע ולא רק דיאלוג', async () => {
     // פתיחת הדיאלוג בלי `searchAdapter.open()` היא דיאלוג שכל חיפוש בו נכשל
     // סגור — ואת זה רואים רק ממעטפת מורכבת.
     const wrapper = await mountShell();
 
-    await wrapper.find('.search-box').trigger('click');
+    const tellMeInput = wrapper.find('.tell-me-input');
+    await tellMeInput.trigger('focus');
+    await tellMeInput.setValue('בדיקה');
+    await settle();
+
+    await wrapper.find('#tell-me-item-doc-search').trigger('click');
     await settle();
 
     expect(stub.searchOpens).toBe(1);
+  });
+
+  it('קיצור Alt+Q מעביר מיקוד לתיבת Tell Me ופותח את התפריט', async () => {
+    const wrapper = await mountShell();
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'q', code: 'KeyQ', altKey: true }));
+    await settle();
+
+    const tellMeInput = wrapper.find('.tell-me-input');
+    expect(tellMeInput.attributes('aria-expanded')).toBe('true');
   });
 });
 

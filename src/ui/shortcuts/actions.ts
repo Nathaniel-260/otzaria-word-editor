@@ -61,6 +61,8 @@ export interface ShellActionDeps {
   openContextMenu: () => boolean;
   /** `F6` — מעביר את המיקוד לאזור הבא. מחזיר האם היה לאן. */
   moveFocusRegion: (direction: 'next' | 'prev') => boolean;
+  /** `Alt+Q` — מיקוד תיבת החיפוש והפקודות (Tell Me). */
+  openTellMe: () => void;
 }
 
 /**
@@ -155,6 +157,9 @@ export function createShellActionRunner(deps: ShellActionDeps): (action: ShellAc
         return deps.moveFocusRegion('next');
       case 'focus-prev-region':
         return deps.moveFocusRegion('prev');
+      case 'tell-me':
+        deps.openTellMe();
+        return true;
     }
   };
 }
