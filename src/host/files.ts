@@ -223,21 +223,28 @@ export async function beginBinaryWrite(expectedSize: number): Promise<WriteTicke
  * באותו שער בדיוק כמו ה-PUT, כך ששני המקרים היו נראים „השרת אינו נגיש”.
  * token שאינו קיים מחזיר 404 מהשרת עצמו — וזו ההוכחה שהוא נגיש.
  *
- * חד-פעמי לכל חיי הדף: שמירה אוטומטית רצה כל כמה שניות, ואבחון בכל כשל
- * היה מציף את הלוג ואת השרת. הממצא נכנס גם להודעת השגיאה — צילום מסך של
- * שורת המצב הוא ערוץ הדיווח בפועל.
+ * הבדיקה עצמה נעשית פעם אחת לכל חיי הדף: שמירה אוטומטית רצה כל כמה שניות,
+ * ובדיקה בכל כשל הייתה מציפה את הלוג ואת השרת. **הממצא, לעומת זאת, נשמר
+ * ומוחזר בכל כשל.** קודם עמד כאן דגל בוליאני, ולכן הכשל השני והלאה קיבל
+ * „העלאת המסמך נכשלה: Failed to fetch” חשוף — אותה תקלה בדיוק, בהודעה
+ * שאינה אומרת דבר, ותלוי רק בשאלה אם זה הניסיון הראשון. צילום מסך של שורת
+ * המצב הוא ערוץ הדיווח בפועל, ולכן הממצא חייב להיות בו בכל פעם.
  */
-let uploadDiagnosed = false;
+let uploadDiagnosis: Promise<string> | undefined;
 
-async function uploadFailureDetail(uploadUrl: string): Promise<string> {
-  if (uploadDiagnosed) return '';
-  uploadDiagnosed = true;
+function uploadFailureDetail(uploadUrl: string): Promise<string> {
+  uploadDiagnosis ??= diagnoseUploadFailure(uploadUrl);
+  return uploadDiagnosis;
+}
 
+async function diagnoseUploadFailure(uploadUrl: string): Promise<string> {
   let probe: string;
+  let blockedByHost = false;
   try {
     const origin = new URL(uploadUrl).origin;
     const res = await fetch(`${origin}/f/probe`, { method: 'GET' });
     probe = `GET לשרת עבר (${res.status}) — ה-PUT עצמו נחסם`;
+    blockedByHost = true;
   } catch (probeError) {
     probe = `גם GET לשרת נכשל (${
       probeError instanceof Error ? probeError.message : String(probeError)
@@ -246,7 +253,10 @@ async function uploadFailureDetail(uploadUrl: string): Promise<string> {
 
   const detail = `דף=${window.location.origin || window.location.protocol}, יעד=${uploadUrl}, ${probe}`;
   console.error('[otzaria-word] אבחון כשל העלאה:', detail);
-  return ` [${detail}]`;
+  // שרת נגיש ו-PUT חסום פירושו שער הבקשות של אוצריא, ולא תקלת רשת: התוסף
+  // אינו יכול לעקוף אותו, ולכן ההודעה אומרת מה כן אפשר לעשות.
+  const advice = blockedByHost ? ' — גרסת אוצריא הזאת חוסמת את כתיבת המסמך; נדרש עדכון' : '';
+  return `${advice} [${detail}]`;
 }
 
 /**
