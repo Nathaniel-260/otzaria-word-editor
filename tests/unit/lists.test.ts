@@ -233,13 +233,19 @@ describe('setListNumberStyle — פסקה שאינה רשימה', () => {
     });
   });
 
-  it('כשיצירת הרשימה נכשלה — הכשל שלה חוזר, והסגנון אינו נשלח', async () => {
+  it('כשיצירת הרשימה נכשלה — ההודעה נושאת את קידומת המודול, ה-reason נשמר, והסגנון אינו נשלח', async () => {
+    // ההודעה של `createList` היא של שכבת הפקודות ובלי שם הפעולה שנבחרה
+    // בתפריט; ה-`reason` הוא מה שמאפשר לצרכן להבחין בין הכשלים.
     const failed = { ok: false, message: 'המנוע אינו מוכן', reason: 'not-ready' } as const;
     const { host, calls, createList } = docWithConvertibleParagraph(failed as never);
 
     const outcome = await setListNumberStyle(host, 'hebrew1', { createList });
 
-    expect(outcome).toEqual(failed);
+    expect(outcome).toEqual({
+      ok: false,
+      message: 'שינוי סגנון המספור נכשל: המנוע אינו מוכן',
+      reason: 'not-ready',
+    });
     expect(calls.get('setLevelNumberStyle')).toEqual([]);
   });
 

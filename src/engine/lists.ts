@@ -213,6 +213,16 @@ async function call(failedAction: string, run: () => MaybePromise<DocReceipt>): 
   return { ok: true };
 }
 
+/**
+ * מוסיפה את קידומת הכשל של המודול להודעה שכבר מנוסחת (כשל שחוזר משכבה
+ * אחרת). ה-`startsWith` מונע קידומת כפולה אם יזרימו לכאן הודעה שכבר נושאת
+ * אותה.
+ */
+function prefixed(failedAction: string, message: string): string {
+  if (!message) return failedAction;
+  return message.startsWith(failedAction) ? message : `${failedAction}: ${message}`;
+}
+
 /** „יש למקם את הסמן ברשימה" — תשובה משותפת לכל הפעולות. */
 function notInList(failedAction: string): CommandOutcome {
   return { ok: false, message: `${failedAction}: יש למקם את הסמן בתוך רשימה`, reason: 'selection-required' };
@@ -233,6 +243,10 @@ export interface SetNumberStyleOptions {
    * (`lists.remove`, ובכותרת/תחתית `lists.removeInStory`). לכן היא נקראת רק
    * על הכרעה חיובית „אינו רשימה” — ולא כשהזיהוי החזיר „לא ידוע” (פריט
    * בתא טבלה, מנוע בלי `getState`), שם טוגל היה הורס את המספור הקיים.
+   *
+   * `useCommand.run` מדווח את הכשל בעצמו לפני שהוא מחזיר אותו, והקורא מדווח
+   * שוב את מה שחזר מכאן — ולכן הכתיבה השנייה לפס המצב, זו שנושאת את שם
+   * הפעולה, היא זו שהמשתמש רואה.
    */
   createList?: () => Promise<CommandOutcome>;
 }
@@ -262,7 +276,10 @@ export async function setListNumberStyle(
   let item = resolution.kind === 'item' ? resolution.address : null;
   if (resolution.kind === 'not-list' && options.createList) {
     const created = await options.createList();
-    if (!created.ok) return created;
+    // הכשל חוזר עם הקידומת של המודול: ההודעה של `createList` היא של שכבת
+    // הפקודות („המנוע אינו מוכן”) ובלי שם הפעולה המשתמש אינו יודע מה נכשל.
+    // ה-`reason` נשמר — הוא מה שמבדיל בין הכשלים אצל הצרכן.
+    if (!created.ok) return { ...created, message: prefixed(failedAction, created.message) };
     // הכתובת יציבה (נמדד: אותו blockId לפני היצירה ואחריה); הפתרון מחדש הוא
     // אימות שהיצירה אכן תפסה, ולא הסתמכות על יציבות שאינה בחוזה.
     item = await resolveAddress(host);
