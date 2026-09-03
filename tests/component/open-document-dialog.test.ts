@@ -29,6 +29,7 @@ function recent(over: Partial<RecentDocument> & { token: string }): RecentDocume
     name: `${over.token}.docx`,
     size: 2048,
     openedAt: Date.now() - HOUR,
+    writable: true,
     pinned: false,
     ...over,
   };
@@ -174,7 +175,8 @@ describe('OpenDocumentDialog — כרטיסי התבניות', () => {
     ['blank', 14, 0, 0],
     ['two-column', 29, 0, 0],
     ['annotated', 16, 1, 0],
-    ['title-page', 12, 1, 0],
+    // עמוד שער בלבד: שלוש פסקאות ממורכזות, בלי גוף ובלי קו. ראו buildSheet.
+    ['title-page', 4, 0, 0],
     ['kuntres-a5', 16, 0, 1],
   ])('התצוגה המקדימה של %s: %i מלבנים, %i קווים, %i קנה מידה', (id, rects, lines, groups) => {
     const { wrapper } = open();

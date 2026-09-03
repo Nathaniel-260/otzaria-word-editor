@@ -94,6 +94,23 @@ function docOf(host: DocDefaultsTarget): DocDefaultsDocumentApi | null {
  * קוראת את גודל ברירת המחדל הנוכחי, דרך dryRun — הקריאה היחידה שיש.
  * מחזירה נקודות, או `null` כשהמנוע אינו יכול לענות (לא כשל: דיאלוג נפתח
  * על שדה ריק).
+ *
+ * ## למה `fontSizeCs` קודם, ולא `fontSize`
+ *
+ * הכתיבה (`applyDocStyleDefaults`) מציבה את שני הערוצים באותו ערך, אבל
+ * **המסמך שנקרא לא בהכרח נכתב כאן**: מסמך שהגיע מ-Word יכול להחזיק
+ * `w:sz="22"` (לטיני, ‏11 נק') לצד `w:szCs="32"` (עברי, ‏16 נק') — צירוף
+ * שכיח בספרי קודש, שבהם הגוף העברי גדול והלועזי קטן.
+ *
+ * הקריאה שהייתה כאן החזירה את `fontSize` בלבד, כלומר 11, והדיאלוג הציג
+ * אותו כ„גודל ברירת המחדל”. מי שביקש לתקן את הלטיני והקליד 12 היה **מקטין
+ * את כל העברית מ-16 ל-12** — שינוי שלא ביקש, על מספר שלא ראה. לפני שהכתיבה
+ * הפכה לדו-ערוצית זה לא יכול היה לקרות, מפני ש-`szCs` לא נגע כלל; מרגע
+ * שהיא נכתבת, הקריאה חייבת להדביק אותה.
+ *
+ * לכן `fontSizeCs` הוא המדווח: זהו עורך עברי, והמספר שהמשתמש רואה חייב
+ * להיות זה שחל על הטקסט שהוא כותב. `fontSize` נשאר כנפילה למסמך שאין בו
+ * `szCs` כלל.
  */
 export async function readDefaultFontSizePt(host: DocDefaultsTarget): Promise<number | null> {
   const apply = docOf(host)?.styles?.apply;
@@ -102,15 +119,23 @@ export async function readDefaultFontSizePt(host: DocDefaultsTarget): Promise<nu
   let receipt: StyleApplyReceipt;
   try {
     receipt = await apply(
-      { target: { scope: 'docDefaults', channel: 'run' }, patch: { fontSize: 0 } },
+      // **שני הערוצים בבקשה**, לא רק אחד: ה-`before` שחוזר מתאר את השדות
+      // שנשלחו, ולכן בקשה על `fontSize` בלבד לא הייתה מחזירה `fontSizeCs`
+      // אף פעם — והנפילה שמתחת הייתה נבלעת תמיד, כלומר התיקון היה מדומה.
+      {
+        target: { scope: 'docDefaults', channel: 'run' },
+        patch: { fontSize: 0, fontSizeCs: 0 },
+      },
       { dryRun: true },
     );
   } catch {
     return null;
   }
 
-  const before = receipt?.before?.fontSize;
-  return typeof before === 'number' ? halfPointsToPoints(before) : null;
+  const cs = receipt?.before?.fontSizeCs;
+  if (typeof cs === 'number') return halfPointsToPoints(cs);
+  const ascii = receipt?.before?.fontSize;
+  return typeof ascii === 'number' ? halfPointsToPoints(ascii) : null;
 }
 
 /**

@@ -271,7 +271,17 @@
                 @focus="onRowFocus(index, 'open')"
                 @click="$emit('open-recent', item.token)"
               >
-                <span class="rec-name">{{ item.name }}</span>
+                <!--
+                  `dir="auto"` — בלעדיו שם קובץ לועזי יורש rtl, והחיתוך
+                  (`text-overflow`) נופל ב-inline-end שהוא **תחילת** השם:
+                  `Shulchan_Aruch_..._vol2_final.docx` היה מוצג כ-
+                  `…_vol2_final.docx`, כלומר בדיוק החלק המזהה נעלם.
+                  `RibbonCombo.vue` עושה את זה מאותו נימוק.
+                -->
+                <span
+                  class="rec-name"
+                  dir="auto"
+                >{{ item.name }}</span>
                 <span
                   v-if="metaParts(item).length > 0"
                   class="rec-meta"
@@ -588,23 +598,54 @@ function buildSheet(preview: TemplatePreview): Sheet {
     rects.push({ x: TEXT_START, y: 12.7, width: 8, height: 5 });
   }
 
-  let bodyTop = MARGIN;
+  const bodyTop = MARGIN;
   let bodyBottom = 271.6;
 
   if (preview.hasTitleBlock) {
-    rects.push({ x: 50, y: 55, width: 110, height: 11, strong: true });
-    rects.push({ x: 74, y: 72, width: 62, height: 6, strong: true });
-    lines.push({ x1: 68, y1: 88, x2: 142, y2: 88 });
-    bodyTop = 100;
+    /*
+     * **עמוד שער, ולא כותרת שמעל גוף.**
+     *
+     * הציור הקודם העמיד גוש כותרת, קו אופקי מתחתיו, ותשע שורות גוף באותו
+     * עמוד — כלומר „מסמך עם כותרת”. מה שהתבנית מייצרת בפועל הוא אחר לגמרי:
+     * `pageBreakBefore` שולח את הגוף לעמוד **הבא**, אין שום קו, ובעמוד
+     * הראשון יושבות שלוש פסקאות בלבד (שם הספר, המחבר, השנה).
+     *
+     * כלומר הציור סתר גם את התבנית וגם את הרמז שלה עצמה („שער נפרד, ואחריו
+     * גוף המסמך”), וזה בדיוק מה שהמפרט אוסר: דגל שאין לו כיסוי בהחלה הוא
+     * ציור שמשקר. שלוש המסות כאן הן שלוש הפסקאות, ממורכזות ובסדר גודל יורד,
+     * והעמוד ריק סביבן — כי זה מה שעמוד שער הוא.
+     *
+     * `return` מיידי: אין גוף לצייר, ולכן גם אין טעם להמשיך לחישוב השורות.
+     */
+    rects.push({ x: 50, y: 90, width: 110, height: 12, strong: true });
+    rects.push({ x: 72, y: 116, width: 66, height: 7, strong: true });
+    rects.push({ x: 93, y: 136, width: 24, height: 6 });
+    return { rects, lines, scaled: preview.ratio === 'a5' };
   }
 
   if (preview.hasFootnoteBand) {
     bodyBottom = 219;
     // המפריד יוצא **מקצה ההתחלה** — בעברית, מימין. כך Word מצייר אותו.
     lines.push({ x1: TEXT_END, y1: 228, x2: 131.5, y2: 228 });
-    rects.push({ x: TEXT_START, y: 235, width: TEXT_WIDTH, height: 5 });
-    rects.push({ x: TEXT_START, y: 247, width: TEXT_WIDTH, height: 5 });
-    rects.push({ x: 97.0, y: 259, width: 87.6, height: 5 });
+    /*
+     * **אותו עובי כמו הגוף**, ולא דק ממנו.
+     *
+     * הציור הראשון נתן לרצועה `height: 5` מול `ROW_THICKNESS: 7` בגוף,
+     * כלומר הצהיר „הביאור קטן מהפנים”. זו טענת פרופורציה, והיא בדיוק סוג
+     * הטענה שהציור הזה כן מתחייב עליה (בשונה מקנה המידה של A5, שמצהיר על
+     * גיליון קטן יותר ולא על מספרים — ראו §5.4 במפרט).
+     *
+     * ובפועל היא אינה נכונה: `applyDocStyleDefaults` חל על `docDefaults`,
+     * כלומר על **שני הזרמים**, והביאור יוצא בדיוק בגודל הפנים. מה שמבדיל
+     * את הרצועה הוא המפריד שמעליה והצפיפות — ושניהם אמיתיים. הגודל אינו,
+     * ולכן הוא יורד מהציור.
+     *
+     * הקצב 14 (מול 19 בגוף) הוא מה שנשאר, והוא חסום מלמטה: השורה השלישית
+     * יושבת ב-263 ומסתיימת ב-270, כלומר בתוך קו השוליים (271.6).
+     */
+    rects.push({ x: TEXT_START, y: 235, width: TEXT_WIDTH, height: ROW_THICKNESS });
+    rects.push({ x: TEXT_START, y: 249, width: TEXT_WIDTH, height: ROW_THICKNESS });
+    rects.push({ x: 97.0, y: 263, width: 87.6, height: ROW_THICKNESS });
   }
 
   if (preview.columns === 2) {
@@ -696,6 +737,8 @@ function onCardKeydown(event: KeyboardEvent): void {
 type RowColumn = 'open' | 'pin' | 'forget';
 
 const activeRow = ref(0);
+/** ה-token של השורה הפעילה — הזהות שהמצביע רודף אחריה. ראו ה-`watch` למטה. */
+const activeToken = ref<string | null>(null);
 const activeColumn = ref<RowColumn>('open');
 const rowRefs = ref<(HTMLElement | null)[]>([]);
 
@@ -705,6 +748,7 @@ function setRowRef(el: unknown, index: number): void {
 
 function onRowFocus(index: number, column: RowColumn): void {
   activeRow.value = index;
+  activeToken.value = visible.value[index]?.token ?? null;
   activeColumn.value = column;
 }
 
@@ -729,6 +773,7 @@ function onRowKeydown(event: KeyboardEvent): void {
 
   event.preventDefault();
   activeRow.value = next;
+  activeToken.value = visible.value[next]?.token ?? null;
   void nextTick(() => {
     const row = rowRefs.value[next];
     const target = row?.querySelector<HTMLElement>(`[data-col="${activeColumn.value}"]`);
@@ -744,12 +789,54 @@ function onRowKeydown(event: KeyboardEvent): void {
 }
 
 /**
- * הרשימה מתקצרת (הסרה, סינון) — והמצביע עלול להצביע מחוץ לה. בלי הצמצום הזה
- * `tabindex="0"` היה נעלם מכל השורות, והרשימה הייתה יוצאת מסדר ה-Tab לגמרי.
+ * המצביע עוקב אחרי ה-**token**, לא אחרי המספר.
+ *
+ * שלוש פעולות מזיזות שורות מתחת למצביע, ואף אחת מהן אינה מזיזה את המיקוד
+ * בעצמה — ולכן `@focus` אינו יורה ו-`activeRow` היה נשאר על מספר שמצביע
+ * לשורה אחרת לגמרי:
+ *
+ * 1. **הצמדה** — השורה קופצת לראש הרשימה. ArrowDown הבא היה מדלג אחורה
+ *    למקום שבו היא ישבה קודם.
+ * 2. **הסרה** — ה-`<li>` הממוקד יורד מה-DOM, והמיקוד נופל ל-`body`, כלומר
+ *    **מחוץ למודאל**. „הסר, הסר, הסר” במקלדת נשבר אחרי הראשון.
+ * 3. **סינון** — הרשימה מתקצרת.
+ *
+ * לכן: אם ה-token עדיין נראה, המצביע רודף אחריו. אם הוא נעלם, המצביע נשאר
+ * במקומו (השורה הבאה תופסת את מקומו — ההתנהגות הצפויה בהסרה רצופה), ומצטמצם
+ * לגבול הרשימה. וכשהמיקוד אכן נפל החוצה, הוא מוחזר לשורה שבמקום הזה.
  */
-watch(visible, (list) => {
-  if (activeRow.value > list.length - 1) activeRow.value = Math.max(0, list.length - 1);
+watch(visible, async (list) => {
+  const index = activeToken.value === null ? -1 : list.findIndex((item) => item.token === activeToken.value);
+  const next = index >= 0 ? index : Math.min(activeRow.value, Math.max(0, list.length - 1));
+  activeRow.value = next;
+  activeToken.value = list[next]?.token ?? null;
+
+  // רק כשהמיקוד באמת אבד. בדיקה על `body` ולא „האם הוא בתוך הרשימה”: הצמדה
+  // אינה מוציאה את המיקוד, והחזרה כפויה שם הייתה גונבת אותו ממי שכבר קיבל
+  // אותו (למשל כפתור הניקוי בחיפוש).
+  if (list.length === 0) return;
+  if (document.activeElement !== document.body) return;
+  await nextTick();
+  const row = rowRefs.value[next];
+  row?.querySelector<HTMLElement>(`[data-col="${activeColumn.value}"]`)?.focus();
 });
+
+/**
+ * המיקוד אינו יכול להישאר על פקד שהתנטרל.
+ *
+ * שמירה אוטומטית יורה בזמן שהדיאלוג פתוח, `busy` הופך ל-true, והכרטיס או
+ * השורה שהמשתמש עמד עליהם מקבלים `disabled` — הדפדפן מוציא מהם את המיקוד
+ * ל-`body`, כלומר אל מחוץ למודאל, ומלכודת ה-Tab מפסיקה לתפוס. החלון עצמו
+ * הוא `tabindex="-1"` בדיוק בשביל הרגע הזה.
+ */
+watch(
+  () => props.busy,
+  async (busy) => {
+    if (!busy || !props.isOpen) return;
+    await nextTick();
+    if (document.activeElement === document.body) dialogRef.value?.focus();
+  },
+);
 
 /* ------------------------------------------------------------------ */
 /* מיקוד ומלכודת                                                       */
@@ -770,9 +857,15 @@ watch(
       // בשדה טקסט היה מבטל את Enter וכולא את החיצים.
       activeCard.value = 0;
       activeRow.value = 0;
+      activeToken.value = null;
       activeColumn.value = 'open';
       void nextTick(() => {
-        (cardRefs.value[0] ?? dialogRef.value)?.focus();
+        // `?? dialogRef` לא הספיק: כשהכרטיס **קיים אבל מנוטרל** ה-`??` אינו
+        // נופל, ומיקוד על כפתור מנוטרל הוא no-op שקט — המיקוד היה נשאר
+        // מאחורי המודאל. `openOpenDialog` (App.vue) כבר מונע את המצב הזה
+        // מלכתחילה, וזו רשת הביטחון שלו.
+        const card = cardRefs.value[0];
+        (card && !(card as HTMLButtonElement).disabled ? card : dialogRef.value)?.focus();
       });
       return;
     }
@@ -791,7 +884,13 @@ function focusables(): HTMLElement[] {
   if (!root) return [];
   const selector = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
   return [...root.querySelectorAll<HTMLElement>(selector)].filter(
-    (element) => !element.hasAttribute('disabled'),
+    // שני הסינונים נדרשים, וה-`tabindex` **אינו** מכוסה על ידי הסלקטור:
+    // ה-`:not()` שם מסייג רק את האיבר `[tabindex]`, ולכן `<button
+    // tabindex="-1">` עדיין תואם ל-`button` ונכנס לרשימה. עם ה-roving
+    // tabindex שכאן זה אומר שכל חמשת הכרטיסים וכל שורות הרשימה נספרו
+    // כעצירות, ו„הראשון” ו„האחרון” שמלכודת ה-Tab קופצת אליהם היו אלמנטים
+    // שהדפדפן עצמו מדלג עליהם.
+    (element) => !element.hasAttribute('disabled') && element.tabIndex >= 0,
   );
 }
 

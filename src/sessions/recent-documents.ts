@@ -54,6 +54,19 @@ export interface RecentDocument {
   size: number;
   /** `Date.now()` בפתיחה האחרונה. `0` = לא ידוע. */
   openedAt: number;
+  /**
+   * האם ה-token ניתן לכתיבה — כלומר „שמור” לא יפתח „שמור בשם”.
+   *
+   * הוא נשמר כאן ולא נגזר מחדש, מפני ש**אין מהיכן לגזור אותו**: הגשר מחזיר
+   * `access` בבורר הקבצים בלבד, ו-`fs.resolveFileUrl` — המסלול שפתיחה
+   * מ„אחרונים” עוברת בו — אינו מחזיר אותו. בלי השדה הזה מסמך שנפתח מהרשימה
+   * יורד לקריאה-בלבד, וגרוע מכך: המצב הזה נכתב לרשומת ההפעלה ושורד הפעלות.
+   *
+   * זה בדיוק אותו שדה, ומאותו טעם, כמו `writable` ב-`SessionDocument`
+   * (session-state.ts) — ו-`resolveRememberedFile` ב-App.vue כבר מרכיב ממנו
+   * את ה-`access` החסר.
+   */
+  writable: boolean;
   pinned: boolean;
 }
 
@@ -102,8 +115,12 @@ function readRecent(value: unknown): RecentDocument | null {
     name: readString(item.name) ?? UNNAMED,
     size: readCount(item.size),
     openedAt: readCount(item.openedAt),
-    // כמו `writable` ב-`readDocument`: רק `true` מפורש הוא כן. ערך פגום אינו
-    // מצמיד מסמך, מפני שהצמדה היא מה שמחריג אותו מהתקרה לנצח.
+    // רק `true` מפורש הוא כן — כמו `writable` ב-`readDocument`. נכשל **סגור**
+    // ובכוונה: רשומה מגרסה קודמת שאין בה השדה נקראת כקריאה-בלבד, ואז „שמור”
+    // פותח „שמור בשם”. זו הטעות הבטוחה מבין השתיים — הכיוון ההפוך היה מנסה
+    // לכתוב ל-token שאין עליו הרשאת כתיבה.
+    writable: item.writable === true,
+    // ערך פגום אינו מצמיד מסמך, מפני שהצמדה היא מה שמחריג אותו מהתקרה לנצח.
     pinned: item.pinned === true,
   };
 }

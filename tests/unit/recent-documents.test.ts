@@ -27,14 +27,16 @@ import {
 import { loadRecentDocuments, saveRecentDocuments } from '../../src/host/settings';
 
 function doc(patch: Partial<RecentDocument> = {}): RecentDocument {
-  return { token: 'tok', name: 'א.docx', size: 1_000, openedAt: 5_000, pinned: false, ...patch };
+  return { token: 'tok', name: 'א.docx', size: 1_000, openedAt: 5_000, writable: true, pinned: false, ...patch };
 }
 
 /** רשומה של `count` פתיחות, מהישנה לחדשה, מעל רשימה נתונה. */
 function afterOpens(count: number, list: readonly RecentDocument[] = []): RecentDocument[] {
   let out = [...list];
   for (let i = 1; i <= count; i += 1) {
-    out = rememberRecent(out, { token: `t${i}`, name: `${i}.docx`, size: i, openedAt: 10_000 + i });
+    out = rememberRecent(out, {
+      token: `t${i}`, name: `${i}.docx`, size: i, openedAt: 10_000 + i, writable: true,
+    });
   }
   return out;
 }
@@ -45,6 +47,25 @@ function frozenCopy(list: readonly RecentDocument[]): RecentDocument[] {
 }
 
 describe('normalizeRecents', () => {
+  /**
+   * שורה שנכתבה לפני שהשדה קיים. נקראת כקריאה-בלבד ולא ככתיבה, וזו הנפילה
+   * הבטוחה: „שמור בשם” על קובץ שאפשר לכתוב אליו הוא הטרדה, כתיבה ל-token
+   * שאין עליו הרשאה היא כשל.
+   */
+  it('רשומה בלי writable נקראת כקריאה-בלבד', () => {
+    const [item] = normalizeRecents([{ token: 't', name: 'א.docx', size: 10, openedAt: 1 }]);
+    expect(item!.writable).toBe(false);
+  });
+
+  it('רק true מפורש הוא כתיב', () => {
+    const list = normalizeRecents([
+      { token: 'a', writable: true },
+      { token: 'b', writable: 'yes' },
+      { token: 'c', writable: 1 },
+    ]);
+    expect(list.map((item) => item.writable)).toEqual([true, false, false]);
+  });
+
   it('קורא רשימה מלאה כפי שנשמרה', () => {
     const stored = [doc({ token: 'a' }), doc({ token: 'b', pinned: true, openedAt: 9 })];
 
@@ -92,8 +113,8 @@ describe('normalizeRecents', () => {
     ]);
 
     expect(read).toEqual([
-      { token: 'a', name: 'מסמך', size: 0, openedAt: 0, pinned: false },
-      { token: 'b', name: 'מסמך', size: 0, openedAt: 0, pinned: false },
+      { token: 'a', name: 'מסמך', size: 0, openedAt: 0, writable: false, pinned: false },
+      { token: 'b', name: 'מסמך', size: 0, openedAt: 0, writable: false, pinned: false },
     ]);
   });
 
@@ -108,27 +129,31 @@ describe('normalizeRecents', () => {
 
 describe('rememberRecent', () => {
   it('מוסיף מסמך שלא היה', () => {
-    const list = rememberRecent([], { token: 'a', name: 'א.docx', size: 12, openedAt: 700 });
+    const list = rememberRecent([], { token: 'a', name: 'א.docx', size: 12, openedAt: 700, writable: true });
 
-    expect(list).toEqual([{ token: 'a', name: 'א.docx', size: 12, openedAt: 700, pinned: false }]);
+    expect(list).toEqual([
+      { token: 'a', name: 'א.docx', size: 12, openedAt: 700, writable: true, pinned: false },
+    ]);
   });
 
   it('token שכבר ברשימה מתעדכן במקום ואינו מוכפל', () => {
     const before = [doc({ token: 'a', name: 'ישן.docx', size: 10, openedAt: 100 }), doc({ token: 'b' })];
 
-    const after = rememberRecent(before, { token: 'a', name: 'חדש.docx', size: 90, openedAt: 900 });
+    const after = rememberRecent(before, { token: 'a', name: 'חדש.docx', size: 90, openedAt: 900, writable: true });
 
     expect(after).toHaveLength(2);
     // השם והגודל נדרסים: הקובץ יכול היה להשתנות או להיות משונה שם, וה-token
     // הוא שמצביע עליו — השם הישן היה שקר על מה שייפתח בלחיצה.
-    expect(after[0]).toEqual({ token: 'a', name: 'חדש.docx', size: 90, openedAt: 900, pinned: false });
+    expect(after[0]).toEqual({
+      token: 'a', name: 'חדש.docx', size: 90, openedAt: 900, writable: true, pinned: false,
+    });
   });
 
   it('פתיחה חוזרת אינה מבטלת הצמדה', () => {
     // ההצמדה היא החלטה על הקובץ, לא נתון של הפתיחה.
     const before = [doc({ token: 'a', pinned: true, openedAt: 100 })];
 
-    const after = rememberRecent(before, { token: 'a', name: 'א.docx', size: 1, openedAt: 900 });
+    const after = rememberRecent(before, { token: 'a', name: 'א.docx', size: 1, openedAt: 900, writable: true });
 
     expect(after[0]?.pinned).toBe(true);
     expect(after[0]?.openedAt).toBe(900);
@@ -137,7 +162,9 @@ describe('rememberRecent', () => {
   it('הרשומה שנפתחה עולה לראש הרשימה', () => {
     const before = [doc({ token: 'a' }), doc({ token: 'b' }), doc({ token: 'c' })];
 
-    const after = rememberRecent(before, { token: 'c', name: 'ג.docx', size: 1, openedAt: 9_000 });
+    const after = rememberRecent(before, {
+      token: 'c', name: 'ג.docx', size: 1, openedAt: 9_000, writable: true,
+    });
 
     expect(after.map((item) => item.token)).toEqual(['c', 'a', 'b']);
   });
@@ -171,21 +198,23 @@ describe('rememberRecent', () => {
     // שורה שאי אפשר לפתוח אינה שווה מקום — וזה בדיוק מה שהקריאה עושה איתה.
     const before = [doc({ token: 'a' })];
 
-    expect(rememberRecent(before, { token: '', name: 'א.docx', size: 1, openedAt: 9 })).toEqual(before);
+    expect(
+      rememberRecent(before, { token: '', name: 'א.docx', size: 1, openedAt: 9, writable: true }),
+    ).toEqual(before);
   });
 
   it('מנרמל את מה שנרשם, כדי שהרשימה בזיכרון תהיה זו שתיקרא אחרי הפעלה מחדש', () => {
-    const [added] = rememberRecent([], { token: 'a', name: '', size: -3, openedAt: 0 });
+    const [added] = rememberRecent([], { token: 'a', name: '', size: -3, openedAt: 0, writable: false });
 
-    expect(added).toEqual({ token: 'a', name: 'מסמך', size: 0, openedAt: 0, pinned: false });
+    expect(added).toEqual({ token: 'a', name: 'מסמך', size: 0, openedAt: 0, writable: false, pinned: false });
   });
 
   it('אינו משנה את הרשימה שנמסרה', () => {
     const before = [doc({ token: 'a', pinned: true }), doc({ token: 'b' })];
     const copy = frozenCopy(before);
 
-    rememberRecent(before, { token: 'a', name: 'אחר.docx', size: 5, openedAt: 9_999 });
-    rememberRecent(before, { token: 'ג', name: 'ג.docx', size: 5, openedAt: 9_999 });
+    rememberRecent(before, { token: 'a', name: 'אחר.docx', size: 5, openedAt: 9_999, writable: true });
+    rememberRecent(before, { token: 'ג', name: 'ג.docx', size: 5, openedAt: 9_999, writable: true });
 
     expect(before).toEqual(copy);
   });
