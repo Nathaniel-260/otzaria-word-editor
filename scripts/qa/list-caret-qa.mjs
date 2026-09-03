@@ -15,6 +15,7 @@
  *      מסמך שנראה תקין בבדיקה חלקית ומצייר „%1.” על המסך.
  *   5. אותה המרה כשלרשימה **שכנה** יש `numId` נפרד אך אותו `abstractNumId`
  *      (כך נראית רשימה שהתחילה מחדש מ-1) — האם השכנה נגררת יחד.
+ *   6. אותה המרה על רשימה **מקוננת** — מה קורה לרמה 1 כשמהפכים ברמה 0.
  * ובכל אחד: `doc.selection.current()` (אסינכרוני!) לפני התפריט ובזמן שהוא פתוח.
  *
  * כל שורת פעולה דורשת שני דברים: שלא הופיעה ההודעה „יש למקם את הסמן” (שומר
@@ -66,25 +67,29 @@ const textOf = (p) =>
     .join('');
 
 /**
- * ה-`numId` של הפסקה → ה-`<w:num>` שלה → ה-`abstractNum` → ה-`<w:lvl w:ilvl="0">`.
+ * ה-`numId` של הפסקה → ה-`<w:num>` שלה → ה-`abstractNum` → ה-`<w:lvl>` המבוקש.
  * בלי השרשור הזה „יש hebrew1 ב-numbering.xml” עובר גם על תבנית של פריט או רמה אחרים.
+ *
+ * `ilvl` הוא הרמה שנקראת מההגדרה, ו-`paraIlvl` הרמה שהפסקה **עצמה** יושבת בה:
+ * בפריט מקונן השתיים נפרדות, וקריאת רמה 0 בשבילו הייתה מודדת את ההורה.
  */
-function lvl0Of(paragraph, numbering) {
+function lvlOf(paragraph, numbering, ilvl = 0) {
   const numId = paragraph.match(/<w:numId w:val="(\d+)"\s*\/>/)?.[1] ?? null;
   const num = numId ? numbering.match(new RegExp(`<w:num w:numId="${numId}"[^>]*>[\\s\\S]*?</w:num>`))?.[0] ?? '' : '';
   const abstractNumId = num.match(/<w:abstractNumId w:val="(\d+)"\s*\/>/)?.[1] ?? null;
   const abstract = abstractNumId
     ? numbering.match(new RegExp(`<w:abstractNum w:abstractNumId="${abstractNumId}"[^>]*>[\\s\\S]*?</w:abstractNum>`))?.[0] ?? ''
     : '';
-  const lvl0 = abstract.match(/<w:lvl w:ilvl="0"[^>]*>[\s\S]*?<\/w:lvl>/)?.[0] ?? '';
-  const override = num.match(/<w:lvlOverride w:ilvl="0"[^>]*>[\s\S]*?<\/w:lvlOverride>/)?.[0] ?? '';
+  const lvl = abstract.match(new RegExp(`<w:lvl w:ilvl="${ilvl}"[^>]*>[\\s\\S]*?</w:lvl>`))?.[0] ?? '';
+  const override = num.match(new RegExp(`<w:lvlOverride w:ilvl="${ilvl}"[^>]*>[\\s\\S]*?</w:lvlOverride>`))?.[0] ?? '';
   return {
     numId,
     abstractNumId,
-    numFmt: lvl0.match(/<w:numFmt w:val="([^"]+)"/)?.[1] ?? null,
-    lvlText: lvl0.match(/<w:lvlText w:val="([^"]*)"/)?.[1] ?? null,
-    markerFont: lvl0.match(/<w:rFonts[^>]*w:ascii="([^"]+)"/)?.[1] ?? null,
-    start: lvl0.match(/<w:start w:val="(\d+)"\s*\/>/)?.[1] ?? null,
+    paraIlvl: paragraph.match(/<w:ilvl w:val="(\d+)"\s*\/>/)?.[1] ?? null,
+    numFmt: lvl.match(/<w:numFmt w:val="([^"]+)"/)?.[1] ?? null,
+    lvlText: lvl.match(/<w:lvlText w:val="([^"]*)"/)?.[1] ?? null,
+    markerFont: lvl.match(/<w:rFonts[^>]*w:ascii="([^"]+)"/)?.[1] ?? null,
+    start: lvl.match(/<w:start w:val="(\d+)"\s*\/>/)?.[1] ?? null,
     startOverride: override.match(/<w:startOverride w:val="(\d+)"\s*\/>/)?.[1] ?? null,
   };
 }
@@ -175,8 +180,8 @@ try {
     : report.fail('1. סמן מכווץ בפריט עם טקסט — אין blockId', JSON.stringify(s1));
   const r1 = await menuAction('התחל מחדש מ-1');
   const numbering1 = numberingOf(r1.files);
-  const first1 = lvl0Of(paragraphsOf(r1.files).find((p) => textOf(p) === 'ראשון') || '', numbering1);
-  const second1 = lvl0Of(paragraphsOf(r1.files).find((p) => textOf(p) === 'שני') || '', numbering1);
+  const first1 = lvlOf(paragraphsOf(r1.files).find((p) => textOf(p) === 'ראשון') || '', numbering1);
+  const second1 = lvlOf(paragraphsOf(r1.files).find((p) => textOf(p) === 'שני') || '', numbering1);
   // הראיה היא ה**ניתוק**: פריט שממשיך לספור חולק את ה-`numId` של קודמו. את
   // ההתחלה מ-1 בודקים בשתי הצורות — נמדד ש-`startOverride=1` יושב על כל
   // `<w:num>` שהמנוע יוצר, ולכן לבדו הוא אינו מבחין בין אתחול להמשך.
@@ -207,7 +212,7 @@ try {
   const r2 = await menuAction('א, ב, ג … יא, יב (גימטריה)');
   // הפריט הריק אינו מזוהה לפי טקסט — הוא הפסקה הממוספרת היחידה שאין בה טקסט.
   const empties = paragraphsOf(r2.files).filter((p) => /<w:numPr>/.test(p) && textOf(p) === '');
-  const lvl2 = empties.length === 1 ? lvl0Of(empties[0], numberingOf(r2.files)) : null;
+  const lvl2 = empties.length === 1 ? lvlOf(empties[0], numberingOf(r2.files)) : null;
   const lastMarker2 = r2.markers[r2.markers.length - 1] || '';
   console.log('2 בזמן התפריט:', JSON.stringify(r2.during), '| picked=', r2.picked, '| אחרי:', JSON.stringify(r2.status),
     '| סמנים:', JSON.stringify(r2.markers), '| ריקות ממוספרות:', empties.length, '| הפריט הריק:', JSON.stringify(lvl2));
@@ -240,7 +245,7 @@ try {
   // ממוספרים ממילא, וחיפוש numPr „בקרבת מקום” היה עובר בירוק בלי שנוצר דבר.
   const free = paragraphsOf(r3.files).find((p) => p.includes('פסקה חופשית')) || '';
   const numbered = /<w:numPr>/.test(free);
-  const lvl3 = lvl0Of(free, numberingOf(r3.files));
+  const lvl3 = lvlOf(free, numberingOf(r3.files));
   const hebrew = lvl3.numFmt === 'hebrew1';
   console.log('3 בזמן התפריט:', JSON.stringify(r3.during), '| אחרי:', JSON.stringify(r3.status),
     '| סמנים:', JSON.stringify(r3.markers), '| lvl0 של הפסקה:', JSON.stringify(lvl3));
@@ -260,7 +265,7 @@ try {
   await app.sleep(400);
   const before4 = await markersOf();
   const r4 = await menuAction('הפוך רשימה ממוספרת לתבליטים', 'פעולות תבליטים');
-  const second4 = lvl0Of(paragraphsOf(r4.files).find((p) => textOf(p) === 'שני') || '', numberingOf(r4.files));
+  const second4 = lvlOf(paragraphsOf(r4.files).find((p) => textOf(p) === 'שני') || '', numberingOf(r4.files));
   // `numFmt` לבדו אינו הוכחה: הסמן נגזר מ-`lvlText`, ו-„%1.” שנשאר שם הוא
   // בדיוק הבאג. ולכן שתי הבדיקות, ובנוסף הסמן שמצטייר בפועל.
   const bulletXml = second4.numFmt === 'bullet' && second4.lvlText === '•';
@@ -288,8 +293,8 @@ try {
   await caretOn('תאומב');
   const rSplit = await menuAction('התחל מחדש מ-1');
   const numberingSplit = numberingOf(rSplit.files);
-  const twinABefore = lvl0Of(paraOf(rSplit.files, 'תאומא'), numberingSplit);
-  const twinBBefore = lvl0Of(paraOf(rSplit.files, 'תאומב'), numberingSplit);
+  const twinABefore = lvlOf(paraOf(rSplit.files, 'תאומא'), numberingSplit);
+  const twinBBefore = lvlOf(paraOf(rSplit.files, 'תאומב'), numberingSplit);
   console.log('5 לפני ההמרה — תאומא:', JSON.stringify(twinABefore), '| תאומב:', JSON.stringify(twinBBefore),
     '| סמנים:', JSON.stringify(rSplit.markers));
   const shared =
@@ -301,8 +306,8 @@ try {
   await caretOn('תאומא');
   const r5 = await menuAction('הפוך רשימה ממוספרת לתבליטים', 'פעולות תבליטים');
   const numbering5 = numberingOf(r5.files);
-  const twinA = lvl0Of(paraOf(r5.files, 'תאומא'), numbering5);
-  const twinB = lvl0Of(paraOf(r5.files, 'תאומב'), numbering5);
+  const twinA = lvlOf(paraOf(r5.files, 'תאומא'), numbering5);
+  const twinB = lvlOf(paraOf(r5.files, 'תאומב'), numbering5);
   console.log('5 אחרי — תאומא:', JSON.stringify(twinA), '| תאומב:', JSON.stringify(twinB),
     '| סמנים:', JSON.stringify(r5.markers), '| status:', JSON.stringify(r5.status));
   const converted = twinA.numFmt === 'bullet' && twinA.lvlText === '•';
@@ -329,6 +334,48 @@ try {
     report.fail('5. ההמרה נגררה גם לשכנה שחולקת את ההגדרה',
       `תאומא ${JSON.stringify(twinABefore)}→${JSON.stringify(twinA)} | תאומב ${JSON.stringify(twinBBefore)}→${JSON.stringify(twinB)} | ` +
         `סמני הזוג ${JSON.stringify(pairMarkers)} status=${r5.status.text}`);
+  }
+
+  /* ---- 6. רשימה מקוננת: מה קורה לרמה 1 ---- */
+  // ההמרה מוחלת על הרשימה כולה, ולכן פריט ברמה 1 מפסיק להיות „a.” והופך
+  // לתבליט. זה מה שהמנוע עושה, וזה מה שלא נמדד בשום שער.
+  await caretOn('תאומב');
+  await newParagraphAfterList();
+  await typeNumberedPair('הורה', 'בן');
+  await app.press('Tab', 'Tab', 9);
+  await app.sleep(700);
+  const nestedBeforeFiles = await app.docx();
+  const numberingNested = numberingOf(nestedBeforeFiles);
+  const parentBefore = lvlOf(paraOf(nestedBeforeFiles, 'הורה'), numberingNested, 0);
+  const childBefore = lvlOf(paraOf(nestedBeforeFiles, 'בן'), numberingNested, 1);
+  console.log('6 לפני — הורה:', JSON.stringify(parentBefore), '| בן:', JSON.stringify(childBefore),
+    '| סמנים:', JSON.stringify(await markersOf()));
+  const nested = childBefore.paraIlvl === '1' && childBefore.numFmt !== 'bullet' && parentBefore.numFmt !== 'bullet';
+  await caretOn('הורה');
+  const r6 = await menuAction('הפוך רשימה ממוספרת לתבליטים', 'פעולות תבליטים');
+  const numbering6 = numberingOf(r6.files);
+  const parent6 = lvlOf(paraOf(r6.files, 'הורה'), numbering6, 0);
+  const child6 = lvlOf(paraOf(r6.files, 'בן'), numbering6, 1);
+  const nestedMarkers = r6.markers.slice(-2);
+  console.log('6 אחרי — הורה:', JSON.stringify(parent6), '| בן:', JSON.stringify(child6),
+    '| סמנים:', JSON.stringify(r6.markers), '| status:', JSON.stringify(r6.status));
+  if (!nested) {
+    report.fail('6. המרה ברמה 0 הופכת גם את רמה 1 לתבליט',
+      `התרחיש לא נבנה: הורה=${JSON.stringify(parentBefore)} בן=${JSON.stringify(childBefore)} — צריך פריט ברמה 1 שאינו תבליט`);
+  } else if (
+    parent6.numFmt === 'bullet' &&
+    parent6.lvlText === '•' &&
+    child6.numFmt === 'bullet' &&
+    child6.lvlText === '•' &&
+    nestedMarkers[0] === '•' &&
+    nestedMarkers[1] === '•'
+  ) {
+    report.pass('6. המרה ברמה 0 הופכת גם את רמה 1 לתבליט',
+      `רמה 0 ${parentBefore.numFmt}→bullet, רמה 1 ${childBefore.numFmt}→bullet | סמני הרשימה ${JSON.stringify(nestedMarkers)}`);
+  } else {
+    report.fail('6. המרה ברמה 0 לא הפכה את רמה 1 לתבליט',
+      `רמה 0 ${JSON.stringify(parentBefore)}→${JSON.stringify(parent6)} | רמה 1 ${JSON.stringify(childBefore)}→${JSON.stringify(child6)} | ` +
+        `סמני הרשימה ${JSON.stringify(nestedMarkers)} status=${r6.status.text}`);
   }
 
   console.log('לוג הדף:', JSON.stringify(await app.log()));
