@@ -132,6 +132,7 @@
 </template>
 
 <script setup lang="ts">
+import type { TellMeCustomAction } from './tell-me-actions';
 import { ref, computed } from 'vue';
 import SvgIcon from '../icons/SvgIcon.vue';
 import TellMeSearch from './TellMeSearch.vue';
@@ -185,7 +186,7 @@ defineEmits<{
   (e: 'open-find', initialQuery?: string): void;
   (e: 'run-command', id: string, payload?: unknown): void;
   (e: 'run-action', action: ShellAction): void;
-  (e: 'custom-action', action: string): void;
+  (e: 'custom-action', action: TellMeCustomAction): void;
   (e: 'toggle-autosave'): void;
   (e: 'update-title', newTitle: string): void;
 }>();

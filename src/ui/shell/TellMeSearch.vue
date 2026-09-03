@@ -150,13 +150,14 @@ import SvgIcon from '../icons/SvgIcon.vue';
 import {
   searchTellMeActions,
   type TellMeAction,
+  type TellMeCustomAction,
 } from './tell-me-actions';
 import type { ShellAction } from '../shortcuts/registry';
 
 const emit = defineEmits<{
   (e: 'run-command', id: string, payload?: unknown): void;
   (e: 'run-action', action: ShellAction): void;
-  (e: 'custom-action', action: string): void;
+  (e: 'custom-action', action: TellMeCustomAction): void;
   (e: 'open-find', initialQuery?: string): void;
 }>();
 

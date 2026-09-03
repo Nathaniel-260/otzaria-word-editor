@@ -9,6 +9,24 @@
 import type { ShellAction } from '../shortcuts/registry';
 import { alignmentPayload, lineHeightPayload, stylePayload } from '../../engine/payloads';
 
+/**
+ * הפעולות הייעודיות. איחוד מוקלד ולא `string`: מזהה שאינו כאן נופל בבנייה,
+ * ולא נראה כפריט תקין שלחיצה עליו אינה עושה דבר.
+ *
+ * `clipboard-*` — הלוח אינו משטח פקודות של המנוע (אין `copy`/`cut`/`paste`
+ * ברג׳יסטרי שלו); הוא עובר ב-engine/clipboard.ts, כמו בכפתורי „בית”.
+ * `ribbon-shulchan` — כלי שולחן העורך הם כלי MacroKit עם דיאלוגים, לא פקודות
+ * מנוע; הפעולה פותחת את הלשונית שלהם.
+ */
+export type TellMeCustomAction =
+  | 'export-pdf'
+  | 'export-otzaria'
+  | 'about'
+  | 'clipboard-copy'
+  | 'clipboard-cut'
+  | 'clipboard-paste'
+  | 'ribbon-shulchan';
+
 export interface TellMeAction {
   /** מזהה ייחודי לפעולה */
   id: string;
@@ -28,8 +46,8 @@ export interface TellMeAction {
   command?: { id: string; payload?: unknown };
   /** פעולת מעטפת להרצה דרך runShellAction */
   shellAction?: ShellAction;
-  /** פעולה ייעודית למעטפת שאינה ב-ShellAction */
-  customAction?: string;
+  /** פעולה ייעודית למעטפת שאינה ב-ShellAction — מטופלת ב-`onCustomActionFromTellMe` ב-App.vue */
+  customAction?: TellMeCustomAction;
 }
 
 /**
@@ -145,7 +163,7 @@ export const TELL_ME_ACTIONS: readonly TellMeAction[] = [
     keywords: ['הדבק', 'הדבקה', 'לוח', 'paste'],
     shortcut: 'Ctrl+V',
     icon: 'paste',
-    command: { id: 'paste' },
+    customAction: 'clipboard-paste',
   },
   {
     id: 'clipboard-copy',
@@ -155,7 +173,7 @@ export const TELL_ME_ACTIONS: readonly TellMeAction[] = [
     keywords: ['העתק', 'העתקה', 'לוח', 'copy'],
     shortcut: 'Ctrl+C',
     icon: 'copy',
-    command: { id: 'copy' },
+    customAction: 'clipboard-copy',
   },
   {
     id: 'clipboard-cut',
@@ -165,7 +183,7 @@ export const TELL_ME_ACTIONS: readonly TellMeAction[] = [
     keywords: ['גזור', 'גזירה', 'לוח', 'cut'],
     shortcut: 'Ctrl+X',
     icon: 'cut',
-    command: { id: 'cut' },
+    customAction: 'clipboard-cut',
   },
   {
     id: 'clipboard-format-painter',
@@ -175,7 +193,7 @@ export const TELL_ME_ACTIONS: readonly TellMeAction[] = [
     keywords: ['מברשת', 'מברשת עיצוב', 'העתק עיצוב', 'format painter'],
     shortcut: 'Ctrl+Shift+C',
     icon: 'formatPainter',
-    command: { id: 'format-painter' },
+    command: { id: 'copy-format' },
   },
 
   // --- גופן ועיצוב תו ---
@@ -278,7 +296,7 @@ export const TELL_ME_ACTIONS: readonly TellMeAction[] = [
     keywords: ['ימין', 'יישור לימין', 'align right'],
     shortcut: 'Ctrl+R',
     icon: 'alignRight',
-    command: { id: 'align', payload: alignmentPayload('right') },
+    command: { id: 'text-align', payload: alignmentPayload('right') },
   },
   {
     id: 'para-align-center',
@@ -288,7 +306,7 @@ export const TELL_ME_ACTIONS: readonly TellMeAction[] = [
     keywords: ['מרכז', 'מרכוז', 'אמצע', 'יישור למרכז', 'center', 'align center'],
     shortcut: 'Ctrl+E',
     icon: 'alignCenter',
-    command: { id: 'align', payload: alignmentPayload('center') },
+    command: { id: 'text-align', payload: alignmentPayload('center') },
   },
   {
     id: 'para-align-left',
@@ -298,7 +316,7 @@ export const TELL_ME_ACTIONS: readonly TellMeAction[] = [
     keywords: ['שמאל', 'יישור לשמאל', 'align left'],
     shortcut: 'Ctrl+L',
     icon: 'alignLeft',
-    command: { id: 'align', payload: alignmentPayload('left') },
+    command: { id: 'text-align', payload: alignmentPayload('left') },
   },
   {
     id: 'para-align-justify',
@@ -308,7 +326,7 @@ export const TELL_ME_ACTIONS: readonly TellMeAction[] = [
     keywords: ['יישור לשני הצדדים', 'מיושר', 'בלוק', 'חסימה', 'justify'],
     shortcut: 'Ctrl+J',
     icon: 'alignJustify',
-    command: { id: 'align', payload: alignmentPayload('justify') },
+    command: { id: 'text-align', payload: alignmentPayload('justify') },
   },
   {
     id: 'para-dir-rtl',
@@ -318,7 +336,7 @@ export const TELL_ME_ACTIONS: readonly TellMeAction[] = [
     keywords: ['כיוון', 'ימין לשמאל', 'עברית', 'rtl', 'right to left'],
     shortcut: 'Ctrl+RightShift',
     icon: 'dirRtl',
-    command: { id: 'direction', payload: { dir: 'rtl' } },
+    command: { id: 'direction-rtl' },
   },
   {
     id: 'para-dir-ltr',
@@ -328,7 +346,7 @@ export const TELL_ME_ACTIONS: readonly TellMeAction[] = [
     keywords: ['כיוון', 'שמאל לימין', 'אנגלית', 'ltr', 'left to right'],
     shortcut: 'Ctrl+LeftShift',
     icon: 'dirLtr',
-    command: { id: 'direction', payload: { dir: 'ltr' } },
+    command: { id: 'direction-ltr' },
   },
   {
     id: 'para-bullets',
@@ -373,7 +391,7 @@ export const TELL_ME_ACTIONS: readonly TellMeAction[] = [
     description: 'קביעת מרווח שורות רגיל',
     keywords: ['מרווח', 'מרווח שורות', 'רווח שורות', 'line spacing'],
     icon: 'lineSpacing',
-    command: { id: 'line-spacing', payload: lineHeightPayload(1.0) },
+    command: { id: 'line-height', payload: lineHeightPayload(1.0) },
   },
   {
     id: 'para-spacing-115',
@@ -382,7 +400,7 @@ export const TELL_ME_ACTIONS: readonly TellMeAction[] = [
     description: 'קביעת מרווח שורות 1.15',
     keywords: ['מרווח', '1.15', 'רווח בין שורות'],
     icon: 'lineSpacing',
-    command: { id: 'line-spacing', payload: lineHeightPayload(1.15) },
+    command: { id: 'line-height', payload: lineHeightPayload(1.15) },
   },
   {
     id: 'para-spacing-15',
@@ -391,7 +409,7 @@ export const TELL_ME_ACTIONS: readonly TellMeAction[] = [
     description: 'קביעת מרווח שורות שורה וחצי',
     keywords: ['מרווח', '1.5', 'שורה וחצי', 'רווח שורות'],
     icon: 'lineSpacing',
-    command: { id: 'line-spacing', payload: lineHeightPayload(1.5) },
+    command: { id: 'line-height', payload: lineHeightPayload(1.5) },
   },
   {
     id: 'para-spacing-2',
@@ -400,7 +418,7 @@ export const TELL_ME_ACTIONS: readonly TellMeAction[] = [
     description: 'קביעת מרווח שורות כפול',
     keywords: ['מרווח', '2.0', 'כפול', 'מרווח כפול'],
     icon: 'lineSpacing',
-    command: { id: 'line-spacing', payload: lineHeightPayload(2.0) },
+    command: { id: 'line-height', payload: lineHeightPayload(2.0) },
   },
 
   // --- סגנונות (Styles) ---
@@ -412,7 +430,7 @@ export const TELL_ME_ACTIONS: readonly TellMeAction[] = [
     keywords: ['סגנון רגיל', 'טקסט רגיל', 'פסקה רגילה', 'normal', 'style'],
     shortcut: 'Ctrl+Shift+N',
     icon: 'pilcrow',
-    command: { id: 'style', payload: stylePayload('normal') },
+    command: { id: 'linked-style', payload: stylePayload('Normal') },
   },
   {
     id: 'style-h1',
@@ -422,7 +440,7 @@ export const TELL_ME_ACTIONS: readonly TellMeAction[] = [
     keywords: ['כותרת 1', 'h1', 'heading 1'],
     shortcut: 'Ctrl+Alt+1',
     icon: 'pilcrow',
-    command: { id: 'style', payload: stylePayload('heading-1') },
+    command: { id: 'linked-style', payload: stylePayload('Heading1') },
   },
   {
     id: 'style-h2',
@@ -432,7 +450,7 @@ export const TELL_ME_ACTIONS: readonly TellMeAction[] = [
     keywords: ['כותרת 2', 'h2', 'heading 2'],
     shortcut: 'Ctrl+Alt+2',
     icon: 'pilcrow',
-    command: { id: 'style', payload: stylePayload('heading-2') },
+    command: { id: 'linked-style', payload: stylePayload('Heading2') },
   },
   {
     id: 'style-h3',
@@ -442,25 +460,7 @@ export const TELL_ME_ACTIONS: readonly TellMeAction[] = [
     keywords: ['כותרת 3', 'h3', 'heading 3'],
     shortcut: 'Ctrl+Alt+3',
     icon: 'pilcrow',
-    command: { id: 'style', payload: stylePayload('heading-3') },
-  },
-  {
-    id: 'style-title',
-    title: 'סגנון: כותרת ראשית',
-    category: 'בית > סגנונות',
-    description: 'החלת סגנון כותרת המסמך (Title)',
-    keywords: ['כותרת ראשית', 'כותרת מסמך', 'title'],
-    icon: 'pilcrow',
-    command: { id: 'style', payload: stylePayload('title') },
-  },
-  {
-    id: 'style-quote',
-    title: 'סגנון: ציטוט',
-    category: 'בית > סגנונות',
-    description: 'החלת סגנון ציטוט מובלט',
-    keywords: ['ציטוט', 'מובאה', 'quote'],
-    icon: 'pilcrow',
-    command: { id: 'style', payload: stylePayload('quote') },
+    command: { id: 'linked-style', payload: stylePayload('Heading3') },
   },
 
   // --- עריכה וחיפוש ---
@@ -552,7 +552,7 @@ export const TELL_ME_ACTIONS: readonly TellMeAction[] = [
     description: 'יצירת תוכן עניינים אוטומטי מהכותרות',
     keywords: ['תוכן', 'תוכן עניינים', 'אינדקס', 'toc', 'table of contents'],
     icon: 'toc',
-    command: { id: 'toc-insert' },
+    command: { id: 'table-of-contents-insert' },
   },
 
   // --- תצוגה וסקירה ---
@@ -672,28 +672,28 @@ export const TELL_ME_ACTIONS: readonly TellMeAction[] = [
     id: 'shulchan-first-word',
     title: 'מילה ראשונה מוגדלת ומודגשת',
     category: 'שולחן עורך',
-    description: 'עיצוב המילה הראשונה בפסקה בגופן מודגש או מוגדל',
+    description: 'פתיחת לשונית שולחן העורך — הכלי „מילה ראשונה”',
     keywords: ['מילה ראשונה', 'שולחן עורך', 'פתיח', 'מודגשת', 'ראשונה'],
     icon: 'bold',
-    command: { id: 'shulchan.first-word' },
+    customAction: 'ribbon-shulchan',
   },
   {
     id: 'shulchan-unclosed',
     title: 'חיפוש סוגריים לא סגורים',
     category: 'שולחן עורך',
-    description: 'בדיקה ואיתור סוגריים פתוחים ללא סגירה במסמך',
+    description: 'פתיחת לשונית שולחן העורך — הכלי „סוגריים לא סגורים”',
     keywords: ['סוגריים', 'סוגריים לא סגורים', 'שולחן עורך', 'הגהה'],
     icon: 'search',
-    command: { id: 'shulchan.unclosed' },
+    customAction: 'ribbon-shulchan',
   },
   {
     id: 'shulchan-uniform',
-    title: 'יישור שורות אחיד (שולחן עורך)',
+    title: 'אחידות מסמך (שולחן עורך)',
     category: 'שולחן עורך',
-    description: 'יישור אורכי שורות בצורה מדויקת לספרי קודש',
-    keywords: ['שורות', 'אחיד', 'יישור שורות', 'שולחן עורך'],
+    description: 'פתיחת לשונית שולחן העורך — גודל עמוד, שוליים ורוחב טורים אחידים',
+    keywords: ['אחידות', 'אחיד', 'שוליים', 'טורים', 'שולחן עורך'],
     icon: 'alignJustify',
-    command: { id: 'shulchan.uniform' },
+    customAction: 'ribbon-shulchan',
   },
 ];
 

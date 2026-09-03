@@ -501,7 +501,8 @@ import { onPluginHidden, onPluginShown } from './host/lifecycle';
 import { revealZone, type RevealBounds, type RevealZone } from './composables/focus-mode';
 import { enterFullscreen, exitFullscreen, isFullscreen, watchFullscreen } from './composables/window-fullscreen';
 import SvgIcon from './ui/icons/SvgIcon.vue';
-import { selectWholeDocument } from './engine/clipboard';
+import { copySelection, cutSelection, pasteFromClipboard, selectWholeDocument } from './engine/clipboard';
+import type { TellMeCustomAction } from './ui/shell/tell-me-actions';
 import {
   DEFAULT_FONT_SIZE_PT,
   fontSizePayload,
@@ -3168,7 +3169,13 @@ function onRunActionFromTellMe(action: ShellAction): void {
   runShellAction(action);
 }
 
-function onCustomActionFromTellMe(action: string): void {
+/**
+ * הפעולות הייעודיות של Tell Me (ראו `TellMeCustomAction`). הלוח עובר כאן
+ * ב-engine/clipboard.ts ומדווח כמו כפתורי „בית”, כי אין למנוע פקודות
+ * `copy`/`cut`/`paste`; כלי שולחן העורך הם כלי MacroKit עם דיאלוגים, ולכן
+ * הפעולה פותחת את הלשונית שלהם.
+ */
+function onCustomActionFromTellMe(action: TellMeCustomAction): void {
   switch (action) {
     case 'export-pdf':
       void onExportPdf();
@@ -3178,6 +3185,19 @@ function onCustomActionFromTellMe(action: string): void {
       break;
     case 'about':
       isAboutOpen.value = true;
+      break;
+    case 'clipboard-copy':
+      void copySelection(activeSuperdoc.value).then((outcome) => reportCommand(outcome, 'clipboard-copy'));
+      break;
+    case 'clipboard-cut':
+      void cutSelection(activeSuperdoc.value).then((outcome) => reportCommand(outcome, 'clipboard-cut'));
+      break;
+    case 'clipboard-paste':
+      void pasteFromClipboard(activeSuperdoc.value).then((outcome) => reportCommand(outcome, 'clipboard-paste'));
+      break;
+    case 'ribbon-shulchan':
+      ribbonTab.value = 'shulchan';
+      ribbonCollapsed.value = false;
       break;
   }
 }

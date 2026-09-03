@@ -7,6 +7,7 @@ import {
   type TellMeAction,
 } from '../../src/ui/shell/tell-me-actions';
 import { ICONS } from '../../src/ui/icons/icons';
+import { SHORTCUTS } from '../../src/ui/shortcuts/registry';
 
 describe('קטלוג הפקודות Tell Me (tell-me-actions)', () => {
   it('יש פקודות בקטלוג', () => {
@@ -31,6 +32,63 @@ describe('קטלוג הפקודות Tell Me (tell-me-actions)', () => {
     for (const action of TELL_ME_ACTIONS) {
       const hasTarget = Boolean(action.command || action.shellAction || action.customAction);
       expect(hasTarget, `action ${action.id} has no execution target`).toBe(true);
+    }
+  });
+
+  /**
+   * בדיקת חוזה: כל `command.id` בקטלוג הוא פקודה שהמנוע מכיר.
+   *
+   * למה זה נדרש: `command.id` הוא `string` חופשי, ו-`commandAdapter.run` מיירט
+   * מזהה לא מוכר ומחזיר „הפעולה אינה מוכרת למנוע” — הפריט נראה תקין בתפריט
+   * ולחיצה עליו נכשלת תמיד. 24 מ-38 הפריטים נכשלו כך לפני הבדיקה הזאת
+   * (`align` במקום `text-align`, `style` במקום `linked-style`, `paste` שאינו
+   * פקודת מנוע כלל). `shellAction`, לעומת זאת, מוקלד ונופל בבנייה.
+   *
+   * מקור האמת: רג׳יסטרי הפקודות של SuperDoc 2.11.0 (`create-super-doc-ui`),
+   * 50 מזהים. הרשימה מועתקת לכאן ולא נקראת מהמנוע: הבדיקה רצה בלי מנוע,
+   * ושדרוג שמוסיף/מסיר פקודה צריך להיראות כשינוי מפורש בקובץ הזה.
+   */
+  const ENGINE_COMMAND_IDS = new Set([
+    'acceptAllChanges', 'acceptChange', 'bold', 'bullet-list', 'clear-formatting', 'copy-format',
+    'direction-ltr', 'direction-rtl', 'document-mode', 'font-family', 'font-size', 'formatting-marks',
+    'highlight-color', 'image', 'indent-decrease', 'indent-increase', 'italic', 'line-height', 'link',
+    'linked-style', 'measurement-unit', 'numbered-list', 'redo', 'rejectAllChanges', 'rejectChange',
+    'ruler', 'setFontFamily', 'setFontSize', 'strikethrough', 'table-add-column-after',
+    'table-add-column-before', 'table-add-row-after', 'table-add-row-before', 'table-delete',
+    'table-delete-column', 'table-delete-row', 'table-fix', 'table-insert',
+    'table-of-contents-insert', 'table-remove-borders', 'table-split-cell', 'text-align',
+    'text-color', 'track-changes-accept-selection', 'track-changes-reject-selection',
+    'underline', 'undo', 'zoom', 'zoom-fit-width',
+  ]);
+
+  it('כל command.id בקטלוג הוא פקודת מנוע קיימת', () => {
+    const unknown = TELL_ME_ACTIONS.filter((a) => a.command && !ENGINE_COMMAND_IDS.has(a.command.id)).map(
+      (a) => `${a.id} → ${a.command!.id}`,
+    );
+    expect(unknown).toEqual([]);
+  });
+
+  it('רג׳יסטרי הקיצורים מסכים עם רשימת המנוע — כדי שהרשימה כאן לא תתיישן בשקט', () => {
+    const commands = (SHORTCUTS as readonly { id: string; command?: string }[]).filter((s) => s.command);
+    const unknown = commands.filter((s) => !ENGINE_COMMAND_IDS.has(s.command!)).map((s) => `${s.id} → ${s.command}`);
+    expect(unknown).toEqual([]);
+  });
+
+  /**
+   * ה-payload של `linked-style` הוא `w:styleId` של OOXML — CamelCase בלי מקף
+   * (`Heading1`, לא `heading-1`). מזהה לא מוכר נכשל *סגור*: המנוע מדווח הצלחה
+   * ואינו משנה כלום, ולכן זה נבדק כאן ולא נראה בריצה.
+   */
+  it('סגנונות ב-payload הם מזהי OOXML מהרג׳יסטרי', () => {
+    const known = new Set(
+      (SHORTCUTS as readonly { command?: string; payload?: unknown }[])
+        .filter((s) => s.command === 'linked-style')
+        .map((s) => (s.payload as { style: string }).style),
+    );
+    for (const action of TELL_ME_ACTIONS) {
+      if (action.command?.id !== 'linked-style') continue;
+      const style = (action.command.payload as { style?: string } | null)?.style;
+      expect(style && known.has(style), `action ${action.id}: style '${style}' אינו ברג׳יסטרי`).toBe(true);
     }
   });
 
