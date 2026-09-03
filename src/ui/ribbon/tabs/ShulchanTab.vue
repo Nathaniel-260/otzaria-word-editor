@@ -112,6 +112,74 @@
       </RibbonStack>
     </RibbonGroup>
 
+    <!-- עמודים ודפוס -->
+    <RibbonGroup title="עמודים ודפוס">
+      <RibbonButton
+        icon="shrinkFont"
+        label="צמצום מסמך"
+        variant="large"
+        :tooltip="toolTooltip('צמצום המסמך ליעד עמודים — שוליים, ריווח פסקאות, מרווח שורות וגופן, בסבבים של 10%')"
+        :disabled="!ready"
+        @click="reductionOpen = true"
+      />
+      <RibbonStack>
+        <RibbonButton
+          label="סמן עמודים"
+          variant="small"
+          :tooltip="toolTooltip('סימון המילה הראשונה והאחרונה של כל עמוד, ושמירת תצלום של שבירות העמודים לבדיקה מאוחרת')"
+          :disabled="!ready"
+          :active="pageMarking.enabled.value"
+          @click="onMarkPages"
+        />
+        <RibbonButton
+          label="בדוק עמודים"
+          variant="small"
+          :tooltip="toolTooltip('בדיקה אילו עמודים נפתחים היום במקום אחר מאשר בסימון האחרון')"
+          :disabled="!ready"
+          @click="onCheckPages"
+        />
+        <RibbonButton
+          label="הסר סימון"
+          variant="small"
+          :tooltip="toolTooltip('כיבוי סימון העמודים ומחיקת התצלום השמור')"
+          :disabled="!ready"
+          @click="onUnmarkPages"
+        />
+      </RibbonStack>
+      <RibbonStack>
+        <RibbonButton
+          label="סימני חיתוך"
+          variant="small"
+          :tooltip="toolTooltip('הגדלת הדף והשוליים במילימטרים לבחירתך והוספת סימני חיתוך בפינות — להדפסה ול-PDF')"
+          :disabled="!ready"
+          @click="onOpenCropMarks"
+        />
+        <RibbonButton
+          label="פירוק מסמך"
+          variant="small"
+          :tooltip="toolTooltip('העברת כל הערות השוליים למסמך חדש בטאב נפרד; בגוף נשאר מספר ההערה בכתב עילי')"
+          :disabled="!ready"
+          @click="onSplitNotes"
+        />
+      </RibbonStack>
+    </RibbonGroup>
+
+    <ShulchanReductionDialog
+      :is-open="reductionOpen"
+      :busy="inFlight"
+      :progress="reductionProgress"
+      @close="reductionOpen = false"
+      @submit="onReductionSubmit"
+      @stop="reductionStop = true"
+    />
+    <ShulchanCropMarksDialog
+      :is-open="cropMarksOpen"
+      :busy="inFlight"
+      :existing-mm="cropMarksExistingMm"
+      @close="cropMarksOpen = false"
+      @add="onCropMarksAdd"
+      @remove="onCropMarksRemove"
+    />
     <ShulchanTyposDialog
       :is-open="typosOpen"
       :busy="inFlight"
@@ -163,8 +231,36 @@
  * המנוע ב-engine/shulchan/*, כשל מדווח ל-COMMAND_REPORTER וסיכום הצלחה
  * ל-STATUS_NOTIFIER.
  */
-import { computed, inject, shallowRef } from 'vue';
+import { computed, inject, shallowRef, watch } from 'vue';
 import type { SuperDoc } from 'superdoc';
+import ShulchanReductionDialog from '../../panels/ShulchanReductionDialog.vue';
+import ShulchanCropMarksDialog from '../../panels/ShulchanCropMarksDialog.vue';
+import { loadSetting, saveSetting } from '../../../host/settings';
+import { paintedHost, settledPageCount } from '../../../engine/page-ruler';
+import {
+  docReductionSummaryText,
+  reduceDocument,
+  type DocReductionOptions,
+} from '../../../engine/shulchan/doc-reduction';
+import {
+  clearPageMarks,
+  comparePageMarks,
+  comparisonSummaryText,
+  loadPageMarks,
+  markingSummaryText,
+  savePageMarks,
+  snapshotFromEdges,
+  type PageEdgeText,
+  type SettingsStore,
+} from '../../../engine/shulchan/page-marking';
+import {
+  addCropMarks,
+  cropMarksSummaryText,
+  removeCropMarks,
+  restoreCropMarksStyle,
+} from '../../../engine/shulchan/crop-marks';
+import { splitFootnotesToDocument, splitNotesSummaryText } from '../../../engine/shulchan/split-notes';
+import { documentKey } from '../../../engine/shulchan/shulchan-doc';
 import RibbonGroup from '../common/RibbonGroup.vue';
 import RibbonStack from '../common/RibbonStack.vue';
 import RibbonButton from '../common/RibbonButton.vue';
@@ -174,7 +270,15 @@ import ShulchanUnclosedDialog from '../../panels/ShulchanUnclosedDialog.vue';
 import ShulchanAlternatingDialog from '../../panels/ShulchanAlternatingDialog.vue';
 import ShulchanFirstWordDialog from '../../panels/ShulchanFirstWordDialog.vue';
 import ShulchanUniformDialog from '../../panels/ShulchanUniformDialog.vue';
-import { COMMAND_REPORTER, STATUS_NOTIFIER, STYLE_GALLERY, type CommandReporter } from '../../../composables/keys';
+import {
+  COMMAND_REPORTER,
+  DRAFT_OPENER,
+  PAGE_MARKING,
+  STATUS_NOTIFIER,
+  STYLE_GALLERY,
+  type CommandReporter,
+  type PageMarkingHandle,
+} from '../../../composables/keys';
 import { useRememberedOptions } from '../../../composables/useRememberedOptions';
 import { ACTIVE_SUPERDOC } from '../../../engine/document-api';
 import { fallbackStyleGallery, type StyleGalleryState } from '../../../engine/style-gallery';
@@ -484,6 +588,163 @@ function onUniformSubmit(index: number): void {
     ok: outcome.ok,
     ...(outcome.ok ? {} : { message: outcome.message }),
   })), () => 'רוחב הטורים הוחל על כל המקטעים מרובי-הטורים');
+}
+
+/* ---------- עמודים ודפוס ---------- */
+
+/** `storage.get/set` של אוצריא, בצורה שהמנוע מקבל בהזרקה (אינו מייבא מ-host/). */
+const settingsStore: SettingsStore = {
+  load: (key) => loadSetting<unknown>(key, null, (raw) => raw),
+  save: (key, value) => saveSetting(key, value),
+};
+
+/** ספירת העמודים המצוירים אחרי התיישבות — הקירוב היחיד שיש (ראו doc-reduction.ts). */
+function countPaintedPagesSettled(): Promise<number | null> {
+  return settledPageCount(paintedHost(superdoc.value?.ui as Parameters<typeof paintedHost>[0]));
+}
+
+const reductionOpen = shallowRef(false);
+const reductionProgress = shallowRef<string | null>(null);
+const reductionStop = shallowRef(false);
+
+function onReductionSubmit(options: DocReductionOptions): void {
+  reductionStop.value = false;
+  reductionProgress.value = 'מתחיל…';
+  void runTool(
+    'shulchan-doc-reduction',
+    () =>
+      reduceDocument(superdoc.value, options, {
+        countPages: countPaintedPagesSettled,
+        onProgress: (text) => {
+          reductionProgress.value = text;
+        },
+        isCancelled: () => reductionStop.value,
+      }).finally(() => {
+        reductionProgress.value = null;
+        reductionOpen.value = false;
+      }),
+    (result) => docReductionSummaryText(result),
+  );
+}
+
+const fallbackPageMarking: PageMarkingHandle = {
+  enabled: shallowRef(false),
+  changedPages: shallowRef<ReadonlySet<number>>(new Set()),
+  setEnabled: () => undefined,
+  setChangedPages: () => undefined,
+  measure: () => [],
+};
+const pageMarking = inject(PAGE_MARKING, fallbackPageMarking);
+
+/** מפתח המסמך לזיכרון, או `null` כשאין מסמך. */
+async function currentDocKey(): Promise<string | null> {
+  const blocks = await readShulchanBlocks(superdoc.value);
+  return blocks === null ? null : documentKey(blocks);
+}
+
+/** מדידה טרייה של מילות הקצה, אחרי שהשכבה הודלקה. `[]` כשאין עמוד מצויר. */
+async function measureEdges(): Promise<PageEdgeText[]> {
+  pageMarking.setEnabled(true);
+  // השכבה נרשמת למדידה ב-flush 'post' — מחזור אחד לפני שאפשר למדוד דרכה.
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  return pageMarking.measure().map((page) => ({
+    pageIndex: page.pageIndex,
+    head: page.head,
+    firstWord: page.first?.text ?? '',
+    lastWord: page.last?.text ?? '',
+  }));
+}
+
+function onMarkPages(): void {
+  void runTool(
+    'shulchan-page-marking',
+    async () => {
+      const docKey = await currentDocKey();
+      if (docKey === null) return { ok: false, message: 'סימון העמודים נכשל: אין מסמך פתוח, או שהמסמך אינו תומך בפעולה', pages: 0 };
+      const edges = await measureEdges();
+      if (edges.length === 0) {
+        pageMarking.setEnabled(false);
+        return { ok: false, message: `סימון העמודים נכשל: ${markingSummaryText(0)}`, pages: 0 };
+      }
+      pageMarking.setChangedPages(new Set());
+      await savePageMarks(settingsStore, snapshotFromEdges(docKey, edges));
+      return { ok: true, pages: edges.length };
+    },
+    (result) => markingSummaryText(result.pages),
+  );
+}
+
+function onCheckPages(): void {
+  void runTool(
+    'shulchan-page-check',
+    async () => {
+      const docKey = await currentDocKey();
+      if (docKey === null) return { ok: false, message: 'בדיקת העמודים נכשלה: אין מסמך פתוח, או שהמסמך אינו תומך בפעולה', text: '' };
+      const snapshot = await loadPageMarks(settingsStore, docKey);
+      if (snapshot === null) return { ok: false, message: 'בדיקת העמודים נכשלה: אין סימון שמור למסמך זה — יש לסמן תחילה', text: '' };
+      const edges = await measureEdges();
+      const comparison = comparePageMarks(snapshot, edges);
+      pageMarking.setChangedPages(new Set(comparison.changedPages.map((page) => page - 1)));
+      return { ok: true, text: comparisonSummaryText(comparison) };
+    },
+    (result) => result.text,
+  );
+}
+
+function onUnmarkPages(): void {
+  void runTool(
+    'shulchan-page-unmark',
+    async () => {
+      pageMarking.setEnabled(false);
+      const docKey = await currentDocKey();
+      if (docKey !== null) await clearPageMarks(settingsStore, docKey);
+      return { ok: true };
+    },
+    () => 'סימון העמודים הוסר',
+  );
+}
+
+const cropMarksOpen = shallowRef(false);
+const cropMarksExistingMm = shallowRef<number | null>(null);
+
+async function onOpenCropMarks(): Promise<void> {
+  if (inFlight.value || !superdoc.value) return;
+  inFlight.value = true;
+  try {
+    cropMarksExistingMm.value = await restoreCropMarksStyle(superdoc.value, settingsStore);
+    cropMarksOpen.value = true;
+    report({ ok: true }, 'shulchan-crop-marks');
+  } finally {
+    inFlight.value = false;
+  }
+}
+
+function onCropMarksAdd(mm: number): void {
+  cropMarksOpen.value = false;
+  void runTool('shulchan-crop-marks-add', () => addCropMarks(superdoc.value, mm, settingsStore), (result) =>
+    cropMarksSummaryText(result, false),
+  );
+}
+
+function onCropMarksRemove(): void {
+  cropMarksOpen.value = false;
+  void runTool('shulchan-crop-marks-remove', () => removeCropMarks(superdoc.value, settingsStore), (result) =>
+    cropMarksSummaryText(result, true),
+  );
+}
+
+/* משתני ה-CSS של סימני החיתוך אינם נשמרים בין הפעלות — הרשומה כן. מסמך
+   שנעשה פעיל מחזיר את הציור (או מכבה אותו, כשלמסמך הזה אין סימנים). */
+watch(superdoc, (instance) => {
+  if (instance) void restoreCropMarksStyle(instance, settingsStore);
+}, { immediate: true });
+
+const openDraft = inject(DRAFT_OPENER, async () => false);
+
+function onSplitNotes(): void {
+  void runTool('shulchan-split-notes', () => splitFootnotesToDocument(superdoc.value, openDraft), (result) =>
+    splitNotesSummaryText(result),
+  );
 }
 </script>
 

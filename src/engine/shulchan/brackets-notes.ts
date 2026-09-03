@@ -164,8 +164,8 @@ interface FootnoteRefSite {
   offset: number;
 }
 
-/** כל הפניות הערות-השוליים בגוף, בסדר המסמך. `null` כשהמנוע אינו חושף `doc.find`. */
-async function listFootnoteRefs(host: ShulchanTarget): Promise<FootnoteRefSite[] | null> {
+/** כל הפניות הערות-השוליים בגוף, בסדר המסמך. `null` כשהמנוע אינו חושף `doc.find`. משותף ל„פירוק מסמך”. */
+export async function listFootnoteRefs(host: ShulchanTarget): Promise<FootnoteRefSite[] | null> {
   const find = (shulchanDoc(host) as { find?: FindApi } | undefined)?.find;
   if (typeof find !== 'function') return null;
 

@@ -139,6 +139,14 @@
         :dictionary="spellcheckDictionary"
         :revision="spellcheckRevision"
       />
+      <PageMarkingOverlay
+        ref="pageMarkingOverlayRef"
+        :host="rulerHost"
+        :viewport-source="rulerViewport"
+        :enabled="pageMarkingEnabled"
+        :changed-pages="pageMarkingChanged"
+        :revision="spellcheckRevision"
+      />
     </div>
 
     <!--
@@ -269,6 +277,7 @@ import PageBorderOverlay from './ui/shell/PageBorderOverlay.vue';
 import LineNumberOverlay from './ui/shell/LineNumberOverlay.vue';
 import PilcrowOverlay from './ui/shell/PilcrowOverlay.vue';
 import SpellingOverlay from './ui/shell/SpellingOverlay.vue';
+import PageMarkingOverlay from './ui/shell/PageMarkingOverlay.vue';
 import FindReplaceDialog from './ui/panels/FindReplaceDialog.vue';
 import AboutDialog from './ui/panels/AboutDialog.vue';
 import LinkDialog from './ui/panels/LinkDialog.vue';
@@ -285,6 +294,8 @@ import {
   FONT_OPTIONS,
   READOUT_SELECTION,
   SPELLCHECK,
+  PAGE_MARKING,
+  DRAFT_OPENER,
   STYLE_GALLERY,
 } from './composables/keys';
 import { ACTIVE_SUPERDOC } from './engine/document-api';
@@ -386,6 +397,7 @@ import {
   createRulerModel,
   paintedHost,
   readRulerUnit,
+  type PageEdgeWords,
   type RulerModel,
   type RulerReading,
   type ViewportSource,
@@ -839,6 +851,37 @@ async function toggleSpellcheck(): Promise<void> {
     spellcheckBusy.value = false;
   }
 }
+
+/**
+ * „סימון עמודים” של שולחן העורך (ui/shell/PageMarkingOverlay.vue). כמו
+ * המילון, השכבה שייכת למעטפת ולא לטאב; הלשונית מדליקה אותה ומבקשת מדידה.
+ * `revision` של בדיקת האיות משמש גם כאן — אותה „עריכה קרתה” בדיוק.
+ */
+const pageMarkingEnabled = ref(false);
+const pageMarkingChanged = shallowRef<ReadonlySet<number>>(new Set());
+const pageMarkingOverlayRef = shallowRef<{ measure: () => readonly PageEdgeWords[] } | null>(null);
+provide(PAGE_MARKING, {
+  enabled: pageMarkingEnabled,
+  changedPages: pageMarkingChanged,
+  setEnabled: (enabled) => {
+    pageMarkingEnabled.value = enabled;
+    if (!enabled) pageMarkingChanged.value = new Set();
+  },
+  setChangedPages: (pages) => {
+    pageMarkingChanged.value = pages;
+  },
+  measure: () => pageMarkingOverlayRef.value?.measure() ?? [],
+});
+
+/**
+ * „פירוק מסמך” של שולחן העורך: מסמך ההערות נפתח בטאב חדש מ-Blob, במסלול
+ * של שחזור טיוטה — לא שמור, ו„שמור” בו פותח „שמור בשם”.
+ */
+provide(DRAFT_OPENER, async (blob: Blob) => {
+  if (isOpening.value) return false;
+  activateTab(createNewDocumentSession());
+  return openDocument(undefined, { draft: blob });
+});
 
 provide(SPELLCHECK, {
   enabled: computed(() => spellcheckDictionary.value !== null),

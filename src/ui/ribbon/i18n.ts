@@ -634,6 +634,33 @@ const EN: Readonly<Record<string, string>> = {
     'Column widths applied to all multi-column sections',
   'הפעולה נכשלה':
     'The action failed',
+  'עמודים ודפוס': 'Pages & Print',
+  'צמצום מסמך': 'Shrink Document',
+  'צמצום המסמך ליעד עמודים — שוליים, ריווח פסקאות, מרווח שורות וגופן, בסבבים של 10%':
+    'Shrink the document to a target page count — margins, paragraph spacing, line spacing and font, in 10% rounds',
+  'סמן עמודים': 'Mark Pages',
+  'סימון המילה הראשונה והאחרונה של כל עמוד, ושמירת תצלום של שבירות העמודים לבדיקה מאוחרת':
+    'Mark the first and last word of every page, and save a snapshot of the page breaks for later checking',
+  'בדוק עמודים': 'Check Pages',
+  'בדיקה אילו עמודים נפתחים היום במקום אחר מאשר בסימון האחרון':
+    'Check which pages now start somewhere else than in the last marking',
+  'הסר סימון': 'Unmark',
+  'כיבוי סימון העמודים ומחיקת התצלום השמור':
+    'Turn page marking off and delete the saved snapshot',
+  'סימני חיתוך': 'Crop Marks',
+  'הגדלת הדף והשוליים במילימטרים לבחירתך והוספת סימני חיתוך בפינות — להדפסה ול-PDF':
+    'Enlarge the page and margins by your chosen millimetres and add corner crop marks — for print and PDF',
+  'פירוק מסמך': 'Split Document',
+  'העברת כל הערות השוליים למסמך חדש בטאב נפרד; בגוף נשאר מספר ההערה בכתב עילי':
+    'Move all footnotes to a new document in a separate tab; the note number stays in the body as superscript',
+  'סימון העמודים נכשל: אין מסמך פתוח, או שהמסמך אינו תומך בפעולה':
+    'Page marking failed: no document is open, or the document does not support the action',
+  'בדיקת העמודים נכשלה: אין מסמך פתוח, או שהמסמך אינו תומך בפעולה':
+    'Page check failed: no document is open, or the document does not support the action',
+  'בדיקת העמודים נכשלה: אין סימון שמור למסמך זה — יש לסמן תחילה':
+    'Page check failed: no saved marking for this document — mark it first',
+  'סימון העמודים הוסר': 'Page marking removed',
+  'מתחיל…': 'Starting…',
 };
 
 /**

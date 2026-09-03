@@ -1647,3 +1647,154 @@ export function applyRulerIndents(
     amountTwips: special === 'none' ? 0 : amountTwips,
   });
 }
+
+/* ------------------------------------------------------------------ */
+/* ספירת עמודים ומילות הקצה — לכלי „שולחן העורך”                      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * מספר העמודים **המצוירים**: `max(data-page-index) + 1`. `null` כשאין
+ * עמוד מצויר. זה הקירוב היחיד שיש לספירת העמודים של המסמך — למנוע אין
+ * API ציבורי לזה (docs/shulchan-source/engine-issues/3970-layout-read-api.md),
+ * ו-`totalPages` של `onPaginationUpdate` מגיע בלי התחייבות לעיתוי.
+ */
+export function countPaintedPages(host: HTMLElement | null): number | null {
+  if (!host) return null;
+  const pages = host.querySelectorAll(`[${PAGE_INDEX_ATTRIBUTE}]`);
+  let max = -1;
+  pages.forEach((node) => {
+    const index = Number(node.getAttribute(PAGE_INDEX_ATTRIBUTE));
+    if (Number.isInteger(index) && index > max) max = index;
+  });
+  return max >= 0 ? max + 1 : null;
+}
+
+/**
+ * ספירת עמודים אחרי התיישבות: המנוע מעמד מחדש א-סינכרונית אחרי מוטציה,
+ * וספירה מיידית רואה את הפריסה הקודמת. הסולם הוא `SETTLE_DELAYS_MS` של
+ * הסרגל — ונעצר מוקדם כששתי קריאות עוקבות מסכימות. הקריאה האחרונה היא
+ * התשובה; `null` כשאף פעם לא צויר עמוד.
+ */
+export async function settledPageCount(
+  host: HTMLElement | null,
+  delays: readonly number[] = SETTLE_DELAYS_MS,
+  wait: (ms: number) => Promise<void> = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+): Promise<number | null> {
+  let last = countPaintedPages(host);
+  for (const delay of delays) {
+    await wait(delay);
+    const next = countPaintedPages(host);
+    if (next === last && next !== null) return next;
+    last = next;
+  }
+  return last;
+}
+
+/** מילה בקצה עמוד: הטקסט שלה והמלבנים שהיא נפרסת עליהם, ביחס ל-`reference`. */
+export interface EdgeWord {
+  text: string;
+  rects: readonly RawTextRect[];
+}
+
+/** המילה הראשונה והאחרונה של עמוד מצויר, והטקסט הפותח שלו. */
+export interface PageEdgeWords {
+  pageIndex: number;
+  /** תחילת הטקסט של העמוד (עד 200 תווים גולמיים) — לזיהוי העמוד בתצלום. */
+  head: string;
+  first: EdgeWord | null;
+  last: EdgeWord | null;
+}
+
+const HEAD_RAW_LENGTH = 200;
+
+interface TextPart {
+  node: Text;
+  offset: number;
+}
+
+function rectsOf(from: TextPart | null, to: TextPart | null, start: number, end: number, referenceBox: DOMRect): RawTextRect[] {
+  if (!from || !to) return [];
+  try {
+    const range = document.createRange();
+    range.setStart(from.node, start - from.offset);
+    range.setEnd(to.node, end - to.offset);
+    const out: RawTextRect[] = [];
+    const list = range.getClientRects();
+    for (let i = 0; i < list.length; i++) {
+      const r = list[i]!;
+      if (!(r.width > 0) || !(r.height > 0)) continue;
+      out.push({ leftPx: r.left - referenceBox.left, topPx: r.top - referenceBox.top, widthPx: r.width, heightPx: r.height });
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
+function partAt(parts: readonly TextPart[], offset: number): TextPart | null {
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const part = parts[i]!;
+    if (offset >= part.offset) return part;
+  }
+  return null;
+}
+
+/**
+ * המילה הראשונה והאחרונה בכל עמוד מצויר — ל„סימון עמודים” של שולחן העורך.
+ *
+ * הטקסט של העמוד נקרא ב-`TreeWalker` על צמתי הטקסט שלו, בסדר המסמך (זה
+ * כולל כותרת/כותרת תחתונה ומספרי עמוד אם הם צמתי טקסט — הקירוב מתועד
+ * ב-engine/shulchan/page-marking.ts). „מילה” = רצף תווים שאינם רווח.
+ * קריאה בלבד, אותו עיגון כמו `measureAllPageRects`.
+ */
+export function measurePageEdgeWords(
+  host: HTMLElement | null,
+  reference: HTMLElement | null,
+): readonly PageEdgeWords[] {
+  if (!host || !reference) return [];
+  if (typeof document === 'undefined' || typeof document.createTreeWalker !== 'function') return [];
+  const pages = host.querySelectorAll(`[${PAGE_INDEX_ATTRIBUTE}]`);
+  if (pages.length === 0) return [];
+  const referenceBox = reference.getBoundingClientRect();
+
+  const ordered = Array.from(pages)
+    .filter((node): node is HTMLElement => node instanceof HTMLElement)
+    .map((el) => ({ el, pageIndex: Number(el.getAttribute(PAGE_INDEX_ATTRIBUTE)) }))
+    .filter((page) => Number.isInteger(page.pageIndex))
+    .sort((a, b) => a.pageIndex - b.pageIndex);
+
+  const out: PageEdgeWords[] = [];
+  for (const { el, pageIndex } of ordered) {
+    let walker: TreeWalker;
+    try {
+      walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    } catch {
+      continue;
+    }
+    const parts: TextPart[] = [];
+    let text = '';
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const value = node.nodeValue ?? '';
+      if (value.length === 0) continue;
+      parts.push({ node: node as Text, offset: text.length });
+      text += value;
+    }
+
+    const firstMatch = /\S+/.exec(text);
+    const lastMatch = /\S+\s*$/.exec(text);
+    const edge = (match: RegExpExecArray | null): EdgeWord | null => {
+      if (!match) return null;
+      const word = match[0].trim();
+      const start = match.index;
+      const end = start + word.length;
+      return { text: word, rects: rectsOf(partAt(parts, start), partAt(parts, Math.max(start, end - 1)), start, end, referenceBox) };
+    };
+    out.push({
+      pageIndex,
+      head: text.slice(0, HEAD_RAW_LENGTH),
+      first: edge(firstMatch),
+      last: edge(lastMatch),
+    });
+  }
+  return out;
+}
