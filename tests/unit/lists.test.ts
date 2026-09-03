@@ -261,6 +261,89 @@ describe('setListNumberStyle — פסקה שאינה רשימה', () => {
     expect(createList).not.toHaveBeenCalled();
     expect(calls.get('setLevelNumberStyle')).toHaveLength(1);
   });
+
+  it('הכרעה חיובית „אינה רשימה" דרך lists.getState — הרשימה נוצרת והסגנון מוחל', async () => {
+    // מסלול הייצור: getState עונה success:true עם isListItem:false.
+    let selection: unknown = IN_PARAGRAPH;
+    const { host, calls, doc } = fakeDoc({ listState: { p9: false, li1: true } });
+    (doc as { selection: { current: unknown } }).selection.current = vi.fn(async () => selection);
+    const createList = vi.fn(async () => {
+      selection = SELECTION_IN_LIST;
+      return { ok: true } as const;
+    });
+
+    expect(await setListNumberStyle(host, 'hebrew1', { createList })).toEqual({ ok: true });
+    expect(createList).toHaveBeenCalledTimes(1);
+    expect(calls.get('setLevelNumberStyle')?.[0]).toEqual({
+      target: { kind: 'block', nodeType: 'listItem', nodeId: 'li1' },
+      level: 0,
+      numberStyle: 'hebrew1',
+    });
+  });
+});
+
+/**
+ * `createList` היא הפקודה `numbered-list`/`bullet-list` של הרצועה, והיא
+ * **טוגל**: אומת במימוש של superdoc (`executeListCommand` מנתב ל-`lists.remove`
+ * / `lists.removeInStory` כשכל הבלוקים כבר באותה רשימה), ואומת חי — לחיצה
+ * שנייה על „מספור” מחזירה isListItem מ-true ל-false.
+ *
+ * ולכן אסור לקרוא לה כשהזיהוי לא הכריע. „אינני רואה את הבלוק" אינו „אין
+ * רשימה": פריט רשימה בתא טבלה אינו נמנה ב-blocks.list כלל, ועל מנוע בלי
+ * getState (או כשהוא מחזיר success:false) טוגל היה **מוריד** לו את המספור.
+ */
+describe('setListNumberStyle — זיהוי שלא הכריע אינו מצדיק טוגל', () => {
+  it('פריט בתא טבלה שאינו נמנה ב-blocks.list ו-getState נכשל — `createList` אינה נקראת', async () => {
+    const selection = { target: { segments: [{ blockId: 'li-in-table' }] } };
+    // listState בלי הבלוק → success:false; blocks.list אינו מונה אותו → „לא ידוע".
+    const blocksList = vi.fn(async () => ({ blocks: [{ nodeId: 'p1', nodeType: 'paragraph' }] }));
+    const { host, calls } = fakeDoc({ selection, blocksList, listState: {} });
+    const createList = vi.fn(async () => ({ ok: true }) as const);
+
+    const outcome = await setListNumberStyle(host, 'hebrew1', { createList });
+
+    expect(createList).not.toHaveBeenCalled();
+    expect(outcome).toMatchObject({ ok: false, reason: 'selection-required' });
+    expect(calls.get('setLevelNumberStyle')).toEqual([]);
+  });
+
+  it('`selection.current` זורק — `createList` אינה נקראת', async () => {
+    const { host, calls, doc } = fakeDoc();
+    (doc as { selection: { current: unknown } }).selection.current = vi.fn(async () => {
+      throw new Error('boom');
+    });
+    const createList = vi.fn(async () => ({ ok: true }) as const);
+
+    const outcome = await setListNumberStyle(host, 'hebrew1', { createList });
+
+    expect(createList).not.toHaveBeenCalled();
+    expect(outcome).toMatchObject({ ok: false, reason: 'selection-required' });
+    expect(calls.get('setLevelNumberStyle')).toEqual([]);
+  });
+
+  it('בחירה בלי blockId — `createList` אינה נקראת', async () => {
+    const { host, calls } = fakeDoc({ selection: { target: { segments: [{}] } } });
+    const createList = vi.fn(async () => ({ ok: true }) as const);
+
+    const outcome = await setListNumberStyle(host, 'hebrew1', { createList });
+
+    expect(createList).not.toHaveBeenCalled();
+    expect(outcome).toMatchObject({ ok: false, reason: 'selection-required' });
+    expect(calls.get('setLevelNumberStyle')).toEqual([]);
+  });
+
+  it('`success:true` בלי `isListItem` אינו הכרעה — ואינו מצדיק טוגל', async () => {
+    const selection = { target: { segments: [{ blockId: 'p9' }] } };
+    const { host, calls, doc } = fakeDoc({ selection, blocksList: async () => ({ blocks: [] }) });
+    (doc as { lists: Record<string, unknown> }).lists.getState = async () => ({ success: true });
+    const createList = vi.fn(async () => ({ ok: true }) as const);
+
+    const outcome = await setListNumberStyle(host, 'hebrew1', { createList });
+
+    expect(createList).not.toHaveBeenCalled();
+    expect(outcome).toMatchObject({ ok: false, reason: 'selection-required' });
+    expect(calls.get('setLevelNumberStyle')).toEqual([]);
+  });
 });
 
 describe('restartListAt', () => {
