@@ -13,7 +13,8 @@
  *   4. „הפוך רשימה ממוספרת לתבליטים” על רשימה קיימת — הסמן שמצטייר, ובנפרד
  *      `numFmt` **וגם** `lvlText`: `numFmt="bullet"` עם `lvlText="%1."` הוא
  *      מסמך שנראה תקין בבדיקה חלקית ומצייר „%1.” על המסך.
- *   5. אותה המרה בצמוד לרשימת תבליטים אחרת — האם השכנה נגררת.
+ *   5. אותה המרה כשלרשימה **שכנה** יש `numId` נפרד אך אותו `abstractNumId`
+ *      (כך נראית רשימה שהתחילה מחדש מ-1) — האם השכנה נגררת יחד.
  * ובכל אחד: `doc.selection.current()` (אסינכרוני!) לפני התפריט ובזמן שהוא פתוח.
  *
  * כל שורת פעולה דורשת שני דברים: שלא הופיעה ההודעה „יש למקם את הסמן” (שומר
@@ -86,6 +87,50 @@ function lvl0Of(paragraph, numbering) {
     start: lvl0.match(/<w:start w:val="(\d+)"\s*\/>/)?.[1] ?? null,
     startOverride: override.match(/<w:startOverride w:val="(\d+)"\s*\/>/)?.[1] ?? null,
   };
+}
+
+const paraOf = (files, text) => paragraphsOf(files).find((p) => textOf(p) === text) || '';
+
+/**
+ * ממקמת סמן בשורה לפי הטקסט שבה. `app.caret(index)` נשבר כאן: כל פסקה מציירת
+ * שני אלמנטים, והמסמך גדל בין השלבים.
+ */
+async function caretOn(text) {
+  const rect = JSON.parse(
+    await app.js(`(function(){
+      var lines = Array.prototype.slice.call(document.querySelectorAll('.superdoc-line, .superdoc-fragment'));
+      var el = lines.filter(function(n){ return (n.textContent || '').indexOf(${JSON.stringify(text)}) >= 0; }).pop();
+      if (!el) return 'null';
+      var r = el.getBoundingClientRect();
+      return JSON.stringify({ x: Math.round(r.x + Math.min(20, r.width / 2)), y: Math.round(r.y + r.height / 2) });
+    })()`),
+  );
+  if (!rect) throw new Error(`השורה „${text}” לא נמצאה על המסך — הבדיקה לא מדדה כלום`);
+  await app.clickAt(rect.x, rect.y);
+  await app.sleep(600);
+  await app.press('End', 'End', 35);
+  await app.sleep(300);
+}
+
+/** פסקה חדשה **מחוץ** לרשימה: Enter פותח פריט ריק, ו-Enter נוסף מסיים אותה. */
+async function newParagraphAfterList() {
+  await app.press('Enter', 'Enter', 13);
+  await app.sleep(400);
+  await app.press('Enter', 'Enter', 13);
+  await app.sleep(500);
+}
+
+/** שני פריטים ממוספרים ברצף אחד: הכפתור „מספור” על הראשון, Enter לשני. */
+async function typeNumberedPair(firstText, secondText) {
+  await app.type(firstText);
+  await app.sleep(400);
+  await app.click('מספור');
+  await app.sleep(1100);
+  await app.press('End', 'End', 35);
+  await app.press('Enter', 'Enter', 13);
+  await app.sleep(400);
+  await app.type(secondText);
+  await app.sleep(600);
 }
 
 async function menuAction(label, button = 'פעולות מספור') {
@@ -232,32 +277,58 @@ try {
       `numFmt=${second4.numFmt} lvlText=„${second4.lvlText}” | סמנים ${JSON.stringify(r4.markers)} status=${r4.status.text}`);
   }
 
-  /* ---- 5. ההמרה נוגעת רק ברשימה שהסמן בה ---- */
-  // `continuity` אינו נמסר ל-`lists.setType`, וברירת המחדל בחוזה היא
-  // `'preserve'` — „מיזוג רצפים סמוכים תואמים”. אחרי 4 „שני” היא תבליטים
-  // ו„ראשון” נשארה ממוספרת בנפרד (ההתחלה מחדש בשלב 1 פיצלה אותן), ולכן
-  // המרת „ראשון” היא בדיוק המצב שבו מיזוג היה נראה: שתי רשימות תבליטים צמודות.
-  const numbering4 = numberingOf(r4.files);
-  const firstBefore5 = lvl0Of(paragraphsOf(r4.files).find((p) => textOf(p) === 'ראשון') || '', numbering4);
-  await app.caret(0);
-  await app.press('End', 'End', 35);
-  await app.sleep(400);
+  /* ---- 5. שכנה שחולקת את אותו `abstractNumId` ---- */
+  // „התחל מחדש מ-1” יוצר `numId` שני שמצביע לאותו `abstractNum` (נמדד), וזו
+  // התצורה היחידה שבה כתיבה להגדרה נראית בשתי הרשימות. „ראשון” ו„שני”
+  // שלמעלה אינן כאלה יותר — סגנון המספור בשלב 2 שיבט להן הגדרות נפרדות —
+  // ולכן נבנה כאן זוג חדש בסוף המסמך.
+  await caretOn('פסקה חופשית');
+  await newParagraphAfterList();
+  await typeNumberedPair('תאומא', 'תאומב');
+  await caretOn('תאומב');
+  const rSplit = await menuAction('התחל מחדש מ-1');
+  const numberingSplit = numberingOf(rSplit.files);
+  const twinABefore = lvl0Of(paraOf(rSplit.files, 'תאומא'), numberingSplit);
+  const twinBBefore = lvl0Of(paraOf(rSplit.files, 'תאומב'), numberingSplit);
+  console.log('5 לפני ההמרה — תאומא:', JSON.stringify(twinABefore), '| תאומב:', JSON.stringify(twinBBefore),
+    '| סמנים:', JSON.stringify(rSplit.markers));
+  const shared =
+    !!twinABefore.abstractNumId &&
+    twinABefore.abstractNumId === twinBBefore.abstractNumId &&
+    !!twinABefore.numId &&
+    twinABefore.numId !== twinBBefore.numId &&
+    twinABefore.numFmt !== 'bullet';
+  await caretOn('תאומא');
   const r5 = await menuAction('הפוך רשימה ממוספרת לתבליטים', 'פעולות תבליטים');
   const numbering5 = numberingOf(r5.files);
-  const first5 = lvl0Of(paragraphsOf(r5.files).find((p) => textOf(p) === 'ראשון') || '', numbering5);
-  const second5 = lvl0Of(paragraphsOf(r5.files).find((p) => textOf(p) === 'שני') || '', numbering5);
-  console.log('5 „ראשון” לפני:', JSON.stringify(firstBefore5), '| „שני” לפני:', JSON.stringify(second4),
-    '| „ראשון” אחרי:', JSON.stringify(first5), '| „שני” אחרי:', JSON.stringify(second5),
-    '| סמנים:', JSON.stringify(r5.markers));
-  const neighbourKept = second5.numId === second4.numId && second5.abstractNumId === second4.abstractNumId;
-  if (firstBefore5.numFmt === 'bullet') {
-    report.fail('5. ההמרה נגעה רק ברשימה שהסמן בה', `„ראשון” הפכה לתבליטים כבר בשלב 4 — הרצפים מוזגו (${JSON.stringify(firstBefore5)})`);
-  } else if (first5.numFmt === 'bullet' && first5.lvlText === '•' && neighbourKept && first5.numId !== second5.numId) {
-    report.pass('5. ההמרה נגעה רק ברשימה שהסמן בה',
-      `„ראשון” ${firstBefore5.numFmt}→bullet ב-numId ${first5.numId}; „שני” נשארה numId=${second5.numId}/abstractNum=${second5.abstractNumId} — בלי מיזוג`);
+  const twinA = lvl0Of(paraOf(r5.files, 'תאומא'), numbering5);
+  const twinB = lvl0Of(paraOf(r5.files, 'תאומב'), numbering5);
+  console.log('5 אחרי — תאומא:', JSON.stringify(twinA), '| תאומב:', JSON.stringify(twinB),
+    '| סמנים:', JSON.stringify(r5.markers), '| status:', JSON.stringify(r5.status));
+  const converted = twinA.numFmt === 'bullet' && twinA.lvlText === '•';
+  // „לא נגררה” פירושו שכל מה שהיה לה נשאר: גם ה-`numId`, גם ההגדרה שהוא
+  // מצביע אליה, וגם הסמן שנגזר ממנה.
+  const untouched =
+    twinB.numId === twinBBefore.numId &&
+    twinB.abstractNumId === twinBBefore.abstractNumId &&
+    twinB.numFmt === twinBBefore.numFmt &&
+    twinB.lvlText === twinBBefore.lvlText;
+  // הסמנים של הזוג הם שני האחרונים במסמך, בסדר הפסקאות.
+  const pairMarkers = r5.markers.slice(-2);
+  const drawn = pairMarkers[0] === '•' && pairMarkers[1] !== '•';
+  if (!shared) {
+    report.fail('5. ההמרה נגעה רק ברשימה שהסמן בה, ולא בשכנה שחולקת את ההגדרה',
+      `התרחיש לא נבנה: תאומא=${JSON.stringify(twinABefore)} תאומב=${JSON.stringify(twinBBefore)} — צריך numId נפרד ואותו abstractNumId`);
+  } else if (/יש למקם את הסמן/.test(r5.status.text || '')) {
+    report.fail('5. ההמרה נגעה רק ברשימה שהסמן בה, ולא בשכנה שחולקת את ההגדרה', r5.status.text);
+  } else if (converted && untouched && drawn) {
+    report.pass('5. ההמרה נגעה רק ברשימה שהסמן בה, ולא בשכנה שחולקת את ההגדרה',
+      `תאומא ${twinABefore.numFmt}→bullet ב-abstractNum ${twinABefore.abstractNumId}→${twinA.abstractNumId}; ` +
+        `תאומב נשארה numId=${twinB.numId}/abstractNum=${twinB.abstractNumId}/${twinB.numFmt} | סמני הזוג ${JSON.stringify(pairMarkers)}`);
   } else {
-    report.fail('5. ההמרה נגעה רק ברשימה שהסמן בה',
-      `„ראשון”=${JSON.stringify(first5)} „שני” ${JSON.stringify(second4)}→${JSON.stringify(second5)} status=${r5.status.text}`);
+    report.fail('5. ההמרה נגררה גם לשכנה שחולקת את ההגדרה',
+      `תאומא ${JSON.stringify(twinABefore)}→${JSON.stringify(twinA)} | תאומב ${JSON.stringify(twinBBefore)}→${JSON.stringify(twinB)} | ` +
+        `סמני הזוג ${JSON.stringify(pairMarkers)} status=${r5.status.text}`);
   }
 
   console.log('לוג הדף:', JSON.stringify(await app.log()));
