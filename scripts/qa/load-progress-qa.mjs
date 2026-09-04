@@ -27,6 +27,15 @@
  * הטאב החדש עם „מסמך חדש” בתוכו אינו כשל — זה `onSkipLoad` שמוצא טאב בלי
  * מסמך ופותח בו אחד ריק, בכוונה.
  *
+ * ## המסלול לבורר עובר דרך דיאלוג הפתיחה
+ *
+ * „פתח קובץ” אינו קורא ל-`fs.pickUserFile` ישירות אלא פותח את
+ * OpenDocumentDialog; הבורר נקרא רק מ-„עיון בקבצים…” שבתוכו. השער לוחץ על
+ * שניהם בכל שלב — לחיצה עיוורת שנייה על „פתח קובץ” הייתה נופלת על כרטיס
+ * „מסמך ריק” בדיאלוג, ומודדת „דלג” על מסמך חדש ולא על מסמך מואט. „דלג” נלחץ
+ * בדגימה, ברגע שהוא מופיע, ולא אחרי המתנה קבועה — והשורה הראשונה מכריעה
+ * שההאטה אכן נתפסה, אחרת שלושת המדדים נמדדו על פתיחה שלא הואטה כלל.
+ *
  *   node scripts/qa/load-progress-qa.mjs
  */
 import { openApp, createReport, sleep } from './harness.mjs';
@@ -86,6 +95,14 @@ async function armPicker(app, name) {
   );
 }
 
+/** „פתח קובץ” → דיאלוג הפתיחה → „עיון בקבצים…”, שהוא מה שקורא לבורר. */
+async function openViaDialog(app, { after = 300 } = {}) {
+  if (!(await app.click('פתח קובץ', { after: 400 }))) throw new Error('„פתח קובץ” לא נמצא');
+  // גוף הדיאלוג נגלל; כפתור מחוץ לחלון מקבל rect אך הלחיצה נופלת באוויר.
+  await app.js("document.querySelector('.open-browse')?.scrollIntoView({ block: 'center' })");
+  if (!(await app.click('עיון בקבצים…', { after }))) throw new Error('„עיון בקבצים…” לא נמצא בדיאלוג');
+}
+
 const samples = (app) => app.js('JSON.stringify(window.__qaLoad)').then(JSON.parse);
 const titleNow = (app) => app.js("document.querySelector('.doc-title-input')?.value ?? null");
 const hostCount = (app) => app.js("document.querySelectorAll('.editor-stack__host').length");
@@ -119,13 +136,18 @@ async function main() {
   const app = await openApp({ name: 'load-progress', port: PORT, extra: INSTRUMENT });
 
   try {
+    // חלון headless הוא 800x600 ודיאלוג הפתיחה גבוה ממנו.
+    await app.cdp.send('Emulation.setDeviceMetricsOverride', {
+      width: 1600, height: 1000, deviceScaleFactor: 1, mobile: false,
+    });
+    await sleep(400);
     await app.tab('קובץ');
 
     /* ------------------------------------------------------------------ */
     await (async function stageOne() {
       await armPicker(app, 'מחוון.docx');
       await app.js('window.__qaSlow.ms = 1500; window.__qaLoadReset()');
-      await app.click('פתח קובץ', { after: 300 });
+      await openViaDialog(app);
       const settled = await waitOpened(app, 'מחוון');
 
       const all = await samples(app);
@@ -138,6 +160,13 @@ async function main() {
       console.log(`  דגימות: ${all.length}, מהן עם מחוון: ${on.length} | האטה נתפסה: ${hits}`);
       console.log(`  אחוזים: ${pcts.slice(0, 4).join(',')} … ${pcts.slice(-4).join(',')}`);
       console.log(`  שלבים על המסך: ${stages.join(' | ')}`);
+
+      // בלי פגיעה בהאטה, המסמך נפתח מהר ושלוש השורות הבאות מודדות אוויר.
+      if (hits > 0) {
+        report.pass('ההאטה נתפסה', `fetch של המסמך הואט ${hits} פעמים`);
+      } else {
+        report.fail('ההאטה נתפסה', 'הבורר לא הגיע ל-fetch של data: URL — הפתיחה לא הואטה');
+      }
 
       if (on.length === 0) {
         report.fail('המחוון מופיע', 'שורת המצב לא הציגה מחוון בשום דגימה של פתיחה שנמשכה יותר משנייה');
@@ -187,13 +216,20 @@ async function main() {
       await armPicker(app, loadName);
       await app.js('window.__qaSlow.ms = 6000; window.__qaLoadReset()');
 
-      // הלחיצה נזרקת ואינה מומתנת: הפתיחה נמשכת ברקע, וזה בדיוק המצב שבו
-      // „דלג” אמור להיות זמין.
-      await app.click('פתח קובץ', { after: 900 });
+      await openViaDialog(app, { after: 0 });
 
+      // „דלג” נלחץ ברגע שהוא מופיע: מסמך שאינו מואט נפתח בתוך ~500ms, והמתנה
+      // קבועה הייתה מחמיצה את הכפתור.
+      let clicked = false;
+      for (let waited = 0; waited < 3000 && !clicked; waited += 50) {
+        if (await app.exists('.status-load__skip')) {
+          clicked = await app.clickSel('.status-load__skip', 0, { after: 200 });
+          break;
+        }
+        await sleep(50);
+      }
       const midway = await samples(app);
       const skipVisible = shown(midway).some((s) => s.skip);
-      const clicked = await app.clickSel('.status-load__skip', 0, { after: 200 });
 
       /*
        * הפס נמדד בדגימה ולא בהשהיה עיוורת.
@@ -304,7 +340,7 @@ async function main() {
       // אחרי ביטול הממשק אינו נשאר חסום: „פתח קובץ” עובד שוב.
       await armPicker(app, 'שוב.docx');
       await app.js('window.__qaSlow.ms = 0; window.__qaLoadReset()');
-      await app.click('פתח קובץ', { after: 300 });
+      await openViaDialog(app);
       await waitOpened(app, 'שוב');
 
       const title = await titleNow(app);
