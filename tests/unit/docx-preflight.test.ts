@@ -885,15 +885,20 @@ describe('preflightSource', () => {
     expect(vba).toEqual(NO_VBA);
   });
 
-  it('URL שאין בו מה לתקן נשאר URL', async () => {
+  it('URL שאין בו מה לתקן נמסר כבייטים שנקראו — בלי קריאה שנייה מהמנוע', async () => {
     const clean = buildZip([{ name: SETTINGS_PART, content: SETTINGS_WITH_ZERO.replace('"0"', '"720"') }]);
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => new Response(clean)),
-    );
-    // חשוב שהמקור יחזור זהה: כך מסלול הפתיחה של כל שאר המסמכים אינו משתנה.
+    const fetchSpy = vi.fn(async () => new Response(clean));
+    vi.stubGlobal('fetch', fetchSpy);
     const { source } = await preflightSource('http://127.0.0.1:1/doc.docx');
-    expect(source).toBe('http://127.0.0.1:1/doc.docx');
+    expect(source).toBeInstanceOf(Blob);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(new Uint8Array(await (source as Blob).arrayBuffer())).toEqual(clean);
+  });
+
+  it('טיוטה שאין בה מה לתקן חוזרת כמות שהיא, בלי העתקה', async () => {
+    const draft = new Blob([buildZip([{ name: SETTINGS_PART, content: SETTINGS_WITH_ZERO.replace('"0"', '"720"') }])]);
+    const { source } = await preflightSource(draft);
+    expect(source).toBe(draft);
   });
 
   it('URL שיש בו מה לתקן מוחלף בבייטים מתוקנים', async () => {
@@ -936,7 +941,8 @@ describe('preflightSource', () => {
     );
 
     const { source, notice } = await preflightSource('http://127.0.0.1:1/doc.docx');
-    expect(source).toBe('http://127.0.0.1:1/doc.docx');
+    expect(source).toBeInstanceOf(Blob);
+    expect(new Uint8Array(await (source as Blob).arrayBuffer())).toEqual(bytes);
     expect(notice).toBeNull();
     expect(warn).toHaveBeenCalledWith(
       expect.stringContaining('הבדיקה המקדימה נכשלה'),
