@@ -141,7 +141,9 @@ describe('setListToBullets', () => {
     const outcome = await setListToBullets(host);
 
     expect(outcome.ok).toBe(false);
-    expect(outcome.ok === false && outcome.message).toContain('אינו זמין בגרסה זו');
+    // הקידומת ולא רק הסיבה: „אינו זמין בגרסה זו” בלי שם הפעולה אינו אומר
+    // למשתמש מה נכשל — החוזה שנקבע ב-`fd91bcb`.
+    expect(outcome.ok === false && outcome.message).toBe('המרת הרשימה לתבליטים נכשלה: אינו זמין בגרסה זו');
   });
 });
 
