@@ -469,7 +469,9 @@ import type { RulerUnit } from './engine/ruler-geometry';
 import {
   applyHebrewDocumentDefaults,
   applyHebrewPaperSize,
+  verifyHebrewDocumentDefaults,
 } from './engine/document-defaults';
+import { blankDocumentSource } from './engine/blank-document-source';
 import type { SuperDoc } from 'superdoc';
 import {
   DOCX_MIME,
@@ -2055,7 +2057,10 @@ async function openDocumentInto(
   if (attempt.cancelled) return false;
   attempt.stage(LOAD_STAGES.engine, 'בונה את המסמך…');
 
-  const outcome = await swap.open(source);
+  // מסמך חדש נפתח מהתבנית העברית (A4, RTL) ולא מהמסמך הריק של המנוע — ראו
+  // engine/blank-document.ts. `undefined` בבדיקות, ואז המנוע פותח את שלו.
+  const blank = !file && !options.draft ? blankDocumentSource() : undefined;
+  const outcome = await swap.open(source ?? blank);
   isOpening.value = swap.isOpening;
 
   // ה-swap מדווח `superseded` גם על פתיחה שבוטלה — הביטול מקדם שם את הדור
@@ -2540,8 +2545,15 @@ async function openDocumentInto(
     // מסמך ששוחזר מטיוטה מדלג על שניהם בכוונה: ההגדרות האלה כבר בתוכו — הוא
     // היה מסמך פתוח שיוצא — והחלה חוזרת שלהן היא כתיבה למסמך של המשתמש
     // ברגע שהוא רק ביקש לחזור אליו.
-    await applyNewDocumentPaperSize(editor.superdoc);
-    await applyNewDocumentDirection(editor.superdoc);
+    //
+    // כשהתבנית נפתחה ההגדרות כבר בקובץ, וקריאה אחת מאמתת זאת: כל כתיבה כאן
+    // עולה בבנייה חוזרת של אינדקס הביקורת במנוע (~200ms לכל שכבה, נמדד).
+    if (blank && (await verifyHebrewDocumentDefaults(editor.superdoc))) {
+      document.documentElement.dataset.documentDirection = 'rtl';
+    } else {
+      await applyNewDocumentPaperSize(editor.superdoc);
+      await applyNewDocumentDirection(editor.superdoc);
+    }
   }
 
   if (options.draft) {
@@ -4582,16 +4594,17 @@ onMounted(async () => {
     // בחר בהפעלה הקודמת. ההעדפה של הסרגל — מאותו טעם: היא חלה על המסמך שנפתח
     // מיד אחרי כאן.
     //
-    // שלוש הקריאות במקביל ולא בזו אחר זו: כל אחת היא סבב IPC מלא מול אוצריא,
+    // כל הקריאות במקביל ולא בזו אחר זו: כל אחת היא סבב IPC מלא מול אוצריא,
     // הן קוראות מפתחות שונים ואינן תלויות זו בזו — והן עומדות בין המשתמש לבין
     // פתיחת המסמך הראשון.
-    const [storedAutosave, storedRuler, stored, storedRecents, storedDiscarded] =
+    const [storedAutosave, storedRuler, stored, storedRecents, storedDiscarded, storedSpellcheck] =
       await Promise.all([
         loadAutosaveEnabled(),
         loadRulerVisible(),
         loadPreviousSession(),
         loadRecentDocuments(),
         loadDiscardBackups(),
+        loadSpellcheckEnabled(),
       ]);
     autosaveEnabled.value = storedAutosave;
     rulerPreference = storedRuler;
@@ -4604,7 +4617,7 @@ onMounted(async () => {
 
     // בדיקת האיות — **לא** ב-await: משיכת המילון היא 1.3MB, והעלייה לא
     // תמתין לה. מי שהדליק בהפעלה הקודמת יקבל את הסימון כשהמילון יגיע.
-    if (await loadSpellcheckEnabled()) {
+    if (storedSpellcheck) {
       void loadTorahDictionary().then((dictionary) => {
         if (dictionary) spellcheckDictionary.value = dictionary;
       });

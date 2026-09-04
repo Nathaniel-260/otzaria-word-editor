@@ -372,6 +372,7 @@ vi.mock('../../src/engine/page-setup', async (importOriginal) => {
 vi.mock('../../src/engine/document-defaults', () => ({
   applyHebrewDocumentDefaults: async () => ({ failures: [] }),
   applyHebrewPaperSize: async () => ({ applied: true }),
+  verifyHebrewDocumentDefaults: async () => false,
 }));
 
 vi.mock('../../src/host/settings', () => ({

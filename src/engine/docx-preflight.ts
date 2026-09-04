@@ -559,9 +559,9 @@ export interface PreflightResult {
  * מקור המסמך, אחרי תיקון. מחזירה את המקור עצמו כשאין מה לתקן — כולל כשהבדיקה
  * עצמה לא הצליחה לרוץ.
  *
- * המקור נשאר URL כשלא נגענו בו, ובכוונה: כך המסלול שבו כל המסמכים נפתחים היום
- * אינו משתנה בגללנו. המחיר הוא קריאה נוספת של הבייטים מ-loopback מקומי, והוא
- * זניח מול פתיחה שנתקעת לנצח.
+ * הבייטים שנקראו כאן הם מה שנמסר למנוע (כ-Blob), גם כשלא נגענו בהם: מקור
+ * URL היה גורם למנוע לקרוא את הקובץ שנית מ-loopback. רק כשל בקריאה עצמה
+ * משאיר את המקור כפי שהתקבל.
  *
  * טבלת הגופנים נקראת באותה הזדמנות: הבייטים כבר כאן והארכיון כבר נפתח, ולכן
  * קריאה שנייה שלהם רק בשביל הטבלה הייתה בזבוז.
@@ -582,6 +582,7 @@ export async function preflightSource(
     return { source, fontTable: null, vba: NO_VBA, notice: null };
   }
 
+  const asRead = (): Blob => (source instanceof Blob ? source : new Blob([bytes], { type: DOCX_MIME }));
   const fontTable = await readDocxPart(bytes, FONT_TABLE_PART);
   // על בייטי המקור ולא על המתוקנים: התיקונים נוגעים לחלקי ה-XML של הגוף
   // והסגנונות, ואין טעם לקרוא את המאקרו מעותק שנכתב מחדש.
@@ -594,9 +595,9 @@ export async function preflightSource(
     // „לתקן, ולא לחסום” גם כאן: הזריקה היחידה שנשארה בפנים היא הקצאה של
     // ארכיון גדול מדי, ומסמך שהיה נפתח בלי השלב הזה ייפתח בלעדיו.
     console.warn('[otzaria-word] הבדיקה המקדימה נכשלה, והמסמך נמסר כמות שהוא', error);
-    return { source, fontTable, vba, notice: null };
+    return { source: asRead(), fontTable, vba, notice: null };
   }
-  if (!repaired) return { source, fontTable, vba, notice: null };
+  if (!repaired) return { source: asRead(), fontTable, vba, notice: null };
 
   // כל תיקון נרשם בנפרד: מי שיקרא את היומן על מסמך שהתנהג במפתיע צריך לדעת
   // **מה** שונה בו, ולא רק שנגענו.
