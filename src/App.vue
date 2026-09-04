@@ -56,6 +56,7 @@
         :has-pdf-export="supportsPdfExport"
         :is-saving="saveSnapshot.isSaving"
         :is-opening="isOpening"
+        :is-exiting="isExiting"
         :book-completion-enabled="bookCompletionEnabled"
         @new-doc="onNewDocument"
         @open-doc="onPickAndOpen"
@@ -665,6 +666,11 @@ const hasDocument = computed(() => activeSuperdoc.value !== null);
 
 const title = ref('מסמך חדש');
 const isOpening = ref(false);
+/**
+ * סגירה היא פעולה א-סינכרונית והרסנית: מרגע שהתחילה אין להיכנס אליה שוב,
+ * גם לפני שה-DOM מספיק לנטרל את הכפתור. ראו `onExit`.
+ */
+const isExiting = ref(false);
 /**
  * מחוון הטעינה של שורת המצב. ההכרעות — התחנות, הזחילה, ומה „דלג” מבטל — ב-
  * sessions/document-load.ts; כאן נשארת ההרכבה בלבד.
@@ -2631,27 +2637,34 @@ async function onExit(): Promise<void> {
   // בזמן פתיחה אין לסגור: `openDocumentInto` כותב לטאב הפעיל לכל אורך ריצתו
   // (ראו `isOpenBusy`), וסגירתו באמצע הייתה משאירה אותה כותבת לתוך מסמך
   // מפורק. הפקד עצמו מנוטרל אז; זה הגיבוי למסלול שיגיע שלא דרכו.
-  if (isOpenBusy()) return;
+  if (isExiting.value || isOpenBusy()) return;
+  // לפני ה-await הראשון: שתי לחיצות שמגיעות באותו סבב אירועים היו מקבלות
+  // שתיהן את המפה הישנה של הטאבים, ואז מפרקות אותה ונוסעות לספרייה פעמיים.
+  isExiting.value = true;
 
-  // הטאב הפעיל נשאל ראשון: הוא המסמך שעל המסך כשלוחצים „יציאה”, ושאלה על
-  // מסמך שאינו נראה, לפניו, נקראת כשאלה עליו.
-  const active = activeSession.value;
-  const open = Array.from(sessions.values());
-  const order = active ? [active, ...open.filter((session) => session !== active)] : open;
+  try {
+    // הטאב הפעיל נשאל ראשון: הוא המסמך שעל המסך כשלוחצים „יציאה”, ושאלה על
+    // מסמך שאינו נראה, לפניו, נקראת כשאלה עליו.
+    const active = activeSession.value;
+    const open = Array.from(sessions.values());
+    const order = active ? [active, ...open.filter((session) => session !== active)] : open;
 
-  // כל הטאבים נשאלים **לפני** שנסגר ולו אחד: „ביטול” על השלישי אחרי ששניים
-  // כבר נסגרו הוא ביטול שאינו מבטל.
-  for (const session of order) {
-    if (!(await resolveUnsavedBeforeClose(session, 'exit'))) return;
+    // כל הטאבים נשאלים **לפני** שנסגר ולו אחד: „ביטול” על השלישי אחרי ששניים
+    // כבר נסגרו הוא ביטול שאינו מבטל.
+    for (const session of order) {
+      if (!(await resolveUnsavedBeforeClose(session, 'exit'))) return;
+    }
+
+    await closeAllSessions();
+
+    // אותו מסלול דיווח כמו „פתח ספרייה” בלשונית „אוצריא”: הודעה בעברית למשתמש
+    // ושורה בלוג של אוצריא. כשל ניווט אינו מחזיר את המסמכים — כל אחד מהם כבר
+    // נשמר או שמחיקתו אושרה במפורש, ומי שנשאר בתוסף נשאר עם עורך נקי והודעה
+    // שאומרת מה נכשל.
+    reportReader(await openLibrary());
+  } finally {
+    isExiting.value = false;
   }
-
-  await closeAllSessions();
-
-  // אותו מסלול דיווח כמו „פתח ספרייה” בלשונית „אוצריא”: הודעה בעברית למשתמש
-  // ושורה בלוג של אוצריא. כשל ניווט אינו מחזיר את המסמכים — כל אחד מהם כבר
-  // נשמר או שמחיקתו אושרה במפורש, ומי שנשאר בתוסף נשאר עם עורך נקי והודעה
-  // שאומרת מה נכשל.
-  reportReader(await openLibrary());
 }
 
 /**

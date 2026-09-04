@@ -84,7 +84,7 @@
         label="יציאה"
         variant="large"
         :tooltip="exitTooltip"
-        :disabled="isSwitchBlocked"
+        :disabled="isExitBlocked"
         @click="$emit('exit-app')"
       />
     </RibbonGroup>
@@ -181,6 +181,8 @@ const props = withDefaults(
     isSaving?: boolean;
     /** האם פתיחת מסמך רצה כרגע. */
     isOpening?: boolean;
+    /** האם סגירת המסמכים והמעבר לספרייה כבר רצים. */
+    isExiting?: boolean;
     /**
      * האם ה-Host מכיר את `ui.exportPdf`.
      *
@@ -197,6 +199,7 @@ const props = withDefaults(
     hasDocument: false,
     isSaving: false,
     isOpening: false,
+    isExiting: false,
     hasPdfExport: false,
   },
 );
@@ -215,12 +218,15 @@ defineEmits<{
 
 /** מעבר מסמך — חדש או פתיחה. אינו דורש מסמך פתוח, אבל כן שקט מסביב. */
 const isSwitchBlocked = computed(() => props.isOpening || props.isSaving);
+/** „יציאה” אינה יכולה להתחיל שוב לפני שהניסיון הקודם הוכרע. */
+const isExitBlocked = computed(() => isSwitchBlocked.value || props.isExiting);
 
 const isSaveBlocked = computed(() => !props.hasDocument || props.isSaving);
 
 const NO_DOCUMENT = 'אין מסמך פתוח';
 const SAVING_NOW = 'השמירה רצה כרגע — רגע אחד';
 const OPENING_NOW = 'פתיחת מסמך רצה כרגע';
+const EXITING_NOW = 'סגירת המסמכים רצה כרגע — רגע אחד';
 
 /** ה-tooltip אומר **למה** הפקד מנוטרל, ולא חוזר על התווית. */
 function switchTooltip(enabledText: string): string {
@@ -262,6 +268,7 @@ const pdfExportTooltip = computed(() => {
  * כתוב כאן „המסמך יישאר פתוח” בעוד הלחיצה שאלה „לצאת בלי לשמור?”.
  */
 const exitTooltip = computed(() => {
+  if (props.isExiting) return EXITING_NOW;
   if (props.isOpening) return OPENING_NOW;
   if (props.isSaving) return SAVING_NOW;
   return 'סגירת המסמך וחזרה למסך הספרייה של אוצריא';

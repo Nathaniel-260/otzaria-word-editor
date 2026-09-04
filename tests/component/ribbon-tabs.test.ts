@@ -363,6 +363,20 @@ describe('לשונית „קובץ” נשענת על מצב המעטפת', () =
     expect(tipMessage(exitButton!)).toContain('פתיחת מסמך רצה כרגע');
   });
 
+  it('„יציאה” מנוטרל בזמן שסגירה קודמת רצה', async () => {
+    const harness = mountUi(FileTab, {
+      superdoc: withSelection(),
+      props: { hasDocument: true, isExiting: true },
+    });
+    await settle();
+
+    const exitButton = harness.wrapper
+      .findAll('button')
+      .find((button) => button.text().trim() === 'יציאה');
+    expect(exitButton!.attributes('disabled')).not.toBeUndefined();
+    expect(tipMessage(exitButton!)).toContain('סגירת המסמכים רצה כרגע');
+  });
+
   it('הרצועה מעבירה את שלושת המצבים — אחרת ה-props כאן הם קוד מת', async () => {
     const harness = mountUi(Ribbon, { props: { hasDocument: false } });
     await settle();

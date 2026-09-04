@@ -106,6 +106,7 @@ const EN: Readonly<Record<string, string>> = {
   'אין מסמך פתוח': 'No open document',
   'השמירה רצה כרגע — רגע אחד': 'Saving is in progress — one moment',
   'פתיחת מסמך רצה כרגע': 'Opening a document is in progress',
+  'סגירת המסמכים רצה כרגע — רגע אחד': 'Closing documents is in progress — one moment',
   'מידע': 'Info',
   'אודות': 'About',
   'אודות עורך Word לאוצריא': 'About the Word Editor for Otzaria',

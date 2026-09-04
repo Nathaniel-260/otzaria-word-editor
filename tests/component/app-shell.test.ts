@@ -1405,6 +1405,35 @@ describe('שחזור כל הטאבים', () => {
       window.Otzaria = undefined as never;
     }
   });
+
+  it('שתי לחיצות מהירות על „יציאה” מפעילות סגירה אחת בלבד', async () => {
+    stub.storedSession = twoTabs();
+    const wrapper = await mountShell();
+    const hostCalls: string[] = [];
+    window.Otzaria = {
+      call: (method: string) => {
+        hostCalls.push(method);
+        return Promise.resolve({ success: true, data: true });
+      },
+    } as never;
+
+    try {
+      const fileTab = wrapper.findAll('[role="tab"]').find((tab) => tab.text().includes('קובץ'));
+      await fileTab!.trigger('click');
+      await settle();
+
+      const exit = buttonByTip(wrapper, 'סגירת המסמך');
+      const first = exit.trigger('click');
+      const second = exit.trigger('click');
+      await Promise.all([first, second]);
+      await settle(24);
+
+      expect(hostCalls.filter((method) => method === 'navigation.goTo')).toHaveLength(1);
+      expect(tabTitles(wrapper)).toEqual(['מסמך חדש']);
+    } finally {
+      window.Otzaria = undefined as never;
+    }
+  });
 });
 
 /**
