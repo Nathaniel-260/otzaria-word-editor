@@ -229,12 +229,33 @@ async function tellMeRect(app, titleOrId) {
   return raw === 'null' ? null : JSON.parse(raw);
 }
 
-/** לשונית המצב הפעילה בדיאלוג „חיפוש והחלפה” — „חפש” או „החלף”. */
-function findDialogMode(app) {
-  return app.js(
-    `(function(){var d=document.querySelector('.find-replace-dialog');if(!d)return '';` +
-      `var t=d.querySelector('.fr-tab[aria-selected="true"]');return t?(t.textContent||'').trim():''})()`,
-  );
+/**
+ * לשונית המצב הפעילה בדיאלוג „חיפוש והחלפה” — „חפש” או „החלף” — ומונה
+ * התוצאות שבו.
+ */
+function findDialogFacts(app) {
+  return app
+    .js(
+      `(function(){var d=document.querySelector('.find-replace-dialog');` +
+        `if(!d)return JSON.stringify({mode:'',counter:''});` +
+        `var t=d.querySelector('.fr-tab[aria-selected="true"]');` +
+        `var c=d.querySelector('.fr-counter');` +
+        `return JSON.stringify({mode:t?(t.textContent||'').trim():'',` +
+        `counter:c?(c.textContent||'').trim():''})})()`,
+    )
+    .then(JSON.parse);
+}
+
+/**
+ * מספר ההתאמות שהמונה מדווח. `searchCounterText` מייצר „i מתוך N”, „N תוצאות”,
+ * „אין תוצאות” או מחרוזת ריקה — ולכן „המונה אינו ריק” אינו מדידה.
+ */
+function counterTotal(text) {
+  const pair = /^(\d+)\s+מתוך\s+(\d+)$/.exec(text ?? '');
+  if (pair) return Number(pair[2]);
+  const many = /^(\d+)\s+תוצאות$/.exec(text ?? '');
+  if (many) return Number(many[1]);
+  return 0;
 }
 
 /** עוטפת את `fetch` כך שבקשות PUT (העלאת שמירה) ייענו בהצלחה בלי שרת אמיתי. */
@@ -832,27 +853,58 @@ async function sectionTitleBar() {
       await app.clickAt(rect.x, rect.y);
       await app.sleep(900);
       const dlg = await app.dialog();
-      const mode = await findDialogMode(app);
+      const { mode } = await findDialogFacts(app);
       const afterPick = await tellMe(app);
       const bad = await noise(app);
       const hasQueryField = !!dlg?.controls?.some((c) => c.name === 'טקסט לחיפוש');
       log('דיאלוג:', JSON.stringify(dlg && { label: dlg.label, mode }), '| התיבה אחרי:',
         JSON.stringify({ value: afterPick.value, פתוחה: afterPick.open }), '| רעש:', bad || '(אין)');
 
-      if (dlg?.label === 'חיפוש והחלפה' && hasQueryField && afterPick.value === '' && !afterPick.open && !bad) {
-        report.pass('תיבת Tell Me — הרצת „חיפוש והחלפה”', `הדיאלוג נפתח בלשונית „${mode}”, והתיבה התרוקנה ונסגרה`);
+      // הלשונית היא ההבדל בין `shellAction:'replace'` ל-`'find'`: בלעדיה השורה
+      // עוברת גם כשנשלחה הפקודה השנייה.
+      if (
+        dlg?.label === 'חיפוש והחלפה' &&
+        hasQueryField &&
+        mode === 'החלף' &&
+        afterPick.value === '' &&
+        !afterPick.open &&
+        !bad
+      ) {
+        report.pass('תיבת Tell Me — הרצת „חיפוש והחלפה”', 'הדיאלוג נפתח בלשונית „החלף”, והתיבה התרוקנה ונסגרה');
       } else {
         report.fail(
           'תיבת Tell Me — הרצת „חיפוש והחלפה”',
-          `dlg=${JSON.stringify(dlg && { label: dlg.label, mode })} שדה חיפוש=${hasQueryField} ` +
-            `התיבה אחרי=${JSON.stringify({ value: afterPick.value, open: afterPick.open })}; רעש: ${bad || 'אין'}`,
+          `dlg=${JSON.stringify(dlg && { label: dlg.label })} לשונית=${JSON.stringify(mode)} (נדרש „החלף”) ` +
+            `שדה חיפוש=${hasQueryField} התיבה אחרי=${JSON.stringify({ value: afterPick.value, open: afterPick.open })}; רעש: ${bad || 'אין'}`,
         );
       }
 
       await app.clickDialog('סגור', { after: 400 });
+
+      /*
+       * מילת עוגן שהשורה כותבת לעצמה. קודם היא חיפשה „לבדיקת” מתוך הטקסט של
+       * צעד „בטל/חזור”, ולכן כשהצעד ההוא נכשל השורה נשארה ירוקה על „אין
+       * תוצאות”. `caret(0)` אינו כתובת פסקה, ולכן הנחיתה אינה מונחת: העוגן
+       * מאומת מהטקסט שהמנוע צייר לפני שמחפשים אותו.
+       */
+      const ANCHOR = 'עוגןתלמי';
+      await app.caret(0);
+      await app.type(ANCHOR);
+      await app.sleep(700);
+      const screen = (await app.screenText()) ?? '';
+      const seeded = screen.split(ANCHOR).length - 1;
+      log('העוגן במסמך:', seeded, 'פעמים');
+      if (seeded !== 1) {
+        report.fail(
+          'תיבת Tell Me — „חפש במסמך” נושא את השאילתה',
+          `מילת העוגן „${ANCHOR}” אינה במסמך פעם אחת (נמדד ${seeded}) — אין מה לחפש, והשורה אינה נמדדת על „אין תוצאות”`,
+        );
+        return;
+      }
+
       await app.reset();
       await app.clickSel('.tell-me-input', 0, { after: 400 });
-      await app.type('לבדיקת');
+      await app.type(ANCHOR);
       await app.sleep(400);
       const docRow = await tellMeRect(app, 'tell-me-item-doc-search');
       if (!docRow) {
@@ -860,20 +912,24 @@ async function sectionTitleBar() {
         return;
       }
       await app.clickAt(docRow.x, docRow.y);
-      await app.sleep(900);
+      await app.sleep(1200);
       const findDlg = await app.dialog();
       const queryField = findDlg?.controls?.find((c) => c.name === 'טקסט לחיפוש');
-      const counter = await app.js(
-        `(function(){var c=document.querySelector('.find-replace-dialog .fr-counter');return c?(c.textContent||'').trim():''})()`,
-      );
+      const { counter } = await findDialogFacts(app);
+      const total = counterTotal(counter);
       const bad2 = await noise(app);
       log('דיאלוג אחרי „חפש במסמך”:', JSON.stringify(findDlg && { label: findDlg.label }),
-        '| שדה החיפוש:', JSON.stringify(queryField?.value), '| מונה:', JSON.stringify(counter), '| רעש:', bad2 || '(אין)');
-      findDlg?.label === 'חיפוש והחלפה' && queryField?.value === 'לבדיקת' && !bad2
-        ? report.pass('תיבת Tell Me — „חפש במסמך” נושא את השאילתה', `הדיאלוג נפתח עם "${queryField.value}" בשדה החיפוש (מונה: ${counter || 'ריק'})`)
+        '| שדה החיפוש:', JSON.stringify(queryField?.value), '| מונה:', JSON.stringify(counter), '| התאמות:', total,
+        '| רעש:', bad2 || '(אין)');
+      findDlg?.label === 'חיפוש והחלפה' && queryField?.value === ANCHOR && total === 1 && !bad2
+        ? report.pass(
+            'תיבת Tell Me — „חפש במסמך” נושא את השאילתה',
+            `הדיאלוג נפתח עם "${queryField.value}" בשדה החיפוש, והמנוע מצא את העוגן פעם אחת ("${counter}")`,
+          )
         : report.fail(
             'תיבת Tell Me — „חפש במסמך” נושא את השאילתה',
-            `dlg=${JSON.stringify(findDlg && { label: findDlg.label })} שדה=${JSON.stringify(queryField?.value)}; רעש: ${bad2 || 'אין'}`,
+            `dlg=${JSON.stringify(findDlg && { label: findDlg.label })} שדה=${JSON.stringify(queryField?.value)} ` +
+              `מונה=${JSON.stringify(counter)} התאמות=${total} (נדרש 1); רעש: ${bad2 || 'אין'}`,
           );
       await app.clickDialog('סגור', { after: 300 });
     });
