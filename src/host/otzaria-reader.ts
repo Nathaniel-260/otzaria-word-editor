@@ -26,6 +26,7 @@ import {
 } from '../engine/document-api';
 import type {
   GetSectionTextMapArgs,
+  ResolvedRefHit,
   NavigationTarget,
   OpenSearchTabArgs,
   ReaderRefState,
@@ -53,6 +54,7 @@ export const READER_PERMISSIONS: Record<string, string> = {
   'reader.getSectionTextMap': 'reader.open',
   'navigation.goTo': 'navigation.write',
   'reader.addContextMenuItem': 'reader.context_menu',
+  'library.resolveRef': 'library.books.read',
 };
 
 /**
@@ -211,6 +213,46 @@ export async function getSectionTextMap(
 
   if (!data || typeof data !== 'object') return { ok: true, value: null };
   return { ok: true, value: data as SectionTextMapResult };
+}
+
+/**
+ * פותרת הפניה חופשית („פסחים לד”) למיקומים מועמדים, דרך מנוע `find_ref` של
+ * אוצריא — אותו מנוע שמאחורי מסך „איתור מקורות”.
+ *
+ * הרזולוציה נשארת באוצריא במכוון: טבלת ראשי-התיבות שלה מונה עשרות אלפי
+ * מונחים, והנרמול שלה מוצמד לזה שבנה את אינדקס ההפניות. פורט מקומי היה סוטה
+ * ממנו בשקט, ובלי גישה לאותן טבלאות גם לא היה מגיע לרזולוציית שורה.
+ *
+ * רשימה ריקה אינה כשל — היא „לא נמצאה התאמה”, שהוא המצב השכיח בזמן הקלדה.
+ */
+export async function resolveRef(
+  ref: string,
+  limit = 8,
+): Promise<ReaderResult<ResolvedRefHit[]>> {
+  let data: unknown;
+  try {
+    data = await call<unknown>('library.resolveRef', { ref, limit });
+  } catch (error) {
+    return hostFailure('library.resolveRef', 'איתור ההפניה נכשל', error);
+  }
+
+  if (!Array.isArray(data)) return { ok: true, value: [] };
+  return { ok: true, value: data.filter(isResolvedRefHit) };
+}
+
+/**
+ * שומרת שהצורה שהגיעה מהגשר היא באמת התאמה. `index` הוא השדה שהקישור נבנה
+ * ממנו, ולכן ערך חסר או לא-מספרי חייב להיפסל כאן ולא להפוך ל-`NaN` ב-href.
+ */
+function isResolvedRefHit(value: unknown): value is ResolvedRefHit {
+  if (!value || typeof value !== 'object') return false;
+  const hit = value as Record<string, unknown>;
+  return (
+    typeof hit.title === 'string' &&
+    typeof hit.reference === 'string' &&
+    typeof hit.index === 'number' &&
+    Number.isFinite(hit.index)
+  );
 }
 
 /** הראשון מבין המועמדים שיש בו טקסט. `''` אינו „קיים” — הוא בחירה ריקה. */

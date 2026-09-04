@@ -15,19 +15,9 @@
  * אינדקס ההפניות. פורט מקומי היה סוטה ממנו בשקט.
  */
 
-/** התאמה יחידה כפי ש-`library.resolveRef` מחזיר אותה. */
-export interface ResolvedRefHit {
-  id?: number | null;
-  bookId: string;
-  bookUid?: string;
-  title: string;
-  reference: string;
-  index: number;
-  isPdf: boolean;
-  isSourceLine: boolean;
-  isUserBook: boolean;
-  bookPath: string;
-}
+import type { ResolvedRefHit } from '../types/otzaria_plugin';
+
+export type { ResolvedRefHit };
 
 export interface AtTrigger {
   /** מה שהוקלד אחרי ה-„@”, בלי ה-„@” עצמו. */
