@@ -9,7 +9,7 @@
  */
 import { openApp, createReport } from './harness.mjs';
 
-const PORT = 9363;
+const PORT = Number(process.env.QA_PORT ?? 9363);
 const report = createReport('לשונית „הוספה”');
 
 /** PNG של 1×1 — הקטן ביותר שאפשר להטמיע, ומספיק כדי לראות אם המנוע הטמיע. */

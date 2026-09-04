@@ -17,7 +17,7 @@
  */
 import { openApp, createReport, sleep } from './harness.mjs';
 
-const PORT = 9368;
+const PORT = Number(process.env.QA_PORT ?? 9368);
 const report = createReport('גבולות עמוד — ציור בפועל בעורך', { strict: true });
 
 const PX_PER_POINT = 96 / 72; // נקודה = 96/72 פיקסל CSS (96dpi)

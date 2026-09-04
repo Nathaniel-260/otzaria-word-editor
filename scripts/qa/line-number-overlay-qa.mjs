@@ -13,7 +13,7 @@
  */
 import { openApp, createReport } from './harness.mjs';
 
-const PORT = 9379;
+const PORT = Number(process.env.QA_PORT ?? 9379);
 const report = createReport('מספרי שורות — ציור בפועל בעורך', { strict: true });
 
 const app = await openApp({ name: 'line-number-overlay', port: PORT });

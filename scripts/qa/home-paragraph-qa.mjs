@@ -32,7 +32,7 @@
 import { execSync } from 'node:child_process';
 import { openApp, createReport, sleep } from './harness.mjs';
 
-const PORT = 9362;
+const PORT = Number(process.env.QA_PORT ?? 9362);
 const report = createReport('בית — פיסקה, סגנונות, עריכה');
 
 /** דפדפן ששרד ריצה קודמת מחזיק את היציאה, ו-`openPage` מתחבר אליו במקום
