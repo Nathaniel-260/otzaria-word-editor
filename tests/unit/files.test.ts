@@ -427,3 +427,59 @@ describe('commitUserFileWrite — הסיומת', () => {
     );
   });
 });
+
+/**
+ * „Failed to fetch” של ה-PUT הוא כל מה שהדפדפן אומר, ולכן `uploadBytes`
+ * מריצה בדיקה אחת שמבחינה בין „השרת אינו נגיש” ל„דווקא ה-PUT נחסם”, ומצמידה
+ * את הממצא להודעה — שורת המצב היא ערוץ הדיווח בפועל.
+ *
+ * הבדיקה כאן היא על **הכשל השני**: קודם עמד שם דגל בוליאני שכיבה את האבחון
+ * אחרי הפעם הראשונה, ולכן אותה תקלה בדיוק הציגה „העלאת המסמך נכשלה: Failed
+ * to fetch” חשוף מהניסיון השני והלאה. הבדיקה עצמה עדיין רצה פעם אחת.
+ */
+describe('uploadBytes — אבחון כשל רשת', () => {
+  it('הממצא מוצמד לכל כשל, וה-probe נשלח פעם אחת', async () => {
+    vi.resetModules();
+    const { uploadBytes } = await import('../../src/host/files');
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).endsWith('/f/probe')) return { status: 404 } as Response;
+      throw new TypeError('Failed to fetch');
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const put = (): Promise<Error> =>
+      uploadBytes('http://127.0.0.1:1/w/tok', new Blob(['x'])).then(
+        () => new Error('לא נזרק'),
+        (error: unknown) => error as Error,
+      );
+
+    const first = await put();
+    const second = await put();
+
+    for (const failure of [first, second]) {
+      expect(failure.message).toContain('העלאת המסמך נכשלה');
+      expect(failure.message).toContain('ה-PUT עצמו נחסם');
+      expect(failure.message).toContain('נדרש עדכון');
+    }
+    expect(
+      fetchMock.mock.calls.filter(([input]) => String(input).endsWith('/f/probe')),
+    ).toHaveLength(1);
+  });
+
+  it('שרת שאינו נגיש — הממצא אומר זאת, בלי לתלות את הכשל בגרסת אוצריא', async () => {
+    vi.resetModules();
+    const { uploadBytes } = await import('../../src/host/files');
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new TypeError('Failed to fetch');
+      }),
+    );
+
+    await expect(
+      uploadBytes('http://127.0.0.1:1/w/tok', new Blob(['x'])),
+    ).rejects.toThrow(/השרת אינו נגיש מהדף/);
+  });
+});
