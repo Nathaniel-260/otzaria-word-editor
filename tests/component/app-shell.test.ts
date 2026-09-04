@@ -86,6 +86,8 @@ const stub = vi.hoisted(() => ({
   resolvedFile: null as unknown,
   /** בייטי הטיוטה שבמרחב הפרטי, או `null` כשאין. */
   draftBytes: null as Uint8Array | null,
+  /** השהיה יזומה של קריאה מהמרחב הפרטי, לבדיקות תחרות פתיחה. */
+  workspaceReadGate: null as Promise<void> | null,
   /**
    * טיוטות לפי נתיב — לתרחיש ריבוי הטאבים, שבו לכל טאב נתיב טיוטה משלו
    * (`draftPathFor`). נתיב שאינו כאן נופל ל-`draftBytes`.
@@ -230,10 +232,12 @@ vi.mock('../../src/host/files', async (importOriginal) => ({
 vi.mock('../../src/host/workspace', () => ({
   MAX_PAYLOAD_BYTES: 10,
   MAX_CONTENT_BYTES: 7,
-  readWorkspaceBytes: async (path: string) =>
-    Object.prototype.hasOwnProperty.call(stub.draftsByPath, path)
+  readWorkspaceBytes: async (path: string) => {
+    await stub.workspaceReadGate;
+    return Object.prototype.hasOwnProperty.call(stub.draftsByPath, path)
       ? stub.draftsByPath[path]
-      : stub.draftBytes,
+      : stub.draftBytes;
+  },
   /**
    * `'written'` ולא `true`: זה מה ש-`WorkspaceWrite` האמיתי מחזיר, ושני
    * הצרכנים — `SessionKeeper.writeDraftNow` והגיבוי של „לא לשמור” — משווים
@@ -461,6 +465,7 @@ beforeEach(() => {
   stub.openSources.length = 0;
   stub.resolvedFile = null;
   stub.draftBytes = null;
+  stub.workspaceReadGate = null;
   for (const path of Object.keys(stub.draftsByPath)) delete stub.draftsByPath[path];
   stub.draftRemovals = 0;
   stub.removedDrafts.length = 0;
@@ -753,15 +758,30 @@ describe('שמירה', () => {
 });
 
 describe('חיפוש', () => {
-  it('כפתור החיפוש בפס פותח session במנוע ולא רק דיאלוג', async () => {
+  it('פתיחת חיפוש דרך Tell Me פותחת session במנוע ולא רק דיאלוג', async () => {
     // פתיחת הדיאלוג בלי `searchAdapter.open()` היא דיאלוג שכל חיפוש בו נכשל
     // סגור — ואת זה רואים רק ממעטפת מורכבת.
     const wrapper = await mountShell();
 
-    await wrapper.find('.search-box').trigger('click');
+    const tellMeInput = wrapper.find('.tell-me-input');
+    await tellMeInput.trigger('focus');
+    await tellMeInput.setValue('בדיקה');
+    await settle();
+
+    await wrapper.find('#tell-me-item-doc-search').trigger('click');
     await settle();
 
     expect(stub.searchOpens).toBe(1);
+  });
+
+  it('קיצור Alt+Q מעביר מיקוד לתיבת Tell Me ופותח את התפריט', async () => {
+    const wrapper = await mountShell();
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'q', code: 'KeyQ', altKey: true }));
+    await settle();
+
+    const tellMeInput = wrapper.find('.tell-me-input');
+    expect(tellMeInput.attributes('aria-expanded')).toBe('true');
   });
 });
 
@@ -1600,6 +1620,37 @@ describe('שחזור כל הטאבים', () => {
     expect(stub.openSources[0], 'הבייטים של הגיבוי, לא קובץ מהדיסק').toBeInstanceOf(Blob);
     expect(tabTitles(wrapper), 'ובטאב נוסף, על שם המסמך שממנו בא').toContain('שני');
     expect(wrapper.find('.word-statusbar').text()).toContain('נפתח מהעותק שנשמר בסגירה');
+  });
+
+  it('לחיצה כפולה על „פתח” של עותק שחזור פותחת אותו פעם אחת בלבד', async () => {
+    // קריאה מהמרחב הפרטי היא אסינכרונית. בלי נעילה, שתי לחיצות לפני סיומה
+    // פותחות שתי פעולות `openDocument`, והאחרונה עשויה להחליף את הראשונה.
+    stub.storedDiscardBackups = [
+      { slot: 0, name: 'עותק', size: 4, discardedAt: Date.now(), token: null },
+    ];
+    stub.draftsByPath['discarded-0.docx'] = new Uint8Array([80, 75, 3, 4]);
+    let releaseRead: (() => void) | undefined;
+    stub.workspaceReadGate = new Promise<void>((resolve) => {
+      releaseRead = resolve;
+    });
+    await mountShell();
+    stub.openSources.length = 0;
+
+    pressCtrl('KeyO');
+    await settle(8);
+    document.querySelector<HTMLButtonElement>('.open-discarded')!.click();
+    await settle(8);
+
+    const open = document.querySelector<HTMLButtonElement>('.discarded-open')!;
+    open.click();
+    open.click();
+    await settle(4);
+    expect(open.disabled, 'הפעולה מסומנת כעסוקה בזמן הקריאה').toBe(true);
+    expect(stub.openSources, 'הפתיחה עדיין ממתינה לבייטים').toEqual([]);
+
+    releaseRead?.();
+    await settle(16);
+    expect(stub.openSources, 'נפתחה פעולה אחת בלבד').toHaveLength(1);
   });
 
   it('טאב שיש בו מנוע נקי וטיוטה — הגיבוי לוקח את הטיוטה, לא את מה שבמנוע', async () => {

@@ -19,6 +19,7 @@
     <div class="shell-top">
       <!-- פס עליון -->
       <TitleBar
+        ref="titleBarRef"
         :title="title"
         :is-dirty="saveSnapshot.isDirty"
         :is-saving="saveSnapshot.isSaving"
@@ -30,7 +31,10 @@
         @save="onSave(false)"
         @undo="onUndo"
         @redo="onRedo"
-        @open-find="openFindDialog('find')"
+        @open-find="(q) => openFindDialog('find', q)"
+        @run-command="onRunCommandFromTellMe"
+        @run-action="onRunActionFromTellMe"
+        @custom-action="onCustomActionFromTellMe"
         @toggle-autosave="toggleAutosave"
         @update-title="onTitleUpdate"
       />
@@ -201,6 +205,7 @@
     <FindReplaceDialog
       :is-open="isFindOpen"
       :initial-mode="findMode"
+      :initial-query="findInitialQuery"
       :result-text="searchCounter"
       :can-replace="canShowReplace"
       :is-replacing="searchState.isReplacing"
@@ -249,7 +254,7 @@
     <DiscardedDocumentsDialog
       :is-open="isDiscardedOpen"
       :entries="discardedBackups"
-      :busy="isOpening || saveSnapshot.isSaving"
+      :busy="isDiscardedBusy"
       @close="isDiscardedOpen = false"
       @open="onOpenDiscarded"
       @forget="onForgetDiscarded"
@@ -555,7 +560,8 @@ import { onPluginHidden, onPluginShown } from './host/lifecycle';
 import { revealZone, type RevealBounds, type RevealZone } from './composables/focus-mode';
 import { enterFullscreen, exitFullscreen, isFullscreen, watchFullscreen } from './composables/window-fullscreen';
 import SvgIcon from './ui/icons/SvgIcon.vue';
-import { selectWholeDocument } from './engine/clipboard';
+import { copySelection, cutSelection, pasteFromClipboard, selectWholeDocument } from './engine/clipboard';
+import type { TellMeCustomAction } from './ui/shell/tell-me-actions';
 import {
   DEFAULT_FONT_SIZE_PT,
   fontSizePayload,
@@ -569,6 +575,7 @@ import { startParagraphOnNewPage, pageBreakTracker } from './engine/page-break';
 import { createFontMemory } from './composables/use-font-controls';
 import { createLinkDialog } from './composables/use-link-dialog';
 import { createShellActionRunner } from './ui/shortcuts/actions';
+import type { ShellAction } from './ui/shortcuts/registry';
 import { useContextMenu } from './composables/use-context-menu';
 import ContextMenu from './ui/menu/ContextMenu.vue';
 import {
@@ -758,6 +765,8 @@ watch([ribbonTab, ribbonCollapsed], ([tab, collapsed]) => {
 
 const isFindOpen = ref(false);
 const findMode = ref<'find' | 'replace'>('find');
+const findInitialQuery = ref('');
+const titleBarRef = ref<InstanceType<typeof TitleBar> | null>(null);
 const isAboutOpen = ref(false);
 const isShortcutsHelpOpen = ref(false);
 
@@ -782,6 +791,11 @@ const recentDocuments = ref<RecentDocument[]>([]);
  */
 const discardedBackups = ref<DiscardedDocument[]>([]);
 const isDiscardedOpen = ref(false);
+/** מונע שתי פתיחות של אותו עותק לפני שהקריאה מה-storage הסתיימה. */
+const isDiscardedOpening = ref(false);
+const isDiscardedBusy = computed(
+  () => isOpening.value || saveSnapshot.value.isSaving || isDiscardedOpening.value,
+);
 const recentSearch = ref('');
 
 /**
@@ -2874,39 +2888,48 @@ function onShowDiscarded(): void {
  * (`onForgetDiscarded`), וזו ההזדמנות היחידה למחוק אותה.
  */
 async function onOpenDiscarded(slot: number): Promise<void> {
-  if (isOpenBusy()) return;
+  if (isOpenBusy() || isDiscardedOpening.value) return;
   const entry = discardedBackups.value.find((item) => item.slot === slot);
   if (!entry) return;
 
-  const bytes = await readWorkspaceBytes(backupPathFor(slot));
-  if (!bytes) {
-    // הקובץ אינו במקומו — נמחק מבחוץ, או שהכתיבה שלו נכשלה מלכתחילה. שורה
-    // שאי אפשר לפתוח היא שורה שהמשתמש ילחץ עליה שוב, ולכן היא יורדת.
-    await onForgetDiscarded(slot);
-    setStatus(`העותק של ${entry.name} לא נמצא, והשורה הוסרה`, true);
-    return;
-  }
+  isDiscardedOpening.value = true;
+  try {
+    const bytes = await readWorkspaceBytes(backupPathFor(slot));
+    if (!bytes) {
+      // הקובץ אינו במקומו — נמחק מבחוץ, או שהכתיבה שלו נכשלה מלכתחילה. שורה
+      // שאי אפשר לפתוח היא שורה שהמשתמש ילחץ עליה שוב, ולכן היא יורדת.
+      await forgetDiscarded(slot);
+      setStatus(`העותק של ${entry.name} לא נמצא, והשורה הוסרה`, true);
+      return;
+    }
 
-  isDiscardedOpen.value = false;
-  ensureOpenTargetTab();
-  const opened = await openDocument(undefined, {
-    draft: new Blob([bytes], { type: DOCX_MIME }),
-    name: entry.name,
-  });
-  if (!opened) {
-    // הרשומה **אינה** יורדת כאן, בשונה מ„העותק לא נמצא”: הבייטים קיימים,
-    // והכשל עשוי להיות זמני (worker שלא עלה). מחיקת השורה הייתה מוחקת את
-    // ההזדמנות היחידה לנסות שוב.
-    setStatus(`${entry.name} לא נפתח מהעותק שנשמר בסגירה`, true);
-    return;
-  }
+    // „סגור” מותר גם בזמן הקריאה. במקרה כזה אין לפתוח מסמך אחרי שהמשתמש
+    // ביטל במפורש את הפעולה.
+    if (!isDiscardedOpen.value) return;
 
-  const age = draftAgeLabel(entry.discardedAt, Date.now());
-  setStatus(
-    age
-      ? `${entry.name} נפתח מהעותק שנשמר בסגירה (${age}) — טרם נשמר לקובץ`
-      : `${entry.name} נפתח מהעותק שנשמר בסגירה — טרם נשמר לקובץ`,
-  );
+    isDiscardedOpen.value = false;
+    ensureOpenTargetTab();
+    const opened = await openDocument(undefined, {
+      draft: new Blob([bytes], { type: DOCX_MIME }),
+      name: entry.name,
+    });
+    if (!opened) {
+      // הרשומה **אינה** יורדת כאן, בשונה מ„העותק לא נמצא”: הבייטים קיימים,
+      // והכשל עשוי להיות זמני (worker שלא עלה). מחיקת השורה הייתה מוחקת את
+      // ההזדמנות היחידה לנסות שוב.
+      setStatus(`${entry.name} לא נפתח מהעותק שנשמר בסגירה`, true);
+      return;
+    }
+
+    const age = draftAgeLabel(entry.discardedAt, Date.now());
+    setStatus(
+      age
+        ? `${entry.name} נפתח מהעותק שנשמר בסגירה (${age}) — טרם נשמר לקובץ`
+        : `${entry.name} נפתח מהעותק שנשמר בסגירה — טרם נשמר לקובץ`,
+    );
+  } finally {
+    isDiscardedOpening.value = false;
+  }
 }
 
 /**
@@ -2915,11 +2938,8 @@ async function onOpenDiscarded(slot: number): Promise<void> {
  * שהוא לא יישאר על הדיסק עד שמישהו יזדמן לדרוס אותו.
  */
 async function onForgetDiscarded(slot: number): Promise<void> {
-  discardedBackups.value = forgetDiscard(discardedBackups.value, slot);
-  await saveDiscardBackups(discardedBackups.value);
-  await deleteWorkspaceEntry(backupPathFor(slot));
-  // מסך ריק אינו מסך: הכפתור שמוביל לכאן ממילא נעלם כשאין מה להציג.
-  if (discardedBackups.value.length === 0) isDiscardedOpen.value = false;
+  if (isDiscardedOpening.value) return;
+  await forgetDiscarded(slot);
 }
 
 function onOpenDialogForget(token: string): void {
@@ -3745,14 +3765,58 @@ function onPointerMove(event: PointerEvent): void {
  * רב-פסקאות (ראו הראש של engine/search.ts). המימוש שלנו עצמאי לגמרי:
  * `doc.blocks.list`/`doc.replace` של ה-Document API הציבורי.
  */
-function openFindDialog(mode: 'find' | 'replace'): void {
+function openFindDialog(mode: 'find' | 'replace', initialQuery = ''): void {
   findMode.value = mode;
+  findInitialQuery.value = initialQuery;
   isFindOpen.value = true;
   void reportSearch(searchAdapter?.open());
 }
 
+async function onRunCommandFromTellMe(id: string, payload?: unknown): Promise<void> {
+  if (!commandAdapter.value) {
+    setStatus('אין מסמך פתוח לביצוע הפעולה', true);
+    return;
+  }
+  const outcome = await commandAdapter.value.run(id, payload);
+  reportCommand(outcome, id);
+}
+
+function onRunActionFromTellMe(action: ShellAction): void {
+  runShellAction(action);
+}
+
+/** פעולות Tell Me שאינן פקודת מנוע או פעולת מעטפת רגילה. */
+function onCustomActionFromTellMe(action: TellMeCustomAction): void {
+  switch (action) {
+    case 'export-pdf':
+      void onExportPdf();
+      break;
+    case 'export-otzaria':
+      void onExportOtzaria();
+      break;
+    case 'about':
+      isAboutOpen.value = true;
+      break;
+    case 'clipboard-copy':
+      void copySelection(activeSuperdoc.value).then((outcome) => reportCommand(outcome, 'clipboard-copy'));
+      break;
+    case 'clipboard-cut':
+      void cutSelection(activeSuperdoc.value).then((outcome) => reportCommand(outcome, 'clipboard-cut'));
+      break;
+    case 'clipboard-paste':
+      void pasteFromClipboard(activeSuperdoc.value).then((outcome) => reportCommand(outcome, 'clipboard-paste'));
+      break;
+    case 'ribbon-shulchan':
+      ribbonTab.value = 'shulchan';
+      ribbonCollapsed.value = false;
+      break;
+  }
+}
+
 function closeFindDialog(): void {
   isFindOpen.value = false;
+  // השאילתה שהגיעה מ-Tell Me שייכת לפתיחה הנוכחית בלבד.
+  findInitialQuery.value = '';
   // סגירה מנקה את ההדגשות במסמך. בלעדיה הן נשארות אחרי שהדיאלוג נעלם.
   searchAdapter?.close();
 }
@@ -4125,6 +4189,7 @@ const runShellAction = createShellActionRunner({
     return true;
   },
   moveFocusRegion: (direction) => focusRing.move(direction) !== null,
+  openTellMe: () => titleBarRef.value?.focusTellMe(),
   closeTopmost: closeTopmostLayer,
   // חמש פעולות הטאבים — ראו „קיצורי הטאבים” ליד `stepTab`. שלוש מהן הן
   // בדיוק המטפלים של רצועת הטאבים, ולכן הקיצור והעכבר אינם יכולים להתפצל.
@@ -4897,6 +4962,21 @@ async function discardWithBackup(session: DocumentSession | null): Promise<void>
 }
 
 /**
+ * פעולות הגיבוי משתפות גם את רשומת המטא-נתונים וגם חמש משבצות קבועות.
+ * ללא שרשור, שתי סגירות יכולות לבחור אותה משבצת מתוך אותה רשימה ישנה, ואז
+ * כתיבה מאוחרת יותר תדרוס עותק ורשומה. אותו תור כולל גם „הסר”, כדי שלא
+ * ידרוס כתיבה שזה עתה הושלמה את מחיקתו.
+ */
+let discardedStorageChain: Promise<void> = Promise.resolve();
+
+function enqueueDiscardedStorageOperation(operation: () => Promise<void>): Promise<void> {
+  const task = discardedStorageChain.then(operation);
+  // פעולה שנכשלה מדווחת לקורא שלה, אך אינה מרעילה את התור עבור הפעולה הבאה.
+  discardedStorageChain = task.catch(() => undefined);
+  return task;
+}
+
+/**
  * כותבת את המסמך שנאמר עליו „לא לשמור” לאחת מחמש המשבצות של הגיבוי.
  *
  * ההחלטה מי נדרס — ולמה משבצות ולא מזהים — ב-sessions/discard-backup.ts.
@@ -4910,6 +4990,15 @@ async function discardWithBackup(session: DocumentSession | null): Promise<void>
  * לשורת המצב וגם כשגיאה של אוצריא — ראו `setStatus`.
  */
 async function backupDiscardedDocument(session: DocumentSession): Promise<void> {
+  try {
+    await enqueueDiscardedStorageOperation(() => backupDiscardedDocumentNow(session));
+  } catch (error) {
+    console.error('Could not save discarded document backup', error);
+    setStatus('שמירת העותק לשחזור נכשלה', true);
+  }
+}
+
+async function backupDiscardedDocumentNow(session: DocumentSession): Promise<void> {
   const bytes = await discardedBytes(session);
   if (!bytes) {
     setStatus('לא נשמר עותק לשחזור של השינויים שלא נשמרו', true);
@@ -4943,6 +5032,18 @@ async function backupDiscardedDocument(session: DocumentSession): Promise<void> 
   // השחזור. בלי השורה הזאת הכפתור היה מופיע רק בהפעלה הבאה — כלומר בדיוק לא
   // ברגע שבו המשתמש מחפש את מה שהרגע ויתר עליו.
   discardedBackups.value = sortedBackups(next);
+}
+
+async function forgetDiscarded(slot: number): Promise<void> {
+  await enqueueDiscardedStorageOperation(async () => {
+    const list = normalizeBackups(await loadDiscardBackups());
+    const next = forgetDiscard(list, slot);
+    await saveDiscardBackups(next);
+    await deleteWorkspaceEntry(backupPathFor(slot));
+    discardedBackups.value = sortedBackups(next);
+    // מסך ריק אינו מסך: הכפתור שמוביל לכאן ממילא נעלם כשאין מה להציג.
+    if (next.length === 0) isDiscardedOpen.value = false;
+  });
 }
 
 /**
