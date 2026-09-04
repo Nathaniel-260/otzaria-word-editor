@@ -34,6 +34,10 @@ function fakeDoc(
     }>;
     /** `lists.getState` — מזהה בלוק → isListItem. בלי המפה הפעולה חסרה (מנוע ישן). */
     listState?: Record<string, boolean>;
+    /** `lists.getStyle` — הרמות שההגדרה מחזיקה. בלעדיה הפעולה חסרה (מנוע ישן). */
+    styleLevels?: Array<Record<string, unknown>>;
+    /** `false` = מנוע שכותב `numFmt` לבדו ומשאיר את `lvlText` — הכשל השקט. */
+    writesLvlText?: boolean;
   } = {},
 ) {
   const calls = new Map<string, unknown[]>();
@@ -52,6 +56,26 @@ function fakeDoc(
     impls.getState = (input: unknown) => {
       const nodeId = (input as { target: { nodeId: string } }).target.nodeId;
       return nodeId in listState ? { success: true, isListItem: listState[nodeId] } : { success: false };
+    };
+  }
+
+  /*
+   * `getStyle` שמושפעת מ-`applyStyle`: כך „הסגנון נכתב” נמדד על ההגדרה ולא
+   * מונח מהקבלה — וזו גם הדרך לדמות מנוע שכותב `numFmt` בלי `lvlText`.
+   */
+  if (options.styleLevels) {
+    const levels = options.styleLevels.map((level) => ({ ...level }));
+    impls.getStyle = () => ({ success: true, style: { levels } });
+    const receipt = options.receipts?.applyStyle ?? { success: true };
+    impls.applyStyle = (input: unknown) => {
+      calls.get('applyStyle')?.push(input);
+      for (const want of (input as { style: { levels: Array<Record<string, unknown>> } }).style.levels) {
+        const at = levels.find((level) => level.level === want.level);
+        if (!at) continue;
+        at.numFmt = want.numFmt;
+        if (options.writesLvlText !== false) at.lvlText = want.lvlText;
+      }
+      return receipt;
     };
   }
 
@@ -94,7 +118,7 @@ describe('setListToBullets', () => {
     const outcome = await setListNumberStyle(host, 'bullet');
 
     expect(outcome.ok).toBe(false);
-    expect(calls.get('setLevelNumberStyle')).toHaveLength(0);
+    expect(calls.get('applyStyle')).toHaveLength(0);
   });
 
   it('פסקה שאינה רשימה — סירוב בלי לגעת במסמך, גם בלי createList', async () => {
@@ -121,18 +145,74 @@ describe('setListToBullets', () => {
   });
 });
 
+/** תשע רמות תבליט — מה שההמרה לתבליטים מותירה בהגדרה (נמדד). */
+const BULLET_LEVELS = Array.from({ length: 9 }, (_, level) => ({
+  level,
+  numFmt: 'bullet',
+  lvlText: '•',
+  markerFont: 'Symbol',
+}));
+
+/** הקסקדה של Word ברשימה ממוספרת טרייה (נמדד): אין בה `markerFont`. */
+const NUMBERED_LEVELS = Array.from({ length: 9 }, (_, level) => ({
+  level,
+  numFmt: ['decimal', 'lowerLetter', 'lowerRoman'][level % 3],
+  lvlText: `%${level + 1}.`,
+}));
+
 describe('setListNumberStyle', () => {
-  it('hebrew1 נשלח ברמה 0 — המספור העברי', async () => {
+  it('lists.applyStyle עם numFmt **וגם** lvlText — ולא setLevelNumberStyle', async () => {
     const { host, calls } = fakeDoc();
 
     const outcome = await setListNumberStyle(host, 'hebrew1');
 
     expect(outcome).toEqual({ ok: true });
-    expect(calls.get('setLevelNumberStyle')?.[0]).toEqual({
+    // `numFmt` לבדו הוא הבאג: אחרי המרה לתבליטים ה-`lvlText` נשאר „•”,
+    // והמסך המשיך לצייר תבליט על מסמך שאומר hebrew1.
+    expect(calls.get('applyStyle')?.[0]).toEqual({
       target: { kind: 'block', nodeType: 'listItem', nodeId: 'li1' },
-      level: 0,
-      numberStyle: 'hebrew1',
+      style: { version: 1, levels: [{ level: 0, numFmt: 'hebrew1', lvlText: '%1.', markerFont: '' }] },
     });
+    expect(calls.get('setLevelNumberStyle')).toHaveLength(0);
+  });
+
+  it('אחרי המרה לתבליטים — כל תשע הרמות חוזרות למספור, וגופן ה-Symbol מרוקן', async () => {
+    // המסלול ההפוך: רמה עמוקה שנשארה תבליט אינה נגישה לשום פקד אחר.
+    const { host, calls } = fakeDoc({ styleLevels: BULLET_LEVELS });
+
+    expect(await setListNumberStyle(host, 'decimal')).toEqual({ ok: true });
+    const input = calls.get('applyStyle')?.[0] as {
+      style: { levels: Array<Record<string, unknown>> };
+    };
+    expect(input.style.levels.map((l) => l.level)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8]);
+    for (const level of input.style.levels) {
+      expect(level).toMatchObject({ numFmt: 'decimal', lvlText: `%${(level.level as number) + 1}.`, markerFont: '' });
+      // מה שלא נמסר נשאר כשהיה — ההזחות, ה-start וה-suff אינם נדרסים.
+      expect(Object.keys(level).sort()).toEqual(['level', 'lvlText', 'markerFont', 'numFmt']);
+    }
+  });
+
+  it('ברשימה ממוספרת — רק רמה 0, והקסקדה של רמות 1–8 אינה נדרסת', async () => {
+    const { host, calls } = fakeDoc({ styleLevels: NUMBERED_LEVELS });
+
+    expect(await setListNumberStyle(host, 'hebrew1')).toEqual({ ok: true });
+    const input = calls.get('applyStyle')?.[0] as {
+      style: { levels: Array<Record<string, unknown>> };
+    };
+    expect(input.style.levels).toEqual([{ level: 0, numFmt: 'hebrew1', lvlText: '%1.' }]);
+  });
+
+  it('מנוע שכתב numFmt בלי lvlText — הכשל מדבר, עם שם הפעולה ועם הרמות', async () => {
+    // הכשל השקט של הדיווח: `status.text === null` על מסמך שאומר decimal
+    // ומסך שמצייר „•”. הקבלה מצליחה, ולכן הבדיקה היא על ההגדרה עצמה.
+    const { host } = fakeDoc({ styleLevels: BULLET_LEVELS, writesLvlText: false });
+
+    const outcome = await setListNumberStyle(host, 'decimal');
+
+    expect(outcome).toMatchObject({ ok: false, reason: 'level-not-written' });
+    expect(outcome.ok === false && outcome.message).toBe(
+      'שינוי סגנון המספור נכשל: הסגנון לא נכתב לרמות 0, 1, 2, 3, 4, 5, 6, 7, 8',
+    );
   });
 
   it('ערך מחוץ ל-numFmt של ECMA-376 נעצר — string חופשי בחוזה', async () => {
@@ -141,7 +221,7 @@ describe('setListNumberStyle', () => {
     const outcome = await setListNumberStyle(host, 'zigzag');
 
     expect(outcome).toMatchObject({ ok: false, reason: 'invalid-number-style' });
-    expect(calls.get('setLevelNumberStyle')).toHaveLength(0);
+    expect(calls.get('applyStyle')).toHaveLength(0);
   });
 
   /**
@@ -156,10 +236,9 @@ describe('setListNumberStyle', () => {
     const outcome = await setListNumberStyle(host, 'hebrew2');
 
     expect(outcome).toEqual({ ok: true });
-    expect(calls.get('setLevelNumberStyle')?.[0]).toEqual({
+    expect(calls.get('applyStyle')?.[0]).toEqual({
       target: { kind: 'block', nodeType: 'listItem', nodeId: 'li1' },
-      level: 0,
-      numberStyle: 'hebrew2',
+      style: { version: 1, levels: [{ level: 0, numFmt: 'hebrew2', lvlText: '%1.', markerFont: '' }] },
     });
   });
 
@@ -184,7 +263,7 @@ describe('resolveListItem', () => {
     const outcome = await setListNumberStyle(host, 'hebrew1');
 
     expect(outcome).toMatchObject({ ok: false, reason: 'selection-required' });
-    expect(calls.get('setLevelNumberStyle')).toHaveLength(0);
+    expect(calls.get('applyStyle')).toHaveLength(0);
   });
 
   it('פריט רשימה בתוך תא טבלה: אינו ב-blocks.list, ו-lists.getState מכריע', async () => {
@@ -197,7 +276,7 @@ describe('resolveListItem', () => {
     const outcome = await setListNumberStyle(host, 'hebrew1');
 
     expect(outcome).toEqual({ ok: true });
-    expect(calls.get('setLevelNumberStyle')?.[0]).toMatchObject({
+    expect(calls.get('applyStyle')?.[0]).toMatchObject({
       target: { kind: 'block', nodeType: 'listItem', nodeId: 'li-in-table' },
     });
     expect(blocksList).not.toHaveBeenCalled();
@@ -209,7 +288,7 @@ describe('resolveListItem', () => {
     const { host, calls } = fakeDoc({ selection, blocksList, listState: { h1: true } });
 
     expect(await setListNumberStyle(host, 'hebrew1')).toEqual({ ok: true });
-    expect(calls.get('setLevelNumberStyle')?.[0]).toMatchObject({
+    expect(calls.get('applyStyle')?.[0]).toMatchObject({
       target: { nodeType: 'listItem', nodeId: 'h1' },
     });
   });
@@ -220,7 +299,7 @@ describe('resolveListItem', () => {
     const outcome = await setListNumberStyle(host, 'hebrew1');
 
     expect(outcome).toMatchObject({ ok: false, reason: 'selection-required' });
-    expect(calls.get('setLevelNumberStyle')).toHaveLength(0);
+    expect(calls.get('applyStyle')).toHaveLength(0);
   });
 
   it('מנוע בלי lists.getState: blocks.list בקריאה אחת, ו-paragraphNumbering נחשב פריט רשימה', async () => {
@@ -233,7 +312,7 @@ describe('resolveListItem', () => {
     const { host, calls } = fakeDoc({ selection, blocksList });
 
     expect(await setListNumberStyle(host, 'hebrew1')).toEqual({ ok: true });
-    expect(calls.get('setLevelNumberStyle')?.[0]).toMatchObject({ target: { nodeType: 'listItem', nodeId: 'h-numbered' } });
+    expect(calls.get('applyStyle')?.[0]).toMatchObject({ target: { nodeType: 'listItem', nodeId: 'h-numbered' } });
     expect(blocksList).toHaveBeenCalledTimes(1);
     expect(blocksList).toHaveBeenCalledWith();
   });
@@ -242,14 +321,14 @@ describe('resolveListItem', () => {
     // הבלוק אינו במפה → success:false → blocks.list (הכפיל: li1 הוא listItem).
     const { host: unknownHost, calls: unknownCalls } = fakeDoc({ listState: {} });
     expect(await setListNumberStyle(unknownHost, 'hebrew1')).toEqual({ ok: true });
-    expect(unknownCalls.get('setLevelNumberStyle')).toHaveLength(1);
+    expect(unknownCalls.get('applyStyle')).toHaveLength(1);
 
     const { host, calls, doc } = fakeDoc({ listState: {} });
     (doc as { lists: { getState: unknown } }).lists.getState = () => {
       throw new Error('boom');
     };
     expect(await setListNumberStyle(host, 'hebrew1')).toEqual({ ok: true });
-    expect(calls.get('setLevelNumberStyle')).toHaveLength(1);
+    expect(calls.get('applyStyle')).toHaveLength(1);
   });
 });
 
@@ -283,10 +362,9 @@ describe('setListNumberStyle — פסקה שאינה רשימה', () => {
 
     expect(outcome).toEqual({ ok: true });
     expect(createList).toHaveBeenCalledTimes(1);
-    expect(calls.get('setLevelNumberStyle')?.[0]).toEqual({
+    expect(calls.get('applyStyle')?.[0]).toEqual({
       target: { kind: 'block', nodeType: 'listItem', nodeId: 'li1' },
-      level: 0,
-      numberStyle: 'hebrew1',
+      style: { version: 1, levels: [{ level: 0, numFmt: 'hebrew1', lvlText: '%1.', markerFont: '' }] },
     });
   });
 
@@ -303,7 +381,7 @@ describe('setListNumberStyle — פסקה שאינה רשימה', () => {
       message: 'שינוי סגנון המספור נכשל: המנוע אינו מוכן',
       reason: 'not-ready',
     });
-    expect(calls.get('setLevelNumberStyle')).toEqual([]);
+    expect(calls.get('applyStyle')).toEqual([]);
   });
 
   it('בלי `createList` — הסירוב המפורש, כמו קודם', async () => {
@@ -312,7 +390,7 @@ describe('setListNumberStyle — פסקה שאינה רשימה', () => {
     const outcome = await setListNumberStyle(host, 'hebrew1');
 
     expect(outcome).toMatchObject({ ok: false, reason: 'selection-required' });
-    expect(calls.get('setLevelNumberStyle')).toEqual([]);
+    expect(calls.get('applyStyle')).toEqual([]);
   });
 
   it('כשהסמן כבר ברשימה — `createList` אינה נקראת', async () => {
@@ -322,7 +400,7 @@ describe('setListNumberStyle — פסקה שאינה רשימה', () => {
     await setListNumberStyle(host, 'hebrew2', { createList });
 
     expect(createList).not.toHaveBeenCalled();
-    expect(calls.get('setLevelNumberStyle')).toHaveLength(1);
+    expect(calls.get('applyStyle')).toHaveLength(1);
   });
 
   it('הכרעה חיובית „אינה רשימה" דרך lists.getState — הרשימה נוצרת והסגנון מוחל', async () => {
@@ -337,10 +415,9 @@ describe('setListNumberStyle — פסקה שאינה רשימה', () => {
 
     expect(await setListNumberStyle(host, 'hebrew1', { createList })).toEqual({ ok: true });
     expect(createList).toHaveBeenCalledTimes(1);
-    expect(calls.get('setLevelNumberStyle')?.[0]).toEqual({
+    expect(calls.get('applyStyle')?.[0]).toEqual({
       target: { kind: 'block', nodeType: 'listItem', nodeId: 'li1' },
-      level: 0,
-      numberStyle: 'hebrew1',
+      style: { version: 1, levels: [{ level: 0, numFmt: 'hebrew1', lvlText: '%1.', markerFont: '' }] },
     });
   });
 });
@@ -368,7 +445,7 @@ describe('setListNumberStyle — זיהוי שלא הכריע אינו מצדי�
 
     expect(createList).not.toHaveBeenCalled();
     expect(outcome).toMatchObject({ ok: false, reason: 'selection-required' });
-    expect(calls.get('setLevelNumberStyle')).toEqual([]);
+    expect(calls.get('applyStyle')).toEqual([]);
   });
 
   it('`selection.current` זורק — `createList` אינה נקראת', async () => {
@@ -382,7 +459,7 @@ describe('setListNumberStyle — זיהוי שלא הכריע אינו מצדי�
 
     expect(createList).not.toHaveBeenCalled();
     expect(outcome).toMatchObject({ ok: false, reason: 'selection-required' });
-    expect(calls.get('setLevelNumberStyle')).toEqual([]);
+    expect(calls.get('applyStyle')).toEqual([]);
   });
 
   it('בחירה בלי blockId — `createList` אינה נקראת', async () => {
@@ -393,7 +470,7 @@ describe('setListNumberStyle — זיהוי שלא הכריע אינו מצדי�
 
     expect(createList).not.toHaveBeenCalled();
     expect(outcome).toMatchObject({ ok: false, reason: 'selection-required' });
-    expect(calls.get('setLevelNumberStyle')).toEqual([]);
+    expect(calls.get('applyStyle')).toEqual([]);
   });
 
   it('`success:true` בלי `isListItem` אינו הכרעה — ואינו מצדיק טוגל', async () => {
@@ -406,7 +483,7 @@ describe('setListNumberStyle — זיהוי שלא הכריע אינו מצדי�
 
     expect(createList).not.toHaveBeenCalled();
     expect(outcome).toMatchObject({ ok: false, reason: 'selection-required' });
-    expect(calls.get('setLevelNumberStyle')).toEqual([]);
+    expect(calls.get('applyStyle')).toEqual([]);
   });
 });
 

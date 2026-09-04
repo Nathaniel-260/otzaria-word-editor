@@ -4,10 +4,10 @@
  *
  * ## ממצא הדגל שנמדד: `hebrew1` עובד
  *
- * `ListsSetLevelNumberStyleInput.numberStyle` הוא **string חופשי** ולא union
- * (שונה מ-`sections.setPageNumbering.format`, שם ה-union נאכף בזמן ריצה).
- * נמדד: `numberStyle:'hebrew1'` על רשימה קיימת כתב
- * `<w:numFmt w:val="hebrew1"/>` ב-numbering.xml — מספור א׳ ב׳ ג׳ אמיתי.
+ * `numFmt` בחוזה הוא **string חופשי** ולא union (שונה מ-
+ * `sections.setPageNumbering.format`, שם ה-union נאכף בזמן ריצה). נמדד:
+ * `numFmt:'hebrew1'` על רשימה קיימת כתב `<w:numFmt w:val="hebrew1"/>`
+ * ב-numbering.xml — מספור א׳ ב׳ ג׳ אמיתי.
  * ולכן המודול מציע אותו, וחוסם ערכים שאינם ברשימת `numFmt` של ECMA-376.
  *
  * ## שאר מה שנמדד
@@ -84,7 +84,9 @@ interface ListsApiShape {
     getState?: (input: {
       target: { kind: 'block'; nodeType: 'paragraph' | 'listItem'; nodeId: string };
     }) => MaybePromise<{ success?: boolean; isListItem?: boolean } | undefined>;
-    setLevelNumberStyle?: (input: Record<string, unknown>) => MaybePromise<DocReceipt>;
+    getStyle?: (input: {
+      target: { kind: 'block'; nodeType: 'listItem'; nodeId: string };
+    }) => MaybePromise<{ success?: boolean; style?: { levels?: ListLevelStyleLike[] } } | undefined>;
     applyStyle?: (input: Record<string, unknown>) => MaybePromise<DocReceipt>;
     restartAt?: (input: Record<string, unknown>) => MaybePromise<DocReceipt>;
     continuePrevious?: (input: Record<string, unknown>) => MaybePromise<DocReceipt>;
@@ -94,6 +96,14 @@ interface ListsApiShape {
 
 export interface ListsHost {
   activeEditor?: { doc?: ListsApiShape | null } | null;
+}
+
+/** רמה אחת כפי ש-`lists.getStyle` מחזירה אותה — רק מה שנקרא כאן. */
+interface ListLevelStyleLike {
+  level?: number;
+  numFmt?: string;
+  lvlText?: string;
+  markerFont?: string;
 }
 
 export type ListsTarget = SuperDoc | ListsHost | null | undefined;
@@ -252,9 +262,74 @@ export interface SetNumberStyleOptions {
   createList?: () => Promise<CommandOutcome>;
 }
 
+/** ה-`levels` שנכתבים ל-`applyStyle`: רק שדות הסמן, ולא ההזחות. */
+interface PlannedLevel {
+  level: number;
+  numFmt: string;
+  lvlText: string;
+  markerFont?: string;
+}
+
+/** תשע הרמות של הגדרת רשימה ב-ECMA-376. */
+const LEVEL_COUNT = 9;
+
 /**
- * מגדירה את סגנון המספור של רמה 0 ברשימה שבה הסמן. `hebrew1` הוא
- * המספור העברי (א׳ ב׳ ג׳) — נמדד שנכתב ל-numbering.xml.
+ * הרמות שסגנון המספור נכתב אליהן: רמה 0 היא הבקשה, ורמה עמוקה רק כשהיא
+ * תבליט — שם אין פקד אחר שיגיע אליה, וקסקדה ממוספרת שהמשתמש קבע אינה נדרסת.
+ */
+function plannedLevels(numberStyle: string, current: ListLevelStyleLike[] | null): PlannedLevel[] {
+  const at = (level: number) => current?.find((l) => l?.level === level);
+  const levels: PlannedLevel[] = [];
+  for (let level = 0; level < LEVEL_COUNT; level += 1) {
+    if (level > 0 && at(level)?.numFmt !== 'bullet') continue;
+    levels.push({
+      level,
+      numFmt: numberStyle,
+      // `%N.` ולא `%1.`: הסמן מפנה למונה של הרמה שלו.
+      lvlText: `%${level + 1}.`,
+      // `''` הוא הריקון היחיד שהחוזה מקבל — `null` נדחה („must be a string”).
+      ...(current === null || at(level)?.markerFont ? { markerFont: '' } : {}),
+    });
+  }
+  return levels;
+}
+
+/** `lists.getStyle` כמדידה ולא כתלות: גרסה בלעדיה מחזירה `null`. */
+async function readLevels(
+  lists: ListsApiShape['lists'],
+  target: ListItemAddress,
+): Promise<ListLevelStyleLike[] | null> {
+  const getStyle = lists?.getStyle;
+  if (typeof getStyle !== 'function') return null;
+  try {
+    const result = await getStyle({ target });
+    const levels = result?.success === true ? result.style?.levels : undefined;
+    return Array.isArray(levels) ? levels : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * הרמות שנכתבו וחזרו אחרות. `numFmt` בלי `lvlText` הוא הכשל השקט שהיה כאן:
+ * המסמך אמר `decimal`, המסך המשיך לצייר „•”, ופס המצב שתק.
+ */
+function unwrittenLevels(wanted: PlannedLevel[], after: ListLevelStyleLike[]): number[] {
+  return wanted
+    .filter((want) => {
+      const got = after.find((l) => l?.level === want.level);
+      return got !== undefined && (got.numFmt !== want.numFmt || got.lvlText !== want.lvlText);
+    })
+    .map((want) => want.level);
+}
+
+/**
+ * מגדירה את סגנון המספור ברשימה שבה הסמן. `hebrew1` הוא המספור העברי
+ * (א׳ ב׳ ג׳) — נמדד שנכתב ל-numbering.xml.
+ *
+ * `applyStyle` ולא `setLevelNumberStyle`: זה כותב `numFmt` לבדו, ואחרי המרה
+ * לתבליטים ה-`lvlText` נשאר „•” — סגנון שנבחר, מסמך שאומר `decimal`, ומסך
+ * שממשיך לצייר תבליט. שניהם sequence-local בחוזה, ולכן הבידוד נשמר.
  *
  * על פסקה שאינה רשימה: אם נמסרה `createList`, קודם יוצרים את הרשימה ואז
  * מחילים את הסגנון — בחירת סגנון היא בקשה למספר, לא שאלה על רשימה קיימת.
@@ -287,16 +362,31 @@ export async function setListNumberStyle(
   }
   if (!item) return notInList(failedAction);
 
-  const setLevelNumberStyle = docOf(host)?.lists?.setLevelNumberStyle;
-  if (typeof setLevelNumberStyle !== 'function') return unsupported(failedAction);
+  const lists = docOf(host)?.lists;
+  const applyStyle = lists?.applyStyle;
+  if (typeof applyStyle !== 'function') return unsupported(failedAction);
 
-  return call(failedAction, () => setLevelNumberStyle({ target: item, level: 0, numberStyle }));
+  const levels = plannedLevels(numberStyle, await readLevels(lists, item));
+  const applied = await call(failedAction, () => applyStyle({ target: item, style: { version: 1, levels } }));
+  if (!applied.ok) return applied;
+
+  // הכתיבה נבדקת אחריה: „הצליח” בקבלה אינו „הסמן התחלף”.
+  const after = await readLevels(lists, item);
+  const unwritten = after ? unwrittenLevels(levels, after) : [];
+  if (unwritten.length > 0) {
+    return {
+      ok: false,
+      message: `${failedAction}: הסגנון לא נכתב לרמות ${unwritten.join(', ')}`,
+      reason: 'level-not-written',
+    };
+  }
+  return { ok: true };
 }
 
 /** רק שדות הסמן, ובכל תשע הרמות — שדה שאינו נמסר נשאר כשהיה, כולל ההזחות. */
 const BULLET_STYLE = {
   version: 1,
-  levels: Array.from({ length: 9 }, (_, level) => ({
+  levels: Array.from({ length: LEVEL_COUNT }, (_, level) => ({
     level,
     numFmt: 'bullet',
     lvlText: '•',
