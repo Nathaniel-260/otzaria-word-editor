@@ -555,11 +555,27 @@
     return { has: true, supported: s.supported, enabled: s.enabled, active: s.active, value: s.value, reason: s.reason };
   };
 
-  /** שורה ראשונה של טקסט במסמך — יעד ללחיצה שממקמת סמן. */
+  var LINE_SEL = '.superdoc-line, .superdoc-fragment';
+
+  /**
+   * שורה ראשונה של טקסט במסמך — יעד ללחיצה שממקמת סמן.
+   *
+   * **האינדקס כאן אינו אינדקס פסקה**: `.superdoc-line` מקונן בתוך
+   * `.superdoc-fragment`, שני האלמנטים נענים לסלקטור, ולכן כל פסקה תופסת שני
+   * אינדקסים — `lineRect(1)` הוא עוד הפסקה הראשונה. לכתובת חד-משמעית יש
+   * `Q.paraRect` / `Q.paraRectByText` שלהלן.
+   */
   Q.lineRect = function (index) {
-    var lines = document.querySelectorAll('.superdoc-line, .superdoc-fragment');
+    var lines = document.querySelectorAll(LINE_SEL);
     var el = lines[index || 0];
-    if (!el) return null;
+    return el ? rectFor(el) : null;
+  };
+
+  Q.lineCount = function () {
+    return document.querySelectorAll(LINE_SEL).length;
+  };
+
+  function rectFor(el) {
     var r = el.getBoundingClientRect();
     return {
       x: Math.round(r.x + Math.min(20, r.width / 2)),
@@ -568,10 +584,97 @@
       w: Math.round(r.width),
       h: Math.round(r.height),
     };
+  }
+
+  /**
+   * פסקה אחת לכל כתובת.
+   *
+   * `.superdoc-fragment` הוא היחיד שנושא את מזהה הבלוק
+   * (`data-source-node-id`), ולכן הוא הכתובת; `.superdoc-line` הוא **שורה
+   * חזותית** — פסקה שנגלשת מציירת שלוש, ואינדקס עליה אינו אינדקס פסקה.
+   * פסקה שנחצית בין עמודים מציירת שני fragment עם אותו מזהה, והראשון נשמר.
+   */
+  function paraFragments() {
+    var seen = {};
+    var out = [];
+    Array.prototype.forEach.call(document.querySelectorAll('.superdoc-fragment[data-source-node-id]'), function (el) {
+      var id = el.getAttribute('data-source-node-id');
+      if (seen[id]) return;
+      seen[id] = true;
+      out.push(el);
+    });
+    return out;
+  }
+
+  Q.paraCount = function () {
+    return paraFragments().length;
   };
 
-  Q.lineCount = function () {
-    return document.querySelectorAll('.superdoc-line, .superdoc-fragment').length;
+  function paraRectOf(el, index) {
+    // ה-fragment עצמו מחזיר מלבן שלילי אחרי reflow (נמדד: x=-495); השורה
+    // החזותית שבתוכו היא הגאומטריה שאפשר ללחוץ עליה.
+    var box = el.querySelector('.superdoc-line') || el;
+    var r = box.getBoundingClientRect();
+    if (!r.width || !r.height) return null;
+    return {
+      // בימין מתחיל הטקסט העברי; 20px מהשמאל נופלים בשורה קצרה על אזור ריק.
+      x: Math.round(r.x + r.width - Math.min(14, r.width / 2)),
+      y: Math.round(r.y + r.height / 2),
+      left: Math.round(r.x + 6),
+      right: Math.round(r.x + r.width - 6),
+      w: Math.round(r.width),
+      h: Math.round(r.height),
+      index: index,
+      nodeId: el.getAttribute('data-source-node-id'),
+      text: (el.textContent || '').trim().slice(0, 40),
+    };
+  }
+
+  /** מלבן ללחיצה על הפסקה ה-n — אינדקס פסקה אמיתי, אחד לפסקה. */
+  Q.paraRect = function (index) {
+    var paras = paraFragments();
+    var i = index || 0;
+    return paras[i] ? paraRectOf(paras[i], i) : null;
+  };
+
+  /** אותו מלבן, לפי הטקסט שבפסקה — כתובת שאינה תלויה בספירת אינדקסים. */
+  Q.paraRectByText = function (text) {
+    var paras = paraFragments();
+    var i;
+    for (i = 0; i < paras.length; i++) {
+      if ((paras[i].textContent || '').trim() === text) return paraRectOf(paras[i], i);
+    }
+    for (i = 0; i < paras.length; i++) {
+      if ((paras[i].textContent || '').indexOf(text) >= 0) return paraRectOf(paras[i], i);
+    }
+    return null;
+  };
+
+  /**
+   * באיזו פסקה הסמן יושב **לפי המנוע** — ההוכחה שהלחיצה נחתה במקום שהתכוונו
+   * אליו. בלעדיה נחיתה על פסקה שכנה עוברת בשקט.
+   */
+  Q.caretBlock = function () {
+    var d = Q.doc();
+    if (!d) return Promise.resolve({ error: 'no-doc' });
+    // קריאה ל-Document API שנתקעת מקפיאה את `awaitPromise` של CDP לנצח.
+    var bell = new Promise(function (resolve) {
+      setTimeout(function () { resolve('timeout'); }, 5000);
+    });
+    return Promise.race([Promise.all([d.selection.current(), d.blocks.list()]), bell]).then(function (out) {
+      if (out === 'timeout') return { error: 'timeout' };
+      var sel = out[0];
+      var blocks = (out[1] && out[1].blocks) || [];
+      var id = (((sel && sel.target && sel.target.segments) || []).find(function (s) { return s.blockId; }) || {}).blockId;
+      return {
+        blockId: id || null,
+        index: id ? blocks.findIndex(function (b) { return b.nodeId === id; }) : -1,
+        count: blocks.length,
+        empty: sel ? sel.empty : undefined,
+      };
+    }, function (e) {
+      return { error: String(e && e.message) };
+    });
   };
 
   /** הטקסט שהמנוע צייר על המסך. גס, אבל מספיק כדי לראות שמשהו נכנס. */

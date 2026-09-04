@@ -303,13 +303,46 @@ function makeApi(cdp) {
       await sleep(300);
     },
 
-    /** ממקמת סמן בשורת טקסט. בלי זה אין בחירה, וכל פקד מדווח „אין סמן”. */
+    /**
+     * ממקמת סמן בשורת טקסט. בלי זה אין בחירה, וכל פקד מדווח „אין סמן”.
+     *
+     * `lineIndex` **אינו אינדקס פסקה** — ראו `Q.lineRect`. למי שמתכוון לפסקה
+     * מסוימת יש `caretPara`.
+     */
     async caret(lineIndex = 0) {
       const rect = JSON.parse(await js(`JSON.stringify(window.__qa.lineRect(${lineIndex}))`));
       if (!rect) throw new Error('אין שורת טקסט במסמך — אין לאן למקם סמן');
       await clickAt(rect.x, rect.y);
       await sleep(600);
       return rect;
+    },
+
+    paraCount: () => js('window.__qa.paraCount()').then(Number),
+    caretBlock: () => call('caretBlock'),
+
+    /**
+     * ממקמת סמן בפסקה — לפי אינדקס פסקה או לפי הטקסט שבה — **ומאמתת מול
+     * המנוע** שהסמן אכן שם, כי לחיצה שנחתה על השכנה עוברת אחרת בשקט.
+     */
+    async caretPara(target, { attempts = 4, after = 600 } = {}) {
+      const call =
+        typeof target === 'number'
+          ? `window.__qa.paraRect(${target})`
+          : `window.__qa.paraRectByText(${JSON.stringify(target)})`;
+      let landed = null;
+      for (let attempt = 0; attempt < attempts; attempt += 1) {
+        // מחדש בכל סבב: reflow מזיז את הגאומטריה בין הלחיצות.
+        const rect = JSON.parse(await js(`JSON.stringify(${call})`));
+        if (!rect) throw new Error(`אין פסקה ${JSON.stringify(target)} במסמך`);
+        await clickAt(rect.x, rect.y);
+        await sleep(after);
+        landed = await this.caretBlock();
+        if (landed && landed.blockId === rect.nodeId) return { ...rect, block: landed };
+        await sleep(400);
+      }
+      throw new Error(
+        `הסמן לא הגיע לפסקה ${JSON.stringify(target)} — נחת ב-${JSON.stringify(landed)}`,
+      );
     },
 
     /** בוחרת את השורה כולה: לחיצה בתחילתה וגרירה לסופה. */
