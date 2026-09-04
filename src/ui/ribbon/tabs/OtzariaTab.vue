@@ -149,17 +149,9 @@ defineEmits<{
 
 const superdoc = inject(ACTIVE_SUPERDOC, shallowRef<SuperDoc | null>(null));
 
-/**
- * מערכת המאקרו של המסמך הפתוח. `null` בלי מסמך — ואז הכפתורים מנוטרלים,
- * מאותו טעם כמו `canSearch`: כפתור שאינו יכול לעבוד נראה כך לפני הלחיצה.
- */
+/** מצב המאקרו של המסמך הפתוח; הוא אינו תלוי ב-SDK של אוצריא. */
 const macros = inject(ACTIVE_MACROS, shallowRef<MacrosHandle | null>(null));
 const macrosAvailable = computed(() => macros.value !== null);
-
-/**
- * מצב ההקלטה, מתוך ה-ref שה-handle חושף: הכפתור צריך להתחלף ל„עצור הקלטה”
- * גם כשההקלטה התחילה מהמקלדת (Ctrl+Alt+R), לא רק מלחיצה עליו.
- */
 const isRecording = computed(() => macros.value?.recording.value ?? false);
 
 function macrosTooltip(available: string): string {

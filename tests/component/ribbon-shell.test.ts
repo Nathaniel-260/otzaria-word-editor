@@ -18,7 +18,18 @@ import { autoUnmount, buttonByTip, findButtonByTip, mountUi, settle } from './ha
 
 autoUnmount();
 
-const TAB_LABELS = ['קובץ', 'בית', 'הוספה', 'פריסה', 'הפניות', 'סקירה', 'תצוגה', 'שולחן העורך', '✦ אוצריא'];
+const TAB_LABELS = [
+  'קובץ',
+  'בית',
+  'הוספה',
+  'פריסה',
+  'הפניות',
+  'סקירה',
+  'תצוגה',
+  'מפתחים',
+  'שולחן העורך',
+  '✦ אוצריא',
+];
 
 /**
  * `hasDocument: true` כברירת מחדל: פקדי „קובץ” הם פעולות מעטפת, וברירת המחדל
@@ -47,7 +58,7 @@ function tabByLabel(harness: Awaited<ReturnType<typeof mountRibbon>>, label: str
 }
 
 describe('סרגל הלשוניות', () => {
-  it('שמונה לשוניות, ו„בית” פעילה בפתיחה', async () => {
+  it('כל הלשוניות בסדרן, ו„בית” פעילה בפתיחה', async () => {
     const harness = await mountRibbon();
     const tabs = harness.wrapper.findAll('[role="tab"]');
 

@@ -467,6 +467,40 @@ describe('uploadBytes — אבחון כשל רשת', () => {
     ).toHaveLength(1);
   });
 
+  /**
+   * הבדיקה נשמרת בין כשלים — אבל ה-`יעד` לא. לכל שמירה יש `uploadUrl` משלה
+   * (write-token אחר, ולעיתים מסמך אחר), וכששמרנו את מחרוזת האבחון כולה
+   * הכשל השני הציג בשורת המצב את היעד של הראשון. מכיוון שצילום המסך של
+   * שורת המצב הוא הדיווח בפועל, זה נראה כמו כתיבה ל-token ישן שלא קרתה.
+   */
+  it('היעד הוא של הכשל הנוכחי ולא של הראשון, אף שה-probe נשמר', async () => {
+    vi.resetModules();
+    const { uploadBytes } = await import('../../src/host/files');
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).endsWith('/f/probe')) return { status: 404 } as Response;
+      throw new TypeError('Failed to fetch');
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const put = (uploadUrl: string): Promise<Error> =>
+      uploadBytes(uploadUrl, new Blob(['x'])).then(
+        () => new Error('לא נזרק'),
+        (error: unknown) => error as Error,
+      );
+
+    const first = await put('http://127.0.0.1:1/w/token-ראשון');
+    const second = await put('http://127.0.0.1:1/w/token-שני');
+
+    expect(first.message).toContain('יעד=http://127.0.0.1:1/w/token-ראשון');
+    expect(second.message).toContain('יעד=http://127.0.0.1:1/w/token-שני');
+    expect(second.message).not.toContain('token-ראשון');
+    // הממצא עצמו עדיין נשמר: הכשל השני לא הריץ בדיקה חדשה.
+    expect(
+      fetchMock.mock.calls.filter(([input]) => String(input).endsWith('/f/probe')),
+    ).toHaveLength(1);
+  });
+
   it('שרת שאינו נגיש — הממצא אומר זאת, בלי לתלות את הכשל בגרסת אוצריא', async () => {
     vi.resetModules();
     const { uploadBytes } = await import('../../src/host/files');

@@ -91,6 +91,12 @@
         v-else-if="currentTabId === 'view'"
         @toggle-focus-mode="$emit('toggle-focus-mode')"
       />
+      <DeveloperTab
+        v-else-if="currentTabId === 'developer'"
+        @manage-macros="$emit('manage-macros')"
+        @macro-record="$emit('macro-record')"
+        @macro-play="$emit('macro-play')"
+      />
       <ShulchanTab v-else-if="currentTabId === 'shulchan'" />
       <OtzariaTab
         v-else-if="currentTabId === 'otzaria'"
@@ -99,9 +105,6 @@
         @search-otzaria="$emit('search-otzaria')"
         @open-library="$emit('open-library')"
         @export-otzaria="$emit('export-otzaria')"
-        @manage-macros="$emit('manage-macros')"
-        @macro-record="$emit('macro-record')"
-        @macro-play="$emit('macro-play')"
         @toggle-book-completion="$emit('toggle-book-completion')"
       />
     </div>
@@ -120,6 +123,7 @@ import LayoutTab from './tabs/LayoutTab.vue';
 import ReferencesTab from './tabs/ReferencesTab.vue';
 import ReviewTab from './tabs/ReviewTab.vue';
 import ViewTab from './tabs/ViewTab.vue';
+import DeveloperTab from './tabs/DeveloperTab.vue';
 import ShulchanTab from './tabs/ShulchanTab.vue';
 import OtzariaTab from './tabs/OtzariaTab.vue';
 
@@ -137,6 +141,9 @@ const TABS: TabDefinition[] = [
   { id: 'references', label: 'הפניות' },
   { id: 'review', label: 'סקירה' },
   { id: 'view', label: 'תצוגה' },
+  // „מפתחים” יושבת אחרי „תצוגה”, במקום שבו Word מציב אותה, ומחזיקה את המאקרו
+  // שישבו עד עכשיו ב„אוצריא” — ראו DeveloperTab.vue.
+  { id: 'developer', label: 'מפתחים' },
   { id: 'shulchan', label: 'שולחן העורך' },
   { id: 'otzaria', label: '✦ אוצריא', className: 'otzaria-tab' },
 ];

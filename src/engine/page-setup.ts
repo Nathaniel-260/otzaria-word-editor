@@ -192,6 +192,18 @@ export interface PaperSize {
 export const PAPER_SIZES: readonly PaperSize[] = [
   { id: 'a4', label: 'A4', hint: '21 × 29.7 ס"מ', widthTwips: 11906, heightTwips: 16838, code: '9' },
   { id: 'letter', label: 'Letter', hint: '21.6 × 27.9 ס"מ', widthTwips: 12240, heightTwips: 15840, code: '1' },
+  /**
+   * A5 — הגודל של קונטרס וחוברת, ולכן הוא כאן ולא ברשימת „גדלים נוספים”
+   * דמיונית: זהו הפורמט השני בשכיחותו בספרי קודש אחרי A4, והוא מה שתבנית
+   * „קונטרס A5” (engine/templates.ts) מבקשת. בלעדיו התבנית הייתה מייצרת A4
+   * ומודיעה על כך — כלומר כרטיס שמצייר גיליון קטן ומסמך שיוצא גדול.
+   *
+   * המידות: 148 × 210 מ״מ בתקן ISO. ‏148 מ״מ = ‎148/25.4×1440 = 8390.55 →
+   * 8391 twips, ו-210 מ״מ = 11906 twips. שהגובה של A5 שווה בדיוק לרוחב של A4
+   * אינו צירוף מקרים אלא ההגדרה של הסדרה: כל גודל הוא חצייה של קודמו לרוחב.
+   * `code` הוא `w:code` של Word ל-A5 (‏`dmPaperSize` = 11).
+   */
+  { id: 'a5', label: 'A5', hint: '14.8 × 21 ס"מ', widthTwips: 8391, heightTwips: 11906, code: '11' },
 ];
 
 export type PageOrientation = 'portrait' | 'landscape';

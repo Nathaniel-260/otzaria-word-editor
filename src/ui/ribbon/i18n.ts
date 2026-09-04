@@ -74,6 +74,7 @@ const EN: Readonly<Record<string, string>> = {
   'הפניות': 'References',
   'סקירה': 'Review',
   'תצוגה': 'View',
+  'מפתחים': 'Developer',
   '✦ אוצריא': '✦ Otzaria',
   'לשוניות הרצועה': 'Ribbon tabs',
   'הצג את הרצועה': 'Show the ribbon',
@@ -304,6 +305,7 @@ const EN: Readonly<Record<string, string>> = {
   'בחירת גודל נייר (A4, Letter)': 'Choose paper size (A4, Letter)',
   '21 × 29.7 ס"מ': '21 × 29.7 cm',
   '21.6 × 27.9 ס"מ': '21.6 × 27.9 cm',
+  '14.8 × 21 ס"מ': '14.8 × 21 cm',
   'פיצול הטקסט לשתי עמודות או יותר': 'Split the text into two or more columns',
   'אחת': 'One',
   'שתיים': 'Two',
@@ -505,6 +507,15 @@ const EN: Readonly<Record<string, string>> = {
   'השלמה מהספר': 'Complete from Book',
   'בזמן הקלדה, אם הטקסט תואם את הספר הפתוח בקורא — Tab משלים 5 מילים מהמקור':
     'While typing, if the text matches the book open in the reader — Tab completes five words from the source',
+  'יש לפתוח מסמך תחילה': 'Open a document first',
+  'סגנון תורני': 'Torah Style',
+  'חידוש': 'Chiddush',
+  'קושיא': 'Kushya',
+  'תירוץ': 'Terutz',
+  'סגנונות תורניים יתווספו בשלב הבא — אין למנוע דרך ציבורית ליצור סגנון פסקה חדש במסמך':
+    'Torah styles will be added in a later phase — the engine has no public way to create a new paragraph style in the document',
+
+  // ── לשונית „מפתחים” ────────────────────────────────────────────────
   'מאקרו': 'Macros',
   'ניהול מאקרו': 'Manage Macros',
   'רשימת המאקרו, קטעי הטקסט והסקריפטים — הרצה, עריכה ושיתוף':
@@ -516,13 +527,6 @@ const EN: Readonly<Record<string, string>> = {
   'נגן אחרון': 'Play Last',
   'מריץ את המאקרו האחרון שהוקלט, מהמקום שבו הסמן עומד':
     'Runs the last recorded macro from wherever the cursor stands',
-  'יש לפתוח מסמך תחילה': 'Open a document first',
-  'סגנון תורני': 'Torah Style',
-  'חידוש': 'Chiddush',
-  'קושיא': 'Kushya',
-  'תירוץ': 'Terutz',
-  'סגנונות תורניים יתווספו בשלב הבא — אין למנוע דרך ציבורית ליצור סגנון פסקה חדש במסמך':
-    'Torah styles will be added in a later phase — the engine has no public way to create a new paragraph style in the document',
 
   // ── בורר הצבעים (ColorPickerPopover) ───────────────────────────────
   'בחירת צבע': 'Pick a color',

@@ -228,8 +228,7 @@ describe('MEASURED_CANDIDATES', () => {
   });
 
   it('כל מועמד נמדד — הוויתור על החוט אינו מדלג על אף שם', async () => {
-    // הרשימה ארוכה מ-`YIELD_EVERY`, וזה המסלול שבו הוויתור קורה. מה שנבדק
-    // הוא שכל שם עבר בדיקה: `available` נספר, ולא רק שהתוצאה שלמה.
+    // מה שנבדק הוא שכל שם עבר בדיקה: `available` נספר, ולא רק שהתוצאה שלמה.
     const asked: string[] = [];
     const snapshot = await loadInstalledFonts({
       call: hostReturning(null),
@@ -241,6 +240,66 @@ describe('MEASURED_CANDIDATES', () => {
     });
     expect(asked).toEqual(MEASURED_CANDIDATES.map((font) => font.name));
     expect(snapshot.families.length).toBe(MEASURED_CANDIDATES.length);
+  });
+});
+
+describe('keepAvailable — הוויתור על החוט', () => {
+  /**
+   * הוויתור הוא על **תקציב זמן**, ולא על מספר שמות (`YIELD_BUDGET_MS`).
+   *
+   * זה מה שההבדל שווה: מדידה של משפחה מותקנת עולה ~15ms ושל שם שאינו קיים
+   * כמעט כלום, ולכן מספר שמות קבוע אינו מייצג זמן קבוע. נמדד על 287 משפחות
+   * מהמארח: ויתור כל 40 שמות נתן מקטע ארוך של 1357ms, וויתור כל 8ms נתן 68ms.
+   *
+   * העבודה האיטית נשרפת בזמן **אמיתי** ולא בשעון מוזרק: ריגול גלובלי על
+   * `performance.now` הוא בדיוק השעון שבו vitest מודד את עצמו, ומדידת המשך של
+   * הבדיקה יצאה ממנו מנופחת פי עשר. מה שנצפה הוא **חזרה לתור המאקרו**: משימה
+   * שמתזמנת את עצמה מחדש יכולה לרוץ רק אם הלולאה ויתרה, ולכן המונה שלה הוא
+   * עדות ישירה לוויתור — ולא לזמן שעבר.
+   */
+  it('הוויתור קורה כשהעבודה איטית, ואינו קורה כשהיא מהירה', async () => {
+    const burn = (ms: number) => {
+      const until = performance.now() + ms;
+      while (performance.now() < until) {
+        /* עבודה סינכרונית, כמו מדידת גופן */
+      }
+    };
+
+    // רשימה מהמארח ולא `MEASURED_CANDIDATES`: 24 שמות מספיקים כדי להראות את
+    // ההכרעה, ו-79 היו משלמים על כך 200ms של שרפה לחינם בכל ריצת בדיקות.
+    const families = Array.from({ length: 24 }, (_, i) => ({ name: `Font ${i}` }));
+
+    const run = async (msPerName: number) => {
+      let interleaved = 0;
+      let done = false;
+      const pump = () => {
+        if (done) return;
+        interleaved += 1;
+        setTimeout(pump, 0);
+      };
+      setTimeout(pump, 0);
+
+      try {
+        await loadInstalledFonts({
+          call: hostReturning({ families, platform: 'windows' }),
+          available: () => {
+            if (msPerName > 0) burn(msPerName);
+            return true;
+          },
+          canMeasure: () => true,
+          // `document.fonts.ready` האמיתי היה מוסיף מאקרו-טיק שאינו שלנו.
+          fontsReady: () => Promise.resolve(),
+        });
+      } finally {
+        done = true;
+      }
+      return interleaved;
+    };
+
+    // 3ms לשם, תקציב 8 → ויתור כל שלושה שמות בערך, כלומר ~7 על 24.
+    expect(await run(3)).toBeGreaterThan(3);
+    // מדידה מיידית — אין שום סיבה לוותר, ולכן הלולאה רצה במקטע אחד.
+    expect(await run(0)).toBe(0);
   });
 });
 

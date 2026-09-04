@@ -1,12 +1,24 @@
 /**
  * קטלוג הפקודות והאפשרויות עבור מנגנון ה-Tell Me (חיפוש פקודות בסגנון Word).
  *
+ * ## התוויות של הקיצורים
+ *
+ * ארבע רשומות כאן הבטיחו למשתמש צירוף שאין לו מאזין: „הגדלת גופן” ו„הקטנת
+ * גופן” הראו `Ctrl+Shift+.` ו-`Ctrl+Shift+,` בעוד הרג'יסטרי קושר `Ctrl+]`
+ * ו-`Ctrl+[`, „הפעלת מאקרו” הראתה `Alt+F9` שאינו קיים כלל, ו„הקלטת מאקרו”
+ * הראתה `Alt+F8` — הצירוף של **ניהול** מאקרו, כלומר פעולה אחרת. ארבעתן עוברות
+ * מעכשיו דרך `shortcutLabel`, ולכן אינן יכולות להיפרד מהמאזין.
+ *
+ * **שאר 39 השורות עדיין כתובות ביד.** הן נכונות היום (נמדד), אבל המזהים כאן
+ * אינם מזהי הרג'יסטרי (`file-save` מול `save`), ולכן ההמרה שלהן דורשת טבלת
+ * מיפוי ולא החלפה מכנית. זה נשאר חוב מתועד.
+ *
  * המטרה: לאפשר למשתמש להקליד מונח בעברית (כגון: "מרכז", "טבלה", "גופן", "הדפסה",
  * "שמור", "סגנון", "מעקב", "אוצריא"), לקבל תוצאות מדויקות ומדורגות, ולהפעיל את
  * הפקודה ישירות מהמקלדת או העכבר.
  */
 
-import type { ShellAction } from '../shortcuts/registry';
+import { shortcutLabel, type ShellAction } from '../shortcuts/registry';
 import { alignmentPayload, lineHeightPayload, stylePayload } from '../../engine/payloads';
 
 /**
@@ -242,7 +254,7 @@ export const TELL_ME_ACTIONS: readonly TellMeAction[] = [
     category: 'בית > גופן',
     description: 'הגדלת גודל האותיות בדרגה אחת',
     keywords: ['הגדל', 'הגדלת גופן', 'גודל', 'אותיות גדולות', 'grow font', 'bigger'],
-    shortcut: 'Ctrl+Shift+.',
+    shortcut: shortcutLabel('font-grow'),
     icon: 'growFont',
     shellAction: 'font-grow',
   },
@@ -252,7 +264,7 @@ export const TELL_ME_ACTIONS: readonly TellMeAction[] = [
     category: 'בית > גופן',
     description: 'הקטנת גודל האותיות בדרגה אחת',
     keywords: ['הקטן', 'הקטנת גופן', 'גודל', 'אותיות קטנות', 'shrink font', 'smaller'],
-    shortcut: 'Ctrl+Shift+,',
+    shortcut: shortcutLabel('font-shrink'),
     icon: 'shrinkFont',
     shellAction: 'font-shrink',
   },
@@ -643,7 +655,7 @@ export const TELL_ME_ACTIONS: readonly TellMeAction[] = [
     category: 'מאקרו',
     description: 'התחלה או עצירה של הקלטת רצף פעולות',
     keywords: ['מאקרו', 'הקלטה', 'הקלטת מאקרו', 'record', 'macro'],
-    shortcut: 'Alt+F8',
+    shortcut: shortcutLabel('macro-record'),
     icon: 'macro',
     shellAction: 'macro-record',
   },
@@ -653,7 +665,7 @@ export const TELL_ME_ACTIONS: readonly TellMeAction[] = [
     category: 'מאקרו',
     description: 'ביצוע חוזר של המאקרו שהוקלט לאחרונה',
     keywords: ['הפעל מאקרו', 'נגן מאקרו', 'מאקרו', 'play macro'],
-    shortcut: 'Alt+F9',
+    shortcut: shortcutLabel('macro-play'),
     icon: 'macro',
     shellAction: 'macro-play',
   },

@@ -86,11 +86,23 @@ const stub = vi.hoisted(() => ({
   resolvedFile: null as unknown,
   /** בייטי הטיוטה שבמרחב הפרטי, או `null` כשאין. */
   draftBytes: null as Uint8Array | null,
+  /** השהיה יזומה של קריאה מהמרחב הפרטי, לבדיקות תחרות פתיחה. */
+  workspaceReadGate: null as Promise<void> | null,
   /**
    * טיוטות לפי נתיב — לתרחיש ריבוי הטאבים, שבו לכל טאב נתיב טיוטה משלו
    * (`draftPathFor`). נתיב שאינו כאן נופל ל-`draftBytes`.
    */
   draftsByPath: {} as Record<string, Uint8Array>,
+  /** רשימת „המסמכים האחרונים” שה-storage מחזיר בעלייה. */
+  storedRecents: null as unknown,
+  /** כל מה שנכתב לרשימת האחרונים, לפי הסדר. */
+  persistedRecents: [] as unknown[],
+  /** כל כתיבה למרחב הפרטי — נתיב ובייטים. הטיוטה והגיבוי עוברים בו. */
+  workspaceWrites: [] as Array<{ path: string; bytes: Uint8Array }>,
+  /** רשומת הגיבוי של „לא לשמור” שה-storage מחזיר בעלייה. */
+  storedDiscardBackups: null as unknown,
+  /** כל מה שנכתב לרשומת הגיבוי, לפי הסדר. */
+  persistedDiscardBackups: [] as unknown[],
   /** כמה פעמים נמחקה הטיוטה. */
   draftRemovals: 0,
   /** הנתיבים שנמחקו, לפי הסדר — „איזו טיוטה” ולא רק „כמה”. */
@@ -220,14 +232,28 @@ vi.mock('../../src/host/files', async (importOriginal) => ({
 vi.mock('../../src/host/workspace', () => ({
   MAX_PAYLOAD_BYTES: 10,
   MAX_CONTENT_BYTES: 7,
-  readWorkspaceBytes: async (path: string) =>
-    Object.prototype.hasOwnProperty.call(stub.draftsByPath, path)
+  readWorkspaceBytes: async (path: string) => {
+    await stub.workspaceReadGate;
+    return Object.prototype.hasOwnProperty.call(stub.draftsByPath, path)
       ? stub.draftsByPath[path]
-      : stub.draftBytes,
-  writeWorkspaceBytes: async () => true,
+      : stub.draftBytes;
+  },
+  /**
+   * `'written'` ולא `true`: זה מה ש-`WorkspaceWrite` האמיתי מחזיר, ושני
+   * הצרכנים — `SessionKeeper.writeDraftNow` והגיבוי של „לא לשמור” — משווים
+   * אליו. כפיל שמחזיר `true` נקרא אצל שניהם ככשל, ולכן הוא היה מסתיר בדיוק
+   * את המסלול שנבדק כאן.
+   */
+  writeWorkspaceBytes: async (path: string, bytes: Uint8Array) => {
+    stub.workspaceWrites.push({ path, bytes });
+    return 'written';
+  },
   deleteWorkspaceEntry: async (path: string) => {
     stub.draftRemovals += 1;
     stub.removedDrafts.push(path);
+    // מחיקה שמוחקת: בלעדיה „הגיבוי נכתב לפני שהטיוטה נמחקה” אינו ניתן
+    // למדידה — קריאה אחרי המחיקה הייתה מחזירה את אותם בייטים.
+    delete stub.draftsByPath[path];
   },
 }));
 
@@ -369,6 +395,14 @@ vi.mock('../../src/host/settings', () => ({
   saveSpellcheckEnabled: async () => {},
   loadSpellcheckWords: async () => [],
   saveSpellcheckWords: async () => {},
+  loadRecentDocuments: async () => stub.storedRecents,
+  saveRecentDocuments: async (list: unknown) => {
+    stub.persistedRecents.push(list);
+  },
+  loadDiscardBackups: async () => stub.storedDiscardBackups,
+  saveDiscardBackups: async (list: unknown) => {
+    stub.persistedDiscardBackups.push(list);
+  },
 }));
 
 // הייבוא **אחרי** ה-mocks במכוון (הם מורמים בכל מקרה, וזה הסדר שקורא נכון).
@@ -385,6 +419,43 @@ async function mountShell(): Promise<ReturnType<typeof mount>> {
   return wrapper;
 }
 
+/** שני קבצים לתרחישי הטאבים — ראו „קיצורי הטאבים” בסוף הקובץ. */
+const FIRST_DOC = { token: 'tok-1', name: 'ראשון.docx', writable: true };
+const SECOND_DOC = { token: 'tok-2', name: 'שני.docx', writable: true };
+const TAB_FILES: Record<string, unknown> = {
+  'tok-1': { token: 'tok-1', url: 'loopback://first', name: 'ראשון.docx', size: 100 },
+  'tok-2': { token: 'tok-2', url: 'loopback://second', name: 'שני.docx', size: 200 },
+};
+
+/** `Ctrl+<code>` על החלון — בדיוק כמו הקשה של המשתמש. */
+function pressCtrl(code: string): void {
+  window.dispatchEvent(
+    new KeyboardEvent('keydown', { code, ctrlKey: true, cancelable: true, bubbles: true }),
+  );
+}
+
+/** הרשומה האחרונה שנכתבה לגיבוי „לא לשמור”. */
+function lastDiscardBackups(): Array<Record<string, unknown>> {
+  const written = stub.persistedDiscardBackups;
+  return (written[written.length - 1] ?? []) as Array<Record<string, unknown>>;
+}
+
+/** חלון „המסמך לא נשמר”, או `null` כשאינו פתוח. */
+function unsavedDialog(): Element | null {
+  return document.querySelector('.unsaved-dialog');
+}
+
+/**
+ * עונה על „המסמך לא נשמר”. שאלה אחת ושלושה כפתורים — עד כאן היו כאן שתי
+ * שאלות של אוצריא זו אחר זו, והתשובה נמסרה דרך `confirm` המזויף.
+ */
+async function answerUnsaved(choice: 'save' | 'discard' | 'cancel'): Promise<void> {
+  const button = document.querySelector<HTMLButtonElement>(`[data-choice="${choice}"]`);
+  if (!button) throw new Error(`„${choice}” אינו מוצג — הדיאלוג אינו פתוח, או שאין בו כפתור כזה`);
+  button.click();
+  await settle(12);
+}
+
 beforeEach(() => {
   stub.autosaveCalls.length = 0;
   stub.saveNowCalls.length = 0;
@@ -394,9 +465,15 @@ beforeEach(() => {
   stub.openSources.length = 0;
   stub.resolvedFile = null;
   stub.draftBytes = null;
+  stub.workspaceReadGate = null;
   for (const path of Object.keys(stub.draftsByPath)) delete stub.draftsByPath[path];
   stub.draftRemovals = 0;
   stub.removedDrafts.length = 0;
+  stub.storedRecents = null;
+  stub.persistedRecents.length = 0;
+  stub.storedDiscardBackups = null;
+  stub.persistedDiscardBackups.length = 0;
+  stub.workspaceWrites.length = 0;
   stub.caretApplied.length = 0;
   stub.lastDocument = null;
   stub.forgotLastDocument = false;
@@ -472,8 +549,12 @@ describe('הרכבת המעטפת', () => {
 
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'n', code: 'KeyN', ctrlKey: true }));
     await settle(12);
+    // Ctrl+N פותח את „פתח מסמך”, ו„מסמך ריק” הוא הכרטיס שפותח בפועל.
+    document.querySelector<HTMLButtonElement>('.tpl-card')?.click();
+    await settle(12);
 
     expect(stub.resetCalls, 'המסמך החדש אכן נפתח').toBe(2);
+    // הדיאלוג מחזיר את המיקוד למי שפתח אותו — שדה החיפוש — ולא לגוף המסמך.
     expect(stub.superdoc?.ops(), 'הפוקוס נשאר בשדה החיפוש').not.toContain('focus');
   });
 });
@@ -1322,9 +1403,7 @@ describe('שחזור כל הטאבים', () => {
     expect(wrapper.find('.word-statusbar').text()).toContain('שוחזרו שינויים');
   });
 
-  it('סגירת טאב שממתין ויש בו עבודה שלא נשמרה — שואלת, ו„לא” משאירה הכול', async () => {
-    // אין `window.Otzaria` בבדיקות, ולכן `confirm` נופל ל„לא” — בדיוק
-    // המשמעות הנכונה: בלי אישור מפורש לא מוחקים.
+  it('סגירת טאב שממתין ויש בו עבודה שלא נשמרה — שואלת, ו„ביטול” משאיר הכול', async () => {
     stub.storedSession = twoTabs(SECOND_DRAFT);
     stub.draftsByPath[SECOND_DRAFT.path] = new Uint8Array([80, 75, 3, 4]);
     const wrapper = await mountShell();
@@ -1332,9 +1411,70 @@ describe('שחזור כל הטאבים', () => {
     await wrapper.findAll('.word-doctab')[1]!.find('.word-doctab-close').trigger('click');
     await settle(12);
 
+    // שאלה אחת עם שני כפתורים — אין ממה לייצא בטאב שלא נטען, ולכן „שמור”
+    // אינו מוצג כלל.
+    expect(unsavedDialog(), 'הדיאלוג נפתח').not.toBeNull();
+    expect(document.querySelector('[data-choice="save"]'), '„שמור” אינו מוצע').toBeNull();
+
+    await answerUnsaved('cancel');
+
     expect(wrapper.findAll('.word-doctab')).toHaveLength(2);
     expect(stub.removedDrafts, 'עבודה שלא נשמרה אינה נמחקת בלי אישור').toEqual([]);
+    expect(stub.persistedDiscardBackups, 'ומה שלא נמחק גם אינו מגובה').toEqual([]);
     expect(wrapper.find('.word-statusbar').text()).toContain('סגירת הטאב בוטלה');
+  });
+
+  it('„לא לשמור” על טאב שממתין — עותק לשחזור נכתב **לפני** שהטיוטה נמחקת', async () => {
+    // זו ההבטחה שמופיעה בדיאלוג עצמו, וזה הסדר שקובע אם היא מתקיימת: מחיקה
+    // קודם הייתה משאירה את הגיבוי בלי בייטים לקרוא מהם.
+    stub.storedSession = twoTabs(SECOND_DRAFT);
+    stub.draftsByPath[SECOND_DRAFT.path] = new Uint8Array([80, 75, 3, 4]);
+    const wrapper = await mountShell();
+
+    await wrapper.findAll('.word-doctab')[1]!.find('.word-doctab-close').trigger('click');
+    await settle(12);
+    await answerUnsaved('discard');
+
+    expect(tabTitles(wrapper), 'הטאב נסגר').toEqual(['ראשון']);
+    const backup = stub.workspaceWrites.find((write) => write.path.startsWith('discarded-'));
+    expect(backup?.path, 'המשבצת הראשונה, כי הרשומה הייתה ריקה').toBe('discarded-0.docx');
+    expect([...(backup?.bytes ?? [])], 'ובדיוק העבודה שלא נשמרה').toEqual([80, 75, 3, 4]);
+    expect(stub.removedDrafts, 'ורק אז הטיוטה נמחקה').toContain(SECOND_DRAFT.path);
+  });
+
+  it('הרשומה של הגיבוי נושאת את השם והמשבצת, ונכתבת אחרי הכתיבה', async () => {
+    stub.storedSession = twoTabs(SECOND_DRAFT);
+    stub.draftsByPath[SECOND_DRAFT.path] = new Uint8Array([80, 75, 3, 4]);
+    const wrapper = await mountShell();
+
+    await wrapper.findAll('.word-doctab')[1]!.find('.word-doctab-close').trigger('click');
+    await settle(12);
+    await answerUnsaved('discard');
+
+    const ledger = lastDiscardBackups();
+    expect(ledger, 'שורה אחת').toHaveLength(1);
+    expect(ledger[0]).toMatchObject({ slot: 0, name: 'שני' });
+    expect(ledger[0]!.discardedAt, 'ומתי זה קרה').toBeGreaterThan(0);
+  });
+
+  it('המשבצת הבאה נבחרת לפי מה שכבר בגיבוי, ולא מאפס', async () => {
+    // רשומה שנשארה מהפעלה קודמת: הכתיבה הבאה אינה דורסת את מה שיש בה כל עוד
+    // יש משבצת פנויה.
+    stub.storedDiscardBackups = [
+      { slot: 0, name: 'ישן', size: 4, discardedAt: 1, token: null },
+    ];
+    stub.storedSession = twoTabs(SECOND_DRAFT);
+    stub.draftsByPath[SECOND_DRAFT.path] = new Uint8Array([80, 75, 3, 4]);
+    const wrapper = await mountShell();
+
+    await wrapper.findAll('.word-doctab')[1]!.find('.word-doctab-close').trigger('click');
+    await settle(12);
+    await answerUnsaved('discard');
+
+    const backup = stub.workspaceWrites.find((write) => write.path.startsWith('discarded-'));
+    expect(backup?.path).toBe('discarded-1.docx');
+    const ledger = lastDiscardBackups();
+    expect(ledger.map((entry) => entry.slot), 'החדש ראשון, והישן נשאר').toEqual([1, 0]);
   });
 
   it('סגירת טאב שממתין ואין בו מה לאבד אינה שואלת, ומורידה אותו מהרשומה', async () => {
@@ -1406,9 +1546,15 @@ describe('שחזור כל הטאבים', () => {
     }
   });
 
-  it('שתי לחיצות מהירות על „יציאה” מפעילות סגירה אחת בלבד', async () => {
-    stub.storedSession = twoTabs();
+  it('„יציאה” על טאב שיש בו עבודה שלא נשמרה מגבה אותה לפני שהיא נמחקת', async () => {
+    // מסלול שני ונפרד מ„×” על טאב: היציאה שואלת על כל הטאבים ואז סוגרת את
+    // כולם (`closeAllSessions`), והמחיקה שם היא של `destroy` ולא של
+    // `discardDraft`. גיבוי שהיה מחובר רק למסלול הראשון היה מאבד כאן עבודה
+    // בשקט — בדיוק כמו שהיה לפניו.
+    stub.storedSession = twoTabs(SECOND_DRAFT);
+    stub.draftsByPath[SECOND_DRAFT.path] = new Uint8Array([80, 75, 3, 4]);
     const wrapper = await mountShell();
+
     const hostCalls: string[] = [];
     window.Otzaria = {
       call: (method: string) => {
@@ -1421,18 +1567,240 @@ describe('שחזור כל הטאבים', () => {
       const fileTab = wrapper.findAll('[role="tab"]').find((tab) => tab.text().includes('קובץ'));
       await fileTab!.trigger('click');
       await settle();
+      await buttonByTip(wrapper, 'סגירת המסמך').trigger('click');
+      await settle(16);
 
-      const exit = buttonByTip(wrapper, 'סגירת המסמך');
-      const first = exit.trigger('click');
-      const second = exit.trigger('click');
-      await Promise.all([first, second]);
-      await settle(24);
+      // הטאב הראשון נקי ואינו נשאל; השאלה היא על השני, שיש בו טיוטה.
+      expect(unsavedDialog(), 'היציאה שאלה').not.toBeNull();
+      await answerUnsaved('discard');
+      // התשובה משחררת שרשרת שלמה: סגירת כל הטאבים, פתיחת טאב ריק במקומם,
+      // ורק בסופה המעבר לספרייה.
+      await settle(16);
 
-      expect(hostCalls.filter((method) => method === 'navigation.goTo')).toHaveLength(1);
-      expect(tabTitles(wrapper)).toEqual(['מסמך חדש']);
+      const backup = stub.workspaceWrites.find((write) => write.path.startsWith('discarded-'));
+      expect([...(backup?.bytes ?? [])], 'העבודה שלא נשמרה נשמרה לשחזור').toEqual([80, 75, 3, 4]);
+      expect(lastDiscardBackups().map((entry) => entry.name)).toEqual(['שני']);
+      expect(hostCalls, 'ורק אחר כך יצאנו').toContain('navigation.goTo');
     } finally {
       window.Otzaria = undefined as never;
     }
+  });
+
+  it('אחרי „לא לשמור” הכפתור מופיע, ופתיחה משם מעלה את העבודה בטאב חדש', async () => {
+    // המעגל השלם: „לא לשמור” → העותק נכתב → הכפתור ב„פתח מסמך” מופיע →
+    // המסמך חוזר. כל חוליה בו שבורה בשקט אם היא לבדה — הכפתור מוסתר כשהמונה
+    // 0, והשורה פותחת מסמך ריק אם הבייטים לא הגיעו.
+    stub.storedSession = twoTabs(SECOND_DRAFT);
+    stub.draftsByPath[SECOND_DRAFT.path] = new Uint8Array([80, 75, 3, 4]);
+    const wrapper = await mountShell();
+
+    await wrapper.findAll('.word-doctab')[1]!.find('.word-doctab-close').trigger('click');
+    await settle(12);
+    await answerUnsaved('discard');
+
+    // הבייטים שנכתבו לגיבוי הם מה שייקרא ממנו — הכפיל מחזיר לפי נתיב.
+    const backup = stub.workspaceWrites.find((write) => write.path.startsWith('discarded-'));
+    stub.draftsByPath[backup!.path] = backup!.bytes;
+    stub.openSources.length = 0;
+
+    // דרך המסך שהמשתמש עובר בו: „פתח קובץ” ואז „נסגרו בלי לשמור”.
+    pressCtrl('KeyO');
+    await settle(8);
+    const entryPoint = document.querySelector<HTMLButtonElement>('.open-discarded');
+    expect(entryPoint, 'הכפתור מופיע ברגע שיש מה לשחזר').not.toBeNull();
+    expect(entryPoint!.textContent).toContain('(1)');
+
+    entryPoint!.click();
+    await settle(8);
+    expect(document.querySelector('.discarded-name')?.textContent).toBe('שני');
+
+    document.querySelector<HTMLButtonElement>('.discarded-open')!.click();
+    await settle(16);
+
+    expect(stub.openSources[0], 'הבייטים של הגיבוי, לא קובץ מהדיסק').toBeInstanceOf(Blob);
+    expect(tabTitles(wrapper), 'ובטאב נוסף, על שם המסמך שממנו בא').toContain('שני');
+    expect(wrapper.find('.word-statusbar').text()).toContain('נפתח מהעותק שנשמר בסגירה');
+  });
+
+  it('לחיצה כפולה על „פתח” של עותק שחזור פותחת אותו פעם אחת בלבד', async () => {
+    // קריאה מהמרחב הפרטי היא אסינכרונית. בלי נעילה, שתי לחיצות לפני סיומה
+    // פותחות שתי פעולות `openDocument`, והאחרונה עשויה להחליף את הראשונה.
+    stub.storedDiscardBackups = [
+      { slot: 0, name: 'עותק', size: 4, discardedAt: Date.now(), token: null },
+    ];
+    stub.draftsByPath['discarded-0.docx'] = new Uint8Array([80, 75, 3, 4]);
+    let releaseRead: (() => void) | undefined;
+    stub.workspaceReadGate = new Promise<void>((resolve) => {
+      releaseRead = resolve;
+    });
+    await mountShell();
+    stub.openSources.length = 0;
+
+    pressCtrl('KeyO');
+    await settle(8);
+    document.querySelector<HTMLButtonElement>('.open-discarded')!.click();
+    await settle(8);
+
+    const open = document.querySelector<HTMLButtonElement>('.discarded-open')!;
+    open.click();
+    open.click();
+    await settle(4);
+    expect(open.disabled, 'הפעולה מסומנת כעסוקה בזמן הקריאה').toBe(true);
+    expect(stub.openSources, 'הפתיחה עדיין ממתינה לבייטים').toEqual([]);
+
+    releaseRead?.();
+    await settle(16);
+    expect(stub.openSources, 'נפתחה פעולה אחת בלבד').toHaveLength(1);
+  });
+
+  it('טאב שיש בו מנוע נקי וטיוטה — הגיבוי לוקח את הטיוטה, לא את מה שבמנוע', async () => {
+    /*
+     * המסלול שאבד בו מידע, והוא היחיד שבו הגיבוי יכול להיכשל בשקט: טאב שיש
+     * בו מנוע שאינו „מלוכלך” בעוד הרשומה מחזיקה טיוטה עם העבודה. כך נראה טאב
+     * שהטעינה שלו נכשלה ונפל לתוכו מסמך ריק (`remember: false`), וכך נראה גם
+     * טאב שנפתח מהטיוטה. `exportDocx` עליו **מצליח** ומחזיר את מה שבמנוע —
+     * ולכן גיבוי שמעדיף את המנוע היה כותב את הריקנות ומוחק את העבודה
+     * ב-`destroy({ removeDraft: true })` שבא אחריו.
+     *
+     * הכפיל חייב לייצא בהצלחה, אחרת הבדיקה עוברת מהסיבה הלא נכונה: בלי
+     * `export` על המופע, `exportDocx` זורק והמעטפת נופלת לטיוטה ממילא.
+     */
+    stub.storedSession = twoTabs(SECOND_DRAFT);
+    stub.draftsByPath[SECOND_DRAFT.path] = new Uint8Array([80, 75, 3, 4]);
+    const wrapper = await mountShell();
+    /*
+     * `arrayBuffer` מוזרק ידנית, ובלעדיו הבדיקה חסרת ערך.
+     *
+     * **jsdom אינו מממש `Blob.prototype.arrayBuffer` כלל** (נמדד: אפס אזכורים
+     * ב-`node_modules/jsdom/lib/jsdom/living/generated/Blob.js`). בלי ההזרקה
+     * הזאת `exportDocx` מצליח, המעטפת נופלת בשורה שאחריו על
+     * `exported.arrayBuffer is not a function`, ה-`catch` שלה נופל לטיוטה —
+     * והבדיקה עוברת **גם על הקוד השבור**. זה נמדד בפועל בסבב מוטציה, ולא
+     * הונח: בדיקה שעוברת על הקוד השבור גרועה מאין בדיקה.
+     */
+    const engineBytes = new Uint8Array([0, 0, 0, 0]);
+    const engineDoc = Object.assign(new Blob([engineBytes]), {
+      arrayBuffer: () => Promise.resolve(engineBytes.buffer),
+    });
+    (stub.superdoc!.host as unknown as { export: () => Promise<Blob> }).export = () =>
+      Promise.resolve(engineDoc);
+
+    // מעבר לטאב טוען את הטיוטה לתוך מנוע אמיתי, והמצביע ברשומה נשאר
+    // (`keepDraft`) — כלומר מכאן והלאה יש גם מנוע וגם טיוטה.
+    await wrapper.findAll('.word-doctab')[1]!.trigger('click');
+    await settle(14);
+
+    await wrapper.findAll('.word-doctab')[1]!.find('.word-doctab-close').trigger('click');
+    await settle(12);
+    await answerUnsaved('discard');
+
+    const backup = stub.workspaceWrites.find((write) => write.path.startsWith('discarded-'));
+    expect([...(backup?.bytes ?? [])], 'העבודה שבטיוטה — ולא המסמך שבמנוע').toEqual([
+      80, 75, 3, 4,
+    ]);
+  });
+
+  it('Escape סוגר את מסך השחזור גם כשהמיקוד כבר לא בתוכו', async () => {
+    // „הסר” מוריד את הכפתור הממוקד מה-DOM, המיקוד נופל ל-`body`, ומאותו רגע
+    // ההקשה מגיעה ל-`window` ולא לחלון. בלי ענף במעטפת היא הייתה ממקדת את
+    // המסמך שמאחורי מודאל פתוח, והחלון היה נשאר על המסך.
+    stub.storedDiscardBackups = [
+      { slot: 0, name: 'ראשון', size: 4, discardedAt: Date.now(), token: null },
+      { slot: 1, name: 'שני', size: 4, discardedAt: Date.now() - 1000, token: null },
+    ];
+    await mountShell();
+
+    pressCtrl('KeyO');
+    await settle(8);
+    document.querySelector<HTMLButtonElement>('.open-discarded')!.click();
+    await settle(8);
+    document.querySelector<HTMLButtonElement>('.discarded-forget')!.click();
+    await settle(12);
+    expect(document.querySelector('.discarded-dialog'), 'עדיין פתוח — נשארה שורה').not.toBeNull();
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Escape', key: 'Escape', bubbles: true }));
+    await settle(8);
+
+    expect(document.querySelector('.discarded-dialog'), 'נסגר').toBeNull();
+  });
+
+  it('Escape על „המסמך לא נשמר” הוא „ביטול” — גם מ-window', async () => {
+    // הכיוון הבטוח: הקשה שאיש לא תפס אינה יכולה להיות אישור למחיקה.
+    stub.storedSession = twoTabs(SECOND_DRAFT);
+    stub.draftsByPath[SECOND_DRAFT.path] = new Uint8Array([80, 75, 3, 4]);
+    const wrapper = await mountShell();
+
+    await wrapper.findAll('.word-doctab')[1]!.find('.word-doctab-close').trigger('click');
+    await settle(12);
+    expect(unsavedDialog()).not.toBeNull();
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Escape', key: 'Escape', bubbles: true }));
+    await settle(12);
+
+    expect(unsavedDialog(), 'נסגר').toBeNull();
+    expect(wrapper.findAll('.word-doctab'), 'והטאב נשאר').toHaveLength(2);
+    expect(stub.removedDrafts, 'ולא נמחק דבר').toEqual([]);
+  });
+
+  it('„הסר” מוחק את העותק מהדיסק ומהרשומה', async () => {
+    stub.storedDiscardBackups = [
+      { slot: 3, name: 'ישן', size: 4, discardedAt: Date.now() - 60_000, token: null },
+    ];
+    const wrapper = await mountShell();
+
+    pressCtrl('KeyO');
+    await settle(8);
+    document.querySelector<HTMLButtonElement>('.open-discarded')!.click();
+    await settle(8);
+    document.querySelector<HTMLButtonElement>('.discarded-forget')!.click();
+    await settle(12);
+
+    expect(lastDiscardBackups(), 'הרשומה התרוקנה').toEqual([]);
+    expect(stub.removedDrafts, 'והקובץ עצמו נמחק').toContain('discarded-3.docx');
+    expect(document.querySelector('.discarded-dialog'), 'ומסך ריק נסגר').toBeNull();
+    // ובלי גיבויים הכפתור אינו מופיע יותר.
+    pressCtrl('KeyO');
+    await settle(8);
+    expect(document.querySelector('.open-discarded')).toBeNull();
+    expect(wrapper.findAll('.word-doctab')).toHaveLength(1);
+  });
+
+  it('שורה שהעותק שלה נעלם מוסרת במקום לפתוח מסמך ריק', async () => {
+    // קובץ שנמחק מבחוץ. שורה שאי אפשר לפתוח היא שורה שילחצו עליה שוב.
+    stub.storedDiscardBackups = [
+      { slot: 1, name: 'נעלם', size: 10, discardedAt: Date.now(), token: null },
+    ];
+    const wrapper = await mountShell();
+    stub.openSources.length = 0;
+
+    pressCtrl('KeyO');
+    await settle(8);
+    document.querySelector<HTMLButtonElement>('.open-discarded')!.click();
+    await settle(8);
+    document.querySelector<HTMLButtonElement>('.discarded-open')!.click();
+    await settle(12);
+
+    expect(stub.openSources, 'לא נפתח מסמך').toEqual([]);
+    expect(lastDiscardBackups(), 'והשורה ירדה').toEqual([]);
+    expect(wrapper.find('.word-statusbar').text()).toContain('לא נמצא');
+  });
+
+  it('„ביטול” על השאלה ביציאה משאיר את הכול — ואינו מגבה דבר', async () => {
+    // גיבוי שנכתב על טאב שלא נסגר הוא רעש שגונב משבצת מאחד שכן נסגר.
+    stub.storedSession = twoTabs(SECOND_DRAFT);
+    stub.draftsByPath[SECOND_DRAFT.path] = new Uint8Array([80, 75, 3, 4]);
+    const wrapper = await mountShell();
+
+    const fileTab = wrapper.findAll('[role="tab"]').find((tab) => tab.text().includes('קובץ'));
+    await fileTab!.trigger('click');
+    await settle();
+    await buttonByTip(wrapper, 'סגירת המסמך').trigger('click');
+    await settle(16);
+    await answerUnsaved('cancel');
+
+    expect(tabTitles(wrapper), 'שני הטאבים נשארו').toEqual(['ראשון', 'שני']);
+    expect(stub.persistedDiscardBackups, 'ולא נכתב גיבוי').toEqual([]);
+    expect(stub.removedDrafts, 'ולא נמחקה טיוטה').toEqual([]);
   });
 });
 
@@ -1791,5 +2159,280 @@ describe('קישוריות בין טאבים', () => {
       wrapper.findAll('.word-doctab')[1]!.find('.word-doctab-dirty').exists(),
       'הטאב ברקע מסומן כשהקואורדינטור שלו דיווח',
     ).toBe(true);
+  });
+});
+
+/**
+ * קיצורי הטאבים.
+ *
+ * הם נבדקים כאן ולא ב-`shortcuts-core.test.ts` מפני שאין להם מה למדוד בלי
+ * רצועת טאבים אמיתית: „הבא” הוא המקום הבא **ברצועה**, ו„סגירה” היא המסלול
+ * שמפרק session ומחליט מי מקבל את המקום. שתי ההכרעות האלה חיות ב-App.vue,
+ * ומעטפת מזויפת הייתה בודקת את המזויפת.
+ *
+ * מה שנבדק כאן הוא ההבטחה שהמשתמש מכיר מכל תוכנה אחרת — ולא רק ש„המטפל
+ * נקרא”: הגלישה מהסוף להתחלה, המיקום המוחלט, `Alt+9` שהוא „האחרון” ולא
+ * „תשיעי”, והזהות בין שלושת הצירופים של „הבא”.
+ */
+describe('קיצורי הטאבים', () => {
+  /** אינדקס הטאב הפעיל ברצועה, לפי הסדר שהמשתמש רואה. */
+  function activeTab(wrapper: Awaited<ReturnType<typeof mountShell>>): number {
+    return wrapper.findAll('.word-doctab').findIndex((tab) => tab.classes('active'));
+  }
+
+  function tabCount(wrapper: Awaited<ReturnType<typeof mountShell>>): number {
+    return wrapper.findAll('.word-doctab').length;
+  }
+
+  /** מקיש צירוף על החלון — בדיוק כמו המשתמש, דרך המנתב האמיתי. */
+  async function press(over: Partial<KeyboardEventInit> & { code: string }): Promise<void> {
+    window.dispatchEvent(
+      new KeyboardEvent('keydown', { cancelable: true, bubbles: true, ...over }),
+    );
+    await settle(12);
+  }
+
+  /** מעטפת עם `count` טאבים פתוחים, כשהאחרון הוא הפעיל — כמו אחרי „+”. */
+  async function shellWithTabs(count: number): Promise<Awaited<ReturnType<typeof mountShell>>> {
+    const wrapper = await mountShell();
+    for (let index = 1; index < count; index += 1) {
+      await wrapper.find('.word-doctabs-new').trigger('click');
+      await settle(12);
+    }
+    return wrapper;
+  }
+
+  it('Ctrl+T פותח טאב נוסף ומפעיל אותו', async () => {
+    const wrapper = await shellWithTabs(1);
+    expect(tabCount(wrapper)).toBe(1);
+
+    await press({ code: 'KeyT', ctrlKey: true });
+
+    expect(tabCount(wrapper)).toBe(2);
+    expect(activeTab(wrapper), 'הטאב החדש הוא הפעיל').toBe(1);
+  });
+
+  it('Ctrl+Tab מתקדם ברצועה, וגולש מהסוף להתחלה', async () => {
+    // הגלישה אינה קישוט: היא מה שהופך את הצירוף לניתן ללחיצה חוזרת בלי
+    // להסתכל, וכל דפדפן עושה אותה.
+    const wrapper = await shellWithTabs(3);
+    expect(activeTab(wrapper), 'אחרי „+” פעמיים הפעיל הוא האחרון').toBe(2);
+
+    await press({ code: 'Tab', ctrlKey: true });
+    expect(activeTab(wrapper)).toBe(0);
+
+    await press({ code: 'Tab', ctrlKey: true });
+    expect(activeTab(wrapper)).toBe(1);
+  });
+
+  it('Ctrl+Shift+Tab חוזר אחורה, וגולש מההתחלה לסוף', async () => {
+    const wrapper = await shellWithTabs(3);
+
+    await press({ code: 'Tab', ctrlKey: true, shiftKey: true });
+    expect(activeTab(wrapper)).toBe(1);
+
+    await press({ code: 'Tab', ctrlKey: true, shiftKey: true });
+    expect(activeTab(wrapper)).toBe(0);
+
+    await press({ code: 'Tab', ctrlKey: true, shiftKey: true });
+    expect(activeTab(wrapper), 'מהראשון אחורה — לאחרון').toBe(2);
+  });
+
+  it('Ctrl+Page Down ו-Ctrl+F6 הם אותו „הבא” בדיוק', async () => {
+    // שלושה צירופים לאותה פעולה, כי שלוש קהילות משתמשים שונות: הדפדפן,
+    // VSCode ו-Word. אם הם מתפצלים, אחד מהם משקר.
+    const wrapper = await shellWithTabs(3);
+
+    await press({ code: 'PageDown', ctrlKey: true });
+    expect(activeTab(wrapper)).toBe(0);
+
+    await press({ code: 'F6', ctrlKey: true });
+    expect(activeTab(wrapper)).toBe(1);
+
+    await press({ code: 'PageUp', ctrlKey: true });
+    expect(activeTab(wrapper)).toBe(0);
+
+    await press({ code: 'F6', ctrlKey: true, shiftKey: true });
+    expect(activeTab(wrapper)).toBe(2);
+  });
+
+  it('F6 בלי Ctrl אינו מזיז טאב — הוא מעבר בין אזורי הממשק', async () => {
+    // שתי רשומות על אותו מקש פיזי, ורק המודיפייר מבדיל. `match.ts` דורש
+    // התאמה מדויקת, וזו הבדיקה ששומרת עליה מהצד של המשתמש.
+    const wrapper = await shellWithTabs(2);
+    const before = activeTab(wrapper);
+
+    await press({ code: 'F6' });
+
+    expect(activeTab(wrapper)).toBe(before);
+  });
+
+  it('Alt+1 ו-Alt+2 עוברים למיקום מוחלט ברצועה', async () => {
+    const wrapper = await shellWithTabs(3);
+
+    await press({ code: 'Digit1', altKey: true });
+    expect(activeTab(wrapper)).toBe(0);
+
+    await press({ code: 'Digit2', altKey: true });
+    expect(activeTab(wrapper)).toBe(1);
+  });
+
+  it('Alt+9 הוא הטאב האחרון, ולא „טאב מספר תשע”', async () => {
+    const wrapper = await shellWithTabs(3);
+    await press({ code: 'Digit1', altKey: true });
+    expect(activeTab(wrapper)).toBe(0);
+
+    await press({ code: 'Digit9', altKey: true });
+
+    expect(activeTab(wrapper)).toBe(2);
+  });
+
+  it('Alt+ספרה שאין לה טאב אינו מזיז דבר', async () => {
+    const wrapper = await shellWithTabs(2);
+    await press({ code: 'Digit1', altKey: true });
+
+    await press({ code: 'Digit7', altKey: true });
+
+    expect(activeTab(wrapper)).toBe(0);
+    expect(tabCount(wrapper)).toBe(2);
+  });
+
+  it('Ctrl+W סוגר את הטאב שעל המסך', async () => {
+    const wrapper = await shellWithTabs(3);
+
+    await press({ code: 'KeyW', ctrlKey: true });
+
+    expect(tabCount(wrapper)).toBe(2);
+  });
+
+  it('Ctrl+F4 סוגר גם הוא — הצירוף של Word לאותה פעולה', async () => {
+    const wrapper = await shellWithTabs(3);
+
+    await press({ code: 'F4', ctrlKey: true });
+
+    expect(tabCount(wrapper)).toBe(2);
+  });
+
+  it('Ctrl+W על הטאב האחרון משאיר מסמך ריק ולא מעטפת בלי טאבים', async () => {
+    // הרצועה, הפס והסרגלים כולם מניחים מסמך. „אפס טאבים” אינו מצב שקיים כאן,
+    // ובדפדפן המקבילה שלו היא סגירת החלון — מה שאין לנו רשות לעשות.
+    const wrapper = await shellWithTabs(1);
+
+    await press({ code: 'KeyW', ctrlKey: true });
+
+    expect(tabCount(wrapper)).toBe(1);
+  });
+
+  it('Ctrl+Shift+T פותח מחדש את הקובץ של הטאב שנסגר', async () => {
+    stub.storedSession = {
+      version: 2,
+      documents: [
+        { id: 'doc-1', document: FIRST_DOC, caret: null, draft: null },
+        { id: 'doc-2', document: SECOND_DOC, caret: null, draft: null },
+      ],
+      activeId: 'doc-1',
+      view: { zoom: null, focusMode: false, ribbonTab: null, ribbonCollapsed: false },
+    };
+    stub.resolvedFile = (token: string) => TAB_FILES[token] ?? null;
+
+    const wrapper = await mountShell();
+    expect(stub.openSources).toEqual(['loopback://first']);
+
+    // הטאב הפעיל נקי (נטען זה עתה מהדיסק), ולכן אין שאלה — והשני נטען
+    // כשהוא מקבל את המקום.
+    await press({ code: 'KeyW', ctrlKey: true });
+    expect(tabCount(wrapper)).toBe(1);
+    expect(stub.openSources).toEqual(['loopback://first', 'loopback://second']);
+
+    await press({ code: 'KeyT', ctrlKey: true, shiftKey: true });
+
+    expect(tabCount(wrapper), 'הקובץ חוזר לטאב משלו').toBe(2);
+    expect(stub.openSources).toEqual([
+      'loopback://first',
+      'loopback://second',
+      'loopback://first',
+    ]);
+  });
+
+  it('Ctrl+Shift+T בלי טאב שנסגר אומר זאת, ואינו פותח דבר', async () => {
+    const wrapper = await shellWithTabs(1);
+    const opened = stub.openSources.length;
+
+    await press({ code: 'KeyT', ctrlKey: true, shiftKey: true });
+
+    expect(tabCount(wrapper)).toBe(1);
+    expect(stub.openSources).toHaveLength(opened);
+    expect(wrapper.text()).toContain('אין טאב שנסגר');
+  });
+
+  it('טאב שנפתח מחדש נשאר בר-כתיבה — הבאג שהיה', async () => {
+    /*
+     * הבאג: `reopenClosedTab` פתח דרך `resolveFileUrl`, שמחזירה
+     * `{token, url, name, size}` **בלי `access`**. הפתיחה נראתה מוצלחת
+     * לגמרי, והמסמך הפך בשקט לקריאה-בלבד — `save` בלי יעד כתיבה, ו-
+     * `writable: false` שנכתב לרשומת ההפעלה, כלומר גם אחרי הפעלה מחדש.
+     *
+     * הסימן הנצפה הוא „פתוח לקריאה” בשורת המצב, אותו אחד שנמדד ב„הודעת
+     * השלב המקדים”. ה-stub מחזיר כאן בדיוק את מה שהגשר האמיתי מחזיר — בלי
+     * `access` — ולכן הבדיקה נופלת על התיקון ולא על זיוף.
+     */
+    stub.storedSession = {
+      version: 2,
+      documents: [{ id: 'doc-1', document: FIRST_DOC, caret: null, draft: null }],
+      activeId: 'doc-1',
+      view: { zoom: null, focusMode: false, ribbonTab: null, ribbonCollapsed: false },
+    };
+    stub.resolvedFile = (token: string) => TAB_FILES[token] ?? null;
+
+    const wrapper = await mountShell();
+    const status = () => wrapper.find('.word-statusbar').text();
+    expect(status(), 'נפתח בכתיבה מלכתחילה').not.toContain('פתוח לקריאה');
+
+    await press({ code: 'KeyW', ctrlKey: true });
+    await press({ code: 'KeyT', ctrlKey: true, shiftKey: true });
+
+    expect(stub.openSources, 'הקובץ אכן נפתח מחדש').toContain('loopback://first');
+    expect(status(), 'ההרשאה שרדה את הסגירה והפתיחה').not.toContain('פתוח לקריאה');
+  });
+
+  it('טאב שהיה קריאה-בלבד נפתח מחדש כקריאה-בלבד', async () => {
+    // הכיוון ההפוך, ומאותה סיבה: ההרשאה נלקחת ממה שהטאב ידע, ולכן היא חייבת
+    // לשמר גם „לא” ולא רק „כן”. בלי זה התיקון היה יכול להיות „תמיד כתיב”,
+    // וזה כשל חמור יותר — ניסיון כתיבה ל-token שאין עליו הרשאה.
+    stub.storedSession = {
+      version: 2,
+      documents: [
+        {
+          id: 'doc-1',
+          document: { ...FIRST_DOC, writable: false },
+          caret: null,
+          draft: null,
+        },
+      ],
+      activeId: 'doc-1',
+      view: { zoom: null, focusMode: false, ribbonTab: null, ribbonCollapsed: false },
+    };
+    stub.resolvedFile = (token: string) => TAB_FILES[token] ?? null;
+
+    const wrapper = await mountShell();
+
+    await press({ code: 'KeyW', ctrlKey: true });
+    await press({ code: 'KeyT', ctrlKey: true, shiftKey: true });
+
+    expect(wrapper.find('.word-statusbar').text()).toContain('פתוח לקריאה');
+  });
+
+  it('טאב חדש שלא נשמר מעולם אינו נכנס למחסנית „נסגר”', async () => {
+    // אין לו token, ולכן אין ממה לפתוח אותו מחדש. רישום שלו היה מייצר
+    // `Ctrl+Shift+T` שנכשל תמיד — הבטחה שאי אפשר לקיים.
+    const wrapper = await shellWithTabs(2);
+    const opened = stub.openSources.length;
+
+    await press({ code: 'KeyW', ctrlKey: true });
+    await press({ code: 'KeyT', ctrlKey: true, shiftKey: true });
+
+    expect(tabCount(wrapper)).toBe(1);
+    expect(stub.openSources).toHaveLength(opened);
+    expect(wrapper.text()).toContain('אין טאב שנסגר');
   });
 });
