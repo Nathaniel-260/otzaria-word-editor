@@ -331,6 +331,8 @@ describe('installAtMention', () => {
     expect(onStatus).toHaveBeenCalledTimes(1);
     expect(onStatus).toHaveBeenCalledWith('חסרה הרשאה', true);
     expect(popup()).toBeNull();
+    // הרשאה חסרה אינה חולפת: אין טעם לשלוח קריאה נוספת בכל הקלדה.
+    expect(resolveRefMock).toHaveBeenCalledTimes(1);
     handle.dispose();
   });
 

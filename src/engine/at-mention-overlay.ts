@@ -198,6 +198,8 @@ export function installAtMention(
   const doc = (host as AtMentionHost | null | undefined)?.activeEditor?.doc;
   const selectionHandle = (host as AtMentionHost | null | undefined)?.ui?.selection;
   let disposed = false;
+  /** כיבוי לכל אורך המסמך אחרי כשל שאינו חולף — ראו `evaluate`. */
+  let stopped = false;
   let session: Session = { kind: 'idle' };
   let debounceTimer: ReturnType<typeof setTimeout> | undefined;
   let popupEl: HTMLDivElement | null = null;
@@ -339,7 +341,7 @@ export function installAtMention(
   }
 
   async function evaluate(): Promise<void> {
-    if (disposed || !doc) return;
+    if (disposed || stopped || !doc) return;
     const token = ++evalToken;
 
     let caret: CaretText | null;
@@ -359,6 +361,9 @@ export function installAtMention(
 
     if (!result.ok) {
       report(result.message, true);
+      // הרשאה חסרה אינה משתנה תוך כדי הפעלה, וכל הקלדת „@” נוספת הייתה
+      // מייצרת עוד קריאת RPC שנדחית.
+      if (result.reason === 'permission-denied') stopped = true;
       return closeSession();
     }
     lastReported = null;

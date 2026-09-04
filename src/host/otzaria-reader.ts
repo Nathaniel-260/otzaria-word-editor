@@ -14,6 +14,7 @@
 import type { SuperDoc } from 'superdoc';
 import { call, isPermissionDenied, hostErrorCode } from './otzaria-client';
 import { readDocSelection, type SelectionDocumentApi } from '../engine/doc-selection';
+import type { OtzariaLinkTarget } from '../engine/otzaria-link';
 import {
   readDocCapabilities,
   type CapabilitiesDocumentApi,
@@ -55,6 +56,7 @@ export const READER_PERMISSIONS: Record<string, string> = {
   'navigation.goTo': 'navigation.write',
   'reader.addContextMenuItem': 'reader.context_menu',
   'library.resolveRef': 'library.books.read',
+  'reader.openBook': 'reader.open',
 };
 
 /**
@@ -253,6 +255,31 @@ function isResolvedRefHit(value: unknown): value is ResolvedRefHit {
     typeof hit.index === 'number' &&
     Number.isFinite(hit.index)
   );
+}
+
+/**
+ * פותחת יעד של קישור `otzaria://` שנלחץ במסמך.
+ *
+ * `detection` מועבר כשאילתה למסך „איתור מקורות” של אוצריא — זה היעד שנכתב
+ * כשלא היה מזהה חד-משמעי, והפתירה שם היא של אוצריא עצמה.
+ */
+export async function openOtzariaLink(target: OtzariaLinkTarget): Promise<ReaderResult> {
+  try {
+    if (target.kind === 'detection') {
+      await call('reader.openSearchTab', { query: target.query });
+      return { ok: true, value: undefined };
+    }
+    await call('reader.openBook', {
+      id: target.id,
+      index: target.index,
+      type: target.kind === 'pdf' ? 'pdf' : 'text',
+      navigateToPositionIfReused: true,
+    });
+    return { ok: true, value: undefined };
+  } catch (error) {
+    const method = target.kind === 'detection' ? 'reader.openSearchTab' : 'reader.openBook';
+    return hostFailure(method, 'פתיחת הקישור נכשלה', error);
+  }
 }
 
 /** הראשון מבין המועמדים שיש בו טקסט. `''` אינו „קיים” — הוא בחירה ריקה. */
