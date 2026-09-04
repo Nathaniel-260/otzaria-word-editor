@@ -16,6 +16,9 @@
  *   5. אותה המרה כשלרשימה **שכנה** יש `numId` נפרד אך אותו `abstractNumId`
  *      (כך נראית רשימה שהתחילה מחדש מ-1) — האם השכנה נגררת יחד.
  *   6. אותה המרה על רשימה **מקוננת** — מה קורה לרמה 1 כשמהפכים ברמה 0.
+ *   7. המסלול ההפוך, הלוך **וחזור**: מספור → תבליטים → מספור. שם היה הכשל
+ *      השקט — `numFmt="decimal"` עם `lvlText="•"` שנשאר, וכל תשע הרמות
+ *      נמדדות ולא רק רמה 0.
  * ובכל אחד: `doc.selection.current()` (אסינכרוני!) לפני התפריט ובזמן שהוא פתוח.
  *
  * כל שורת פעולה דורשת שני דברים: שלא הופיעה ההודעה „יש למקם את הסמן” (שומר
@@ -95,6 +98,13 @@ function lvlOf(paragraph, numbering, ilvl = 0) {
 }
 
 const paraOf = (files, text) => paragraphsOf(files).find((p) => textOf(p) === text) || '';
+
+/** כל תשע הרמות: המרה שנעצרה ברמה 0 משאירה תבליטים שאין פקד שיגיע אליהם. */
+const allLevelsOf = (paragraph, numbering) =>
+  Array.from({ length: 9 }, (_, ilvl) => lvlOf(paragraph, numbering, ilvl));
+
+/** תמצית לקריאה בלוג ולהשוואה בין השלבים. */
+const brief = (levels) => levels.map((l, i) => `${i}:${l.numFmt}|${l.lvlText}|${l.markerFont ?? '-'}`).join(' ');
 
 /**
  * ממקמת סמן בשורה לפי הטקסט שבה. `app.caret(index)` נשבר כאן: כל פסקה מציירת
@@ -376,6 +386,79 @@ try {
     report.fail('6. המרה ברמה 0 לא הפכה את רמה 1 לתבליט',
       `רמה 0 ${JSON.stringify(parentBefore)}→${JSON.stringify(parent6)} | רמה 1 ${JSON.stringify(childBefore)}→${JSON.stringify(child6)} | ` +
         `סמני הרשימה ${JSON.stringify(nestedMarkers)} status=${r6.status.text}`);
+  }
+
+  /* ---- 7. הלוך וחזור: מספור → תבליטים → מספור ---- */
+  /*
+   * סדר הבנייה אינו מתחלף: ההמרה לתבליטים **משבטת** את ההגדרה, ולכן זוג
+   * שהופרד לפניה כבר אינו חולק אותה כשבוחרים סגנון מספור — ושורה שנבנתה כך
+   * הייתה עוברת בירוק גם על פעולה abstract-scoped שדולפת (נמדד: `applyTemplate`
+   * עבר). ההפרדה נעשית **אחרי** ההמרה, ואז שני ה-`numId` חולקים את הגדרת
+   * התבליט — התצורה היחידה שבה כתיבת המספור יכולה לדלוף לשכנה.
+   */
+  await caretOn('בן');
+  await newParagraphAfterList();
+  await typeNumberedPair('חזורא', 'חזורב');
+  const filesUp = await app.docx();
+  const upA = allLevelsOf(paraOf(filesUp, 'חזורא'), numberingOf(filesUp));
+  console.log('7 ממוספר — חזורא:', brief(upA), '| סמנים:', JSON.stringify(await markersOf()));
+  const startedNumbered = upA.every((l, i) => l.numFmt !== 'bullet' && l.lvlText === `%${i + 1}.`);
+
+  await caretOn('חזורא');
+  const r7bullets = await menuAction('הפוך רשימה ממוספרת לתבליטים', 'פעולות תבליטים');
+  await caretOn('חזורב');
+  await menuAction('התחל מחדש מ-1');
+  const filesMid = await app.docx();
+  const numberingMid = numberingOf(filesMid);
+  const midA = allLevelsOf(paraOf(filesMid, 'חזורא'), numberingMid);
+  const midB = allLevelsOf(paraOf(filesMid, 'חזורב'), numberingMid);
+  const midMarkers = (await markersOf()).slice(-2);
+  console.log('7 בתבליטים — חזורא:', brief(midA), '| חזורב:', brief(midB),
+    '| סמני הזוג:', JSON.stringify(midMarkers), '| status ההמרה:', JSON.stringify(r7bullets.status));
+  const sharedBullets =
+    midA.every((l) => l.numFmt === 'bullet' && l.lvlText === '•') &&
+    midB.every((l) => l.numFmt === 'bullet' && l.lvlText === '•') &&
+    !!midA[0].abstractNumId &&
+    midA[0].abstractNumId === midB[0].abstractNumId &&
+    !!midA[0].numId &&
+    midA[0].numId !== midB[0].numId &&
+    midMarkers[0] === '•' &&
+    midMarkers[1] === '•';
+
+  await caretOn('חזורא');
+  const r7 = await menuAction('1, 2, 3');
+  const numbering7 = numberingOf(r7.files);
+  const backA = allLevelsOf(paraOf(r7.files, 'חזורא'), numbering7);
+  const backB = allLevelsOf(paraOf(r7.files, 'חזורב'), numbering7);
+  const backMarkers = r7.markers.slice(-2);
+  console.log('7 אחרי — חזורא:', brief(backA), '| חזורב:', brief(backB),
+    '| סמני הזוג:', JSON.stringify(backMarkers), '| status:', JSON.stringify(r7.status));
+  // `numFmt` לבדו הוא בדיוק מה שהיה כאן ירוק כשהמסך צייר „•”: הסמן נגזר
+  // מ-`lvlText`, ולכן שלושת הדברים — שני השדות בכל תשע הרמות, גופן הסמן
+  // שאינו Symbol, והסמן שמצטייר.
+  const numFmtBack = backA.every((l) => l.numFmt === 'decimal');
+  const lvlTextBack = backA.every((l, i) => l.lvlText === `%${i + 1}.`);
+  const fontCleared = backA.every((l) => l.markerFont !== 'Symbol');
+  const drawnBack = backMarkers[0] === '1.' && !backMarkers[0].includes('%');
+  // „לא נגררה”: אותו `numId`, אותה הגדרה, כל תשע הרמות, והסמן שנגזר מהן.
+  const neighbourKept =
+    backB[0].numId === midB[0].numId && brief(backB) === brief(midB) && backMarkers[1] === '•';
+  if (!startedNumbered || !sharedBullets) {
+    report.fail('7. מספור → תבליטים → מספור: הרשימה חוזרת למספור, והשכנה שחולקת את הגדרת התבליט אינה נגררת',
+      `התרחיש לא נבנה: מספור=${startedNumbered} תבליט-משותף=${sharedBullets} | ` +
+        `חזורא=${brief(midA)} (numId=${midA[0].numId}/abs=${midA[0].abstractNumId}) | ` +
+        `חזורב=${brief(midB)} (numId=${midB[0].numId}/abs=${midB[0].abstractNumId}) | סמני הזוג ${JSON.stringify(midMarkers)}`);
+  } else if (/יש למקם את הסמן/.test(r7.status.text || '')) {
+    report.fail('7. מספור → תבליטים → מספור: הרשימה חוזרת למספור, והשכנה שחולקת את הגדרת התבליט אינה נגררת', r7.status.text);
+  } else if (numFmtBack && lvlTextBack && fontCleared && drawnBack && neighbourKept) {
+    report.pass('7. מספור → תבליטים → מספור: הרשימה חוזרת למספור, והשכנה שחולקת את הגדרת התבליט אינה נגררת',
+      `כל תשע הרמות decimal עם %N. וללא Symbol (${brief(backA)}) ב-abstractNum ${midA[0].abstractNumId}→${backA[0].abstractNumId} | ` +
+        `חזורב נשארה numId=${backB[0].numId}/abstractNum=${backB[0].abstractNumId} ותבליט | סמני הזוג ${JSON.stringify(backMarkers)}`);
+  } else {
+    report.fail('7. מספור → תבליטים → מספור: הרשימה לא חזרה למספור, או שהשכנה נגררה',
+      `numFmt=${numFmtBack} lvlText=${lvlTextBack} גופן=${fontCleared} סמן=${drawnBack} שכנה=${neighbourKept} | ` +
+        `חזורא ${brief(midA)} → ${brief(backA)} | חזורב ${brief(midB)} → ${brief(backB)} | ` +
+        `סמני הזוג ${JSON.stringify(backMarkers)} status=${r7.status.text}`);
   }
 
   console.log('לוג הדף:', JSON.stringify(await app.log()));
