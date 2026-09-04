@@ -14,12 +14,28 @@
  * - **`keydown` נתפס ב-capture, ו-`preventDefault` רק כשהרשימה פתוחה** — אחרת
  *   חצים ו-Tab מפסיקים להתנהג רגיל בשאר המסמך.
  *
- * ## כתיבת הקישור: שני מסלולים
+ * ## כתיבת הקישור: מחיקת האזכור ואז `hyperlinks.insert`
  *
- * `hyperlinks.insert({target, text, link})` הוא הפעולה האטומית המתאימה, אבל
- * היא לא נמדדה כאן (`wrap` כן — ראו hyperlinks-manage.ts). לכן היא מנוסה
- * ראשונה, ובכשל יש נפילה ל-`doc.insert` + `hyperlinks.wrap`: שני חלקים
- * שכל אחד מהם מוכח בנפרד. אחרי מדידה בשער ה-QA אפשר להשאיר רק אחד.
+ * שלושה דברים נמדדו, ושלושתם ביחד קובעים את המסלול:
+ *
+ * 1. `hyperlinks.insert` **מוסיפה ואינה מחליפה** — היא כתבה את הקישור
+ *    והשאירה את „@פסחים לד” שלפניו במקומו.
+ * 2. `hyperlinks.wrap` מחזירה `INVALID_TARGET` על טווח שנכתב זה עתה, גם
+ *    כאשר `ranges.resolve` על אותו טווח בדיוק מחזירה את הטקסט הנכון. זה
+ *    אינו תזמון ואינו ה-`blockId`: היא נכשלת גם עם `href` של https, ולכן
+ *    גם אינו סינון הסכימה. היא נמדדה עובדת רק על הבחירה שהמשתמש סימן
+ *    (כך היא נקראת ב-hyperlinks-manage.ts).
+ * 3. `doc.insert` עם `value: ''` מוחקת טווח בהצלחה.
+ *
+ * לכן: מוחקים את האזכור, ואז מוסיפים את הקישור בנקודה שנפתחה.
+ *
+ * ## הקישור אינו לחיץ בתוך העורך
+ *
+ * נמדד: ה-DomPainter של המנוע מסנן כל href מול רשימת סכימות קבועה
+ * (`http`, `https`, `mailto`, `tel`, `sms`), חוסם את השאר, ואינו מקבל
+ * קונפיגורציה בנקודת הקריאה. הקישור נכתב ל-DOCX תקין ועובד בכל תוכנה
+ * שפותחת אותו — אבל בתוך העורך `onActivate` (otzaria-link-activation.ts)
+ * אינו נקרא, כי המנוע חוסם עוד לפניו. ראו docs/engine-gaps.md.
  */
 import type { SuperDoc } from 'superdoc';
 import {
@@ -56,12 +72,8 @@ export interface AtMentionDoc extends WordSelectionDoc {
   insert?: (input: { value: string; type: 'text'; target?: unknown }) => MaybePromise<DocReceipt>;
   hyperlinks?: {
     insert?: (input: {
-      target?: TextAddressLike;
-      text: string;
-      link: HyperlinkSpecLike;
-    }) => MaybePromise<DocReceipt>;
-    wrap?: (input: {
       target: TextAddressLike;
+      text: string;
       link: HyperlinkSpecLike;
     }) => MaybePromise<DocReceipt>;
   } | null;
@@ -200,6 +212,11 @@ export function installAtMention(
   let disposed = false;
   /** כיבוי לכל אורך המסמך אחרי כשל שאינו חולף — ראו `evaluate`. */
   let stopped = false;
+  /**
+   * היסט ה-„@” שהמשתמש דחה ב-Escape. בלעדיו התו הבא שיוקלד היה פותח את אותה
+   * רשימה מחדש, וה-Escape היה נראה כאילו לא עשה דבר.
+   */
+  let dismissedAt: number | null = null;
   let session: Session = { kind: 'idle' };
   let debounceTimer: ReturnType<typeof setTimeout> | undefined;
   let popupEl: HTMLDivElement | null = null;
@@ -354,7 +371,14 @@ export function installAtMention(
     if (!caret) return closeSession();
 
     const trigger = parseAtTrigger(caret.beforeCaret);
-    if (!trigger || !isQueryable(trigger)) return closeSession();
+    if (!trigger || !isQueryable(trigger)) {
+      dismissedAt = null;
+      return closeSession();
+    }
+
+    const replaceStart = caret.base + trigger.atIndex;
+    if (dismissedAt === replaceStart) return closeSession();
+    dismissedAt = null;
 
     const result = await resolveRef(trigger.query.trim(), MAX_SUGGESTIONS);
     if (token !== evalToken || disposed) return;
@@ -374,7 +398,7 @@ export function installAtMention(
       hits: result.value,
       activeIndex: 0,
       query: trigger.query,
-      replaceStart: caret.base + trigger.atIndex,
+      replaceStart,
       cursorOffset: caret.cursorOffset,
       blockId: caret.blockId,
       story: caret.story,
@@ -394,41 +418,41 @@ export function installAtMention(
     renderPopup();
   }
 
-  /** כותבת את הקישור. ראו הערת המודול על שני המסלולים. */
+  /** כותבת את הקישור. ראו הערת המודול: מחיקה ואז הוספה, ולא עטיפה. */
   async function writeLink(
     address: TextAddressLike,
     text: string,
     href: string,
   ): Promise<DocReceipt | null> {
-    const link: HyperlinkSpecLike = { destination: { href } };
     const insertLink = doc?.hyperlinks?.insert;
-    if (typeof insertLink === 'function') {
-      try {
-        const receipt = await insertLink({ target: address, text, link });
-        if (receipt?.success !== false) return receipt;
-      } catch {
-        // נופלים למסלול המפורק.
-      }
+    if (typeof doc?.insert !== 'function' || typeof insertLink !== 'function') return null;
+
+    const deleted = await doc.insert({
+      value: '',
+      type: 'text',
+      target: {
+        kind: 'selection',
+        start: pointAt(address.blockId, address.range.start, address.story),
+        end: pointAt(address.blockId, address.range.end, address.story),
+        ...(address.story ? { story: address.story } : {}),
+      } satisfies SelectionTargetLike,
+    });
+    if (deleted?.success === false) return deleted;
+
+    // הנקודה שנפתחה נקראת מהבחירה ולא מחושבת: זו גם נקודת ההוספה האמיתית
+    // וגם הסנכרון מול המחיקה שקדמה לה.
+    let at = { blockId: address.blockId, offset: address.range.start };
+    try {
+      const after = readCaretSeed((await doc.selection?.current?.())?.selectionTarget);
+      if (after) at = { blockId: after.blockId, offset: after.offset };
+    } catch {
+      /* נשארים עם תחילת הטווח שנמחק */
     }
 
-    if (typeof doc?.insert !== 'function' || typeof doc.hyperlinks?.wrap !== 'function') return null;
-    const target: SelectionTargetLike = {
-      kind: 'selection',
-      start: pointAt(address.blockId, address.range.start, address.story),
-      end: pointAt(address.blockId, address.range.end, address.story),
-      ...(address.story ? { story: address.story } : {}),
-    };
-    const inserted = await doc.insert({ value: text, type: 'text', target });
-    if (inserted?.success === false) return inserted;
-
-    return await doc.hyperlinks.wrap({
-      target: {
-        kind: 'text',
-        blockId: address.blockId,
-        range: { start: address.range.start, end: address.range.start + text.length },
-        ...(address.story ? { story: address.story } : {}),
-      },
-      link,
+    return await insertLink({
+      target: { kind: 'text', blockId: at.blockId, range: { start: at.offset, end: at.offset } },
+      text,
+      link: { destination: { href } },
     });
   }
 
@@ -462,11 +486,30 @@ export function installAtMention(
       return;
     }
     if (receipt?.success === false) {
-      report(receipt.failure?.message ?? 'הוספת הקישור נכשלה', true);
+      // המנוע אינו תומך בקישור בתוך קישור, ומודיע על כך באנגלית.
+      const nested = receipt.failure?.code === 'hyperlink-nested-unsupported';
+      report(
+        nested
+          ? 'אי אפשר להוסיף קישור בתוך קישור קיים'
+          : (receipt.failure?.message ?? 'הוספת הקישור נכשלה'),
+        true,
+      );
     }
   }
 
   const onInput = (): void => scheduleEvaluate();
+
+  /**
+   * המקשים שהרשימה מטפלת בהם אינם משנים טקסט, ולכן `keyup` שלהם אינו אמור
+   * להעריך מחדש. נמדד: בלי הסינון הזה חץ למטה בנה session חדש שהחזיר את
+   * הבחירה לפריט הראשון, ו-Escape נסגר ונפתח מיד.
+   */
+  const HANDLED_KEYS = new Set(['ArrowDown', 'ArrowUp', 'Enter', 'Tab', 'Escape']);
+
+  const onKeyUp = (event: KeyboardEvent): void => {
+    if (HANDLED_KEYS.has(event.key)) return;
+    scheduleEvaluate();
+  };
 
   const onKeyDown = (event: KeyboardEvent): void => {
     if (session.kind !== 'suggesting') return;
@@ -482,6 +525,7 @@ export function installAtMention(
         void accept();
         break;
       case 'Escape':
+        dismissedAt = session.replaceStart;
         closeSession();
         break;
       default:
@@ -495,7 +539,7 @@ export function installAtMention(
   const onBlur = (): void => closeSession();
 
   container.addEventListener('input', onInput);
-  container.addEventListener('keyup', onInput);
+  container.addEventListener('keyup', onKeyUp);
   container.addEventListener('keydown', onKeyDown, true);
   container.addEventListener('scroll', onScroll, true);
   container.addEventListener('focusout', onBlur);
@@ -507,7 +551,7 @@ export function installAtMention(
       if (debounceTimer !== undefined) clearTimeout(debounceTimer);
       closeSession();
       container.removeEventListener('input', onInput);
-      container.removeEventListener('keyup', onInput);
+      container.removeEventListener('keyup', onKeyUp);
       container.removeEventListener('keydown', onKeyDown, true);
       container.removeEventListener('scroll', onScroll, true);
       container.removeEventListener('focusout', onBlur);

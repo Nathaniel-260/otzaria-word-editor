@@ -31,31 +31,21 @@ function hit(overrides: Partial<ResolvedRefHit> = {}): ResolvedRefHit {
 
 const BLOCK = 'b1';
 
-/**
- * כפיל מנוע: הסמן יושב בסוף `text`, וחלון הקריאה מחזיר את הטקסט כולו.
- * `hyperlinksInsert === null` מדמה גרסה שאין בה את הפעולה האטומית.
- */
-function fakeDoc(
-  text: string,
-  options: { hyperlinksInsert?: (() => unknown) | null; docInsert?: () => unknown } = {},
-) {
+/** כפיל מנוע: הסמן יושב בסוף `text`, וחלון הקריאה מחזיר את הטקסט כולו. */
+function fakeDoc(text: string, options: { docInsert?: () => unknown } = {}) {
   const calls = new Map<string, unknown[]>();
   const record = (name: string, input: unknown) =>
     calls.set(name, [...(calls.get(name) ?? []), input]);
 
-  const cursor = text.length;
+  // הסמן זז עם המסמך: `insert` מחליף טווח, ואחריו הוא יושב בסוף מה שנכתב —
+  // בדיוק מה שקוד ההחלפה קורא כדי לבנות את טווח העטיפה.
+  let cursor = text.length;
   const hyperlinks: Record<string, unknown> = {
-    wrap: (input: unknown) => {
-      record('wrap', input);
+    insert: (input: unknown) => {
+      record('hyperlinks.insert', input);
       return { success: true };
     },
   };
-  if (options.hyperlinksInsert !== null) {
-    hyperlinks.insert = (input: unknown) => {
-      record('hyperlinks.insert', input);
-      return options.hyperlinksInsert?.() ?? { success: true };
-    };
-  }
 
   const doc = {
     selection: {
@@ -75,6 +65,11 @@ function fakeDoc(
     },
     insert: (input: unknown) => {
       record('insert', input);
+      const { value, target } = input as {
+        value: string;
+        target: { start: { offset: number } };
+      };
+      cursor = target.start.offset + value.length;
       return options.docInsert?.() ?? { success: true };
     },
     hyperlinks,
@@ -168,15 +163,25 @@ describe('installAtMention', () => {
     container.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     await vi.advanceTimersByTimeAsync(0);
 
-    const input = calls.get('hyperlinks.insert')?.[0] as {
+    // קודם מחיקת האזכור — `hyperlinks.insert` מוסיפה ואינה מחליפה.
+    const deleted = calls.get('insert')?.[0] as {
+      value: string;
+      target: { start: { offset: number }; end: { offset: number } };
+    };
+    // "ראה " הוא 4 תווים, ולכן ה-@ יושב ב-4 והסמן ב-13.
+    expect(deleted.value).toBe('');
+    expect(deleted.target.start.offset).toBe(4);
+    expect(deleted.target.end.offset).toBe(13);
+
+    // ואז הקישור נכנס בנקודה שנפתחה.
+    const linked = calls.get('hyperlinks.insert')?.[0] as {
       target: { blockId: string; range: { start: number; end: number } };
       text: string;
       link: { destination: { href: string } };
     };
-    // "ראה " הוא 4 תווים, ולכן ה-@ יושב ב-4 והסמן ב-13.
-    expect(input.target).toMatchObject({ blockId: BLOCK, range: { start: 4, end: 13 } });
-    expect(input.text).toBe('פסחים דף לד');
-    expect(input.link.destination.href).toBe('otzaria://open/book/42?index=1234');
+    expect(linked.target).toMatchObject({ blockId: BLOCK, range: { start: 4, end: 4 } });
+    expect(linked.text).toBe('פסחים דף לד');
+    expect(linked.link.destination.href).toBe('otzaria://open/book/42?index=1234');
     handle.dispose();
   });
 
@@ -189,45 +194,26 @@ describe('installAtMention', () => {
     container.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     await vi.advanceTimersByTimeAsync(0);
 
-    const input = calls.get('hyperlinks.insert')?.[0] as {
-      target: { range: { start: number } };
-    };
-    // "כמובא ב" הוא 7 תווים; ההחלפה מתחילה ב-@ שאחריהם.
-    expect(input.target.range.start).toBe(7);
+    const deleted = calls.get('insert')?.[0] as { target: { start: { offset: number } } };
+    // "כמובא ב" הוא 7 תווים; המחיקה מתחילה ב-@ שאחריהם.
+    expect(deleted.target.start.offset).toBe(7);
     handle.dispose();
   });
 
-  it('נופל ל-insert+wrap כשהפעולה האטומית אינה קיימת', async () => {
-    const { host, calls } = fakeDoc('@פסחים לד', { hyperlinksInsert: null });
-    const handle = installAtMention(container, host as never);
+  it('בלי hyperlinks.insert אין כתיבה, ויש דיווח', async () => {
+    const onStatus = vi.fn();
+    const { host, calls } = fakeDoc('@פסחים לד');
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    delete (host.activeEditor.doc as any).hyperlinks.insert;
+    const handle = installAtMention(container, host as never, { onStatus });
 
     container.dispatchEvent(new Event('input'));
     await settle();
     container.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     await vi.advanceTimersByTimeAsync(0);
 
-    expect(calls.get('insert')?.[0]).toMatchObject({ value: 'פסחים דף לד', type: 'text' });
-    // ה-wrap עוטף בדיוק את הטקסט שנכתב, מתחילת ההחלפה ובאורכו.
-    expect(calls.get('wrap')?.[0]).toMatchObject({
-      target: { blockId: BLOCK, range: { start: 0, end: 'פסחים דף לד'.length } },
-      link: { destination: { href: 'otzaria://open/book/42?index=1234' } },
-    });
-    handle.dispose();
-  });
-
-  it('נופל ל-insert+wrap גם כשהפעולה האטומית מחזירה כשל', async () => {
-    const { host, calls } = fakeDoc('@פסחים לד', {
-      hyperlinksInsert: () => ({ success: false, failure: { code: 'X' } }),
-    });
-    const handle = installAtMention(container, host as never);
-
-    container.dispatchEvent(new Event('input'));
-    await settle();
-    container.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-    await vi.advanceTimersByTimeAsync(0);
-
-    expect(calls.has('insert')).toBe(true);
-    expect(calls.has('wrap')).toBe(true);
+    expect(calls.has('insert')).toBe(false);
+    expect(onStatus).toHaveBeenCalledWith('הוספת קישור אינה זמינה במסמך זה', true);
     handle.dispose();
   });
 
@@ -254,8 +240,8 @@ describe('installAtMention', () => {
     container.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }));
     await vi.advanceTimersByTimeAsync(0);
 
-    const input = calls.get('hyperlinks.insert')?.[0] as { link: { destination: { href: string } } };
-    expect(input.link.destination.href).toBe('otzaria://open/book/7?index=99');
+    const linked = calls.get('hyperlinks.insert')?.[0] as { link: { destination: { href: string } } };
+    expect(linked.link.destination.href).toBe('otzaria://open/book/7?index=99');
     handle.dispose();
   });
 
@@ -272,8 +258,8 @@ describe('installAtMention', () => {
     options()[1]!.click();
     await vi.advanceTimersByTimeAsync(0);
 
-    const input = calls.get('hyperlinks.insert')?.[0] as { link: { destination: { href: string } } };
-    expect(input.link.destination.href).toBe('otzaria://open/book/7?index=99');
+    const linked = calls.get('hyperlinks.insert')?.[0] as { link: { destination: { href: string } } };
+    expect(linked.link.destination.href).toBe('otzaria://open/book/7?index=99');
     handle.dispose();
   });
 
@@ -286,8 +272,67 @@ describe('installAtMention', () => {
     container.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
 
     expect(popup()).toBeNull();
-    expect(calls.has('hyperlinks.insert')).toBe(false);
+    expect(calls.has('insert')).toBe(false);
     handle.dispose();
+  });
+
+  it('keyup של מקשי הרשימה אינו מעריך מחדש', async () => {
+    // נמדד בשער: בלי הסינון, ה-keyup של חץ למטה בנה session חדש שהחזיר את
+    // הבחירה לפריט הראשון.
+    resolveRefMock.mockResolvedValue({
+      ok: true,
+      value: [hit(), hit({ id: 7, reference: 'פסחים דף לה', index: 99 })],
+    });
+    const { host } = fakeDoc('@פסחים');
+    const handle = installAtMention(container, host as never);
+
+    container.dispatchEvent(new Event('input'));
+    await settle();
+    container.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+    container.dispatchEvent(new KeyboardEvent('keyup', { key: 'ArrowDown', bubbles: true }));
+    await settle();
+
+    expect(options()[1]!.getAttribute('aria-selected')).toBe('true');
+    handle.dispose();
+  });
+
+  it('אחרי Escape אותו אזכור אינו נפתח מחדש', async () => {
+    // נמדד בשער: ה-keyup של Escape עצמו פתח את הרשימה מיד מחדש.
+    const { host } = fakeDoc('@פסחים לד');
+    const handle = installAtMention(container, host as never);
+
+    container.dispatchEvent(new Event('input'));
+    await settle();
+    container.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    container.dispatchEvent(new KeyboardEvent('keyup', { key: 'Escape', bubbles: true }));
+    await settle();
+    expect(popup()).toBeNull();
+
+    // גם הקלדה נוספת באותו אזכור אינה מחזירה אותו.
+    container.dispatchEvent(new Event('input'));
+    await settle();
+    expect(popup()).toBeNull();
+    handle.dispose();
+  });
+
+  it('אזכור חדש נפתח גם אחרי שקודמו נדחה', async () => {
+    const { host } = fakeDoc('@פסחים לד');
+    const handle = installAtMention(container, host as never);
+
+    container.dispatchEvent(new Event('input'));
+    await settle();
+    container.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await settle();
+    expect(popup()).toBeNull();
+    handle.dispose();
+
+    // אזכור במיקום אחר — הדחייה נקשרת להיסט ה-@, לא לפיצ'ר כולו.
+    const second = fakeDoc('ראה @ברכות ב');
+    const handle2 = installAtMention(container, second.host as never);
+    container.dispatchEvent(new Event('input'));
+    await settle();
+    expect(popup()).not.toBeNull();
+    handle2.dispose();
   });
 
   it('מקש שאינו של הרשימה אינו נבלע', async () => {
