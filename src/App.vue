@@ -4582,16 +4582,17 @@ onMounted(async () => {
     // בחר בהפעלה הקודמת. ההעדפה של הסרגל — מאותו טעם: היא חלה על המסמך שנפתח
     // מיד אחרי כאן.
     //
-    // שלוש הקריאות במקביל ולא בזו אחר זו: כל אחת היא סבב IPC מלא מול אוצריא,
+    // כל הקריאות במקביל ולא בזו אחר זו: כל אחת היא סבב IPC מלא מול אוצריא,
     // הן קוראות מפתחות שונים ואינן תלויות זו בזו — והן עומדות בין המשתמש לבין
     // פתיחת המסמך הראשון.
-    const [storedAutosave, storedRuler, stored, storedRecents, storedDiscarded] =
+    const [storedAutosave, storedRuler, stored, storedRecents, storedDiscarded, storedSpellcheck] =
       await Promise.all([
         loadAutosaveEnabled(),
         loadRulerVisible(),
         loadPreviousSession(),
         loadRecentDocuments(),
         loadDiscardBackups(),
+        loadSpellcheckEnabled(),
       ]);
     autosaveEnabled.value = storedAutosave;
     rulerPreference = storedRuler;
@@ -4604,7 +4605,7 @@ onMounted(async () => {
 
     // בדיקת האיות — **לא** ב-await: משיכת המילון היא 1.3MB, והעלייה לא
     // תמתין לה. מי שהדליק בהפעלה הקודמת יקבל את הסימון כשהמילון יגיע.
-    if (await loadSpellcheckEnabled()) {
+    if (storedSpellcheck) {
       void loadTorahDictionary().then((dictionary) => {
         if (dictionary) spellcheckDictionary.value = dictionary;
       });
