@@ -99,6 +99,18 @@ function lvlOf(paragraph, numbering, ilvl = 0) {
 
 const paraOf = (files, text) => paragraphsOf(files).find((p) => textOf(p) === text) || '';
 
+/** רמת הקינון שהסמן יושב בה, מ-`lists.getState` — סמכות הרשימות של המנוע. */
+const caretState = () =>
+  app.js(`(async function(){
+    try {
+      var ed = window.__otzariaEditor.superdoc.activeEditor;
+      var info = await ed.doc.selection.current();
+      var seg = info && info.target && info.target.segments && info.target.segments[0];
+      if (!seg) return JSON.stringify({error:'אין blockId'});
+      return JSON.stringify(await ed.doc.lists.getState({ target: {kind:'block', nodeType:'paragraph', nodeId: seg.blockId} }));
+    } catch (e) { return JSON.stringify({error: String(e)}); }
+  })()`).then(parse);
+
 /** כל תשע הרמות: המרה שנעצרה ברמה 0 משאירה תבליטים שאין פקד שיגיע אליהם. */
 const allLevelsOf = (paragraph, numbering) =>
   Array.from({ length: 9 }, (_, ilvl) => lvlOf(paragraph, numbering, ilvl));
@@ -362,6 +374,11 @@ try {
     '| סמנים:', JSON.stringify(await markersOf()));
   const nested = childBefore.paraIlvl === '1' && childBefore.numFmt !== 'bullet' && parentBefore.numFmt !== 'bullet';
   await caretOn('הורה');
+  const caret6 = await caretState();
+  console.log('6 מצב הסמן:', JSON.stringify(caret6));
+  // הכותרת מצהירה „ברמה 0”, ולכן הרמה שהסמן בה נמדדת ואינה מונחת: גם על רמה 1
+  // ההמרה מהפכת את הרשימה כולה, והשורה הייתה עוברת בירוק על תרחיש אחר.
+  const caretAtRoot = caret6?.success === true && caret6.ilvl === 0;
   const r6 = await menuAction('הפוך רשימה ממוספרת לתבליטים', 'פעולות תבליטים');
   const numbering6 = numberingOf(r6.files);
   const parent6 = lvlOf(paraOf(r6.files, 'הורה'), numbering6, 0);
@@ -369,9 +386,10 @@ try {
   const nestedMarkers = r6.markers.slice(-2);
   console.log('6 אחרי — הורה:', JSON.stringify(parent6), '| בן:', JSON.stringify(child6),
     '| סמנים:', JSON.stringify(r6.markers), '| status:', JSON.stringify(r6.status));
-  if (!nested) {
+  if (!nested || !caretAtRoot) {
     report.fail('6. המרה ברמה 0 הופכת גם את רמה 1 לתבליט',
-      `התרחיש לא נבנה: הורה=${JSON.stringify(parentBefore)} בן=${JSON.stringify(childBefore)} — צריך פריט ברמה 1 שאינו תבליט`);
+      `התרחיש לא נבנה: הורה=${JSON.stringify(parentBefore)} בן=${JSON.stringify(childBefore)} — צריך פריט ברמה 1 ` +
+        `שאינו תבליט, והסמן ברמה 0 (נמדד ${JSON.stringify(caret6)})`);
   } else if (
     parent6.numFmt === 'bullet' &&
     parent6.lvlText === '•' &&
@@ -381,7 +399,8 @@ try {
     nestedMarkers[1] === '•'
   ) {
     report.pass('6. המרה ברמה 0 הופכת גם את רמה 1 לתבליט',
-      `רמה 0 ${parentBefore.numFmt}→bullet, רמה 1 ${childBefore.numFmt}→bullet | סמני הרשימה ${JSON.stringify(nestedMarkers)}`);
+      `הסמן ב-ilvl=${caret6.ilvl} | רמה 0 ${parentBefore.numFmt}→bullet, רמה 1 ${childBefore.numFmt}→bullet | ` +
+        `סמני הרשימה ${JSON.stringify(nestedMarkers)}`);
   } else {
     report.fail('6. המרה ברמה 0 לא הפכה את רמה 1 לתבליט',
       `רמה 0 ${JSON.stringify(parentBefore)}→${JSON.stringify(parent6)} | רמה 1 ${JSON.stringify(childBefore)}→${JSON.stringify(child6)} | ` +
