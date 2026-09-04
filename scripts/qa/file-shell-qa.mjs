@@ -40,7 +40,7 @@
 import { execSync } from 'node:child_process';
 import { openApp, createReport } from './harness.mjs';
 
-const PORT = 9367;
+const PORT = Number(process.env.QA_PORT ?? 9367);
 const report = createReport('קובץ / ✦ אוצריא / TitleBar');
 
 const log = (...a) => console.log(...a);
@@ -197,20 +197,18 @@ async function tooltipOf(app, label) {
  */
 async function tellMe(app) {
   const raw = await app.js(
-    `(function(){var box=document.querySelector('.tell-me-input');` +
+    `(function(){var shown=function(el){return !!(el&&window.__qa.rectOf(el));};` +
+      `var box=document.querySelector('.tell-me-input');` +
       `var list=document.getElementById('tell-me-listbox');` +
-      `var lr=list?list.getBoundingClientRect():null;` +
       `var items=list?Array.prototype.map.call(list.querySelectorAll('[role="option"]'),function(o){` +
       `var t=o.querySelector('.tell-me-item-title');var c=o.querySelector('.tell-me-item-category');` +
-      `var r=o.getBoundingClientRect();` +
       `return {title:(t?t.textContent:(o.textContent||'')).replace(/\\s+/g,' ').trim(),` +
-      `category:(c?c.textContent:'').trim(),id:o.id,shown:r.width>0&&r.height>0};}):[];` +
+      `category:(c?c.textContent:'').trim(),id:o.id,shown:shown(o)};}):[];` +
       `var sec=list?list.querySelector('.tell-me-section-title'):null;` +
       `return JSON.stringify({found:!!box,disabled:box?!!box.disabled:null,` +
       `value:box?box.value:null,expanded:box?box.getAttribute('aria-expanded'):null,` +
       `placeholder:box?box.getAttribute('placeholder'):null,` +
-      `boxShown:box?!!window.__qa.rectOf(box):false,` +
-      `open:!!(lr&&lr.width>0&&lr.height>0),` +
+      `rect:box?window.__qa.rectOf(box):null,boxShown:shown(box),open:shown(list),` +
       `section:sec?(sec.textContent||'').trim():null,items:items})})()`,
   );
   return JSON.parse(raw);
@@ -231,12 +229,12 @@ async function tellMeRect(app, titleOrId) {
 
 /**
  * לשונית המצב הפעילה בדיאלוג „חיפוש והחלפה” — „חפש” או „החלף” — ומונה
- * התוצאות שבו.
+ * התוצאות שבו. שניהם נקראים מאותו עוגן שממנו `Q.dialog` קורא, `[role="dialog"]`.
  */
 function findDialogFacts(app) {
   return app
     .js(
-      `(function(){var d=document.querySelector('.find-replace-dialog');` +
+      `(function(){var d=document.querySelector('[role="dialog"]');` +
         `if(!d)return JSON.stringify({mode:'',counter:''});` +
         `var t=d.querySelector('.fr-tab[aria-selected="true"]');` +
         `var c=d.querySelector('.fr-counter');` +
@@ -729,11 +727,18 @@ async function sectionTitleBar() {
     log('לשונית פעילה כברירת מחדל:', active);
 
     await step('מיקום פקדי פס הכותרת', async () => {
-      // תיבת ה-Tell Me מזוהה לפי ה-`aria-label` שלה; „חיפוש והחלפה” בפס
-      // הכותרת הוחלף בה, ונשאר נגיש מבית > עריכה.
-      const names = ['שמירה אוטומטית', 'שמור', 'בטל', 'חזור', 'חיפוש אפשרויות, פקודות ועזרה'];
+      const names = ['שמירה אוטומטית', 'שמור', 'בטל', 'חזור'];
       const results = {};
       for (const n of names) results[n] = await onScreen(app, n);
+      // „חיפוש והחלפה” בפס הכותרת הוחלף בתיבת Tell Me (ונשאר נגיש מבית > עריכה).
+      // התיבה נמדדת כאן מאותו עוגן שכל שורותיה מודדות ממנו, `.tell-me-input`.
+      const box = await tellMe(app);
+      const inside = !!box.rect && box.rect.x > 0 && box.rect.y > 0;
+      results['תיבת Tell Me'] = {
+        ok: inside,
+        why: inside ? '' : box.found ? `מחוץ לחלון או אינו מוצג (rect=${JSON.stringify(box.rect)})` : 'לא נמצא',
+        rect: box.rect,
+      };
       log('מיקומים:', JSON.stringify(results));
       const off = Object.entries(results).filter(([, r]) => !r.ok);
       off.length
