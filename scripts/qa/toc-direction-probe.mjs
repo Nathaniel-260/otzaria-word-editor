@@ -47,21 +47,6 @@ async function widen(app) {
   await app.sleep(2000);
 }
 
-async function findLineIndex(app, text) {
-  const idx = await app.js(
-    `(function(){var t=${JSON.stringify(text)};var nodes=document.querySelectorAll('.superdoc-line');` +
-      `for(var i=0;i<nodes.length;i++){if((nodes[i].textContent||'').trim()===t)return i;}` +
-      `for(var j=0;j<nodes.length;j++){if((nodes[j].textContent||'').indexOf(t)>=0)return j;}return -1;})()`
-  );
-  return Number(idx);
-}
-
-async function caretText(app, text) {
-  const idx = await findLineIndex(app, text);
-  if (idx < 0) throw new Error(`לא נמצאה שורה עם הטקסט "${text}"`);
-  return app.caret(idx);
-}
-
 async function seed(app, words) {
   await app.caret(0);
   for (let i = 0; i < words.length; i++) {
@@ -141,14 +126,27 @@ try {
   await seed(app, ['פרק ראשון', 'גוף הפרק', 'פרק שני']);
 
   await app.tab('בית');
-  await caretText(app, 'פרק ראשון');
+  await app.caretPara('פרק ראשון');
   await app.clickGallery('כותרת 1', { after: 900 });
-  await caretText(app, 'פרק שני');
+  await app.caretPara('פרק שני');
   await app.clickGallery('כותרת 1', { after: 900 });
+
+  /*
+    בלי השורה הזאת כל הסקר מודד תוכן עניינים שנבנה מפסקאות אחרות מאלה שהתכוון
+    אליהן, ועובר: היעדים הוזנו ל-`caret(n)` כאינדקס פסקה, ולכן „פרק שני” נחת
+    על „פרק ראשון” — כותרת אחת קיבלה `Heading1` פעמיים, והשנייה נשארה גוף.
+  */
+  const headed = paragraphs((await app.docx())['word/document.xml'] ?? '')
+    .filter((p) => /<w:pStyle w:val="Heading1"/.test(p))
+    .map((p) => (p.match(/<w:t[^>]*>([\s\S]*?)<\/w:t>/g) ?? []).map((t) => t.replace(/<[^>]+>/g, '')).join(''));
+  log('פסקאות עם Heading1:', JSON.stringify(headed));
+  const bothHeaded = headed.length === 2 && headed.includes('פרק ראשון') && headed.includes('פרק שני');
+  if (bothHeaded) report.pass('הכותרות הוחלו על שתי הפסקאות שנבחרו', JSON.stringify(headed));
+  else report.fail('הכותרות לא הוחלו על הפסקאות שנבחרו', `Heading1 על ${JSON.stringify(headed)} במקום על „פרק ראשון” ו„פרק שני”`);
 
   // 1 — מה המנוע כותב מעצמו
   await app.tab('הפניות');
-  await caretText(app, 'גוף הפרק');
+  await app.caretPara('גוף הפרק');
   await app.press('End', 'End', 35);
   await app.sleep(300);
   await app.reset();
