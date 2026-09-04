@@ -39,16 +39,30 @@ try {
 
   /*
     שם פקד נפתר בהתאמת קידומת על כל הדף, ולכן שער שקורא בשם עלול למדוד אלמנט
-    אחר לגמרי — כך „הכפתור לא נמצא” נדווח על מוצר תקין.
+    אחר לגמרי — כך „הכפתור לא נמצא” נדווח על מוצר תקין. לשונית לשונית, כי
+    גוף לשונית שאינה פעילה אינו ב-DOM כלל (`v-if`, Ribbon.vue:62,78) —
+    „מצב מיקוד” שבלשונית „תצוגה” נפל באותה מלכודת בדיוק.
   */
-  const scan = await app.shadowed();
-  console.log('עמימות לגיטימית (מדידה):', JSON.stringify(scan.notes));
-  console.log('אלמנטים זרים שנושאים שם של פקד:', JSON.stringify(scan.findings));
-  scan.findings.length === 0
-    ? report.pass('שם הפקד נפתר לפקד עצמו', `${scan.scanned} שמות בלשונית „${scan.tab}”`)
+  const tabLabels = (await app.tabs()).map((t) => t.label);
+  const findings = [];
+  const notes = [];
+  let scanned = 0;
+  for (const label of tabLabels) {
+    await app.tab(label);
+    const scan = await app.shadowed();
+    scanned += scan.scanned;
+    findings.push(...scan.findings);
+    notes.push(...scan.notes);
+  }
+  await app.tab('בית');
+
+  console.log('עמימות לגיטימית (מדידה):', JSON.stringify(notes));
+  console.log('אלמנטים זרים שנושאים שם של פקד:', JSON.stringify(findings));
+  findings.length === 0
+    ? report.pass('שם הפקד נפתר לפקד עצמו', `${scanned} שמות ב-${tabLabels.length} לשוניות`)
     : report.fail(
         'אלמנט שאינו הפקד נושא את שמו',
-        scan.findings
+        findings
           .map((f) => `${f.tab}/${f.name}: ${f.kind} ${f.el} ב-${f.at}${f.picked ? ' — וזה מה שהעזר מחזיר' : ''}`)
           .join(' | ')
           .slice(0, 400),

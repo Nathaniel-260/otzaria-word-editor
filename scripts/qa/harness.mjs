@@ -202,6 +202,7 @@ function makeApi(cdp) {
 
     controls: (scope) => js(`JSON.stringify(window.__qa.controls(${JSON.stringify(scope ?? null)}))`).then(JSON.parse),
     shadowed: () => js('JSON.stringify(window.__qa.shadowed())').then(JSON.parse),
+    tabs: () => js('JSON.stringify(window.__qa.tabs())').then(JSON.parse),
 
     status: () => js('JSON.stringify(window.__qa.status())').then(JSON.parse),
     messages: () => js('JSON.stringify(window.__qa.messages())').then(JSON.parse),
