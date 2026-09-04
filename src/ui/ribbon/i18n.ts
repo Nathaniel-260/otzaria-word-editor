@@ -101,11 +101,12 @@ const EN: Readonly<Record<string, string>> = {
   'ייצוא ל-PDF דורש גרסה עדכנית יותר של אוצריא':
     'Export to PDF requires a newer version of Otzaria',
   'יציאה': 'Exit',
-  'חזרה למסך הספרייה של אוצריא; המסמך יישאר פתוח':
-    'Return to the Otzaria library screen; the document stays open',
+  'סגירת המסמך וחזרה למסך הספרייה של אוצריא':
+    'Close the document and return to the Otzaria library screen',
   'אין מסמך פתוח': 'No open document',
   'השמירה רצה כרגע — רגע אחד': 'Saving is in progress — one moment',
   'פתיחת מסמך רצה כרגע': 'Opening a document is in progress',
+  'סגירת המסמכים רצה כרגע — רגע אחד': 'Closing documents is in progress — one moment',
   'מידע': 'Info',
   'אודות': 'About',
   'אודות עורך Word לאוצריא': 'About the Word Editor for Otzaria',

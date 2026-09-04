@@ -64,6 +64,7 @@
         :has-pdf-export="hasPdfExport"
         :is-saving="isSaving"
         :is-opening="isOpening"
+        :is-exiting="isExiting"
         @new-doc="$emit('new-doc')"
         @open-doc="$emit('open-doc')"
         @save-doc="$emit('save-doc')"
@@ -165,9 +166,17 @@ withDefaults(
     hasPdfExport?: boolean;
     isSaving?: boolean;
     isOpening?: boolean;
+    isExiting?: boolean;
     bookCompletionEnabled?: boolean;
   }>(),
-  { hasDocument: false, hasPdfExport: false, isSaving: false, isOpening: false, bookCompletionEnabled: false },
+  {
+    hasDocument: false,
+    hasPdfExport: false,
+    isSaving: false,
+    isOpening: false,
+    isExiting: false,
+    bookCompletionEnabled: false,
+  },
 );
 
 /**
