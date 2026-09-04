@@ -62,7 +62,14 @@ process.exit(report.print() > 0 ? 1 : 0);
 **דיאלוגים** — `dialog()` (שם + כל הפקדים), `dialogFill(idאוName, value)`, `clickDialog(name)`
 
 **מסמך וקלט**
-- `caret(lineIndex)` — לחיצה בשורת טקסט; `selectLine(i)`, `extendSelection(n)`
+- `caret(lineIndex)` — לחיצה בשורת טקסט; `selectLine(i)`, `extendSelection(n)`.
+  **`lineIndex` אינו אינדקס פסקה**: הסלקטור שמאחוריו הוא
+  `'.superdoc-line, .superdoc-fragment'`, וה-line מקונן ב-fragment — כלומר כל
+  פסקה תופסת שני אינדקסים, ו-`caret(1)` הוא עוד הפסקה הראשונה. `caret(0)`
+  תמיד הפסקה הראשונה, ולכן רוב הקוראים אינם נפגעים
+- `caretPara(indexאוText)` — סמן בפסקה, **מאומת מול המנוע** (`data-source-node-id`
+  של ה-fragment מול `doc.selection.current()`) וזורק כשהלחיצה נחתה על אחרת.
+  ‏`paraCount()`, `caretBlock()`. זה מה שצריך כשהמדידה תלויה **באיזו** פסקה
 - `type(text)`, `press(key, code, vk, modifiers, text)`
 - `screenText()`, `lineCount()`, `selection()`
 - `docx()` → מפה של `נתיב → מחרוזת` מתוך ה-docx המיוצא. **זו ההוכחה.** `word/document.xml`,
