@@ -188,6 +188,55 @@ async function tooltipOf(app, label) {
   return raw === 'null' ? null : JSON.parse(raw);
 }
 
+/**
+ * מצב תיבת ה-Tell Me: הקלט, הרשימה שמתחתיו, והפריטים שמוצגים בה בפועל.
+ *
+ * `#tell-me-listbox` הוא `v-show` — הוא קיים ב-DOM גם כשהתיבה סגורה, ופריטיו
+ * נמצאים בו כל הזמן. לכן `open` נמדד מהמלבן ולא מהנוכחות, וכל פריט מדווח
+ * `shown` בנפרד: „יש שורה כזאת” אינו „השורה מוצגת למשתמש”.
+ */
+async function tellMe(app) {
+  const raw = await app.js(
+    `(function(){var box=document.querySelector('.tell-me-input');` +
+      `var list=document.getElementById('tell-me-listbox');` +
+      `var lr=list?list.getBoundingClientRect():null;` +
+      `var items=list?Array.prototype.map.call(list.querySelectorAll('[role="option"]'),function(o){` +
+      `var t=o.querySelector('.tell-me-item-title');var c=o.querySelector('.tell-me-item-category');` +
+      `var r=o.getBoundingClientRect();` +
+      `return {title:(t?t.textContent:(o.textContent||'')).replace(/\\s+/g,' ').trim(),` +
+      `category:(c?c.textContent:'').trim(),id:o.id,shown:r.width>0&&r.height>0};}):[];` +
+      `var sec=list?list.querySelector('.tell-me-section-title'):null;` +
+      `return JSON.stringify({found:!!box,disabled:box?!!box.disabled:null,` +
+      `value:box?box.value:null,expanded:box?box.getAttribute('aria-expanded'):null,` +
+      `placeholder:box?box.getAttribute('placeholder'):null,` +
+      `boxShown:box?!!window.__qa.rectOf(box):false,` +
+      `open:!!(lr&&lr.width>0&&lr.height>0),` +
+      `section:sec?(sec.textContent||'').trim():null,items:items})})()`,
+  );
+  return JSON.parse(raw);
+}
+
+/** מלבן של שורה בתיבת ה-Tell Me, לפי כותרתה או לפי ה-id שלה. */
+async function tellMeRect(app, titleOrId) {
+  const raw = await app.js(
+    `(function(){var list=document.getElementById('tell-me-listbox');if(!list)return 'null';` +
+      `var nodes=list.querySelectorAll('[role="option"]');` +
+      `for(var i=0;i<nodes.length;i++){var t=nodes[i].querySelector('.tell-me-item-title');` +
+      `var text=(t?t.textContent:(nodes[i].textContent||'')).replace(/\\s+/g,' ').trim();` +
+      `if(text===${JSON.stringify(titleOrId)}||nodes[i].id===${JSON.stringify(titleOrId)})` +
+      `return JSON.stringify(window.__qa.rectOf(nodes[i]));}return 'null'})()`,
+  );
+  return raw === 'null' ? null : JSON.parse(raw);
+}
+
+/** לשונית המצב הפעילה בדיאלוג „חיפוש והחלפה” — „חפש” או „החלף”. */
+function findDialogMode(app) {
+  return app.js(
+    `(function(){var d=document.querySelector('.find-replace-dialog');if(!d)return '';` +
+      `var t=d.querySelector('.fr-tab[aria-selected="true"]');return t?(t.textContent||'').trim():''})()`,
+  );
+}
+
 /** עוטפת את `fetch` כך שבקשות PUT (העלאת שמירה) ייענו בהצלחה בלי שרת אמיתי. */
 async function mockUploadFetch(app) {
   await app.js(
@@ -659,7 +708,9 @@ async function sectionTitleBar() {
     log('לשונית פעילה כברירת מחדל:', active);
 
     await step('מיקום פקדי פס הכותרת', async () => {
-      const names = ['שמירה אוטומטית', 'שמור', 'בטל', 'חזור', 'חיפוש והחלפה'];
+      // תיבת ה-Tell Me מזוהה לפי ה-`aria-label` שלה; „חיפוש והחלפה” בפס
+      // הכותרת הוחלף בה, ונשאר נגיש מבית > עריכה.
+      const names = ['שמירה אוטומטית', 'שמור', 'בטל', 'חזור', 'חיפוש אפשרויות, פקודות ועזרה'];
       const results = {};
       for (const n of names) results[n] = await onScreen(app, n);
       log('מיקומים:', JSON.stringify(results));
@@ -731,16 +782,100 @@ async function sectionTitleBar() {
       else report.fail('חזור', `נכשל; רעש: ${bad || 'אין'}`);
     });
 
-    await step('חיפוש והחלפה — התיבה במרכז הפס פותחת דיאלוג', async () => {
+    await step('תיבת Tell Me — סינון, ובחירה שמריצה את הפקודה', async () => {
       await app.reset();
-      const clicked = await app.click('חיפוש והחלפה', { after: 600 });
+      const idle = await tellMe(app);
+      log('לפני לחיצה:', JSON.stringify({ found: idle.found, disabled: idle.disabled, מוצגת: idle.boxShown, פתוחה: idle.open, placeholder: idle.placeholder }));
+      if (!idle.found || !idle.boxShown || idle.disabled !== false) {
+        report.fail('תיבת Tell Me — סינון', `התיבה אינה פעילה: found=${idle.found} מוצגת=${idle.boxShown} disabled=${idle.disabled}`);
+        return;
+      }
+
+      const clicked = await app.clickSel('.tell-me-input', 0, { after: 500 });
+      const opened = await tellMe(app);
+      const suggested = opened.items.filter((i) => i.shown).map((i) => i.title);
+
+      await app.type('החלפה');
+      await app.sleep(400);
+      const filtered = await tellMe(app);
+      const shown = filtered.items.filter((i) => i.shown).map((i) => i.title);
+      log('נלחץ:', clicked, '| פתוחה אחרי לחיצה:', opened.open, '| מוצעות:', JSON.stringify(suggested));
+      log('שאילתה:', JSON.stringify(filtered.value), '| מקטע:', filtered.section, '| תוצאות:', JSON.stringify(shown));
+
+      const filterOk =
+        clicked &&
+        !idle.open &&
+        opened.open &&
+        opened.section === 'פעולות מוצעות' &&
+        suggested.includes('חיפוש והחלפה') &&
+        filtered.value === 'החלפה' &&
+        filtered.expanded === 'true' &&
+        filtered.section === 'פקודות ואפשרויות' &&
+        shown[0] === 'חיפוש והחלפה' &&
+        shown.length < suggested.length;
+      filterOk
+        ? report.pass(
+            'תיבת Tell Me — סינון',
+            `סגורה עד הלחיצה, ואחריה ${suggested.length} פעולות מוצעות; „החלפה” צמצם ל-${shown.length} תוצאות שבראשן „${shown[0]}”`,
+          )
+        : report.fail(
+            'תיבת Tell Me — סינון',
+            `נלחץ=${clicked} פתוחה לפני=${idle.open} אחרי=${opened.open} מקטע=${opened.section}/${filtered.section} ` +
+              `שאילתה=${JSON.stringify(filtered.value)} expanded=${filtered.expanded} מוצעות=${JSON.stringify(suggested)} תוצאות=${JSON.stringify(shown)}`,
+          );
+
+      const rect = await tellMeRect(app, 'חיפוש והחלפה');
+      if (!rect) {
+        report.fail('תיבת Tell Me — הרצת „חיפוש והחלפה”', 'לשורה „חיפוש והחלפה” אין מלבן ללחיצה — היא אינה מוצגת');
+        return;
+      }
+      await app.clickAt(rect.x, rect.y);
+      await app.sleep(900);
       const dlg = await app.dialog();
+      const mode = await findDialogMode(app);
+      const afterPick = await tellMe(app);
       const bad = await noise(app);
-      log('נלחץ:', clicked, '| דיאלוג:', JSON.stringify(dlg && { label: dlg.label }), '| רעש:', bad || '(אין)');
-      if (clicked && dlg && dlg.label === 'חיפוש והחלפה' && !bad)
-        report.pass('חיפוש והחלפה', 'דיאלוג „חיפוש והחלפה” נפתח בלי שגיאה (session חיפוש נפתח במנוע)');
-      else report.fail('חיפוש והחלפה', `dlg=${JSON.stringify(dlg)}; רעש: ${bad || 'אין'}`);
-      await app.escape();
+      const hasQueryField = !!dlg?.controls?.some((c) => c.name === 'טקסט לחיפוש');
+      log('דיאלוג:', JSON.stringify(dlg && { label: dlg.label, mode }), '| התיבה אחרי:',
+        JSON.stringify({ value: afterPick.value, פתוחה: afterPick.open }), '| רעש:', bad || '(אין)');
+
+      if (dlg?.label === 'חיפוש והחלפה' && hasQueryField && afterPick.value === '' && !afterPick.open && !bad) {
+        report.pass('תיבת Tell Me — הרצת „חיפוש והחלפה”', `הדיאלוג נפתח בלשונית „${mode}”, והתיבה התרוקנה ונסגרה`);
+      } else {
+        report.fail(
+          'תיבת Tell Me — הרצת „חיפוש והחלפה”',
+          `dlg=${JSON.stringify(dlg && { label: dlg.label, mode })} שדה חיפוש=${hasQueryField} ` +
+            `התיבה אחרי=${JSON.stringify({ value: afterPick.value, open: afterPick.open })}; רעש: ${bad || 'אין'}`,
+        );
+      }
+
+      await app.clickDialog('סגור', { after: 400 });
+      await app.reset();
+      await app.clickSel('.tell-me-input', 0, { after: 400 });
+      await app.type('לבדיקת');
+      await app.sleep(400);
+      const docRow = await tellMeRect(app, 'tell-me-item-doc-search');
+      if (!docRow) {
+        report.fail('תיבת Tell Me — „חפש במסמך” נושא את השאילתה', 'שורת „חפש במסמך” אינה מוצגת אחרי הקלדה');
+        return;
+      }
+      await app.clickAt(docRow.x, docRow.y);
+      await app.sleep(900);
+      const findDlg = await app.dialog();
+      const queryField = findDlg?.controls?.find((c) => c.name === 'טקסט לחיפוש');
+      const counter = await app.js(
+        `(function(){var c=document.querySelector('.find-replace-dialog .fr-counter');return c?(c.textContent||'').trim():''})()`,
+      );
+      const bad2 = await noise(app);
+      log('דיאלוג אחרי „חפש במסמך”:', JSON.stringify(findDlg && { label: findDlg.label }),
+        '| שדה החיפוש:', JSON.stringify(queryField?.value), '| מונה:', JSON.stringify(counter), '| רעש:', bad2 || '(אין)');
+      findDlg?.label === 'חיפוש והחלפה' && queryField?.value === 'לבדיקת' && !bad2
+        ? report.pass('תיבת Tell Me — „חפש במסמך” נושא את השאילתה', `הדיאלוג נפתח עם "${queryField.value}" בשדה החיפוש (מונה: ${counter || 'ריק'})`)
+        : report.fail(
+            'תיבת Tell Me — „חפש במסמך” נושא את השאילתה',
+            `dlg=${JSON.stringify(findDlg && { label: findDlg.label })} שדה=${JSON.stringify(queryField?.value)}; רעש: ${bad2 || 'אין'}`,
+          );
+      await app.clickDialog('סגור', { after: 300 });
     });
 
     await step('שם המסמך — עריכה משפיעה על שם קובץ השמירה', async () => {
