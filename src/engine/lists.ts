@@ -395,9 +395,8 @@ const BULLET_STYLE = {
 };
 
 /**
- * `applyStyle` ולא `setType`: `setType` כותב ל-`abstractNum` המשותף, והפך גם
- * את השכנה שחולקת אותו (`numId` נפרד מ„התחל מחדש מ-1”); `applyStyle` הוא
- * sequence-local בחוזה — הגדרה משותפת משובטת לפני הכתיבה.
+ * `applyStyle` ולא `setType`: `setType` כותב ל-`abstractNum` המשותף ומהפך גם
+ * רשימה שכנה; `applyStyle` הוא sequence-local — הגדרה משותפת משובטת.
  */
 export async function setListToBullets(host: ListsTarget): Promise<CommandOutcome> {
   const failedAction = 'המרת הרשימה לתבליטים נכשלה';
