@@ -610,6 +610,21 @@
     return paraFragments().length;
   };
 
+  /**
+   * הטקסט של הפסקה עצמה. `textContent` של fragment אינו זה: בפריט רשימה הוא
+   * „1. פריט” — הסמן מצויר בתוך ה-fragment (`.superdoc-list-marker` ועוד תו
+   * רווח ב-`.superdoc-marker-suffix-tab`), ונמדד שהתוכן שלה הוא בדיוק הטקסט
+   * שב-`.superdoc-text-run`.
+   */
+  function paraText(el) {
+    return Array.prototype.map
+      .call(el.querySelectorAll('.superdoc-text-run'), function (run) {
+        return run.textContent || '';
+      })
+      .join('')
+      .trim();
+  }
+
   function paraRectOf(el, index) {
     // ה-fragment עצמו מחזיר מלבן שלילי אחרי reflow (נמדד: x=-495); השורה
     // החזותית שבתוכו היא הגאומטריה שאפשר ללחוץ עליה.
@@ -650,32 +665,51 @@
     return null;
   };
 
+  /** כמה זמן לחכות למנוע. נמדד: `blocks.list` הראשון אחרי מוטציה 390ms, אחריו ~1ms. */
+  var ENGINE_MS = 20000;
+
   /**
    * באיזו פסקה הסמן יושב **לפי המנוע** — ההוכחה שהלחיצה נחתה במקום שהתכוונו
    * אליו. בלעדיה נחיתה על פסקה שכנה עוברת בשקט.
+   *
+   * ‏`answered:false` ולא זריקה, ולא ערך שנראה כמו תשובה: „המנוע לא ענה” אינו
+   * „הסמן במקום אחר”, ושער שמערבב ביניהם מדווח נחיתה שגויה על קליק שנחת נכון.
    */
-  Q.caretBlock = function () {
+  Q.caretBlock = function (timeoutMs) {
     var d = Q.doc();
-    if (!d) return Promise.resolve({ error: 'no-doc' });
+    if (!d) return Promise.resolve({ answered: false, why: 'אין מסמך פתוח' });
+    var ms = timeoutMs || ENGINE_MS;
+    // סמן ייחודי, ולא ה-Promise עצמו: `resolve(bell)` בתוך `bell` הוא מחזור.
+    var LATE = {};
     // קריאה ל-Document API שנתקעת מקפיאה את `awaitPromise` של CDP לנצח.
     var bell = new Promise(function (resolve) {
-      setTimeout(function () { resolve('timeout'); }, 5000);
+      setTimeout(function () { resolve(LATE); }, ms);
     });
     return Promise.race([Promise.all([d.selection.current(), d.blocks.list()]), bell]).then(function (out) {
-      if (out === 'timeout') return { error: 'timeout' };
+      if (out === LATE) return { answered: false, why: 'המנוע לא ענה בתוך ' + ms + 'ms' };
       var sel = out[0];
       var blocks = (out[1] && out[1].blocks) || [];
       var id = (((sel && sel.target && sel.target.segments) || []).find(function (s) { return s.blockId; }) || {}).blockId;
       return {
+        answered: true,
         blockId: id || null,
         index: id ? blocks.findIndex(function (b) { return b.nodeId === id; }) : -1,
         count: blocks.length,
         empty: sel ? sel.empty : undefined,
+        text: id ? paraTextOf(id) : null,
       };
     }, function (e) {
-      return { error: String(e && e.message) };
+      return { answered: false, why: 'הקריאה למנוע נכשלה: ' + String(e && e.message) };
     });
   };
+
+  /** הטקסט של הפסקה שמזהה הבלוק הזה מצייר, לשמה בהודעת כשל. */
+  function paraTextOf(nodeId) {
+    var hit = paraFragments().filter(function (el) {
+      return el.getAttribute('data-source-node-id') === nodeId;
+    })[0];
+    return hit ? paraText(hit).slice(0, 40) : null;
+  }
 
   /** הטקסט שהמנוע צייר על המסך. גס, אבל מספיק כדי לראות שמשהו נכנס. */
   Q.screenText = function () {

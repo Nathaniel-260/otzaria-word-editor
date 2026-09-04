@@ -318,31 +318,40 @@ function makeApi(cdp) {
     },
 
     paraCount: () => js('window.__qa.paraCount()').then(Number),
-    caretBlock: () => call('caretBlock'),
+    caretBlock: (timeoutMs = null) => call('caretBlock', timeoutMs),
 
     /**
      * ממקמת סמן בפסקה — לפי אינדקס פסקה או לפי הטקסט שבה — **ומאמתת מול
      * המנוע** שהסמן אכן שם, כי לחיצה שנחתה על השכנה עוברת אחרת בשקט.
      */
-    async caretPara(target, { attempts = 4, after = 600 } = {}) {
-      const call =
+    async caretPara(target, { attempts = 4, after = 600, verifyMs = 20_000 } = {}) {
+      const where =
         typeof target === 'number'
           ? `window.__qa.paraRect(${target})`
           : `window.__qa.paraRectByText(${JSON.stringify(target)})`;
+      const name = typeof target === 'number' ? `פסקה ${target}` : `הפסקה „${target}”`;
+      /*
+        חימום לפני הלחיצה: `blocks.list` הראשון אחרי מוטציה נמדד ב-390ms מול
+        ~1ms בהמשך, ובלעדיו הקריאה הקרה היא זו שעומדת מול הפעמון.
+      */
+      const warm = await this.caretBlock(verifyMs);
+      if (!warm.answered) throw new Error(`האימות של ${name} לא התבצע — ${warm.why}`);
+
       let landed = null;
       for (let attempt = 0; attempt < attempts; attempt += 1) {
         // מחדש בכל סבב: reflow מזיז את הגאומטריה בין הלחיצות.
-        const rect = JSON.parse(await js(`JSON.stringify(${call})`));
+        const rect = JSON.parse(await js(`JSON.stringify(${where})`));
         if (!rect) throw new Error(`אין פסקה ${JSON.stringify(target)} במסמך`);
         await clickAt(rect.x, rect.y);
         await sleep(after);
-        landed = await this.caretBlock();
-        if (landed && landed.blockId === rect.nodeId) return { ...rect, block: landed };
+        landed = await this.caretBlock(verifyMs);
+        // „לא ענה” אינו „נחת במקום אחר”, ולכן אינו נספר כנחיתה שגויה.
+        if (!landed.answered) throw new Error(`האימות של ${name} לא התבצע — ${landed.why}`);
+        if (landed.blockId === rect.nodeId) return { ...rect, block: landed };
         await sleep(400);
       }
-      throw new Error(
-        `הסמן לא הגיע לפסקה ${JSON.stringify(target)} — נחת ב-${JSON.stringify(landed)}`,
-      );
+      const at = landed.text ? `„${landed.text}”` : `בלוק ${landed.blockId}`;
+      throw new Error(`הסמן לא הגיע ל${name} — נחת על ${at}`);
     },
 
     /** בוחרת את השורה כולה: לחיצה בתחילתה וגרירה לסופה. */
