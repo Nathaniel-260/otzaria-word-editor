@@ -3,6 +3,8 @@ import vue from '@vitejs/plugin-vue';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { TORAH_DICTIONARY_FILE, TORAH_DICTIONARY_GLOBAL } from './src/engine/spellcheck';
+import { patchBlankDocumentXml, patchBlankStylesXml } from './src/engine/blank-document';
+import { deriveHebrewBlankDocx } from './scripts/blank-docx';
 
 /**
  * ל-WebView2 של Windows אין תמיכה ב-<script type="module"> מ-file:// ,
@@ -308,9 +310,31 @@ function torahDictionaryAsset(): Plugin {
   };
 }
 
+const BLANK_DOCX_MODULE = 'virtual:otzaria-blank-docx';
+
+/**
+ * תבנית „מסמך חדש” עברית, כ-base64 במודול וירטואלי. נגזרת מהמסמך הריק של
+ * המנוע בכל בנייה — ראו src/engine/blank-document.ts. נכס נפרד לא היה עובד:
+ * `fetch` מ-file:// חסום (origin opaque), כמו במילון.
+ */
+function hebrewBlankDocx(): Plugin {
+  const resolved = `\0${BLANK_DOCX_MODULE}`;
+  return {
+    name: 'otzaria-hebrew-blank-docx',
+    resolveId(id) {
+      return id === BLANK_DOCX_MODULE ? resolved : undefined;
+    },
+    load(id) {
+      if (id !== resolved) return undefined;
+      const docx = deriveHebrewBlankDocx({ patchDocument: patchBlankDocumentXml, patchStyles: patchBlankStylesXml });
+      return `export default ${JSON.stringify(docx.toString('base64'))};\n`;
+    },
+  };
+}
+
 export default defineConfig({
   base: './',
-  plugins: [vue(), torahDictionaryAsset(), inlineEngineWorkers(), deferredEntry()],
+  plugins: [vue(), hebrewBlankDocx(), torahDictionaryAsset(), inlineEngineWorkers(), deferredEntry()],
   worker: { format: 'iife' },
 
   // ברירת המחדל של Vite ב-build היא legalComments: 'none', והיא מוחקת את באנר
