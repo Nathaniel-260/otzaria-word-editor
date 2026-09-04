@@ -46,6 +46,7 @@ try {
   const tabLabels = (await app.tabs()).map((t) => t.label);
   const findings = [];
   const notes = [];
+  const duplicates = [];
   let scanned = 0;
   for (const label of tabLabels) {
     await app.tab(label);
@@ -53,10 +54,12 @@ try {
     scanned += scan.scanned;
     findings.push(...scan.findings);
     notes.push(...scan.notes);
+    duplicates.push(...scan.duplicates);
   }
   await app.tab('בית');
 
   console.log('עמימות לגיטימית (מדידה):', JSON.stringify(notes));
+  console.log('שמות שיש להם יותר מפקד נראה אחד:', JSON.stringify(duplicates));
   console.log('אלמנטים זרים שנושאים שם של פקד:', JSON.stringify(findings));
   findings.length === 0
     ? report.pass('שם הפקד נפתר לפקד עצמו', `${scanned} שמות ב-${tabLabels.length} לשוניות`)
@@ -67,6 +70,19 @@ try {
           .join(' | ')
           .slice(0, 400),
       );
+
+  /*
+    `opts.index` הוא סדר DOM, ומי שסומך עליו סומך על משהו שאינו רשום בשום מקום.
+    scripts/qa/home-font-qa.mjs:363,396 לוחץ על „בחירת צבע” ב-0 ו-1 ומתכוון
+    לסימון ולגופן — כאן זה נכתב, ונמדד מול הפקד שלפני כל חץ.
+  */
+  const INDEXED = [{ name: 'בחירת צבע', holders: ['צבע סימון טקסט', 'צבע גופן'] }];
+  for (const want of INDEXED) {
+    const got = duplicates.find((d) => d.name === want.name);
+    got && got.holders.join('|') === want.holders.join('|')
+      ? report.pass(`האינדקס של „${want.name}”`, want.holders.map((h, i) => `${i}=${h}`).join(', '))
+      : report.fail(`האינדקס של „${want.name}”`, `נמצא ${JSON.stringify(got ? got.holders : null)} ולא ${JSON.stringify(want.holders)}`);
+  }
 
   const files = await app.docx();
   if (!files) {

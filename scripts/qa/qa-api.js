@@ -186,6 +186,7 @@
 
     var findings = [];
     var notes = [];
+    var duplicates = [];
 
     names.forEach(function (n) {
       var mine = holders[n];
@@ -203,10 +204,20 @@
       if (picked && !Q.rectOf(picked)) {
         findings.push({ tab: tab, name: n, kind: 'מוסתר', el: tagOf(picked), at: placeOf(picked), visible: false, picked: true });
       }
-      if (mine.length > 1) notes.push({ tab: tab, name: n, kind: 'כפול-ברצועה', count: mine.length });
+      if (mine.length > 1) {
+        // הפקד שלפניו הוא הזהות של כל מופע: „בחירת צבע” הוא חץ של כפתור מפוצל.
+        duplicates.push({
+          tab: tab,
+          name: n,
+          holders: mine.map(function (el) {
+            var prev = el.previousElementSibling;
+            return prev ? nameOf(prev).slice(0, 30) : '';
+          }),
+        });
+      }
     });
 
-    return { tab: tab, scanned: names.length, findings: findings, notes: notes };
+    return { tab: tab, scanned: names.length, findings: findings, notes: notes, duplicates: duplicates };
   };
 
   Q.state = function (name, opts) {
