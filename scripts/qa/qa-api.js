@@ -128,22 +128,85 @@
     return hits[opts.index || 0] || null;
   };
 
-  /** פקדים נראים שעליהם `Q.el` בכל זאת מחזיר אלמנט מוסתר — המלכודת עצמה. */
+  /** מה ש-`Q.el` סורק בברירת מחדל, ומה שיכול להחזיק שורות `option`/`menuitem`. */
+  var NAME_SEL = 'button, select, input, [role="menuitem"], [role="option"]';
+  var LIST_HOSTS = '[role="listbox"], [role="menu"], .ribbon-menu__popover, .ribbon-combo-list';
+
+  /*
+    אזורי המעטפת שנושאים שמות של פקודות רצועה מתוך תכנון: סרגל הגישה המהירה,
+    טאבי המסמכים, שורת המצב, רשימת ה-Tell Me, ותפריטים/דיאלוגים/פופאוברים
+    שנפתחים. הופעת אזור חדש כאן היא החלטה של אדם, ולא ברירת מחדל שקטה.
+  */
+  var MIRRORS =
+    '.quick-access-tools, .word-doctabs-strip, .word-tab-bar, .word-statusbar, ' +
+    '#tell-me-listbox, .color-palette-popover, [role="dialog"], ' + LIST_HOSTS;
+
+  /**
+   * עמימות בפתרון שם פקד בלשונית הפעילה.
+   *
+   * הפתרון הוא התאמת קידומת על `textContent` בכל הדף, ולכן השאלה אינה „האם
+   * `Q.el` החזיר מוסתר” — זה רק אחד הביטויים — אלא „אילו אלמנטים אחרים נושאים
+   * את השם, ומה מעמדם”. `findings` הם אדום: אלמנט שאינו פקד ואינו שורת רשימה,
+   * או פקד מחוץ לרצועה ומחוץ לאזורי המראה. `notes` הם מדידה: כפילות לגיטימית
+   * בממשק, שאין להמציא עליה אדום שווא.
+   */
   Q.shadowed = function () {
     var body = document.querySelector('.word-ribbon-body');
-    if (!body) return [];
-    var out = [];
-    var seen = {};
+    if (!body) return { tab: null, scanned: 0, findings: [], notes: [], duplicates: [] };
+
+    var tab = Q.activeTab();
+    var all = Array.prototype.slice.call(document.querySelectorAll(NAME_SEL));
+
+    function classify(el) {
+      var t = el.tagName;
+      var control = t === 'BUTTON' || t === 'SELECT' || t === 'INPUT';
+      if (!control && !el.closest(LIST_HOSTS)) return 'זר';
+      if (body.contains(el)) return 'ribbon';
+      if (el.closest(MIRRORS)) return 'mirror';
+      return 'מחוץ';
+    }
+    function tagOf(el) {
+      var role = el.getAttribute('role');
+      return el.tagName.toLowerCase() + (role ? '[' + role + ']' : '');
+    }
+    function placeOf(el) {
+      var p = el.parentElement;
+      return p ? String(p.className || p.tagName).slice(0, 40) : '?';
+    }
+
+    var holders = {};
+    var names = [];
     Array.prototype.forEach.call(body.querySelectorAll('button, select, input'), function (el) {
       var n = nameOf(el);
-      if (!n || seen[n] || !Q.rectOf(el)) return;
-      seen[n] = true;
-      var picked = Q.el(n);
-      if (picked && !Q.rectOf(picked)) {
-        out.push({ name: n, picked: nameOf(picked).slice(0, 60), tag: picked.tagName.toLowerCase() });
-      }
+      if (!n || !Q.rectOf(el)) return;
+      if (holders[n]) return holders[n].push(el);
+      holders[n] = [el];
+      names.push(n);
     });
-    return out;
+
+    var findings = [];
+    var notes = [];
+
+    names.forEach(function (n) {
+      var mine = holders[n];
+      var picked = Q.el(n);
+
+      all.forEach(function (x) {
+        if (mine.indexOf(x) >= 0 || nameOf(x).indexOf(n) !== 0) return;
+        var kind = classify(x);
+        var row = { tab: tab, name: n, kind: kind, el: tagOf(x), at: placeOf(x), visible: !!Q.rectOf(x), picked: picked === x };
+        if (kind === 'זר' || kind === 'מחוץ') return findings.push(row);
+        if (kind === 'mirror') return notes.push({ tab: tab, name: n, kind: 'מראה', at: row.at, picked: row.picked });
+        if (nameOf(x) !== n) notes.push({ tab: tab, name: n, kind: 'משפחת-קידומת', other: nameOf(x).slice(0, 30), picked: row.picked });
+      });
+
+      if (picked && !Q.rectOf(picked)) {
+        findings.push({ tab: tab, name: n, kind: 'מוסתר', el: tagOf(picked), at: placeOf(picked), visible: false, picked: true });
+      }
+      if (mine.length > 1) notes.push({ tab: tab, name: n, kind: 'כפול-ברצועה', count: mine.length });
+    });
+
+    return { tab: tab, scanned: names.length, findings: findings, notes: notes };
   };
 
   Q.state = function (name, opts) {

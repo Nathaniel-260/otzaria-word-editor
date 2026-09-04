@@ -37,13 +37,22 @@ try {
 
   clicked ? report.pass('נמצא הכפתור „מודגש” ונלחץ') : report.fail('הכפתור „מודגש” לא נמצא');
 
-  // כל פקד נראה בלשונית מול מה ש-`Q.el` מחזיר עליו — שער שנפל על התאמה מוסתרת
-  // דיווח „הכפתור לא נמצא”, בלי שום דרך לדעת שהעזר הוא שטעה.
-  const shadowed = await app.shadowed();
-  console.log('פקדים שהעזר מחזיר עליהם אלמנט מוסתר:', JSON.stringify(shadowed));
-  shadowed.length === 0
-    ? report.pass('העזר בוחר את הפקד הנראה', `${(await app.controls()).length} פקדים נסרקו`)
-    : report.fail('העזר בחר אלמנט מוסתר על פקד נראה', shadowed.map((s) => `${s.name} → ${s.tag} „${s.picked}”`).join(' | ').slice(0, 200));
+  /*
+    שם פקד נפתר בהתאמת קידומת על כל הדף, ולכן שער שקורא בשם עלול למדוד אלמנט
+    אחר לגמרי — כך „הכפתור לא נמצא” נדווח על מוצר תקין.
+  */
+  const scan = await app.shadowed();
+  console.log('עמימות לגיטימית (מדידה):', JSON.stringify(scan.notes));
+  console.log('אלמנטים זרים שנושאים שם של פקד:', JSON.stringify(scan.findings));
+  scan.findings.length === 0
+    ? report.pass('שם הפקד נפתר לפקד עצמו', `${scan.scanned} שמות בלשונית „${scan.tab}”`)
+    : report.fail(
+        'אלמנט שאינו הפקד נושא את שמו',
+        scan.findings
+          .map((f) => `${f.tab}/${f.name}: ${f.kind} ${f.el} ב-${f.at}${f.picked ? ' — וזה מה שהעזר מחזיר' : ''}`)
+          .join(' | ')
+          .slice(0, 400),
+      );
 
   const files = await app.docx();
   if (!files) {
