@@ -54,7 +54,7 @@
       :id="listId"
       ref="listRef"
       class="ribbon-combo-list"
-      :class="{ 'has-sample': showSample }"
+      :class="{ 'has-sample': showSample, 'has-glyphs': hasGlyphs, specimen: sampleSpecimen }"
       role="listbox"
       :style="[popoverStyle, { minWidth: listMinWidth }]"
       @pointerdown.prevent.stop
@@ -109,17 +109,24 @@
         פס הדגימה. `role="presentation"` ו-`aria-hidden` כמו `ribbon-combo-group`
         ו-`ribbon-combo-empty` שמעליו: הוא חוזר על טקסט שהמשתמש עצמו סימן, ואין
         בו מה להכריז. `dir="auto"` ולא ירושה — ראו ההסבר ב-CSS.
+
+        ה-`<span>` הפנימי הוא מה שמאפשר את שלוש השורות במצב הדגימה: הקטיעה שם
+        היא `-webkit-line-clamp`, שדורש `display: -webkit-box` על האלמנט
+        שנקטע — ו-`text-overflow: ellipsis` של מצב הבחירה חל על מכל **בלוק**,
+        כלומר לא היה שורד על אותו אלמנט. במצב הבחירה ה-`<span>` נשאר inline
+        ואינו משנה דבר. צומת אחד לכל הרשימה, ולא לכל שורה בה — זה ההבדל
+        מהדגימה שבשורות עצמן, שנשארה `::before` בדיוק מהטעם הזה.
       -->
       <li
         v-if="showSample"
         class="ribbon-combo-sample"
-        :class="{ unavailable: sampleUnavailable }"
+        :class="{ unavailable: sampleUnavailable, specimen: sampleSpecimen }"
         role="presentation"
         aria-hidden="true"
         dir="auto"
         :style="sampleStyle"
       >
-        {{ sample }}
+        <span>{{ sample }}</span>
       </li>
     </ul>
   </div>
@@ -451,6 +458,25 @@ const sampleStyle = computed<Record<string, string> | undefined>(() => {
  * אין אפשרות מסומנת, ולכן אין גופן שהוא מדגים.
  */
 const showSample = computed(() => props.sample !== '' && built.value.count > 0);
+
+/**
+ * האם לרשימה יש עמודת דגימה — כלומר האם היא בורר גופן. השמות נצמדים לקצה
+ * הנגדי רק כאן; ברשימת גדלים „12” ו„14” יישארו זה מתחת לזה בצד ההתחלה.
+ *
+ * `props.options` ולא `built.rows`: החיפוש מסנן, ו„Arial” שהוקלד היה מבטל את
+ * העמודה באמצע ההקלדה — כלומר מזיז את כל השמות בשורה שהמשתמש מסתכל עליה.
+ */
+const hasGlyphs = computed(() => props.options.some((option) => option.hebrew === true));
+
+/**
+ * מצב הדגימה: הפס מציג משפט קבוע ולא טקסט של המשתמש, ולכן שלוש שורות בגודל
+ * הרשימה במקום שורה אחת בגודל שבמסמך.
+ *
+ * הסימן הוא היעדר `sampleSize`, ולא דגל נוסף — ראו `use-font-controls`: הגודל
+ * שבמסמך **הוא** ההבטחה „הטקסט שלך ייראה כך”, וכשאין בחירה אין מה להבטיח.
+ * שתי הידיעות הן אחת, ושני props לאותה ידיעה היו יכולים לסתור זה את זה.
+ */
+const sampleSpecimen = computed(() => showSample.value && !props.sampleSize);
 
 /** התיבה מציגה את הגופן הנבחר בגופן שלו — כמו ב-Word. לא בזמן הקלדה. */
 const previewStyle = computed(() => {
@@ -813,6 +839,38 @@ watch(activeIndex, async (index) => {
 }
 
 /*
+  שתי עמודות, ולא שתיים צמודות.
+
+  הדגימה נצמדת לצד ההתחלה (ימין בעברית) והשם לצד הסיום (שמאל), והרווח שנובע
+  מהפרשי אורך השמות נופל **באמצע** במקום להצטבר בקצה אחד. „Franklin Gothic
+  Medium” ו„Arial” מתחילים מאותו קו משני הכיוונים, וזה מה שהופך את הרשימה
+  לשתי עמודות אמיתיות: אותיות עבריות מול שמות לטיניים.
+
+  ## ולמה `::before` ריק גם בשורה שאין בה עברית
+
+  `space-between` מניח **פריט יחיד** בצד ההתחלה, ולכן שורה בלי דגימה
+  („Arial Black”, וכל גופן לטיני) הייתה נצמדת לימין בזמן שכל שכניה נצמדים
+  לשמאל. הפריט הריק הוא מה שמעמיד גם אותה על אותו קו — אותה תחבולה בדיוק
+  שכבר משמשת למעלה לשורה שאינה זמינה, ומאותו טעם: העמודה נשארת, גם כשאין בה
+  אותיות.
+
+  ורק ברשימה שיש בה בכלל מה להדגים (`has-glyphs`): בבורר הגודל אין דגימה, ושם
+  „12” ו„14” נשארים בצד ההתחלה כמו ברשימה רגילה.
+*/
+.ribbon-combo-list.has-glyphs .ribbon-combo-option {
+  justify-content: space-between;
+}
+
+.ribbon-combo-list.has-glyphs .ribbon-combo-option:not(.hebrew)::before {
+  content: "";
+  min-width: 3em;
+  margin-inline-end: 8px;
+  flex-shrink: 0;
+  font-size: 18px;
+  line-height: inherit;
+}
+
+/*
   שורה שהדפדפן אינו פותר את הגופן שלה, ופס הדגימה כשהוא עומד עליה.
 
   ## למה עמעום, ולא הסתרה ולא כיבוי
@@ -901,6 +959,17 @@ watch(activeIndex, async (index) => {
 
   הקטיעה בשלוש נקודות היא הגיבוי לתקרת האורך שב-`use-font-controls`: היא חוסמת
   פרק שלם, וזו חוסמת שורה אחת ארוכה.
+
+  ## שני מצבים, ולמה הם שונים
+
+  הפס עונה על שתי שאלות שונות, ולכן הוא נראה אחרת בכל אחת:
+
+  **בחירה** — „איך **הטקסט שלי** ייראה”. שורה אחת, בגודל שבמסמך, נקטעת בשלוש
+  נקודות. זה מה שכתוב מכאן ולמטה, ולא נגענו בו.
+
+  **בלי בחירה** (`specimen`) — „אילו אותיות יש בגופן הזה”. אין טקסט של המשתמש
+  ואין גודל להדגים, ולכן הפס מציג את הפסוק שב-`composables/font-sample.ts`
+  בגודל הקבוע של הרשימה, ובשלוש שורות. ראו למטה.
 */
 .ribbon-combo-sample {
   position: sticky;
@@ -926,7 +995,7 @@ watch(activeIndex, async (index) => {
     השורה היחידה (`nowrap` מבטיח אחת) ומשאיר את הפס מכל בלוק.
   */
   box-sizing: border-box;
-  height: 44px;
+  height: var(--combo-sample-h);
   padding: 6px 8px;
   line-height: 30px;
   font-size: 14px;
@@ -937,6 +1006,48 @@ watch(activeIndex, async (index) => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/*
+  מצב הדגימה — הפסוק, בשלוש שורות.
+
+  ## למה שלוש, וזו מדידה ולא טעם
+
+  לשורה בפס יש **227 פיקסלים**: 260 של הרשימה, פחות מסגרת, ריפוד ופס גלילה
+  (נמדד באפליקציה — `scripts/qa/font-list-layout-qa.mjs`). וזה פחות ממה שכל
+  מועמד דורש; נמדד בכרום, ב-14px:
+
+  | טקסט | Arial | David | Segoe UI | Guttman Yad-Brush |
+  |---|---|---|---|---|
+  | הפנגרם הקודם, 36 תווים | 231px | 218px | 254px | 303px |
+  | הפסוק, 63 תווים | 394px | 373px | 434px | 510px |
+
+  כלומר שורה אחת מעולם לא הספיקה: הפנגרם הקודם נחתך **גם ב-Arial**, ופס דגימה
+  שנחתך הוא בדיוק כישלון של מה שהוא קיים בשבילו — האותיות שאינן נראות הן
+  האותיות שלא נבדקו. שתי שורות כיסו את הפסוק בגופנים פרופורציונליים, אבל
+  `Courier New` — גופן רוחב-קבוע נפוץ — נקטע בהן. שלוש שורות נותנות 681px,
+  ולכן מציגות את כל 63 התווים גם בו.
+
+  ## ולמה `line-height: 20px` דווקא
+
+  30px הוא של מצב הבחירה, שם הוא ממרכז שורה אחת בגודל שמגיע ל-24px. שלוש שורות
+  בו היו 90px, ולכן `20px` מכיל את 14px של הדגימה בכל גופן שנמדד (תיבת השורה
+  הטבעית הגיעה ל-19px ב-Segoe UI וב-Levenim MT). שלוש שורות יוצאות 60px —
+  בתוך 63 של תיבת התוכן, עם אותו מרווח אמיתי שגובה 44 משאיר לשורה אחת.
+
+  ‏`line-clamp` הוא מה שמונע שורה רביעית לגלוש מתחת לגבול, ומוסיף את שלוש
+  הנקודות בעצמו — `text-overflow` של מצב הבחירה אינו חל על יותר משורה אחת.
+*/
+.ribbon-combo-sample.specimen {
+  line-height: 20px;
+  white-space: normal;
+}
+
+.ribbon-combo-sample.specimen > span {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
 }
 
 /*
@@ -959,8 +1070,19 @@ watch(activeIndex, async (index) => {
   המלא**, ומכאן ההצהרה המשותפת.
 */
 .ribbon-combo-list.has-sample {
+  /*
+    גובה הפס — ראו ההערה למעלה. משתנה אחד ולא שני מספרים שצריך לשמור שווים:
+    הפס קורא אותו ל-`height`, והרשימה ל-`scroll-padding`, ושניהם משתנים יחד
+    כשהפס עובר למצב הדגימה.
+  */
+  --combo-sample-h: 44px;
+
   padding-block-end: 0;
-  /* גובה הפס המלא — ראו ההערה למעלה; עלה מ-34 ל-44 יחד עם גובה הפס. */
-  scroll-padding-block-end: 44px;
+  scroll-padding-block-end: var(--combo-sample-h);
+}
+
+/* שלוש שורות של 20px, ריפוד ומסגרת — ועוד 3 של מרווח, כמו במצב הבחירה. */
+.ribbon-combo-list.has-sample.specimen {
+  --combo-sample-h: 76px;
 }
 </style>
