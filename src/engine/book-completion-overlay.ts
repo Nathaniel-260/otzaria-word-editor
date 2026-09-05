@@ -53,6 +53,8 @@ import {
   sliceWords,
   type SectionWordCache,
 } from './book-completion';
+import { loadAcronymDictionary } from './acronym-dictionary';
+import { parseAtTrigger } from './at-mention';
 import {
   getCurrentReaderState,
   getSectionTextMap,
@@ -159,6 +161,8 @@ interface TypedSnapshot {
   cursorOffset: number;
   blockId: string;
   story: unknown;
+  /** הטקסט הגולמי מתחילת החלון עד הסמן, לשם בידוד אזכור `@` מהשלמות ghost. */
+  rawBeforeText: string;
 }
 
 async function readTypedSnapshot(doc: CompletionDoc): Promise<TypedSnapshot | null> {
@@ -212,6 +216,7 @@ async function readTypedSnapshot(doc: CompletionDoc): Promise<TypedSnapshot | nu
     cursorOffset: seed.offset,
     blockId: seed.blockId,
     story: seed.story,
+    rawBeforeText: beforeText,
   };
 }
 
@@ -440,6 +445,13 @@ export function installBookCompletion(
       return;
     }
 
+    // אזכור המקור מקבל את כל הקשות ה-@; אחרת שתי שכבות נפרדות היו יכולות
+    // להציג הצעה ולתפוס Tab מול הרשימה של at-mention-overlay.
+    if (parseAtTrigger(snapshot.rawBeforeText)) {
+      clearSuggestion();
+      return;
+    }
+
     const titleMatch = currentBook
       ? matchBookTitle(currentBook, currentRef, snapshot)
       : null;
@@ -493,6 +505,29 @@ export function installBookCompletion(
           blockId: snapshot.blockId,
           story: snapshot.story,
           continueFrom: bookMatch.nextWordIndex,
+        };
+        showGhost(ghostText);
+        return;
+      }
+    }
+
+    // ראשי-תיבות הם מילה שלמה, ולכן נבדקים רק אחרי רווח ולא כהשלמת prefix.
+    if (snapshot.partialWord === '' && snapshot.precedingWords.length > 0) {
+      const dictionary = await loadAcronymDictionary();
+      if (token !== evalToken || disposed) return;
+      const lastWord = snapshot.precedingWords[snapshot.precedingWords.length - 1]!;
+      const expansion = dictionary?.lookup(lastWord) ?? null;
+      if (expansion) {
+        const ghostText = ` ${expansion}`;
+        suggestion = {
+          kind: 'suggesting',
+          ghostText,
+          insertText: ghostText,
+          replaceStart: snapshot.cursorOffset,
+          cursorOffset: snapshot.cursorOffset,
+          blockId: snapshot.blockId,
+          story: snapshot.story,
+          continueFrom: null,
         };
         showGhost(ghostText);
         return;

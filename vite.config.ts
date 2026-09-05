@@ -3,6 +3,7 @@ import vue from '@vitejs/plugin-vue';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { TORAH_DICTIONARY_FILE, TORAH_DICTIONARY_GLOBAL } from './src/engine/spellcheck';
+import { ACRONYMS_FILE, ACRONYMS_GLOBAL } from './src/engine/acronyms-constants';
 import { patchBlankDocumentXml, patchBlankStylesXml } from './src/engine/blank-document';
 import { deriveHebrewBlankDocx } from './scripts/blank-docx';
 
@@ -310,6 +311,28 @@ function torahDictionaryAsset(): Plugin {
   };
 }
 
+/** מילון ראשי-תיבות, כנכס עצל: ב-file:// אין fetch, ולכן מוזרק script קלאסי. */
+function acronymsAsset(): Plugin {
+  const source = fileURLToPath(new URL('./src/data/acronyms.json', import.meta.url));
+  const build = (): string => {
+    const data = JSON.parse(readFileSync(source, 'utf8')) as Record<string, unknown>;
+    return `window.${ACRONYMS_GLOBAL} = ${JSON.stringify(data)};\n`;
+  };
+  return {
+    name: 'otzaria-acronyms',
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        if (!req.url || req.url.split('?')[0] !== `/${ACRONYMS_FILE}`) return next();
+        res.setHeader('Content-Type', 'text/javascript; charset=utf-8');
+        res.end(build());
+      });
+    },
+    generateBundle() {
+      this.emitFile({ type: 'asset', fileName: ACRONYMS_FILE, source: build() });
+    },
+  };
+}
+
 const BLANK_DOCX_MODULE = 'virtual:otzaria-blank-docx';
 
 /**
@@ -334,7 +357,14 @@ function hebrewBlankDocx(): Plugin {
 
 export default defineConfig({
   base: './',
-  plugins: [vue(), hebrewBlankDocx(), torahDictionaryAsset(), inlineEngineWorkers(), deferredEntry()],
+  plugins: [
+    vue(),
+    hebrewBlankDocx(),
+    torahDictionaryAsset(),
+    acronymsAsset(),
+    inlineEngineWorkers(),
+    deferredEntry(),
+  ],
   worker: { format: 'iife' },
 
   // ברירת המחדל של Vite ב-build היא legalComments: 'none', והיא מוחקת את באנר
