@@ -633,10 +633,10 @@ describe('פס הדגימה', () => {
       expect(listClasses()).not.toContain('specimen');
     });
 
-    it('הטקסט יושב ב-`<span>` פנימי — בלעדיו אין קטיעה בשתי שורות', async () => {
+    it('הטקסט יושב ב-`<span>` פנימי — בלעדיו אין קטיעה בשלוש שורות', async () => {
       // `-webkit-line-clamp` דורש `display: -webkit-box` על האלמנט שנקטע,
       // ו-`text-overflow` של מצב הבחירה חל על מכל בלוק בלבד. הצומת הפנימי
-      // אינו קישוט: בלעדיו שורה שלישית הייתה גולשת מהפס בגופן רחב, בלי שום
+      // אינו קישוט: בלעדיו שורה רביעית הייתה גולשת מהפס בגופן רחב, בלי שום
       // סימן ב-jsdom.
       await combo.setProps({ options: SAMPLED, modelValue: 'David', sample: 'פסוק' });
       await open();

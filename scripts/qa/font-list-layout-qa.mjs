@@ -10,7 +10,7 @@
  * 1. **השמות נצמדים לקצה הסיום.** `justify-content: space-between` עם
  *    `::before` שקיים גם כשהוא ריק — הפרש אורך השמות נופל באמצע השורה, ולא
  *    מצטבר בקצה. שורה שאיבדה את זה נראית „תקינה לחלוטין” בכל סריקת מקור.
- * 2. **הפנגרם נכנס בפס.** הפס מחזיק שתי שורות של 227 פיקסלים (הרוחב נמדד כאן,
+ * 2. **הפנגרם נכנס בפס.** הפס מחזיק שלוש שורות של 227 פיקסלים (הרוחב נמדד כאן,
  *    והוא 260 של הרשימה פחות מסגרת, ריפוד ופס גלילה), והפסוק שבברירת המחדל
  *    (`composables/font-sample.ts`) הוא 63 תווים. „נכנס” כאן פירושו
  *    `scrollHeight <= clientHeight` בגופן שהסימון עומד עליו — וזה בדיוק
@@ -111,13 +111,13 @@ const INSTALL = `window.__fontListMeasure = function (list) {
     sample = {
       text: span.textContent,
       family: bar.style.fontFamily || '(ברירת מחדל)',
-      /* מצב הדגימה: שתי שורות בגודל הרשימה, ולא שורה אחת בגודל שבמסמך. */
+      /* מצב הדגימה: שלוש שורות בגודל הרשימה, ולא שורה אחת בגודל שבמסמך. */
       specimen: bar.classList.contains('specimen'),
       fontSize: getComputedStyle(bar).fontSize,
       height: Math.round(br.height),
       inner: Math.round(bar.clientWidth - 16),
       lines: Object.keys(tops).length,
-      /* הטקסט נקטע: יש בו יותר משתי שורות. גופן רחב במיוחד מגיע לכאן. */
+      /* הטקסט נקטע: יש בו יותר משלוש שורות. זו רגרסיה — הפס חייב להיות פנגרם. */
       truncated: span.scrollHeight > span.clientHeight + 0.5,
       /* הפס עצמו גולש מגבולותיו — זו רגרסיה בפריסה, ולא קטיעה של טקסט. */
       overflow: bar.scrollHeight > bar.clientHeight + 0.5,
@@ -238,22 +238,15 @@ try {
     }
 
     /*
-     * קטיעה אינה שבר — היא מה שקורה בגופן רחב במיוחד (Courier New הוא רוחב
-     * קבוע, וגופני מברשת רחבים ממנו), ובדיוק כפי שקרה גם למשפט הקודם. מה
-     * שכן שבור הוא רוב שנקטע: פס דגימה שאינו מראה את האותיות אינו ממלא את
-     * תפקידו, וזו הייתה העדות שהפסוק ארוך מדי לפס.
+     * קטיעה היא שבר: הפסוק קיים כדי להראות כל אות, והסתרת זנבו מסתירה חלק
+     * מהאלפבית. שלוש שורות נבחרו במיוחד כדי ש-Courier New, שנחתך בשתיים,
+     * ייכנס במלואו.
      */
     const cut = walked.filter((w) => w.truncated);
-    const full = walked.length - cut.length;
     if (cut.length === 0) {
       report.pass('הפסוק נראה במלואו', `בכל ${walked.length} הגופנים שנמדדו`);
-    } else if (cut.length * 2 <= walked.length) {
-      report.partial(
-        'הפסוק נראה במלואו',
-        `${full} מתוך ${walked.length}; נקטע ב: ${cut.map((w) => w.family).join(', ')}`,
-      );
     } else {
-      report.fail('הפסוק נראה במלואו', `רק ${full} מתוך ${walked.length} — הפסוק ארוך מדי לפס`);
+      report.fail('הפסוק נראה במלואו', `נחתך ב: ${cut.map((w) => w.family).join(', ')}`);
     }
   }
 
