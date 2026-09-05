@@ -42,6 +42,7 @@ import { createFontPreview } from './font-preview';
 import { createFontSample } from './font-sample';
 import { applyOptimistically, withCurrent, type PickerOption } from './picker-value';
 import { ACTIVE_SUPERDOC } from '../engine/document-api';
+import { isFamilyAvailable } from '../engine/docx-fonts';
 import { captureRange, paintFamily, readSelectionText } from '../engine/font-preview';
 import { UNSETTLED_SELECTION } from '../engine/readout-hold';
 import {
@@ -60,6 +61,40 @@ import {
  * היחיד שבטוח קיים בכל פלטפורמה.
  */
 export const DEFAULT_FONT_FAMILY = 'Assistant';
+
+/**
+ * טווח הגודל שבו פס הדגימה מצייר, בפיקסלים. ראו `sampleSize` — הפס יושב ברשימה
+ * בגובה קבוע, וגדלים חריגים (6pt, 72pt) היו קטנים מכדי להראות צורה או גדולים
+ * מכדי להיכנס. הגבול העליון תפור לתיבת התוכן של `.ribbon-combo-sample`:
+ * `line-height: 30px` בתוך גובה 44px — שינוי שם מחייב שינוי כאן.
+ */
+export const SAMPLE_SIZE_MIN_PX = 12;
+export const SAMPLE_SIZE_MAX_PX = 24;
+
+/**
+ * הגודל שבו פס הדגימה מצייר את הטקסט המסומן — מחרוזת CSS מוכנה, מגודל הבחירה.
+ *
+ * זה מה שהופך את הפס ל„איך הטקסט שלי ייראה” ולא רק „הנה האותיות”: הוא מצייר
+ * את הבחירה בגופן שמרחפים עליו **ובגודל שבמסמך**. ההמרה היא `pt × 4/3` —
+ * ‎96dpi, כלומר בדיוק היחס שבו הדפדפן עצמו מצייר `pt`.
+ *
+ * החסימה ל-[`SAMPLE_SIZE_MIN_PX`, `SAMPLE_SIZE_MAX_PX`] אינה קוסמטית: הפס יושב
+ * ברשימה נגללת בגובה קבוע. ‎72pt הם 96px והיו שוברים את הרשימה, ו-6pt קטנים
+ * מכדי להראות צורת אות. בטווח הנפוץ (12–18pt) הגודל יוצא מדויק, ומעליו נשמרת
+ * הצורה והמידה מוקטנת — הצורה היא מה שהמשתמש בא לראות.
+ *
+ * פונקציה טהורה ולא `computed` בגוף הקומפוזבל, כדי שהחוזה הזה ייבדק ישירות
+ * (`tests/unit/font-sample.test.ts`) בלי להרכיב קומפוננטה.
+ *
+ * גודל שאינו מספר סופי (מנוע ששתק, קלט פגום) נופל ל-`SAMPLE_SIZE_MIN_PX`:
+ * `NaN` היה יוצא `'NaNpx'`, כלומר `font-size` פסול שהדפדפן מתעלם ממנו בשקט.
+ */
+export function sampleSizePx(pt: number): string {
+  if (!Number.isFinite(pt)) return `${SAMPLE_SIZE_MIN_PX}px`;
+  const px = pt * (4 / 3);
+  const clamped = Math.min(SAMPLE_SIZE_MAX_PX, Math.max(SAMPLE_SIZE_MIN_PX, px));
+  return `${Math.round(clamped)}px`;
+}
 
 /** שתי שכבות הזיכרון של הבוררים. ראו הערת הראש. */
 export interface FontMemory {
@@ -121,6 +156,12 @@ export interface FontControls {
    * שנמדד ונשלל בצביעה במסמך, ב-`engine/font-preview.ts`.
    */
   sampleText: ComputedRef<string>;
+  /**
+   * הגודל שבו פס הדגימה מצייר — מחרוזת CSS (`'18px'`), נגזרת מגודל הבחירה
+   * במסמך וחסומה לטווח שנכנס בפס. זה מה שהופך את הדגימה לנאמנה: הטקסט שלך,
+   * בגופן הזה, **ובגודל שלו** — ולא בגודל קבוע של הרשימה.
+   */
+  sampleSize: ComputedRef<string>;
 }
 
 export function useFontControls(): FontControls {
@@ -195,11 +236,31 @@ export function useFontControls(): FontControls {
    * סדר העדיפויות: מה שנבחר וטרם נענה, אחר כך מה שהמנוע מדווח, ולבסוף האחרון
    * שידענו. בקשה שנדחתה נעלמת מהשכבה הראשונה, ואז המסמך חוזר להיות מה שמוצג.
    */
-  const family = computed(
+  const reported = computed(
     () => memory.pendingFamily.value ?? engineFamily.value ?? memory.family.value,
   );
+
+  /**
+   * הגופן המוחל, **באיות של הרשימה**.
+   *
+   * המנוע מדווח את מה שכתוב במסמך, והמסמך אינו מחויב לאיות שלנו: ריצה שמצהירה
+   * „APTOS” מול רשימה שמחזיקה „Aptos” היא אותו גופן בדיוק — ההתאמה ב-CSS
+   * ובמנוע חסרת רגישות לאותיות, ו-`familyKey` במיזוג מאחד אותם.
+   *
+   * הפקד, לעומת זאת, משווה **מדויק** בארבעה מקומות. בלי הנרמול כאן היו שתי
+   * תוצאות רעות ואין שלישית: או שורה כפולה לאותו גופן, או — וזה מה שנמדד —
+   * רשימה בלי שום שורה מסומנת, שגם נפתחת מהראש במקום על הגופן שבמסמך.
+   */
+  const family = computed(() => {
+    const value = reported.value;
+    const key = value.trim().toLowerCase();
+    return families.value.find((option) => option.value.trim().toLowerCase() === key)?.value ?? value;
+  });
   const sizePt = computed(() => memory.pendingSize.value ?? engineSize.value ?? memory.size.value);
   const size = computed(() => String(sizePt.value));
+
+  /** הגודל שבו פס הדגימה מצייר. החישוב עצמו ב-[sampleSizePx]. */
+  const sampleSize = computed(() => sampleSizePx(sizePt.value));
 
   const familyOptions = computed(() =>
     withCurrent(
@@ -210,10 +271,23 @@ export function useFontControls(): FontControls {
         // הקיבוץ וכיסוי העברית נקבעים במיזוג ולא כאן — engine/font-options.ts.
         group: option.group,
         hebrew: option.hebrew,
+        /*
+         * הדגל הפוך לזה שבמיזוג (`available`) בכוונה: הפקד מסמן **חריגה**, ו-
+         * `unavailable` דלוק רק בשורה שיש עליה מה לומר. `available` היה מחייב
+         * את הפקד לצייר סימון על היעדר דגל — כלומר גם על כל בורר שאינו גופנים,
+         * שאין לו את השדה בכלל.
+         */
+        unavailable: option.available === false,
+        measured: option.measured,
       })),
       family.value,
-      // גופן שאינו ברשימה מוצג בגופן עצמו, כמו כל שאר השורות.
-      { preview: true },
+      /*
+       * גופן שאינו ברשימה מוצג בגופן עצמו, כמו כל שאר השורות — **אם** הדפדפן
+       * פותר אותו. `available` הוא מה שמונע מהמסלול הזה להיות היצרן השני של
+       * השורה המשקרת: הוא נגיש בהקלדת שם חופשי, ואז השורה והתיבה הסגורה היו
+       * מציירות שם שאינו קיים ב-fallback.
+       */
+      { preview: true, available: isFamilyAvailable },
     ),
   );
 
@@ -315,5 +389,6 @@ export function useFontControls(): FontControls {
     hoverFamily,
     endHoverFamily,
     sampleText: sample.text,
+    sampleSize,
   };
 }

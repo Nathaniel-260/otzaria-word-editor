@@ -15,6 +15,11 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import {
+  SAMPLE_SIZE_MAX_PX,
+  SAMPLE_SIZE_MIN_PX,
+  sampleSizePx,
+} from '../../src/composables/use-font-controls';
+import {
   createFontSample,
   FONT_SAMPLE_FALLBACK,
   FONT_SAMPLE_MAX_CHARS,
@@ -192,5 +197,54 @@ describe('משפט ברירת המחדל', () => {
 
   it('ונכנס בתקרת האורך, אחרת הוא נחתך בשלוש נקודות', () => {
     expect(Array.from(FONT_SAMPLE_FALLBACK).length).toBeLessThanOrEqual(FONT_SAMPLE_MAX_CHARS);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* הגודל שבו הפס מצייר                                                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * זה מה שהופך את הדגימה מ„הנה האותיות” ל„הנה איך הטקסט שלי ייראה”: גופן נראה
+ * אחרת לגמרי ב-11pt וב-20pt, ומי שבוחר כתב לספר בוחר את הצירוף. לפני כן הפס
+ * צייר ב-14px קבועים, ולכן הבדיקה הראשונה כאן היא שהגודל בכלל נגזר מהמסמך.
+ */
+describe('sampleSizePx — הגודל שהפס מצייר בו', () => {
+  it('נגזר מגודל הבחירה, ואינו קבוע', () => {
+    expect(sampleSizePx(12)).toBe('16px');
+    expect(sampleSizePx(18)).toBe('24px');
+    expect(sampleSizePx(12)).not.toBe(sampleSizePx(18));
+  });
+
+  it('ההמרה היא `pt × 4/3` — אותו יחס שבו הדפדפן מצייר `pt`', () => {
+    // 15pt = 20px בדיוק, ולכן זו השורה שתופסת יחס שגוי בלי עיגול שמסתיר אותו.
+    expect(sampleSizePx(15)).toBe('20px');
+  });
+
+  it('גודל חריג נחסם, כדי שלא ישבור את הרשימה', () => {
+    // 72pt הם 96px. פס בגובה קבוע לא היה מכיל אותם.
+    expect(sampleSizePx(72)).toBe(`${SAMPLE_SIZE_MAX_PX}px`);
+    // 6pt הם 8px — קטן מכדי להראות צורת אות.
+    expect(sampleSizePx(6)).toBe(`${SAMPLE_SIZE_MIN_PX}px`);
+  });
+
+  it('הגדלים הנפוצים נשארים בתוך הטווח, ולכן יוצאים מדויקים', () => {
+    for (const pt of [10, 11, 12, 14, 16, 18]) {
+      const px = Number.parseFloat(sampleSizePx(pt));
+      expect(px).toBe(Math.round(pt * (4 / 3)));
+      expect(px).toBeGreaterThanOrEqual(SAMPLE_SIZE_MIN_PX);
+      expect(px).toBeLessThanOrEqual(SAMPLE_SIZE_MAX_PX);
+    }
+  });
+
+  it('גודל שאינו מספר אינו הופך ל-`NaNpx`', () => {
+    // `font-size: NaNpx` הוא ערך פסול שהדפדפן מתעלם ממנו בשקט — כלומר הפס היה
+    // חוזר לגודל של הרשימה בלי שאיש ידע למה.
+    expect(sampleSizePx(Number.NaN)).toBe(`${SAMPLE_SIZE_MIN_PX}px`);
+    expect(sampleSizePx(Number.POSITIVE_INFINITY)).toBe(`${SAMPLE_SIZE_MIN_PX}px`);
+  });
+
+  it('תמיד מחזיר מחרוזת עם `px`, כי היא נכתבת ישר ל-`style`', () => {
+    for (const pt of [6, 12, 20, 72]) expect(sampleSizePx(pt)).toMatch(/^\d+px$/);
   });
 });

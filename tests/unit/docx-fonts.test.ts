@@ -232,6 +232,10 @@ const PROBE_WIDTH: Record<string, number> = {
 
 interface FontProbe {
   covers: (name: string) => boolean;
+  /** „האם הדפדפן פותר את השם” — שאלה אחרת מכיסוי, ובעלת מטמון משלה. */
+  available: (name: string) => boolean;
+  /** המיזוג מהמודול **הזה**, כדי שהמדידה שהוא עושה תהיה זו שנספרת כאן. */
+  merge: typeof import('../../src/engine/font-options').mergeFontFamilies;
   install: (fontTableXml: string | null) => Promise<string[]>;
   /** כמה מדידות רוחב נעשו בפועל — כך נראה מה נשמר במפה ומה נמדד מחדש. */
   measurements: () => number;
@@ -269,9 +273,14 @@ async function fontProbe(hebrew: readonly string[]): Promise<FontProbe> {
 
   vi.resetModules();
   const fonts = await import('../../src/engine/docx-fonts');
+  // אחרי ה-reset ובאותו גרף: כך `mergeFontFamilies` קורא ל-`isFamilyAvailable`
+  // של המודול המדומה, ולא לזה של גרף אחר שאינו סופר מדידות.
+  const options = await import('../../src/engine/font-options');
 
   return {
     covers: fonts.coversHebrew,
+    available: fonts.isFamilyAvailable,
+    merge: options.mergeFontFamilies,
     install: fonts.installDocumentFontAliases,
     measurements: () => measurements,
     hebrew: known,
@@ -398,9 +407,136 @@ describe('installDocumentFontAliases', () => {
     expect(document.querySelectorAll(`#${FONT_ALIAS_STYLE_ID}`)).toHaveLength(1);
   });
 
+  it('ממתינה לגופני מארח לפני שמקדמים את דור המטמון', async () => {
+    /*
+     * גופן שמגיע ב-`url(data:...)` נטען אחרי שה-`@font-face` נכתב. אם הדור
+     * מתקדם לפני ה-load, המיזוג שאחריו יכול לזכור `false` ולסמן את הגופן
+     * „אינו מותקן” עד המסמך הבא. המדמה מחזיק את הטעינה באמצע בדיוק, כדי
+     * שהבדיקה תיכשל אם ההמתנה תוסר או תעבור אחרי `advanceAliasGeneration`.
+     */
+    const probe = await fontProbe([]);
+    const previousFonts = Object.getOwnPropertyDescriptor(document, 'fonts');
+    let release!: () => void;
+    const loading = new Promise<void>((resolve) => { release = resolve; });
+    const load = vi.fn(async () => {
+      await loading;
+      return [];
+    });
+
+    Object.defineProperty(document, 'fonts', { configurable: true, value: { load } });
+    try {
+      tryCallMock.mockResolvedValue({
+        css: '@font-face{font-family:"Narkisim";src:url(data:font/woff2;base64,AA==)}',
+      });
+      const fontTable = '<w:font w:name="Narkisim"><w:charset w:val="B1"/></w:font>';
+      expect(probe.available('Narkisim')).toBe(false);
+
+      const installing = probe.install(fontTable);
+      await vi.waitFor(() => expect(tryCallMock).toHaveBeenCalled());
+      await vi.waitFor(() => expect(load).toHaveBeenCalled());
+
+      let settled = false;
+      void installing.then(() => { settled = true; });
+      await Promise.resolve();
+      expect(settled).toBe(false);
+
+      // מרגע שהדפדפן סיים לטעון, אותה משפחה באמת נפתרת דרך האליאס.
+      probe.hebrew.add('Narkisim');
+      release();
+      await installing;
+      expect(probe.available('Narkisim')).toBe(true);
+    } finally {
+      if (previousFonts) Object.defineProperty(document, 'fonts', previousFonts);
+      else Reflect.deleteProperty(document, 'fonts');
+      probe.restore();
+    }
+  });
+
   it('בסביבה בלי canvas שום גופן אינו נחשב חסר, ולכן אין מה להתקין', async () => {
     // הנפילה הבטוחה, מקצה לקצה: אין מדידה → אין החלפה → אין פנייה למארח.
     await expect(installDocumentFontAliases(REAL_FONT_TABLE)).resolves.toEqual([]);
     expect(tryCallMock).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * `isFamilyAvailable` — השאלה שכל תצוגת הגופן נשענת עליה.
+ *
+ * הבדיקה היחידה שהייתה כאן קודם טענה שהיא מחזירה `true` בלי canvas, כלומר
+ * מדדה את **הסביבה** ולא את הקוד. עם ה-canvas המדומה אפשר סוף־סוף לראות גם
+ * `false`, וזה הצד שהתיקון כולו חי ממנו.
+ */
+describe('isFamilyAvailable — מדידה, מטמון, והתיישנות', () => {
+  it('שם שהדפדפן פותר נמדד זמין, ושם שאינו — לא', async () => {
+    const probe = await fontProbe(['Narkisim']);
+    try {
+      expect(probe.available('Narkisim')).toBe(true);
+      expect(probe.available('Aptos')).toBe(false);
+    } finally {
+      probe.restore();
+    }
+  });
+
+  it('התשובה נשמרת ואינה נמדדת שוב, ובלי רגישות לאותיות ולרווחים', async () => {
+    // בלי מיתות היו כאן שלוש רשומות ל-Arial, ו-`keepAvailable` שואל על כל שם
+    // שהמכונה מדווחת — נמדד 287 משפחות.
+    const probe = await fontProbe(['Narkisim']);
+    try {
+      probe.available('Narkisim');
+      const afterFirst = probe.measurements();
+      expect(afterFirst).toBeGreaterThan(0);
+
+      probe.available('Narkisim');
+      probe.available('NARKISIM');
+      probe.available('  narkisim  ');
+
+      expect(probe.measurements()).toBe(afterFirst);
+    } finally {
+      probe.restore();
+    }
+  });
+
+  it('הזרקת אליאסים מבטלת תשובה קודמת — אחרת היא שורדת את מה שהפך אותה לשגויה', async () => {
+    /*
+     * מה שנבדק כאן הוא **מפתח הדור**, ולא הניקוי: `installDocumentFontAliases`
+     * דורס את ה-`@font-face` בכל מסמך, כלומר שם שלא נפתר במסמך א' כן נפתר
+     * במסמך ב'. `familyProbeKey` נושא את הדור, ולכן דור חדש מחטיא וקורא מדידה
+     * טרייה. הבדיקה תאדים אם הדור יוסר מהמפתח — היא **לא** תאדים אם רק
+     * `familyAvailability.clear()` יימחק, וזה נכון: הניקוי הוא ניהול זיכרון.
+     */
+    const probe = await fontProbe([]);
+    try {
+      expect(probe.available('Narkisim')).toBe(false);
+
+      probe.hebrew.add('Narkisim');
+      expect(probe.available('Narkisim')).toBe(false); // עדיין מהמטמון
+
+      await probe.install(null);
+
+      expect(probe.available('Narkisim')).toBe(true);
+    } finally {
+      probe.restore();
+    }
+  });
+
+  it('המיזוג בלי כפיל באמת מודד — ולא רק מכריז', async () => {
+    /*
+     * הבדיקות ב-font-options.test.ts מזריקות `resolves`, ובצדק — אבל בכך הן
+     * מודדות את ההיגיון ולא את החיווט. כאן נקרא `mergeFontFamilies` **בלי**
+     * הפרמטר, מול canvas שיכול לומר `false`, וזו הבדיקה היחידה ברמת היחידה
+     * שמוכיחה שברירת המחדל מחוברת לפונקציה האמיתית.
+     */
+    const probe = await fontProbe(['Arial']);
+    try {
+      const merged = probe.merge([{ value: 'Aptos Display', label: 'Aptos Display' }]);
+      const row = merged.find((option) => option.value === 'Aptos Display');
+      const arial = merged.find((option) => option.value === 'Arial');
+
+      expect(row?.available).toBe(false);
+      expect(row?.previewFamily).toBeUndefined();
+      expect(arial?.available).toBe(true);
+    } finally {
+      probe.restore();
+    }
   });
 });

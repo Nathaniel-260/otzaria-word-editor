@@ -29,6 +29,23 @@ export interface PickerOption {
    * שנוספת ב-`withCurrent`.
    */
   hebrew?: boolean;
+  /**
+   * הדפדפן אינו פותר את שם הגופן, ולכן אין דגימה אמיתית להציג עליו.
+   *
+   * השורה נשארת בחירה חוקית — מסמך נודד, והגופן עשוי להיות מותקן במכונה שבה
+   * המסמך ייפתח. מה שנופל הוא **הציור**: `preview` חסר, והשורה מסומנת כך
+   * שהמשתמש לא יחשוב שמה שהוא רואה הוא הגופן. נקבע ב-engine/font-options.ts
+   * (`available`), ורק למקורות שאין להם מזריק — ראו שם.
+   */
+  unavailable?: boolean;
+  /**
+   * `unavailable` נגזר ממדידה ולא מהכרזה.
+   *
+   * מה שזה קונה: שער QA יכול לבדוק רק את השורות שיש עליהן מה לבדוק. גופן
+   * שהוכרז זמין בלי מדידה (ראו `available` ב-engine/font-options.ts) אינו
+   * נפתר בכרום נקי, ושער שדורש הסכמה על כל שורה היה נכשל עליו תמיד.
+   */
+  measured?: boolean;
 }
 
 /**
@@ -57,6 +74,23 @@ export interface CurrentShape {
    * לאמוד בו מרחק הוא בורר שצריך לקרוא כל שורה בו.
    */
   readonly numeric?: boolean;
+  /**
+   * האם הדפדפן פותר את שם הגופן — ומה שקורה כשלא.
+   *
+   * בלי זה האפשרות שנוספת כאן הייתה **המסלול השני** שמייצר בדיוק את השורה
+   * שהתיקון ב-engine/font-options.ts בא לבטל: `preview: current` הוא השם
+   * החשוף, ולכן שם שאינו נפתר צויר ב-fallback תחת השם שלו. והוא נגיש:
+   * `commitValue` מחיל טקסט חופשי כמו שהוא כשאין התאמה, כלומר די להקליד שם
+   * גופן שאינו מותקן וללחוץ Enter.
+   *
+   * הסתם-פונקציה ולא ייבוא של `isFamilyAvailable`: הקובץ הזה משרת גם את בורר
+   * הגודל, ומדידת גופנים אינה עניינו. הקורא שיודע שהוא מרכיב בורר גופן הוא
+   * זה שמעביר — כמו `preview` ו-`numeric` שמעליו.
+   *
+   * חסר = לא נשאל, והאפשרות נחשבת זמינה. זו ההתנהגות שהייתה, ולכן בורר
+   * הגודל אינו משתנה.
+   */
+  readonly available?: (value: string) => boolean;
 }
 
 /**
@@ -69,10 +103,24 @@ export function withCurrent<T extends PickerOption>(
   current: string,
   shape: CurrentShape = {},
 ): readonly (T | PickerOption)[] {
+  /*
+   * השוואה **מדויקת**, ובכוונה — ניסיון לקפל רישיות כאן נמדד כגרוע יותר מהפגם
+   * שהוא פתר. `RibbonCombo` משווה מדויק בארבעה מקומות (`chosen`,
+   * `aria-selected`, `previewStyle`, `indexOfCurrent`), ולכן ערך שנבלע כאן
+   * בשל קיפול משאיר את הרשימה **בלי שום שורה מסומנת**: לא רואים איזה גופן
+   * מוחל, והרשימה נפתחת מהראש במקום עליו.
+   *
+   * ההתאמה בין „APTOS” שבמסמך לבין „Aptos” שברשימה נעשית לכן במקור — הקורא
+   * מנרמל את הערך לאיות הקנוני לפני שהוא מגיע לכאן (ראו `use-font-controls`).
+   */
   if (current === '' || options.some((option) => option.value === current)) return options;
 
+  const measured = shape.available !== undefined;
+  const available = shape.available?.(current) ?? true;
   const added: PickerOption = shape.preview
-    ? { value: current, label: current, preview: current }
+    ? available
+      ? { value: current, label: current, preview: current, measured }
+      : { value: current, label: current, unavailable: true, measured }
     : { value: current, label: current };
 
   const value = Number(current);

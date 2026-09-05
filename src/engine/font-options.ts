@@ -46,7 +46,7 @@
  * להם קשר לאפשרויות.
  */
 import type { FontFamilyOption, FontSizeOption } from 'superdoc/ui';
-import { coversHebrew } from './docx-fonts';
+import { coversHebrew, isFamilyAvailable } from './docx-fonts';
 import { emptyInstalledFonts, type InstalledFontsSnapshot } from './system-fonts';
 import { WORD_FONT_SIZES } from './payloads';
 
@@ -81,6 +81,28 @@ export interface FontFamilyChoice extends FontFamilyOption {
    * בראש הרשימה (`FONT_GROUP_TOP`) וכולן עבריות.
    */
   hebrew: boolean;
+  /**
+   * הדפדפן פותר את שם המשפחה, ולכן דגימה בה מראה **אותה** ולא גופן אחר.
+   *
+   * `false` פירושו שהשורה מוצגת בלי דגימה ועם סימון „אינו מותקן”. השורה
+   * **אינה** נעלמת בכוונה: מסמך נודד, ובחירת גופן שיותקן במכונה אחרת היא
+   * שימוש לגיטימי — וזו גם הסיבה ש-`Aptos` ו-`Segoe UI` נכתבו ברשימה
+   * מלכתחילה (ראו `LATIN_FONT_FAMILIES`).
+   *
+   * **אינו נמדד לכל מקור.** ראו `verify` ב-`sources` שבתוך `mergeFontFamilies`,
+   * ואת `measured` כאן למטה שאומר איזה מהשניים קרה.
+   */
+  available: boolean;
+  /**
+   * `available` **נמדד**, ולא הוכרז.
+   *
+   * ההבחנה אינה תיאורטית, והיא מה שמאפשר לשער QA לבדוק את התיקון בלי לבדוק
+   * את הסביבה: חמשת הגופנים שאוצריא מזריקה מוכרזים זמינים ואינם נשאלים, ולכן
+   * בכרום נקי — שאין בו מארח שמזריק — הם באמת אינם נפתרים. שער שדורש הסכמה
+   * בין ההכרזה לדפדפן על **כל** שורה היה נכשל עליהם תמיד, וזה מה שנמדד
+   * (`scripts/qa/font-availability-qa.mjs`).
+   */
+  measured: boolean;
 }
 
 /** מה שהבוררים ב-Ribbon מציגים. */
@@ -155,6 +177,7 @@ export function mergeFontFamilies(
   engineOptions: readonly FontFamilyOption[] | undefined,
   installed: InstalledFontsSnapshot = emptyInstalledFonts(),
   covers: (family: string) => boolean = coversHebrew,
+  resolves: (family: string) => boolean = isFamilyAvailable,
 ): readonly FontFamilyChoice[] {
   /**
    * שני מקורות לידיעה, ולא אחד: מה שהמנייה **אמרה** ומה שהדפדפן **מדד**.
@@ -191,22 +214,70 @@ export function mergeFontFamilies(
    * מכריזה את ההפך ממה שהשורה מראה. השורה העברית נכנסת מיד אחרי המותקנים
    * העבריים ולא בסוף, מפני ש-`buildComboRows` פותח כותרת בכל **החלפה** של
    * קבוצה: מקור עברי אחרי „כל הגופנים” היה מייצר כותרת „עברית” שנייה.
+   *
+   * ## `verify` — למי נמדדת הזמינות, ולמה רק לו
+   *
+   * השדה החמישי מבקש למדוד שהדפדפן באמת פותר את השם לפני שמובטחת עליו דגימה.
+   * הוא דלוק על מקור **אחד**, וההבדל בין המקורות הוא תזמון ולא טעם:
+   *
+   * - **רשימת המנוע** (`engine`) — היא מביאה את גופני **המסמך**, וזה המקור
+   *   שהבאג נמצא בו בפועל אף שהמדידה שגילתה אותו לא נגעה בו: הגשש לא פותח
+   *   מסמך, ולכן 67 השורות שהוא מנה לא כללו אפילו גופן מסמך אחד. מסמך Word 365
+   *   נושא `Aptos` **ו-`Aptos Display`**; הראשונה נתפסת ברשימת הלטינית והשנייה
+   *   מגיעה רק מכאן, ובלי מדידה השורה שלה הכריזה „Aptos Display” וציירה Arial.
+   *
+   *   הנימוק שהחריג אותה קודם — „`installDocumentFontAliases` מזריק בכל פתיחה
+   *   ולכן התשובה נעה” — **נמדד ונפל, פעמיים**: `planFontAliases` מדלג על כל
+   *   גופן שאינו עברי (docx-fonts.ts:401, `if (!font.hebrew …) continue`),
+   *   כלומר לגופן מסמך לטיני חסר אין מזריק כלל; וההזרקה מתרחשת ב-`await`
+   *   **לפני** `swap.open` (App.vue:2089), כלומר כשמגיע דיווח הגופנים של מסמך
+   *   האליאסים שלו כבר במקום.
+   *
+   *   ולגופן עברי חסר שכן קיבל אליאס: הוא **נפתר** דרכו ולכן נמדד זמין —
+   *   וזה נכון, לא פשרה. גוף המסמך מצויר באותו תחליף בדיוק, ולכן הדגימה
+   *   מראה את מה שהמשתמש רואה בעמוד.
+   *
+   * - `LATIN_FONT_FAMILIES` — **אין לה מזריק.** לא אנחנו ולא אוצריא; הגופנים
+   *   האלה מותקנים במכונה או שאינם, והתשובה עליהם קבועה מהשנייה הראשונה
+   *   ואינה משתנה לעולם. לכן מדידה כאן בטוחה בכל רגע. וזה גם טריגר **נמדד**
+   *   ולא הגנה תיאורטית: `scripts/qa/font-availability-qa.mjs` מנה 67
+   *   שורות שהבורר מציג ומצא ש-`Aptos` — ברירת המחדל של Word 365 — נופלת
+   *   ל-fallback במכונה בלי Office, כלומר השורה הכריזה „Aptos” וציירה Arial.
+   *
+   * - `OTZARIA_FONT_FAMILIES` — **מוזרקות אחרי שהמנייה רצה**, וחמש מהשש
+   *   מגיעות מאוצריא (`Assistant` לבדה ארוזה עם התוסף). מדידה בעלייה מחזירה
+   *   `false` לגופן שיהיה שם בעוד רגע — נמדד: `FrankRuhlCLM=false` — והדגימה
+   *   הייתה נעלמת מ-Frank Ruhl ואז חוזרת. זה גרוע משתי האפשרויות, ולכן הן
+   *   מוכרזות זמינות ואינן נשאלות.
+   *
+   * - המנייה (`installed.families`) — **כבר סוננה** ב-`keepAvailable`
+   *   (system-fonts.ts). מדידה חוזרת כאן היא עבודה כפולה על מאות שמות.
+   *
+   * העלות אינה חשש: `isFamilyAvailable` ממותת בדור האליאסים (docx-fonts.ts),
+   * ולכן שם נמדד פעם אחת לכל הזרקה — באותה מכניקה ש-`coversHebrew` חי בה
+   * ממילא על אותו מיזוג.
    */
   const engineHebrew = engine.filter(isHebrew);
-  const sources: readonly (readonly [readonly FontFamilyOption[], string, boolean?, number?])[] = [
+  const sources: readonly (readonly [
+    readonly FontFamilyOption[],
+    string,
+    boolean?,
+    number?,
+    boolean?,
+  ])[] = [
     [OTZARIA_FONT_FAMILIES, FONT_GROUP_TOP, true],
-    [LATIN_FONT_FAMILIES, FONT_GROUP_TOP],
-    [engine, FONT_GROUP_RECENT, undefined, RECENT_FONT_LIMIT],
+    [LATIN_FONT_FAMILIES, FONT_GROUP_TOP, undefined, undefined, true],
+    [engine, FONT_GROUP_RECENT, undefined, RECENT_FONT_LIMIT, true],
     [installed.families.filter(isHebrew), FONT_GROUP_HEBREW, true],
-    [engineHebrew, FONT_GROUP_HEBREW, true],
+    [engineHebrew, FONT_GROUP_HEBREW, true, undefined, true],
     [installed.families.filter((option) => !isHebrew(option)), FONT_GROUP_ALL, false],
-    [engine, FONT_GROUP_ALL, false],
+    [engine, FONT_GROUP_ALL, false, undefined, true],
   ];
 
   const merged: FontFamilyChoice[] = [];
   const seen = new Set<string>();
 
-  for (const [options, group, hebrew, limit] of sources) {
+  for (const [options, group, hebrew, limit, verify] of sources) {
     // נספר מה ש**נוסף**, ולא מה שנסרק: מכסה שסופרת גם שמות שכבר הופיעו למעלה
     // הייתה מציגה קבוצה ריקה בדיוק כשהמסמך משתמש בגופנים שלנו.
     let added = 0;
@@ -218,12 +289,31 @@ export function mergeFontFamilies(
       if (seen.has(key)) continue;
       seen.add(key);
       added += 1;
+      /*
+       * הזמינות נמדדת רק כשהמקור ביקש (`verify`) — ראו את הנימוק לכל מקור
+       * למעלה. מי שלא נמדד מוכרז זמין, וזה מכוון: הכרזה שלפעמים טועה טובה
+       * ממדידה ברגע הלא נכון, שמבהבת.
+       *
+       * ו-`previewFamily` **נופל** כשהמדידה שלילית, ולא נשאר עם השם החשוף.
+       * שלושה מקומות ציור נגזרים מהשדה הזה — השורה, התיבה הסגורה ופס הדגימה —
+       * ולכן הפלה אחת כאן מכבה את שלושתם.
+       *
+       * **אבל לא את הרביעי**, וזו הסתייגות ולא פרט: דגימת „אבגד” היא
+       * `::before` על מחלקת `hebrew` בלבד, ואינה קוראת את השדה הזה כלל. היא
+       * מכובה ב-CSS (`RibbonCombo`), ולא כאן — כי `hebrew` ו-`available` יכולים
+       * להיפרד, בצרוף אחד שנמדד כאפשרי: שם שהמנייה סיווגה עברי בעליית
+       * האפליקציה, ואליאס של מסמך מאוחר הפסיק לפתור.
+       */
+      const measured = verify === true;
+      const available = !measured || resolves(value);
       merged.push({
         value,
         label: typeof option.label === 'string' && option.label.trim() !== '' ? option.label : value,
-        previewFamily: option.previewFamily ?? value,
+        previewFamily: available ? (option.previewFamily ?? value) : undefined,
         group,
         hebrew: hebrew ?? isHebrew(option),
+        available,
+        measured,
       });
     }
   }
@@ -287,9 +377,12 @@ export function composeFontOptions(
   slice: FontsSliceLike | null | undefined,
   installed: InstalledFontsSnapshot = emptyInstalledFonts(),
   covers: (family: string) => boolean = coversHebrew,
+  // מועבר הלאה כמו `covers`, ומאותו טעם: בלעדיו נקודת הכניסה של הייצור אינה
+  // ניתנת למדידה, ובדיקה הייתה חייבת לעקוף אותה ולקרוא ל-`mergeFontFamilies`.
+  resolves: (family: string) => boolean = isFamilyAvailable,
 ): FontOptions {
   return {
-    families: mergeFontFamilies(slice?.options, installed, covers),
+    families: mergeFontFamilies(slice?.options, installed, covers, resolves),
     sizes: mergeFontSizes(slice?.sizeOptions),
   };
 }

@@ -11,6 +11,7 @@
       :options="fonts.familyOptions.value"
       :disabled="!fonts.familyEnabled.value"
       :sample="fonts.sampleText.value"
+      :sample-size="fonts.sampleSize.value"
       width="100%"
       title="גופן"
       @done="onDone"

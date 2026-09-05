@@ -82,13 +82,16 @@
             active: row.index === activeIndex,
             chosen: row.option.value === modelValue,
             hebrew: row.option.hebrew === true,
+            unavailable: row.option.unavailable === true,
           }"
           role="option"
           :aria-selected="row.option.value === modelValue"
           :data-value="row.option.value"
           :data-group="row.option.group ?? ''"
-          :aria-label="row.option.hebrew ? menuString(row.option.label) : undefined"
-          :style="row.option.preview ? { fontFamily: row.option.preview } : undefined"
+          :data-availability="availabilityOf(row.option)"
+          :data-tip-title="row.option.unavailable === true ? menuString(NOT_INSTALLED) : undefined"
+          :aria-label="rowAria(row.option)"
+          :style="rowStyle(row.option)"
           @pointerdown.prevent.stop="choose(row.option.value)"
           @mousemove="activeIndex = row.index"
         >
@@ -110,10 +113,11 @@
       <li
         v-if="showSample"
         class="ribbon-combo-sample"
+        :class="{ unavailable: sampleUnavailable }"
         role="presentation"
         aria-hidden="true"
         dir="auto"
-        :style="sampleFamily ? { fontFamily: sampleFamily } : undefined"
+        :style="sampleStyle"
       >
         {{ sample }}
       </li>
@@ -214,6 +218,16 @@ const props = withDefaults(
      * להראות: „13” אינו נראה אחרת ב-13 נקודות.
      */
     sample?: string;
+    /**
+     * הגודל שבו פס הדגימה מצייר את הטקסט — מחרוזת CSS מוכנה (`'18px'`).
+     *
+     * זה מה שהופך את הפס מ„הנה האותיות” ל„הנה איך הטקסט שלי ייראה”: הוא
+     * מצייר את הבחירה בגופן שמרחפים עליו **ובגודל שבמסמך**, ולא בגודל קבוע
+     * של הרשימה. המרת נקודות→פיקסלים והגבלת הטווח יושבות אצל הקורא
+     * (`use-font-controls`), מפני שהן יודעות מהו גודל הבחירה; הפקד רק מצייר.
+     * `undefined` = הגודל הקבוע של הפס (בורר הגודל, שאין לו פס בכלל).
+     */
+    sampleSize?: string;
   }>(),
   {
     modelValue: '',
@@ -224,6 +238,7 @@ const props = withDefaults(
     emptyText: 'אין גופן בשם הזה',
     listMinWidth: '150px',
     sample: '',
+    sampleSize: undefined,
   },
 );
 
@@ -324,15 +339,111 @@ const highlighted = computed<string | null>(() => {
 watch(highlighted, (value) => emit('preview', value));
 
 /**
+ * מה שנאמר על שורה שהדפדפן אינו פותר את הגופן שלה.
+ *
+ * טולטיפ ולא טקסט בשורה: השורה היא שם גופן, וטקסט נוסף בתוכה היה דוחף את
+ * העמודה ומשנה את גובה הרשימה בדיוק לפי אילו גופנים מותקנים במכונה. הרמז
+ * הנראה הוא העמעום (ראו ה-CSS), וההסבר הוא למי שעוצר על השורה.
+ *
+ * `data-tip-title` ולא `title` מולד — זה חוזה של התוכנה ולא טעם, והוא נאכף
+ * בשער `tests/unit/native-title.test.ts`: Blink קורא `title` **בתזוזת העכבר**
+ * ולכן המלבן האפור מצויר גם אחרי שהתכונה ירדה, והוא גם מטפס להורים. שכבת
+ * הטולטיפ (`ui/tooltip/tooltip-content.ts`) היא המסלול היחיד.
+ */
+const NOT_INSTALLED = 'הגופן אינו מותקן במכונה — אין דגימה להציג';
+
+/**
+ * ה-`aria-label` של שורה, וזה שדרוש **שני** דברים ולכן אינו ביטוי בתבנית.
+ *
+ * 1. **דגימת הגליפים.** שורה עברית נושאת `::before` עם „אבגד”, וקורא מסך היה
+ *    מכריז „אבגד Narkisim”. התווית המפורשת היא מה שמנקה את זה, וזה היה הכלל
+ *    היחיד כאן קודם.
+ * 2. **גופן שאינו מותקן.** `data-tip-*` הוא ציור, ואינו נגיש: קורא מסך אינו
+ *    רואה אותו, והעמעום גם הוא חזותי בלבד. בלי התווית הזאת העובדה שאין דגימה
+ *    לא הייתה מגיעה בכלל למי שאינו רואה — כלומר דווקא למי שהעמעום אינו עוזר לו.
+ *
+ * `undefined` לשורה רגילה, כדי שהתוכן שלה יוכרז כמו שהוא.
+ */
+/**
+ * מה השורה יודעת על הזמינות שלה — ומי רשאי לבדוק אותה.
+ *
+ * שלושה מצבים ולא שניים, וזה מה שמאפשר לשער QA למדוד את **המוצר** ולא את
+ * הסביבה: `declared` היא שורה שהוכרזה זמינה בלי מדידה (חמשת הגופנים שאוצריא
+ * מזריקה), והיא באמת אינה נפתרת בכרום נקי שאין בו מארח. שער שדרש הסכמה בין
+ * ההכרזה לדפדפן על כל שורה נכשל עליהן תמיד — נמדד.
+ *
+ * הרשימה נגזרת מהמוצר ולא מטבלה בשער, ובכוונה: טבלה כזאת הייתה נשברת בכל
+ * גופן חדש, והתשובה הייתה „להרחיב את הטבלה”.
+ */
+const availabilityOf = (option: ComboOption): 'declared' | 'measured' | 'missing' => {
+  if (option.measured !== true) return 'declared';
+  return option.unavailable === true ? 'missing' : 'measured';
+};
+
+const rowAria = (option: ComboOption): string | undefined => {
+  const unavailable = option.unavailable === true;
+  if (!unavailable && option.hebrew !== true) return undefined;
+  const name = menuString(option.label);
+  return unavailable ? `${name} — ${menuString(NOT_INSTALLED)}` : name;
+};
+
+/**
  * הגופן שפס הדגימה מצייר בו: מה שהסימון עומד עליו, ובהיעדר סימון — הגופן
  * הנבחר, כדי שהפס לא יופיע ריק ברגע הפתיחה.
  *
  * `undefined` כשלאפשרות אין `preview` (כלומר בכל בורר שאינו גופנים) — ואז הפס
  * פשוט מצייר בגופן הרגיל, ולא ב-`font-family: 13`.
  */
-const sampleFamily = computed<string | undefined>(() => {
+const highlightedOption = computed(() => {
   const value = highlighted.value ?? props.modelValue;
-  return props.options.find((option) => option.value === value)?.preview;
+  return props.options.find((option) => option.value === value);
+});
+
+/**
+ * הגופן שמותר לצייר בו אפשרות — ואיפה נאכפת האינווריאנטה „לא זמין ⇒ לא מצויר”.
+ *
+ * היא נאכפת **פעמיים** בכוונה, וזו אינה הגנה ללא טריגר. `previewFamily` נופל
+ * במיזוג (engine/font-options.ts) וזה מכבה את הציור — אבל המיזוג אינו היצרן
+ * היחיד של אפשרויות: `withCurrent` (composables/picker-value.ts) מוסיף את
+ * הגופן שבמסמך כשאינו ברשימה, והוא נמדד כמסלול שמייצר בדיוק את השורה
+ * שהתיקון הזה בא לבטל. לכן התנאי חי גם כאן, במקום שדרכו עובר **כל** ציור.
+ *
+ * שלושת הקוראים — השורה, פס הדגימה והתיבה הסגורה — מקבלים אותו כלל, כדי
+ * שהתשובה תהיה אחת ולא שלוש.
+ */
+const paintFamily = (option: ComboOption | undefined): string | undefined =>
+  option && option.unavailable !== true ? option.preview : undefined;
+
+/** מה שהשורה מצוירת בו. `undefined` — ואז אין `style` כלל, ולא `style` ריק. */
+const rowStyle = (option: ComboOption): Record<string, string> | undefined => {
+  const family = paintFamily(option);
+  return family ? { fontFamily: family } : undefined;
+};
+
+const sampleFamily = computed<string | undefined>(() => paintFamily(highlightedOption.value));
+
+/**
+ * הפס מדגים גופן שאינו מותקן — כלומר אין לו מה להדגים.
+ *
+ * זה החצי שבלעדיו התיקון היה חסר ערך: הורדת הציור לבדה מותירה את הפס מצייר
+ * את הטקסט של המשתמש בגופן הממשק, ב-24px, ונראה בדיוק כמו דגימה אמיתית. הוא
+ * מעומעם בדיוק כמו השורה, ומאותו טוקן, כדי שהשניים יאמרו אותו דבר.
+ */
+const sampleUnavailable = computed(() => highlightedOption.value?.unavailable === true);
+
+/**
+ * הסגנון של פס הדגימה: הגופן שהסימון עומד עליו, ובגודל שבמסמך (`sampleSize`).
+ *
+ * שני המפתחות מותנים בנפרד: `fontFamily` נופל כשלאפשרות אין `preview` (בורר
+ * שאינו גופנים), ו-`fontSize` נופל כשלא הועבר `sampleSize` — ואז הפס נשאר
+ * בגודלו הקבוע, כפי שהיה לפני שהגודל האמיתי חובר. `undefined` מלא כששניהם
+ * נופלים, כדי לא לכתוב `style` ריק.
+ */
+const sampleStyle = computed<Record<string, string> | undefined>(() => {
+  const style: Record<string, string> = {};
+  if (sampleFamily.value) style.fontFamily = sampleFamily.value;
+  if (props.sampleSize) style.fontSize = props.sampleSize;
+  return Object.keys(style).length > 0 ? style : undefined;
 });
 
 /**
@@ -345,7 +456,8 @@ const showSample = computed(() => props.sample !== '' && built.value.count > 0);
 const previewStyle = computed(() => {
   if (query.value !== null) return undefined;
   const current = props.options.find((option) => option.value === props.modelValue);
-  return current?.preview ? { fontFamily: current.preview } : undefined;
+  const family = paintFamily(current);
+  return family ? { fontFamily: family } : undefined;
 });
 
 /** מיקום הערך הנוכחי ברשימה, או -1. */
@@ -700,6 +812,64 @@ watch(activeIndex, async (index) => {
   line-height: inherit;
 }
 
+/*
+  שורה שהדפדפן אינו פותר את הגופן שלה, ופס הדגימה כשהוא עומד עליה.
+
+  ## למה עמעום, ולא הסתרה ולא כיבוי
+
+  **לא הסתרה:** השורה היא בחירה חוקית. מסמך נודד, וגופן שאינו כאן עשוי להיות
+  מותקן במכונה שבה המסמך ייפתח — וזו בדיוק הסיבה ש-`Aptos` (ברירת המחדל של
+  Word 365) נכתבה ברשימה מלכתחילה. הסתרה הייתה מוחקת את הגופן של המסמך מהבורר.
+
+  **לא `disabled`:** אפשר לבחור אותה, וסמן „כבוי” על דבר שנבחר הוא שקר אחר.
+
+  **וכן עמעום**, כלומר `--color-on-surface-variant` — אותו טוקן של
+  `.ribbon-combo-empty`, השורה השנייה בפקד הזה שאומרת „אין כאן מה לראות”.
+  הצבע הוא כל ההבדל; אין כאן טקסט נוסף, ולכן גובה השורה ורוחב העמודה אינם
+  משתנים לפי אילו גופנים מותקנים במכונה. ההסבר עצמו יושב ב-`title`.
+
+  שתי הבוררות באותו כלל בכוונה: השורה והפס חייבים לאמר את אותו דבר. הפס הוא
+  החצי שבלעדיו התיקון היה חסר ערך — בלי עמעום הוא מצייר את הטקסט של המשתמש
+  בגופן הממשק, בגודל שבמסמך, ונראה כמו דגימה אמיתית לכל דבר.
+*/
+.ribbon-combo-option.unavailable,
+.ribbon-combo-sample.unavailable {
+  color: var(--color-on-surface-variant);
+}
+
+/*
+  וכשהגופן שאינו מותקן הוא **הגופן המוחל** — הכחול מנצח את העמעום.
+
+  זו רגרסיה שנמדדה, לא זהירות: שני הבוררים הם שתי מחלקות (0,2,0), והעמעום
+  נכתב אחרי `.chosen`, ולכן הוא היה גובר. התוצאה, בדיוק בתרחיש שהתיקון נבנה
+  בשבילו — מסמך Word 365 ב-Aptos שנפתח במכונה בלי Office — הייתה שאף שורה
+  ברשימה אינה כחולה, כלומר המשתמש אינו רואה איזה גופן מוחל.
+
+  ולמה הכחול הוא זה שנשאר: הערת ה-CSS מעל `.chosen` מסבירה שהצבע הוא הערוץ
+  **היחיד** שנותר לסימון הזה — `font-weight` הוסר משם מפני שהוא הזיז שורות
+  תחת העכבר. לעמעום, לעומת זאת, יש שני ערוצים נוספים על אותה שורה: הטולטיפ
+  וה-`aria-label`. ידיעה עם שלושה ערוצים מוותרת לידיעה שיש לה אחד.
+*/
+.ribbon-combo-option.chosen.unavailable {
+  color: var(--word-blue);
+}
+
+/*
+  ומקום הציור הרביעי — דגימת „אבגד” — מכובה על שורה לא-זמינה.
+
+  הוא היחיד שאינו נגזר מ-`previewFamily`, ולכן הפלת השדה במיזוג אינה מגיעה
+  אליו: הוא `::before` על מחלקת `hebrew` לבדה. על שורה שאינה נפתרת הוא היה
+  מצייר את האותיות של **גופן אחר** תחת השם — כלומר בדיוק השקר שהדגל קיים כדי
+  למנוע, ובצורה החמורה יותר, שכן הדגימה היא התוכן שם והשם רק התווית.
+
+  `content: ""` ולא `display: none`: ה-`min-width: 3em` נשאר, ולכן השמות
+  ממשיכים להתחיל באותו קו לאורך הקבוצה. הסתרה הייתה מזיזה שורה אחת שמאלה
+  בדיוק לפי אילו גופנים מותקנים במכונה.
+*/
+.ribbon-combo-option.unavailable.hebrew::before {
+  content: "";
+}
+
 .ribbon-combo-option.active {
   background: var(--word-btn-active);
 }
@@ -739,10 +909,26 @@ watch(activeIndex, async (index) => {
     גובה מוצהר, ולא „מה שייצא”: הוא חייב להיות שווה ל-`scroll-padding-block-end`
     למטה, ושני מספרים שנגזרים מגופן ומ-padding אינם שווים בשום מקום שאפשר
     לבדוק. `nowrap` מבטיח שורה אחת, ולכן הגובה קבוע בפועל ולא רק בהצהרה.
+
+    הגובה עלה מ-34 ל-44 כשהפס התחיל לצייר בגודל **שבמסמך** ולא בגודל קבוע
+    (`sampleSize`, מ-`use-font-controls`): הגודל שם חסום ל-24px לכל היותר,
+    ו-`line-height: 30px` מכיל אותו. 44 ולא 42, כדי שיישאר מרווח אמיתי מעל
+    תיבת התוכן (31px אחרי ה-padding וה-border) — ב-42 ה-`scrollHeight` יצא
+    שווה בדיוק ל-`clientHeight`, כלומר על גבול החיתוך ובלי שום שגיאת עיגול
+    להרשות לעצמנו.
+
+    ## ולמה `line-height` ולא `display: flex`
+
+    המירכוז האנכי המתבקש כאן הוא `flex` עם `align-items: center`, והוא **שובר
+    את הקטיעה**: `text-overflow: ellipsis` חל על מכל בלוק בלבד, ובמכל flex
+    הטקסט נעטף בפריט אנונימי שאינו מקבל אותו — כלומר שורה ארוכה הייתה נחתכת
+    בלי שלוש הנקודות, בשקט. `line-height` השווה לגובה תיבת התוכן ממרכז את
+    השורה היחידה (`nowrap` מבטיח אחת) ומשאיר את הפס מכל בלוק.
   */
   box-sizing: border-box;
-  height: 34px;
+  height: 44px;
   padding: 6px 8px;
+  line-height: 30px;
   font-size: 14px;
   color: var(--color-on-surface);
   background: var(--color-surface-container-high);
@@ -774,6 +960,7 @@ watch(activeIndex, async (index) => {
 */
 .ribbon-combo-list.has-sample {
   padding-block-end: 0;
-  scroll-padding-block-end: 34px;
+  /* גובה הפס המלא — ראו ההערה למעלה; עלה מ-34 ל-44 יחד עם גובה הפס. */
+  scroll-padding-block-end: 44px;
 }
 </style>
