@@ -160,6 +160,9 @@ export interface FontControls {
    * הגודל שבו פס הדגימה מצייר — מחרוזת CSS (`'18px'`), נגזרת מגודל הבחירה
    * במסמך וחסומה לטווח שנכנס בפס. זה מה שהופך את הדגימה לנאמנה: הטקסט שלך,
    * בגופן הזה, **ובגודל שלו** — ולא בגודל קבוע של הרשימה.
+   *
+   * `''` כשאין בחירה כלל, ואז הפס מציג את פסוק ברירת המחדל בגודל הקבוע של
+   * הרשימה. ראו את ההנמקה במימוש.
    */
   sampleSize: ComputedRef<string>;
 }
@@ -258,9 +261,6 @@ export function useFontControls(): FontControls {
   });
   const sizePt = computed(() => memory.pendingSize.value ?? engineSize.value ?? memory.size.value);
   const size = computed(() => String(sizePt.value));
-
-  /** הגודל שבו פס הדגימה מצייר. החישוב עצמו ב-[sampleSizePx]. */
-  const sampleSize = computed(() => sampleSizePx(sizePt.value));
 
   const familyOptions = computed(() =>
     withCurrent(
@@ -363,6 +363,18 @@ export function useFontControls(): FontControls {
    * לאותו מידע. ראו `composables/font-sample.ts`.
    */
   const sample = createFontSample({ read: () => readSelectionText(host.value) });
+
+  /**
+   * הגודל שבו פס הדגימה מצייר. החישוב עצמו ב-[sampleSizePx].
+   *
+   * `''` כשאין בחירה, וזו אינה קיצור דרך: הגודל שבמסמך הוא ההבטחה „**הטקסט
+   * שלך** ייראה כך”, ובלי בחירה אין טקסט כזה — מה שמוצג הוא פסוק שכל תפקידו
+   * להראות את כל האותיות. הוא ארוך פי שניים מהבחירה הטיפוסית, ובגודל של
+   * המסמך (עד 24px) לא היה נכנס בפס בשום גופן; הפס מקבל אותו בגודל הקבוע של
+   * הרשימה, בשתי שורות. מה שריק כאן הוא מה שמדליק את המצב הזה ב-`RibbonCombo`
+   * — ולכן אין כאן דגל נוסף לאותה ידיעה.
+   */
+  const sampleSize = computed(() => (sample.isFallback.value ? '' : sampleSizePx(sizePt.value)));
 
   function hoverFamily(family: string | null): void {
     if (family !== null) sample.begin();

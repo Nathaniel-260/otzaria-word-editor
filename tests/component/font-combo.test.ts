@@ -100,6 +100,42 @@ describe('דגימת אותיות עבריות', () => {
     expect(classesOf('12')).not.toContain('hebrew');
   });
 
+  /**
+   * עמודת הדגימה. ה-CSS הוא שמצמיד את האותיות לקצה אחד ואת השם לשני, ו-jsdom
+   * אינו מחשב אותו — אבל **התנאי** להחלתו הוא מחלקה על הרשימה, וזו הכרעה של
+   * התבנית: בלעדיה השורות חוזרות לצמוד-לצמוד, ובורר הגודל היה מקבל עמודה
+   * ריקה של 3em לפני „12”.
+   */
+  describe('עמודת הדגימה', () => {
+    const listClasses = () => combo.find('[role="listbox"]').classes();
+
+    it('רשימה שיש בה גופנים עבריים מקבלת את העמודה', async () => {
+      await open();
+      expect(listClasses()).toContain('has-glyphs');
+    });
+
+    it('בורר הגודל אינו מקבל אותה — אין לו מה להדגים', async () => {
+      await combo.setProps({
+        options: [
+          { value: '12', label: '12' },
+          { value: '14', label: '14' },
+        ],
+        modelValue: '12',
+      });
+      await open();
+      expect(listClasses()).not.toContain('has-glyphs');
+    });
+
+    it('חיפוש שכל התאמותיו לטיניות אינו מבטל אותה', async () => {
+      // אחרת השמות היו קופצים לצד השני באמצע ההקלדה — בדיוק בשורה שהמשתמש
+      // מסתכל עליה. העמודה נגזרת מהמלאי, לא מהתוצאות.
+      await open();
+      await type('Arial Black');
+      expect(optionValues()).toEqual(['Arial Black']);
+      expect(listClasses()).toContain('has-glyphs');
+    });
+  });
+
   it('השם הנגיש הוא שם הגופן, בלי הדגימה שלפניו', async () => {
     // Chrome מכליל תוכן של `::before` בשם הנגיש, וקורא מסך היה מכריז את
     // אותיות הדגימה לפני כל שם עברי ברשימה.
@@ -568,6 +604,51 @@ describe('פס הדגימה', () => {
     await combo.setProps({ options: SAMPLED, modelValue: 'David', sample: 'שלום' });
     await open();
     expect(barSize()).toBe('');
+  });
+
+  /**
+   * שני מצבי הפס. ה-CSS הוא שנותן לאחד שורה אחת ולשני שתיים, ו-jsdom אינו
+   * מחשב אותו; מה שנבדק כאן הוא ההכרעה שמפעילה אותו — ושהיא נגזרת מ-
+   * `sampleSize` ולא מדגל שני שיכול לסתור אותו.
+   */
+  describe('מצב הדגימה מול מצב הבחירה', () => {
+    const listClasses = () => combo.find('[role="listbox"]').classes();
+
+    it('בלי גודל — הפס במצב דגימה, והרשימה יודעת שהוא גבוה יותר', async () => {
+      await combo.setProps({ options: SAMPLED, modelValue: 'David', sample: 'פסוק' });
+      await open();
+      expect(bar().classes()).toContain('specimen');
+      expect(listClasses()).toContain('specimen');
+    });
+
+    it('עם גודל שבמסמך — שורה אחת, בלי מצב דגימה', async () => {
+      await combo.setProps({
+        options: SAMPLED,
+        modelValue: 'David',
+        sample: 'שלום',
+        sampleSize: '21px',
+      });
+      await open();
+      expect(bar().classes()).not.toContain('specimen');
+      expect(listClasses()).not.toContain('specimen');
+    });
+
+    it('הטקסט יושב ב-`<span>` פנימי — בלעדיו אין קטיעה בשתי שורות', async () => {
+      // `-webkit-line-clamp` דורש `display: -webkit-box` על האלמנט שנקטע,
+      // ו-`text-overflow` של מצב הבחירה חל על מכל בלוק בלבד. הצומת הפנימי
+      // אינו קישוט: בלעדיו שורה שלישית הייתה גולשת מהפס בגופן רחב, בלי שום
+      // סימן ב-jsdom.
+      await combo.setProps({ options: SAMPLED, modelValue: 'David', sample: 'פסוק' });
+      await open();
+      expect(bar().find('span').text()).toBe('פסוק');
+    });
+
+    it('בלי פס אין מחלקה על הרשימה — בורר הגודל אינו מקבל גובה של דגימה', async () => {
+      await combo.setProps({ options: SAMPLED, modelValue: 'David', sample: '' });
+      await open();
+      expect(bar().exists()).toBe(false);
+      expect(listClasses()).not.toContain('specimen');
+    });
   });
 });
 

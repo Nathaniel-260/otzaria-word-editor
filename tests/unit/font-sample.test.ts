@@ -195,8 +195,58 @@ describe('משפט ברירת המחדל', () => {
     expect(Array.from(ALPHABET).filter((letter) => !seen.has(letter))).toEqual([]);
   });
 
-  it('ונכנס בתקרת האורך, אחרת הוא נחתך בשלוש נקודות', () => {
-    expect(Array.from(FONT_SAMPLE_FALLBACK).length).toBeLessThanOrEqual(FONT_SAMPLE_MAX_CHARS);
+  /**
+   * הפס במצב הדגימה מחזיק שתי שורות של 227 פיקסלים, כלומר 454 לכל היותר.
+   * נמדד בכרום, ב-14px: הפסוק (63 תווים) דורש 373px ב-David, 394 ב-Arial
+   * ו-434 ב-Segoe UI — הרחב שבגופני הטקסט שנמדדו, ועדיין בתוך שתי השורות.
+   *
+   * 70 היא התקרה: היא משאירה מרווח מעל 63 התווים שנמדדו, ועדיין נופלת לפני
+   * שורה שלישית. `FONT_SAMPLE_MAX_CHARS` אינו התקרה כאן — הוא חוסם טקסט
+   * שנקרא מהמסמך (`Ctrl+A` על ספר שלם), וזו מחרוזת קבועה שנמדדה.
+   *
+   * מה שאין כאן, ובכוונה: „הפסוק נכנס בפס”. זו טענה על פריסה, והיא נמדדת
+   * במקום היחיד שיש בו פריסה — `scripts/qa/font-list-layout-qa.mjs`.
+   */
+  it('נכנס בשתי השורות של הפס', () => {
+    expect(Array.from(FONT_SAMPLE_FALLBACK).length).toBeLessThanOrEqual(70);
+  });
+});
+
+/**
+ * `isFallback` — מה שמפריד בין „הטקסט שלך, בגודל שבמסמך” לבין „הנה האותיות”.
+ *
+ * בלעדיו הפס היה מצייר את הפסוק בגודל הבחירה (עד 24px), כלומר חותך אותו בכל
+ * גופן; ועם דגל **נפרד** לאותה ידיעה שני הצדדים היו יכולים לסתור זה את זה.
+ */
+describe('האם מוצג הפסוק או הטקסט של המשתמש', () => {
+  it('לפני שנקרא משהו — הפסוק', () => {
+    const sample = createFontSample({ read: async () => '' });
+    expect(sample.isFallback.value).toBe(true);
+    expect(sample.text.value).toBe(FONT_SAMPLE_FALLBACK);
+  });
+
+  it('טקסט מסומן מכבה אותו', async () => {
+    const sample = createFontSample({ read: async () => 'בראשית ברא' });
+    sample.begin();
+    await flush();
+    expect(sample.isFallback.value).toBe(false);
+    expect(sample.text.value).toBe('בראשית ברא');
+  });
+
+  it('סגירת הרשימה מחזירה אותו', async () => {
+    const sample = createFontSample({ read: async () => 'בראשית ברא' });
+    sample.begin();
+    await flush();
+    sample.end();
+    expect(sample.isFallback.value).toBe(true);
+  });
+
+  it('בחירה של רווחים בלבד אינה טקסט — הפס אינו נשאר ריק', async () => {
+    const sample = createFontSample({ read: async () => '   ' });
+    sample.begin();
+    await flush();
+    expect(sample.isFallback.value).toBe(true);
+    expect(sample.text.value).toBe(FONT_SAMPLE_FALLBACK);
   });
 });
 
