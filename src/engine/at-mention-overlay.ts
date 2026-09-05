@@ -218,6 +218,12 @@ export function installAtMention(
    */
   let dismissedAt: number | null = null;
   let session: Session = { kind: 'idle' };
+  /**
+   * כתיבת קישור היא שתי פעולות של המנוע (מחיקה ואז insert). בזמן הקצר הזה
+   * אסור לתת להקשה נוספת להזיז את הסמן או לערוך את הטווח, אחרת אי אפשר לדעת
+   * לאן לשחזר את האזכור אם פעולת הקישור נדחית.
+   */
+  let writing = false;
   let debounceTimer: ReturnType<typeof setTimeout> | undefined;
   let popupEl: HTMLDivElement | null = null;
   /** אחרון שדווח, כדי לא להציף את שורת הסטטוס באותה הודעה. */
@@ -423,6 +429,7 @@ export function installAtMention(
     address: TextAddressLike,
     text: string,
     href: string,
+    originalText: string,
   ): Promise<DocReceipt | null> {
     const insertLink = doc?.hyperlinks?.insert;
     if (typeof doc?.insert !== 'function' || typeof insertLink !== 'function') return null;
@@ -449,11 +456,44 @@ export function installAtMention(
       /* נשארים עם תחילת הטווח שנמחק */
     }
 
-    return await insertLink({
-      target: { kind: 'text', blockId: at.blockId, range: { start: at.offset, end: at.offset } },
-      text,
-      link: { destination: { href } },
-    });
+    const insertionTarget = {
+      kind: 'text' as const,
+      blockId: at.blockId,
+      range: { start: at.offset, end: at.offset },
+      ...(address.story ? { story: address.story } : {}),
+    };
+
+    /**
+     * `hyperlinks.insert` אינו טרנזקציוני עם המחיקה שלפניו. אם הוא נכשל,
+     * הטקסט שהמשתמש הקליד חייב לחזור בדיוק לנקודה שנפתחה; הודעת שגיאה בלי
+     * שחזור הייתה מאבדת את האזכור שלו.
+     */
+    const restore = async (): Promise<void> => {
+      try {
+        await doc.insert?.({
+          value: originalText,
+          type: 'text',
+          target: {
+            kind: 'selection',
+            start: pointAt(at.blockId, at.offset, address.story),
+            end: pointAt(at.blockId, at.offset, address.story),
+            ...(address.story ? { story: address.story } : {}),
+          } satisfies SelectionTargetLike,
+        });
+      } catch (error) {
+        // זו תקלה כפולה ונדירה; החריגה המקורית עדיין מדווחת ל-caller.
+        console.warn('[otzaria-word] אזכור: שחזור הטקסט נכשל', error);
+      }
+    };
+
+    try {
+      const receipt = await insertLink({ target: insertionTarget, text, link: { destination: { href } } });
+      if (receipt?.success === false) await restore();
+      return receipt;
+    } catch (error) {
+      await restore();
+      throw error;
+    }
   }
 
   async function accept(index?: number): Promise<void> {
@@ -464,6 +504,7 @@ export function installAtMention(
     const { replaceStart, cursorOffset, blockId, story, query } = session;
     const text = buildLinkText(hit, query);
     const href = buildRefHref(hit, query);
+    const originalText = `@${query}`;
     closeSession();
 
     const address: TextAddressLike = {
@@ -474,12 +515,15 @@ export function installAtMention(
     };
 
     let receipt: DocReceipt | null;
+    writing = true;
     try {
-      receipt = await writeLink(address, text, href);
+      receipt = await writeLink(address, text, href, originalText);
     } catch (error) {
       console.warn('[otzaria-word] אזכור: כתיבת הקישור נכשלה', error);
       report('הוספת הקישור נכשלה', true);
       return;
+    } finally {
+      writing = false;
     }
     if (receipt === null) {
       report('הוספת קישור אינה זמינה במסמך זה', true);
@@ -497,7 +541,9 @@ export function installAtMention(
     }
   }
 
-  const onInput = (): void => scheduleEvaluate();
+  const onInput = (): void => {
+    if (!writing) scheduleEvaluate();
+  };
 
   /**
    * המקשים שהרשימה מטפלת בהם אינם משנים טקסט, ולכן `keyup` שלהם אינו אמור
@@ -507,11 +553,17 @@ export function installAtMention(
   const HANDLED_KEYS = new Set(['ArrowDown', 'ArrowUp', 'Enter', 'Tab', 'Escape']);
 
   const onKeyUp = (event: KeyboardEvent): void => {
+    if (writing) return;
     if (HANDLED_KEYS.has(event.key)) return;
     scheduleEvaluate();
   };
 
   const onKeyDown = (event: KeyboardEvent): void => {
+    if (writing) {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
     if (session.kind !== 'suggesting') return;
     switch (event.key) {
       case 'ArrowDown':

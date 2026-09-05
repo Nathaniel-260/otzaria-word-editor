@@ -32,7 +32,10 @@ function hit(overrides: Partial<ResolvedRefHit> = {}): ResolvedRefHit {
 const BLOCK = 'b1';
 
 /** כפיל מנוע: הסמן יושב בסוף `text`, וחלון הקריאה מחזיר את הטקסט כולו. */
-function fakeDoc(text: string, options: { docInsert?: () => unknown } = {}) {
+function fakeDoc(
+  text: string,
+  options: { docInsert?: () => unknown; hyperlinkInsert?: () => unknown } = {},
+) {
   const calls = new Map<string, unknown[]>();
   const record = (name: string, input: unknown) =>
     calls.set(name, [...(calls.get(name) ?? []), input]);
@@ -43,7 +46,7 @@ function fakeDoc(text: string, options: { docInsert?: () => unknown } = {}) {
   const hyperlinks: Record<string, unknown> = {
     insert: (input: unknown) => {
       record('hyperlinks.insert', input);
-      return { success: true };
+      return options.hyperlinkInsert?.() ?? { success: true };
     },
   };
 
@@ -214,6 +217,30 @@ describe('installAtMention', () => {
 
     expect(calls.has('insert')).toBe(false);
     expect(onStatus).toHaveBeenCalledWith('הוספת קישור אינה זמינה במסמך זה', true);
+    handle.dispose();
+  });
+
+  it('כשל בהוספת קישור משחזר את האזכור שנמחק', async () => {
+    const { host, calls } = fakeDoc('@פסחים לד', {
+      hyperlinkInsert: () => ({ success: false, failure: { code: 'document-readonly' } }),
+    });
+    const handle = installAtMention(container, host as never);
+
+    container.dispatchEvent(new Event('input'));
+    await settle();
+    container.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await vi.advanceTimersByTimeAsync(0);
+
+    const inserts = calls.get('insert') as Array<{
+      value: string;
+      target: { start: { offset: number }; end: { offset: number } };
+    }>;
+    expect(inserts).toHaveLength(2);
+    expect(inserts[0]).toMatchObject({ value: '', target: { start: { offset: 0 }, end: { offset: 9 } } });
+    expect(inserts[1]).toMatchObject({
+      value: '@פסחים לד',
+      target: { start: { offset: 0 }, end: { offset: 0 } },
+    });
     handle.dispose();
   });
 
