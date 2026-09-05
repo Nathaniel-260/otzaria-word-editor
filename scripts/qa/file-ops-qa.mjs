@@ -244,17 +244,34 @@ await stage('exit', async (app) => {
 await stage('open', async (app) => {
   await app.reset();
   await app.tab('קובץ');
-  await app.click('פתח קובץ', { after: 2_500 });
+  /*
+   * „פתח קובץ” ברצועה **אינו** פותח את הבורר של אוצריא אלא את מסך „פתח
+   * מסמך”, והבורר יושב מאחורי „עיון בקבצים…” שבתוכו. השלב הזה מדד רק את
+   * הלחיצה הראשונה, ולכן מרגע שהמסך נולד הוא נכשל — למשתמש שני הכשלים
+   * נראים זהים („לחצתי, ולא נפתח כלום”), ולכן שניהם נמדדים כאן.
+   */
+  await app.click('פתח קובץ', { after: 1_500 });
+  const screenOpen = await app.js("!!document.querySelector('.open-dialog')");
+  await app.clickSel('.open-browse', 0, { after: 2_500 });
   const calls = (await app.hostCalls()).map((c) => c.method);
   const status = await app.status();
-  console.log(`  קריאות: ${JSON.stringify(calls)} | שורת מצב: ${JSON.stringify(status)}`);
-  // הדמה עונה „בוטל”, ולכן הציפייה היא שהבורר נקרא ושהביטול אינו שגיאה.
-  if (!calls.includes('fs.pickUserFile')) {
-    report.fail('פתח קובץ', `בורר הקובץ לא נקרא: ${JSON.stringify(calls)}`);
+  // הדמה עונה „בוטל”. ביטול הוא „נמלכתי בדעתי לגבי הקובץ”, לא „סגור את
+  // המסך” — ולכן החלון חייב להישאר בדיוק איפה שהוא היה.
+  const stillOpen = await app.js("!!document.querySelector('.open-dialog')");
+  console.log(
+    `  מסך „פתח מסמך”: ${screenOpen} | קריאות: ${JSON.stringify(calls)} | ` +
+      `נשאר פתוח אחרי ביטול: ${stillOpen} | שורת מצב: ${JSON.stringify(status)}`,
+  );
+  if (!screenOpen) {
+    report.fail('פתח קובץ', 'הלחיצה ברצועה לא פתחה את מסך „פתח מסמך”');
+  } else if (!calls.includes('fs.pickUserFile')) {
+    report.fail('פתח קובץ', `„עיון בקבצים…” לא הגיע לבורר: ${JSON.stringify(calls)}`);
   } else if (status.error) {
     report.partial('פתח קובץ', `ביטול הבורר הוצג כשגיאה: „${status.text}”`);
+  } else if (!stillOpen) {
+    report.partial('פתח קובץ', 'ביטול בבורר סגר את מסך „פתח מסמך” והחזיר לעורך');
   } else {
-    report.pass('פתח קובץ', 'הבורר נקרא, וביטול אינו שגיאה');
+    report.pass('פתח קובץ', 'המסך נפתח, „עיון בקבצים…” קרא לבורר, וביטול משאיר את המסך פתוח בלי שגיאה');
   }
 });
 

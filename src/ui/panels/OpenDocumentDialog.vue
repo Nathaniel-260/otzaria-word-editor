@@ -37,7 +37,10 @@
         </button>
       </div>
 
-      <div class="open-body">
+      <div
+        ref="bodyRef"
+        class="open-body"
+      >
         <!-- מסמך חדש -->
         <section
           class="tpl-section"
@@ -139,202 +142,214 @@
           </div>
         </section>
 
-        <!-- עיון בקבצים -->
-        <button
-          type="button"
-          class="open-browse"
-          :disabled="busy"
-          @click="$emit('browse')"
+        <!--
+          „עיון בקבצים…” והאחרונים הם **פן אחד** של המסך, והתבניות הן השני.
+          העטיפה אינה קישוט: `block-size: 100%` נותן לפן הזה גובה של חלון
+          שלם, וזה מה שמאפשר ל„פתח קובץ” לנחות עליו כשהוא בראש — גם כשאין
+          מסמכים אחרונים ואין מה לגלול בלעדיו. ראו `landOnOpenPane`.
+        -->
+        <div
+          ref="paneRef"
+          class="open-pane"
         >
-          <SvgIcon
-            name="folder"
-            :size="18"
-            class="open-browse__icon"
-          />
-          <span class="open-browse__label">עיון בקבצים…</span>
-          <span class="open-browse__hint">בחר קובץ Word מהמחשב</span>
-          <SvgIcon
-            name="chevronLeft"
-            :size="16"
-            class="open-browse__chevron"
-          />
-        </button>
-
-        <!-- מסמכים אחרונים -->
-        <section
-          class="rec-section"
-          :aria-labelledby="REC_TITLE_ID"
-        >
-          <div class="rec-head">
-            <h3
-              :id="REC_TITLE_ID"
-              class="section-title"
-            >
-              מסמכים אחרונים
-            </h3>
-            <p
-              v-if="countText"
-              class="rec-count"
-              role="status"
-              aria-live="polite"
-            >
-              {{ countText }}
-            </p>
-            <div
-              v-if="recents.length > 0"
-              class="rec-search"
-            >
-              <SvgIcon
-                name="search"
-                :size="14"
-                class="rec-search__icon"
-              />
-              <input
-                class="rec-search__input"
-                type="text"
-                :value="searchQuery"
-                :disabled="busy"
-                aria-label="סינון מסמכים אחרונים לפי שם"
-                @input="onSearchInput"
-              >
-              <button
-                v-if="searchQuery !== ''"
-                type="button"
-                class="rec-search__clear"
-                aria-label="נקה את הסינון"
-                :disabled="busy"
-                @click="$emit('update:searchQuery', '')"
-              >
-                ✕
-              </button>
-            </div>
-          </div>
-
-          <!-- אין אחרונים כלל -->
-          <div
-            v-if="recents.length === 0"
-            class="rec-empty"
+          <!-- עיון בקבצים -->
+          <button
+            ref="browseRef"
+            type="button"
+            class="open-browse"
+            :disabled="busy"
+            @click="$emit('browse')"
           >
             <SvgIcon
               name="folder"
-              :size="28"
-              class="rec-empty__icon"
+              :size="18"
+              class="open-browse__icon"
             />
-            <p class="rec-empty__title">
-              עדיין אין מסמכים אחרונים
-            </p>
-            <p class="rec-empty__hint">
-              מסמך שתפתח מכאן או מ„עיון בקבצים…” יופיע כאן.
-            </p>
-          </div>
+            <span class="open-browse__label">עיון בקבצים…</span>
+            <span class="open-browse__hint">בחר קובץ Word מהמחשב</span>
+            <SvgIcon
+              name="chevronLeft"
+              :size="16"
+              class="open-browse__chevron"
+            />
+          </button>
 
-          <!-- סינון בלי תוצאות -->
-          <div
-            v-else-if="visible.length === 0"
-            class="rec-empty"
-            role="status"
-            aria-live="polite"
-          >
-            <p class="rec-empty__title">
-              אין מסמך שתואם ל„{{ searchQuery }}”
-            </p>
-            <button
-              type="button"
-              class="rec-empty__clear"
-              @click="$emit('update:searchQuery', '')"
-            >
-              נקה סינון
-            </button>
-          </div>
-
-          <ul
-            v-else
-            class="rec-list"
+          <!-- מסמכים אחרונים -->
+          <section
+            class="rec-section"
             :aria-labelledby="REC_TITLE_ID"
-            @keydown="onRowKeydown"
           >
-            <li
-              v-for="(item, index) in visible"
-              :key="item.token"
-              :ref="(el) => setRowRef(el, index)"
-              class="rec-row"
-              :class="{ 'rec-row--last-pinned': index === lastPinnedIndex }"
+            <div class="rec-head">
+              <h3
+                :id="REC_TITLE_ID"
+                class="section-title"
+              >
+                מסמכים אחרונים
+              </h3>
+              <p
+                v-if="countText"
+                class="rec-count"
+                role="status"
+                aria-live="polite"
+              >
+                {{ countText }}
+              </p>
+              <div
+                v-if="recents.length > 0"
+                class="rec-search"
+              >
+                <SvgIcon
+                  name="search"
+                  :size="14"
+                  class="rec-search__icon"
+                />
+                <input
+                  class="rec-search__input"
+                  type="text"
+                  :value="searchQuery"
+                  :disabled="busy"
+                  aria-label="סינון מסמכים אחרונים לפי שם"
+                  @input="onSearchInput"
+                >
+                <button
+                  v-if="searchQuery !== ''"
+                  type="button"
+                  class="rec-search__clear"
+                  aria-label="נקה את הסינון"
+                  :disabled="busy"
+                  @click="$emit('update:searchQuery', '')"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+
+            <!-- אין אחרונים כלל -->
+            <div
+              v-if="recents.length === 0"
+              class="rec-empty"
             >
+              <SvgIcon
+                name="folder"
+                :size="28"
+                class="rec-empty__icon"
+              />
+              <p class="rec-empty__title">
+                עדיין אין מסמכים אחרונים
+              </p>
+              <p class="rec-empty__hint">
+                מסמך שתפתח מכאן או מ„עיון בקבצים…” יופיע כאן.
+              </p>
+            </div>
+
+            <!-- סינון בלי תוצאות -->
+            <div
+              v-else-if="visible.length === 0"
+              class="rec-empty"
+              role="status"
+              aria-live="polite"
+            >
+              <p class="rec-empty__title">
+                אין מסמך שתואם ל„{{ searchQuery }}”
+              </p>
               <button
                 type="button"
-                class="rec-open"
-                data-col="open"
-                :aria-label="openLabel(item)"
-                :data-tip-title="item.name"
-                :tabindex="index === activeRow ? 0 : -1"
-                :disabled="busy"
-                @focus="onRowFocus(index, 'open')"
-                @click="$emit('open-recent', item.token)"
+                class="rec-empty__clear"
+                @click="$emit('update:searchQuery', '')"
               >
-                <!--
-                  `dir="auto"` — בלעדיו שם קובץ לועזי יורש rtl, והחיתוך
-                  (`text-overflow`) נופל ב-inline-end שהוא **תחילת** השם:
-                  `Shulchan_Aruch_..._vol2_final.docx` היה מוצג כ-
-                  `…_vol2_final.docx`, כלומר בדיוק החלק המזהה נעלם.
-                  `RibbonCombo.vue` עושה את זה מאותו נימוק.
-                -->
-                <span
-                  class="rec-name"
-                  dir="auto"
-                >{{ item.name }}</span>
-                <span
-                  v-if="metaParts(item).length > 0"
-                  class="rec-meta"
-                >
-                  <template
-                    v-for="(part, i) in metaParts(item)"
-                    :key="i"
-                  >
-                    <span
-                      v-if="i > 0"
-                      aria-hidden="true"
-                    > · </span>{{ part }}
-                  </template>
-                </span>
+                נקה סינון
               </button>
-              <span class="rec-actions">
+            </div>
+
+            <ul
+              v-else
+              class="rec-list"
+              :aria-labelledby="REC_TITLE_ID"
+              @keydown="onRowKeydown"
+            >
+              <li
+                v-for="(item, index) in visible"
+                :key="item.token"
+                :ref="(el) => setRowRef(el, index)"
+                class="rec-row"
+                :class="{ 'rec-row--last-pinned': index === lastPinnedIndex }"
+              >
                 <button
                   type="button"
-                  class="rec-iconbtn rec-pin"
-                  data-col="pin"
-                  :aria-pressed="item.pinned"
-                  :aria-label="item.pinned ? `בטל הצמדה של ${item.name}` : `הצמד את ${item.name} לראש הרשימה`"
-                  :data-tip-title="item.pinned ? 'בטל הצמדה' : 'הצמד לראש הרשימה'"
+                  class="rec-open"
+                  data-col="open"
+                  :aria-label="openLabel(item)"
+                  :data-tip-title="item.name"
                   :tabindex="index === activeRow ? 0 : -1"
                   :disabled="busy"
-                  @focus="onRowFocus(index, 'pin')"
-                  @click="$emit('toggle-pin', item.token, !item.pinned)"
+                  @focus="onRowFocus(index, 'open')"
+                  @click="$emit('open-recent', item.token)"
                 >
-                  <SvgIcon
-                    name="bookmark"
-                    :size="15"
-                  />
+                  <!--
+                    `dir="auto"` — בלעדיו שם קובץ לועזי יורש rtl, והחיתוך
+                    (`text-overflow`) נופל ב-inline-end שהוא **תחילת** השם:
+                    `Shulchan_Aruch_..._vol2_final.docx` היה מוצג כ-
+                    `…_vol2_final.docx`, כלומר בדיוק החלק המזהה נעלם.
+                    `RibbonCombo.vue` עושה את זה מאותו נימוק.
+                  -->
+                  <span
+                    class="rec-name"
+                    dir="auto"
+                  >{{ item.name }}</span>
+                  <span
+                    v-if="metaParts(item).length > 0"
+                    class="rec-meta"
+                  >
+                    <template
+                      v-for="(part, i) in metaParts(item)"
+                      :key="i"
+                    >
+                      <span
+                        v-if="i > 0"
+                        aria-hidden="true"
+                      > · </span>{{ part }}
+                    </template>
+                  </span>
                 </button>
-                <button
-                  type="button"
-                  class="rec-iconbtn rec-forget"
-                  data-col="forget"
-                  :aria-label="`הסר את ${item.name} מרשימת האחרונים`"
-                  data-tip-title="הסר מהרשימה"
-                  :tabindex="index === activeRow ? 0 : -1"
-                  :disabled="busy"
-                  @focus="onRowFocus(index, 'forget')"
-                  @click="$emit('forget-recent', item.token)"
-                >
-                  <SvgIcon
-                    name="reject"
-                    :size="15"
-                  />
-                </button>
-              </span>
-            </li>
-          </ul>
-        </section>
+                <span class="rec-actions">
+                  <button
+                    type="button"
+                    class="rec-iconbtn rec-pin"
+                    data-col="pin"
+                    :aria-pressed="item.pinned"
+                    :aria-label="item.pinned ? `בטל הצמדה של ${item.name}` : `הצמד את ${item.name} לראש הרשימה`"
+                    :data-tip-title="item.pinned ? 'בטל הצמדה' : 'הצמד לראש הרשימה'"
+                    :tabindex="index === activeRow ? 0 : -1"
+                    :disabled="busy"
+                    @focus="onRowFocus(index, 'pin')"
+                    @click="$emit('toggle-pin', item.token, !item.pinned)"
+                  >
+                    <SvgIcon
+                      name="bookmark"
+                      :size="15"
+                    />
+                  </button>
+                  <button
+                    type="button"
+                    class="rec-iconbtn rec-forget"
+                    data-col="forget"
+                    :aria-label="`הסר את ${item.name} מרשימת האחרונים`"
+                    data-tip-title="הסר מהרשימה"
+                    :tabindex="index === activeRow ? 0 : -1"
+                    :disabled="busy"
+                    @focus="onRowFocus(index, 'forget')"
+                    @click="$emit('forget-recent', item.token)"
+                  >
+                    <SvgIcon
+                      name="reject"
+                      :size="15"
+                    />
+                  </button>
+                </span>
+              </li>
+            </ul>
+          </section>
+        </div>
       </div>
 
       <div class="open-footer">
@@ -430,6 +445,13 @@ const props = withDefaults(
      * `0` = אין מה לשחזר, והכניסה אינה מרונדרת כלל.
      */
     discardedCount?: number;
+    /**
+     * מאיזו כוונה נפתח החלון — `'new'` (מסמך חדש) או `'open'` (פתח קובץ).
+     *
+     * שני הכפתורים ברצועה, ו-`Ctrl+N`/`Ctrl+O`, פותחים את **אותו מסך**; מה
+     * שהם קובעים הוא איפה הוא נוחת ואיפה המיקוד. ראו `landOnOpenPane`.
+     */
+    intent?: 'new' | 'open';
   }>(),
   {
     // נכשל סגור: דיאלוג שהורכב בלי מידע אינו מציג תבניות שאינו מכיר ואינו
@@ -440,6 +462,9 @@ const props = withDefaults(
     busy: false,
     searchQuery: '',
     discardedCount: 0,
+    // ברירת המחדל היא „מסמך חדש”: מי שמרכיב את הדיאלוג בלי להצהיר על כוונה
+    // מקבל בדיוק את ההתנהגות שהייתה כאן לפני שהשדה נולד — ראש המסך.
+    intent: 'new',
   },
 );
 
@@ -843,6 +868,33 @@ watch(
 /* ------------------------------------------------------------------ */
 
 const dialogRef = ref<HTMLElement | null>(null);
+const bodyRef = ref<HTMLElement | null>(null);
+const paneRef = ref<HTMLElement | null>(null);
+const browseRef = ref<HTMLElement | null>(null);
+
+/**
+ * מגלגל את הגוף עד ש„עיון בקבצים…” בראש חלון הגלילה.
+ *
+ * **למה חישוב ולא `scrollIntoView`:** `scrollIntoView` מגלגל גם את כל האבות,
+ * והמודאל יושב בתוך מעטפת שאין שום סיבה להזיז. ההפרש בין שני המלבנים מזיז
+ * מיכל אחד בדיוק, והדפדפן מקצץ בעצמו כל ערך שחורג מהמקסימום.
+ *
+ * הריפוד מנוכה כדי שהכפתור לא יידבק לקצה: היעד הוא **תחילת תיבת התוכן** של
+ * הגוף, לא הגבול שלו. וזה גם בדיוק המקסימום — `.open-pane` הוא בגובה חלון
+ * שלם בדיוק (`block-size: 100%`), ולכן מה שנשאר לגלול הוא בדיוק רצועת
+ * התבניות. כלומר הנחיתה זהה בין „יש עשרים אחרונים” ל„אין אף אחד”.
+ *
+ * `getBoundingClientRect` קיימת ב-jsdom ומחזירה אפסים — כלומר `scrollTop`
+ * נשאר 0, וזו התוצאה הנכונה לסביבה בלי פריסה.
+ */
+function landOnOpenPane(): void {
+  const body = bodyRef.value;
+  const pane = paneRef.value;
+  if (!body || !pane) return;
+  const padding = Number.parseFloat(getComputedStyle(body).paddingBlockStart) || 0;
+  const delta = pane.getBoundingClientRect().top - body.getBoundingClientRect().top - padding;
+  body.scrollTop += delta;
+}
 
 /** לאן המיקוד חוזר בסגירה — בלעדיו הוא נופל ל-`body` ו-Tab מתחיל מהתחלה. */
 let focusOnClose: HTMLElement | null = null;
@@ -852,20 +904,24 @@ watch(
   (open) => {
     if (open) {
       focusOnClose = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-      // הכרטיס הראשון, ולא תיבת החיפוש: ה-props אינם כוללים „מאיזו כוונה
-      // נפתחתי” (Ctrl+N מול Ctrl+O), ולכן יש כלל אחד לשני המסלולים. מיקוד
-      // בשדה טקסט היה מבטל את Enter וכולא את החיצים.
+      // הכרטיס הראשון או „עיון בקבצים…”, ולא תיבת החיפוש: מיקוד בשדה טקסט
+      // היה מבטל את Enter וכולא את החיצים. `intent` הוא מה שמכריע ביניהם —
+      // המקלדת נוחתת בדיוק במקום שהעין נוחתת בו.
       activeCard.value = 0;
       activeRow.value = 0;
       activeToken.value = null;
       activeColumn.value = 'open';
+      const wantsOpen = props.intent === 'open';
       void nextTick(() => {
-        // `?? dialogRef` לא הספיק: כשהכרטיס **קיים אבל מנוטרל** ה-`??` אינו
+        // הגלילה לפני המיקוד: `focus()` על פקד שמחוץ לחלון הגלילה גורר
+        // גלילה משל הדפדפן, וסדר הפוך היה מייצר שתי קפיצות במקום אחת.
+        if (wantsOpen) landOnOpenPane();
+        // `?? dialogRef` לא הספיק: כשהיעד **קיים אבל מנוטרל** ה-`??` אינו
         // נופל, ומיקוד על כפתור מנוטרל הוא no-op שקט — המיקוד היה נשאר
         // מאחורי המודאל. `openOpenDialog` (App.vue) כבר מונע את המצב הזה
         // מלכתחילה, וזו רשת הביטחון שלו.
-        const card = cardRefs.value[0];
-        (card && !(card as HTMLButtonElement).disabled ? card : dialogRef.value)?.focus();
+        const target = wantsOpen ? browseRef.value : cardRefs.value[0];
+        (target && !(target as HTMLButtonElement).disabled ? target : dialogRef.value)?.focus();
       });
       return;
     }
@@ -954,7 +1010,22 @@ function onTab(event: KeyboardEvent): void {
    * עמודות, 800 → 4, 520 → 2.
    */
   width: min(840px, 94vw);
-  max-height: min(760px, 88vh);
+  /*
+   * **גובה קבוע, ולא `max-height`.**
+   *
+   * המפרט קבע „האזור מקבל את גובהו מהתוכן — הדיאלוג מתקצר במקום לשמור מקום
+   * למה שאין” (§10), וזה נכון כל עוד יש כניסה אחת. יש שתיים: „מסמך חדש”
+   * נוחת בראש, ו„פתח קובץ” נוחת על `.open-pane`. נחיתה דורשת מרחק גלילה,
+   * ודיאלוג שמתקצר לפי מספר האחרונים מייצר מרחק **שונה בכל פתיחה** — כלומר
+   * „פתח קובץ” היה נוחת במקום אחר אצל מי שיש לו עשרים מסמכים ואצל מי שאין
+   * לו אף אחד, ואצל האחרון לא היה מה לגלול בכלל.
+   *
+   * המחיר הוא שטח ריק בפעם הראשונה, והוא נקנה בשתי תמורות: הנחיתה זהה
+   * תמיד, וכפתור „סגור” יושב באותו פיקסל בכל פתיחה במקום לנדוד עם אורך
+   * הרשימה. `.rec-list` כבר גולל בתוך עצמו (`overflow-y: auto`), ולכן
+   * הגובה הקבוע אינו דוחק שום תוכן החוצה.
+   */
+  block-size: min(760px, 88vh);
   display: flex;
   flex-direction: column;
   background: var(--color-surface);
@@ -1009,6 +1080,26 @@ function onTab(event: KeyboardEvent): void {
   min-height: 0;
   overflow-y: auto;
   padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/*
+ * הפן השני של המסך: „עיון בקבצים…” והאחרונים, **בגובה חלון גלילה שלם**.
+ *
+ * ה-100% נפתר מול תיבת התוכן של `.open-body`, ולכן הוא דורש את הגובה הקבוע
+ * של `.open-dialog` שמעליו — שם מוסבר למה הוא שם.
+ *
+ * `block-size: 100%` ולא `min-block-size`: „לפחות חלון” היה נותן לרשימה
+ * ארוכה למתוח את הפן מעבר לחלון, ואז **הגוף** גולל במקום `.rec-list` —
+ * כלומר §1.2 („הרשימה בולעת את כל מה שנשאר וגוללת”) היה נשבר בדיוק במסך
+ * שיש בו מה לגלול. „בדיוק חלון” משאיר את הגלילה הפנימית בידי הרשימה, ואת
+ * מרחק הגלילה של הגוף — בדיוק רצועת התבניות שמעליו.
+ */
+.open-pane {
+  flex: 0 0 auto;
+  block-size: 100%;
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -1392,10 +1483,15 @@ function onTab(event: KeyboardEvent): void {
 
 /* מצבי הריק — האזור מקבל את גובהו מהתוכן, והדיאלוג מתקצר במקום לשמור מקום
    למה שאין. */
+/* `flex: 1 1 auto` ו-`justify-content: center` נולדו עם `.open-pane`: מרגע
+   שהאזור מקבל גובה של חלון שלם, מצב הריק אינו „שורה שנשארה בראש” אלא התוכן
+   היחיד באזור — והוא ממורכז בו במקום להיצמד לקצה העליון של שטח פנוי. */
 .rec-empty {
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   gap: 4px;
   padding: 16px 12px;
   text-align: center;

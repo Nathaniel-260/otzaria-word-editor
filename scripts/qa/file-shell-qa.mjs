@@ -492,7 +492,12 @@ async function sectionFileTab() {
           `data:{token:'qa-open-token',url:${JSON.stringify(dataUrl)},name:'קובץ שנפתח.docx',size:1000,access:'readwrite'}})}`,
       );
       await app.reset();
-      const clicked = await app.click('פתח קובץ', { after: 6000 });
+      // הכפתור ברצועה פותח את מסך „פתח מסמך”; הבורר של אוצריא יושב מאחורי
+      // „עיון בקבצים…” שבתוכו, וזה המסלול שהמשתמש עובר בו. עד שהשלב השני
+      // נוסף כאן, השער לחץ פעם אחת וציפה לבורר שלא נקרא מעולם.
+      const clicked = await app.click('פתח קובץ', { after: 1500 });
+      await app.js("document.querySelector('.open-browse')?.scrollIntoView({ block: 'center' })");
+      await app.clickSel('.open-browse', 0, { after: 6000 });
       const calls = (await app.hostCalls()).map((c) => c.method);
       const bad = await noise(app);
       const titleAfter = await app.js("document.querySelector('.doc-title-input')?.value");
@@ -501,9 +506,19 @@ async function sectionFileTab() {
       log('טקסט אחרי הפתיחה:', JSON.stringify(text), '| רעש:', bad || '(אין)');
       const picked = calls.includes('fs.pickUserFile');
       const opened = titleAfter === 'קובץ שנפתח' && /שמור בשם|עוד שינוי/.test(text ?? '');
-      if (picked && opened && !bad)
-        report.pass('פתח קובץ', 'fs.pickUserFile נקרא, ומסמך אמיתי (עם התוכן הישן) נטען תחת השם החדש');
-      else report.fail('פתח קובץ', `picked=${picked} opened=${opened}; רעש: ${bad || 'אין'}`);
+      // בחירה שהצליחה **כן** סוגרת את המסך: מאחוריו כבר יושב המסמך שנפתח.
+      // (ביטול, לעומת זאת, משאיר אותו — נמדד ב-file-ops-qa.)
+      const closed = await app.js("!document.querySelector('.open-dialog')");
+      if (picked && opened && closed && !bad)
+        report.pass(
+          'פתח קובץ',
+          'fs.pickUserFile נקרא, מסמך אמיתי (עם התוכן הישן) נטען תחת השם החדש, ומסך „פתח מסמך” נסגר',
+        );
+      else
+        report.fail(
+          'פתח קובץ',
+          `picked=${picked} opened=${opened} closed=${closed}; רעש: ${bad || 'אין'}`,
+        );
     });
 
     await step('הדפסה', async () => {

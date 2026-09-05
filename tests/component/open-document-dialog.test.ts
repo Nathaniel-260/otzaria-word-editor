@@ -374,3 +374,66 @@ describe('OpenDocumentDialog — busy', () => {
     expect(wrapper.find('.open-status').text()).toBe('פותח מסמך…');
   });
 });
+
+/**
+ * הכוונה — „מסמך חדש” מול „פתח קובץ” — אינה שני מסכים אלא שתי נחיתות באותו
+ * מסך. מה שנמדד כאן הוא **המיקוד והמבנה**; הגלילה עצמה נמדדת בדפדפן אמיתי
+ * (`scripts/open-dialog-probe.mjs`), כי ל-jsdom אין פריסה ולכן `scrollTop`
+ * שלו הוא תמיד אפס — בדיקה שהייתה נכתבת כאן הייתה עוברת ירוקה על קוד שבור.
+ */
+describe('OpenDocumentDialog — הכוונה שממנה נפתח', () => {
+  /** המיקוד נקבע במעבר סגור→פתוח, ולכן ההרכבה מתחילה סגורה. */
+  async function reopen(props: Record<string, unknown> = {}) {
+    const { wrapper } = mountUi(OpenDocumentDialog, {
+      props: {
+        isOpen: false,
+        templates: DOCUMENT_TEMPLATES,
+        recents: RECENTS,
+        busy: false,
+        searchQuery: '',
+        ...props,
+      },
+    });
+    await wrapper.setProps({ isOpen: true });
+    await settle();
+    return wrapper;
+  }
+
+  it('„עיון בקבצים…” והאחרונים הם פן אחד, בתוך אותה עטיפה', () => {
+    const { wrapper } = open();
+    const pane = wrapper.find('.open-pane');
+    expect(pane.exists()).toBe(true);
+    expect(pane.find('.open-browse').exists()).toBe(true);
+    expect(pane.find('.rec-section').exists()).toBe(true);
+    // הרצועה נשארת **מחוץ** לפן — היא מה שנשאר לגלול מעליו.
+    expect(pane.find('.tpl-section').exists()).toBe(false);
+  });
+
+  it("'open' ממקד את „עיון בקבצים…”", async () => {
+    const wrapper = await reopen({ intent: 'open' });
+    expect(document.activeElement).toBe(wrapper.find('.open-browse').element);
+  });
+
+  it("'new' ממקד את הכרטיס הראשון", async () => {
+    const wrapper = await reopen({ intent: 'new' });
+    expect(document.activeElement).toBe(wrapper.find('.tpl-card').element);
+  });
+
+  it('ברירת המחדל היא „מסמך חדש”', async () => {
+    const wrapper = await reopen();
+    expect(document.activeElement).toBe(wrapper.find('.tpl-card').element);
+  });
+
+  /**
+   * מיקוד על כפתור מנוטרל הוא no-op שקט, והמיקוד היה נשאר מאחורי המודאל —
+   * בדיוק הכשל שרשת הביטחון בקומפוננטה נכתבה בשבילו. הוא נבדק בשני המסלולים
+   * כי `intent` הוסיף יעד שני שאף בדיקה לא כיסתה.
+   */
+  it('busy: המיקוד נופל לחלון עצמו ולא לכפתור מנוטרל', async () => {
+    const openWrapper = await reopen({ intent: 'open', busy: true });
+    expect(document.activeElement).toBe(openWrapper.find('.open-dialog').element);
+
+    const newWrapper = await reopen({ intent: 'new', busy: true });
+    expect(document.activeElement).toBe(newWrapper.find('.open-dialog').element);
+  });
+});

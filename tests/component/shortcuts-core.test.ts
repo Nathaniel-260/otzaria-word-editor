@@ -545,6 +545,12 @@ describe('פעולות המעטפת', () => {
 
     expect(document.querySelector('.open-dialog'), 'הדיאלוג נפתח').not.toBeNull();
     expect(stub.pickCalls, 'ועדיין לא נפתח בורר קבצים').toBe(0);
+    // Ctrl+O ו-Ctrl+N פותחים את אותו חלון, ולכן ההבדל ביניהם הוא **איפה הוא
+    // נוחת**. המיקוד הוא הצד שאפשר למדוד ב-jsdom; הגלילה נמדדת בדפדפן
+    // (scripts/open-dialog-probe.mjs), ושניהם נגזרים מאותו `intent`.
+    expect(document.activeElement, 'והמיקוד על „עיון בקבצים…”').toBe(
+      document.querySelector('.open-browse'),
+    );
 
     document.querySelector<HTMLButtonElement>('.open-browse')?.click();
     await settle();
@@ -562,6 +568,9 @@ describe('פעולות המעטפת', () => {
     expect(event.defaultPrevented).toBe(true);
     expect(document.querySelector('.open-dialog'), 'הדיאלוג נפתח').not.toBeNull();
     expect(stub.resets, 'ועדיין לא נפתח מסמך').toBe(0);
+    expect(document.activeElement, 'והמיקוד על כרטיס התבנית הראשון').toBe(
+      document.querySelector('.tpl-card'),
+    );
 
     // הכרטיס הראשון הוא „מסמך ריק” — ראו DOCUMENT_TEMPLATES ב-engine/templates.ts.
     document.querySelector<HTMLButtonElement>('.tpl-card')?.click();
@@ -606,6 +615,9 @@ describe('פעולות המעטפת', () => {
 
     expect(stub.pickCalls, 'בורר הקבצים נפתח').toBe(1);
     expect(stub.confirms, 'הבחירה בוטלה — אין מה לשאול').toEqual([]);
+    // וביטול אינו סגירה: המשתמש נמלך בדעתו לגבי הקובץ, לא לגבי המסך. קודם
+    // החלון נסגר לפני שהבורר בכלל נפתח, ו„בטל” היה מחזיר אותו לעורך.
+    expect(document.querySelector('.open-dialog'), 'והחלון נשאר על המסך').not.toBeNull();
   });
 
   it('Ctrl+K פותח את דיאלוג הקישור — מכל לשונית', async () => {
