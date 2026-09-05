@@ -69,8 +69,8 @@
  * ההערות מחוברות; אם שלב כלשהו נכשל מוחזר `{ ok: false, message, reason:
  * 'template-partial-failure' }`, וה-`message` מפרט מה **לא** הוחל (ולא רק
  * „נכשל”, כדי שהמשתמש ידע שהמסמך עדיין פתוח עם מה שכן הוחל). כל `note` — גם
- * מהמנוע (כמו `rtlColumnNote`) וגם מהתבנית עצמה (כמו הערת ה-A5) — מגיע
- * לקורא דרך אותו ערוץ יחיד: שדה `note` של `CommandOutcome` (page-setup.ts
+ * מהמנוע וגם מהתבנית עצמה — מגיע לקורא דרך אותו ערוץ יחיד: שדה `note` של
+ * `CommandOutcome` (page-setup.ts
  * מתעד: `{ ok: true; note?: string }`). אין ל-`CommandOutcome` שדה נפרד
  * ל„הערת תבנית” לעומת „הערת מנוע” — ולכן הם מתמזגים למחרוזת אחת.
  */
@@ -101,7 +101,12 @@ export interface DocumentTemplate {
   id: TemplateId;
   label: string;
   hint: string;
-  /** אזהרה שמוצגת בכרטיס **לפני** הלחיצה. רק ל-`two-column` יש כזו. */
+  /**
+   * אזהרה שמוצגת בכרטיס **לפני** הלחיצה. אין כרגע תבנית שנושאת אחת: שתי
+   * האזהרות שהיו כאן — „A4 במקום A5” ו„הטורים מצוירים הפוך” — ירדו כששני
+   * הפערים שהן תיארו נסגרו (הראשון ב-`PAPER_SIZES`, השני ב-superdoc 2.12.0).
+   * השדה נשאר מפני שהוא הערוץ היחיד שבו אזהרה ברמת התבנית מגיעה אל הכרטיס.
+   */
   note?: string;
   preview: TemplatePreview;
 }
@@ -122,11 +127,11 @@ export const DOCUMENT_TEMPLATES: readonly DocumentTemplate[] = [
     id: 'two-column',
     label: 'ספר קודש — שני טורים',
     hint: 'גוף בשני טורים שווים, עם כותרת רצה',
-    // הנוסח הזה קבוע בתוכנית (open-document-dialog-plan.md, החלטה 2) ובעיצוב
-    // (§2.4): קצר יותר מ-`rtlColumnNote` בכוונה — זו אזהרה שנקראת *לפני*
-    // הפעולה, ו-`rtlColumnNote` היא הודעה שמופיעה *אחרי* (ומגיעה כ-`note`
-    // ב-`CommandOutcome` שמוחזר מ-`applyTemplate`, לא מכאן).
-    note: 'הטורים מצוירים הפוך בעורך; הקובץ נשמר נכון',
+    // כאן עמדה האזהרה „הטורים מצוירים הפוך בעורך; הקובץ נשמר נכון”, לפי
+    // התוכנית (open-document-dialog-plan.md, החלטה 2) והעיצוב (§2.4). היא
+    // הוסרה עם המעבר ל-superdoc 2.12.0: הטור הראשון נמדד שם בצד ימין, כמו
+    // בוורד (`SD-4764`; ראו `applyColumns` ב-page-setup.ts). כרטיס שמזהיר
+    // מפני ציור שכבר תקין מרתיע מתבנית תקינה.
     preview: { columns: 2, hasTitleBlock: false, hasRunningHead: true, hasFootnoteBand: false, ratio: 'a4' },
   },
   {

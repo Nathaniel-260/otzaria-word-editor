@@ -1,30 +1,30 @@
 /**
- * בחירה בגרירה על פני שני טורים במקטע `w:bidi` — מה נבחר, ומה המשתמש רואה.
+ * שני טורים במקטע `w:bidi` — איפה הם מצוירים, מה נבחר בגרירה, ומה עושה המקלדת.
  *
- * ## למה יש גשש נפרד לזה
+ * ## מה השתנה כאן, ולמה הגשש נשאר
  *
- * `docs/superdoc-2.10-review.md` כבר מדד שסדר מילוי הטורים במנוע קבוע
- * שמאל→ימין ואינו קורא את `w:bidi`, וסיכם ש„הנזק בתצוגה בלבד” מפני שה-docx
- * המיוצא יוצא שלם. הגשש הזה מודד את מה שאותו סיכום פספס: **הנזק אינו בתצוגה
- * בלבד — הוא באינטראקציה.** בעברית הטור שנקרא ראשון הוא הימני, והוא ה*שני*
- * בסדר המסמך; לכן גרירה טבעית ממנו שמאלה **מתהפכת סביב העוגן** במקום להמשיך
- * ממנו — הבחירה נשארת רצף אחד (`contiguous: true`) שראשו עבר למקום מוקדם
- * מהעוגן, ולא „נמחקת”. זה הפנים שהמשתמש פוגש, וזה מה שנמדד כאן.
+ * עד superdoc 2.11.0 המנוע מילא את הטורים שמאל→ימין גם תחת `w:bidi`, בניגוד
+ * ל-ECMA-376 §17.6.1: שורה 01 נחתה בטור השמאלי, והמשתמש קיבל הודעה בפס המצב
+ * (`rtlColumnNote`) שמסבירה את זה. הפער נסגר במנוע — `SD-4764`, נכלל
+ * ב-2.12.0 — וההודעה ירדה. הגשש לא ירד איתה: הוא הפך מ**תיאור של פער**
+ * ל**שער שמונע את חזרתו**, ובלי שער כזה רגרסיה בציור הטורים הייתה מגיעה
+ * למשתמש בשקט מוחלט (ה-docx המיוצא תקין בשני המקרים — ראו שורה 2).
  *
  * ## מה נמדד
  *
- *   1. „עמודות ← שתיים” מהתפריט האמיתי מגיעה לשורת המצב עם ההודעה
- *      (`rtlColumnNote` ב-engine/page-setup.ts) — התיקון היחיד שכן בידינו.
+ *   1. „עמודות ← שתיים” מהתפריט האמיתי מצליחה ואינה משאירה הודעה בפס המצב.
+ *      הודעה כאן = ההערה שהוסרה חזרה, או שנוספה אחרת בלי שאיש שם לב.
  *   2. הייצוא: `w:bidi` ושני טורים ב-`sectPr`.
- *   3. באיזה צד נוחתת הפסקה הראשונה — כלומר הפער עצמו.
- *   4. גרירה בסדר המסמך (שמאל→ימין): בקרה, וצריכה לצאת רציפה.
- *   5. גרירה בסדר הקריאה העברי (ימין→שמאל): המחווה שהמשתמש עושה בפועל.
- *   6. גרירה **בתוך הטור הימני** אל מתחת לשורה האחרונה שבו — האם הראש מהודק
+ *   3. **בצד ימין נוחת הטור הראשון** — הפער עצמו, בכיוונו החדש.
+ *   4. גרירה מהטור הראשון אל השני: הטווח שנבחר הוא בדיוק המבוקש, והוא רצף.
+ *      בעברית זו גם מחוות הקריאה (ימין ואז שמאל) — הן התלכדו עם התיקון.
+ *   5. גרירה **בתוך הטור הראשון** אל מתחת לשורה האחרונה שבו — האם הראש מהודק
  *      לסוף הטור או קופץ לטור השכן.
- *   7. Shift+חץ מטה בגבול שבין הטורים — האם המקלדת היא מעקף. מיקום הסמן
- *      מאומת בהקשה בודדת **לפני** רצף ההקשות (ראו `placeCaret`), והשורה
- *      מבחינה בין „לא חצה” לבין „גלש לתחילת המסמך”: השני חמור יותר, וכותרת
- *      אחת לשניהם הייתה מוכרת אותו בפחות ממה שנמדד.
+ *   6. Shift+חץ מטה בגבול שבין הטורים.
+ *   7. **בקרת LTR** לשתי השורות שמעליה. זו השורה שמכריעה מה שייך ל-`w:bidi`
+ *      ומה שייך לטורים בכלל: אותה מחווה בדיוק על מקטע לועזי. נמדד שהמקלדת
+ *      נשברת **זהה** בשני הכיוונים — ולכן זה אינו פער RTL, ואינו מצדיק הודעה
+ *      על מקטע עברי. ראו `docs/engine-gaps.md`.
  *
  * ## שלושה כללי מדידה שנלמדו כאן בדם, ואסור לוותר עליהם
  *
@@ -36,23 +36,17 @@
  * 2. **מרכז הפרגמנט הוא אמצע הטקסט, לא תחילתו.** לחיצה על `at(n)` מציבה את
  *    העוגן בתוך שורה n, ולכן המספר הראשון שנספר הוא n+1. כל קריטריון כאן
  *    לוקח את זה בחשבון במפורש.
- * 3. **ספירת מלבנים לבדה אינה מבדילה בין „הראש זז לאן שלא צריך” לבין „הראש
- *    לא זז בכלל”.** לכן שורה שמכריעה על סמך צדדים מדווחת גם את הדגימה
- *    שלפניה, ומכריעה על המצב שאחרי השחרור ולא על דגימה חיה.
- *
- * ## למה השתלטות על גודל החלון
- *
- * חלון headless הוא 800x600, ושטח הכתיבה של A4 מתחיל מתחת לקו הזה. בלי
- * `Emulation.setDeviceMetricsOverride` אירועי העכבר נוחתים מחוץ לדף, הבחירה
- * יוצאת ריקה, והמדידה נראית כאילו „אין בחירה בכלל”. זה נמדד: אותו סקריפט
- * בדיוק החזיר `empty: true` בכל התרחישים עד שהחלון הוגדל.
+ * 3. **ספירת מלבנים אינה קריטריון.** היא נמדדת ומדווחת כראיה, אבל מה שמכריע
+ *    הוא הטווח שנבחר: „20 מלבנים ירדו ל-14” נראה כמו בחירה שנמחקה גם כשהטווח
+ *    שנבחר מדויק לחלוטין. הקריטריון הישן כאן היה בדיוק זה, והוא סימן „חלקי”
+ *    על גרירה תקינה אחרי שהמנוע כבר תוקן.
  *
  * הרצה:  CHROME=<נתיב> node scripts/qa/column-selection-probe.mjs
  */
 import { openApp, createReport, sleep } from './harness.mjs';
 
 const PORT = Number(process.env.QA_PORT ?? 9385);
-const report = createReport('בחירה בגרירה על פני שני טורים');
+const report = createReport('שני טורים במקטע עברי: ציור, בחירה ומקלדת');
 
 /** כמה פסקאות. די כדי לגלוש לטור שני ולהשאיר בכל טור שורות לזהות. */
 const LINES = 40;
@@ -197,10 +191,14 @@ try {
     report.stuck('„שתיים” לא נלחץ', JSON.stringify(menu));
   } else {
     const status = await app.status();
-    if (status?.text?.includes('בצד שמאל') && status?.error === false) {
-      report.pass('„עמודות ← שתיים” מודיעה למשתמש על סדר הטורים', status.text);
+    if (!status?.error && !status?.text) {
+      report.pass('„עמודות ← שתיים” מצליחה בשקט', 'שורת המצב נשארה ריקה');
     } else {
-      report.fail('ההודעה על סדר הטורים אינה מגיעה לשורת המצב', JSON.stringify(status));
+      report.fail(
+        'הפעולה הותירה טקסט בשורת המצב',
+        'ההערה על סדר הטורים ירדה עם superdoc 2.12.0, ואין פקודה אחרת שאמורה ' +
+          `לדבר כאן: ${JSON.stringify(status)}`,
+      );
     }
   }
   await sleep(2_500);
@@ -220,7 +218,9 @@ try {
 
   /* -------------------- 3: איפה נחת כל טור -------------------- */
 
-  const geometry = await app.js(`(() => {
+  /** נקרא פעמיים: פעם על המקטע העברי, ופעם על בקרת ה-LTR שבסוף. */
+  const readGeometry = () =>
+    app.js(`(() => {
     const page = document.querySelector('.superdoc-page').getBoundingClientRect();
     const rows = [];
     document.querySelectorAll('.superdoc-fragment').forEach((el) => {
@@ -232,7 +232,7 @@ try {
     return JSON.stringify({ pageMiddle: Math.round(page.x + page.width / 2), rows });
   })()`).then(JSON.parse);
 
-  const { pageMiddle, rows } = geometry;
+  const { pageMiddle, rows } = await readGeometry();
   const at = (line) => rows.find((r) => r.line === line);
   const side = (line) => (at(line).x < pageMiddle ? 'שמאלי' : 'ימני');
   const sample = () => rectsBySide(pageMiddle);
@@ -264,87 +264,71 @@ try {
   }
 
   // הגבול בין הטורים בסדר המסמך: השורה האחרונה שעדיין בטור הראשון.
+  // לפי הצד שנמדד, ולא לפי „ימין הוא הראשון”: אותו קוד משרת גם את בקרת ה-LTR
+  // בסוף הקובץ, ושורה שמניחה כיוון אינה יכולה להכריע מה תלוי בכיוון.
   const firstColumnSide = side(1);
-  const lastOfFirst = rows.filter((r) => side(r.line) === firstColumnSide).pop().line;
+  const inFirst = rows.filter((r) => side(r.line) === firstColumnSide);
+  const inSecond = rows.filter((r) => side(r.line) !== firstColumnSide);
+  const lastOfFirst = inFirst[inFirst.length - 1].line;
   const firstOfSecond = lastOfFirst + 1;
 
-  /* -------------------- 4: גרירה בסדר המסמך -------------------- */
+  /* -------------------- 4: גרירה מהטור הראשון אל השני -------------------- */
 
   {
-    const from = at(5);
-    const to = at(Math.min(firstOfSecond + 4, LINES));
-    const path = [from];
-    for (let y = from.y; y <= at(lastOfFirst).y; y += 40) path.push({ x: from.x, y });
-    for (let x = from.x; x <= to.x; x += 60) path.push({ x, y: at(lastOfFirst).y });
-    path.push(to);
-
-    const { threw } = await dragAlong(path, sample);
-    const got = await selectedLines();
-    if (threw) {
-      report.stuck('גרירה בסדר המסמך — `getRects` זרק', threw);
-    } else if (got.first === 6 && got.last >= firstOfSecond && got.contiguous) {
-      // 6 ולא 5: הלחיצה נופלת באמצע הטקסט של שורה 05 (ראו כלל המדידה 2).
-      report.pass('גרירה בסדר המסמך — רציפה וחוצה את הגבול', got.label);
-    } else {
-      report.fail('גרירה בסדר המסמך נשברה', `${got.label} (רצוף: ${got.contiguous})`);
-    }
-  }
-
-  /* -------------------- 5: גרירה בסדר הקריאה העברי -------------------- */
-
-  {
-    // המחווה של המשתמש: התחלה בטור שנקרא ראשון (הימני), ירידה בתוכו, ואז מעבר לשני.
-    const from = rightRows[Math.floor(rightRows.length * 0.3)];
-    const down = rightRows[Math.floor(rightRows.length * 0.8)];
-    const to = leftRows[Math.floor(leftRows.length * 0.75)];
+    // מחוות הקריאה: התחלה בטור שנקרא ראשון, ירידה בתוכו, ואז מעבר לשני. עד
+    // 2.11.0 היא הייתה גם המחווה ההפוכה לסדר המסמך (הטור שנקרא ראשון היה
+    // השני בסדר), ולכן היא הפכה את הבחירה סביב העוגן. עם התיקון השתיים
+    // התלכדו, וזו בדיוק הסיבה שהשורה הזאת מודדת **טווח** ולא כיוון.
+    const from = inFirst[Math.floor(inFirst.length * 0.3)];
+    const down = inFirst[Math.floor(inFirst.length * 0.8)];
+    const to = inSecond[Math.floor(inSecond.length * 0.75)];
 
     const path = [from];
     for (let y = from.y; y <= down.y; y += 30) path.push({ x: from.x, y });
-    for (let x = down.x; x >= to.x; x -= 60) path.push({ x, y: down.y });
+    // הצעד האופקי חוצה את המרזב, ובכיוון שנמדד ולא בכיוון שמונח: הגבול הוא
+    // המקום שבו הבחירה נשברה, ומסלול שמדלג עליו אינו מודד אותו.
+    const stepX = to.x > down.x ? 60 : -60;
+    for (let x = down.x; stepX > 0 ? x <= to.x : x >= to.x; x += stepX) path.push({ x, y: down.y });
     path.push(to);
 
     const { trail, final, threw } = await dragAlong(path, sample);
     const peak = Math.max(...trail.map((p) => p.right));
     const got = await selectedLines();
+    // הראש בשורה `to.line` והזנב בשורה שאחרי העוגן (כלל המדידה 2).
+    const wanted = `${from.line + 1}..${to.line}`;
+    const rects = `מלבנים בסיום ${final.n} (${final.left} משמאל, ${final.right} מימין; שיא מימין ${peak})`;
 
-    // ההבחנה שהמדידה מספקת, ושהקריטריון הקודם לא נגע בה: `contiguous`. ירידה
-    // במספר המלבנים בטור הימני אינה „הבחירה נמחקה” — כאן נמדד
-    // `contiguous: true`, כלומר **רצף אחד** שראשו עבר למקום מוקדם יותר בסדר
-    // המסמך. זה היפוך של הבחירה סביב העוגן, לא מחיקה. לכן הכשל נשמר למצב שבו
-    // הבחירה באמת התפרקה, וההיפוך נרשם כמה שהוא.
     if (threw) {
-      report.stuck('גרירה בסדר הקריאה — `getRects` זרק', threw);
+      report.stuck('גרירה מהטור הראשון אל השני — `getRects` זרק', threw);
+    } else if (got.contiguous && got.first === from.line + 1 && got.last === to.line) {
+      report.pass('גרירה מהטור הראשון אל השני בוחרת בדיוק את הטווח', `${got.label} = ${wanted}; ${rects}`);
     } else if (!got.contiguous) {
-      report.fail(
-        'גרירה בסדר הקריאה מפרקת את הבחירה',
-        `הנבחר בסוף אינו רצף אחד: ${got.label} (שיא ${peak} מלבנים בטור הימני, בסיום ${final.right})`,
-      );
-    } else if (final.right >= peak) {
-      report.pass('גרירה בסדר הקריאה — מה שסומן בטור הימני נשמר', `שיא ${peak}, בסיום ${final.right}`);
+      report.fail('גרירה חוצת-גבול מפרקת את הבחירה', `${got.label}, רצוי ${wanted}; ${rects}`);
     } else {
-      report.partial(
-        'גרירה בסדר הקריאה — הבחירה מתהפכת סביב העוגן',
-        `הטור הימני הגיע ל-${peak} מלבנים וירד ל-${final.right} אחרי המעבר לטור השמאלי, ` +
-          `אך הנבחר נשאר רצף אחד: ${got.label} — כלומר הראש עבר למקום מוקדם מהעוגן ` +
-          `(שורה ${from.line}) במקום להמשיך ממנו, והבחירה לא נמחקה אלא התהפכה`,
+      report.fail(
+        'גרירה חוצת-גבול בוחרת טווח אחר מהמבוקש',
+        `${got.label} במקום ${wanted}; ${rects}`,
       );
     }
   }
 
-  /* -------------------- 6: גרירה בתוך הטור הימני, אל מתחת לתחתיתו ------- */
+  /* ------------- 5: גרירה בתוך הטור הראשון, אל מתחת לתחתיתו ------------- */
 
   {
-    const bottomRight = rightRows[rightRows.length - 1];
-    const bottomLeft = leftRows[leftRows.length - 1];
-    // נקודה ברוחב הטור הימני, מתחת לשורה האחרונה שלו אך מעל תחתית השמאלי.
-    const belowY = Math.round((bottomRight.y + bottomLeft.y) / 2);
-    if (belowY <= bottomRight.y + 10) {
-      report.skip('גרירה אל מתחת לתחתית הטור הימני', 'הטורים מסתיימים קרוב מדי זה לזה — אין רצועה למדוד');
+    const bottomFirst = inFirst[inFirst.length - 1];
+    const bottomSecond = inSecond[inSecond.length - 1];
+    // נקודה ברוחב הטור הראשון, מתחת לשורה האחרונה שלו אך מעל תחתית השני.
+    const belowY = Math.round((bottomFirst.y + bottomSecond.y) / 2);
+    /** כל המלבנים בצד של הטור הראשון — הניסוח שאינו מניח איזה צד זה. */
+    const onlyFirstSide = (final) =>
+      firstColumnSide === 'ימני' ? final.left === 0 && final.right > 0 : final.right === 0 && final.left > 0;
+    if (belowY <= bottomFirst.y + 10) {
+      report.skip('גרירה אל מתחת לתחתית הטור הראשון', 'הטורים מסתיימים קרוב מדי זה לזה — אין רצועה למדוד');
     } else {
-      // **העוגן בטור הימני עצמו** — אחרת השורה מודדת משהו אחר לגמרי.
-      const anchor = rightRows[Math.floor(rightRows.length * 0.3)];
+      // **העוגן בטור הראשון עצמו** — אחרת השורה מודדת משהו אחר לגמרי.
+      const anchor = inFirst[Math.floor(inFirst.length * 0.3)];
       if (!(await placeCaret(anchor))) {
-        report.stuck('גרירה אל מתחת לתחתית הטור הימני', 'הלחיצה לא מיקמה סמן נקי');
+        report.stuck('גרירה אל מתחת לתחתית הטור הראשון', 'הלחיצה לא מיקמה סמן נקי');
       } else {
         const path = [anchor];
         for (let y = anchor.y + 40; y <= belowY; y += 40) path.push({ x: anchor.x, y });
@@ -354,15 +338,15 @@ try {
         const before = trail[trail.length - 2] ?? trail[0];
         const got = await selectedLines();
         if (threw) {
-          report.stuck('גרירה אל מתחת לתחתית הטור הימני — `getRects` זרק', threw);
-        } else if (final.left === 0 && final.right > 0) {
+          report.stuck('גרירה אל מתחת לתחתית הטור הראשון — `getRects` זרק', threw);
+        } else if (onlyFirstSide(final)) {
           report.pass(
-            'הראש מהודק לסוף הטור הימני כשהסמן יורד מתחתיו',
-            `${final.n} מלבנים, כולם מימין; ${got.label}`,
+            'הראש מהודק לסוף הטור הראשון כשהסמן יורד מתחתיו',
+            `${final.n} מלבנים, כולם בצד ה${firstColumnSide}; ${got.label}`,
           );
         } else {
           report.fail(
-            'סמן ברוחב הטור הימני מתחת לשורה האחרונה שבו — הראש אינו מהודק לסוף הטור',
+            'סמן ברוחב הטור הראשון מתחת לשורה האחרונה שבו — הראש אינו מהודק לסוף הטור',
             `בגובה ${belowY}: ${final.left} מלבנים משמאל ו-${final.right} מימין ` +
               `(בצעד שלפניו ${before.left}/${before.right}) — הנבחר: ${got.label}`,
           );
@@ -371,7 +355,7 @@ try {
     }
   }
 
-  /* -------------------- 7: המקלדת בגבול שבין הטורים -------------------- */
+  /* -------------------- 6: המקלדת בגבול שבין הטורים -------------------- */
 
   {
     // אם Shift+חץ מטה היה חוצה את הגבול כראוי, הייתה למשתמש דרך לעקוף את
@@ -422,6 +406,68 @@ try {
               `${startsRight ? 'מתחיל נכון' : `מתחיל ב-${got.first} ולא ב-${anchorLine + 1}`}, ` +
               `${crossed ? 'חצה' : `לא הגיע לשורה ${firstOfSecond}`}`,
           );
+        }
+      }
+    }
+  }
+
+  /* -------------------- 7: בקרת LTR -------------------- */
+
+  /*
+   * אותו מסמך, אותה מחווה, מקטע לועזי. בלי השורה הזאת אי אפשר לדעת אם מה
+   * שנשבר למעלה שייך ל-`w:bidi` או לטורים בכלל — וההבדל הוא שההודעה שהוסרה
+   * דיברה על מקטע עברי דווקא. נמדד: המקלדת נשברת **זהה** בשני הכיוונים.
+   */
+  {
+    await app.js(`(async () => {
+      const doc = window.__otzariaEditor.superdoc.activeEditor.doc;
+      const first = (await doc.sections.list()).items[0];
+      await doc.sections.setSectionDirection({ target: first.address, direction: 'ltr' });
+    })()`);
+    await sleep(2_500);
+
+    const ltr = await readGeometry();
+    const atL = (line) => ltr.rows.find((r) => r.line === line);
+    const sideL = (line) => (atL(line).x < ltr.pageMiddle ? 'שמאלי' : 'ימני');
+    if (ltr.rows.length < LINES) {
+      report.stuck('בקרת LTR', `${ltr.rows.length}/${LINES} שורות אחרי החלפת הכיוון — אין מה להשוות`);
+    } else {
+      const firstSideL = sideL(1);
+      const lastOfFirstL = ltr.rows.filter((r) => sideL(r.line) === firstSideL).pop().line;
+      if (firstSideL === 'שמאלי') {
+        report.pass('בקרת LTR: הטור הראשון עובר לשמאל עם הכיוון', `שורה 01 ב-x=${atL(1).x}, אמצע ${ltr.pageMiddle}`);
+      } else {
+        report.fail(
+          'בקרת LTR: הטור הראשון נשאר מימין גם במקטע לועזי',
+          `שורה 01 ב-x=${atL(1).x}, אמצע ${ltr.pageMiddle} — הכיוון אינו מה שמזיז את הטורים`,
+        );
+      }
+
+      const anchorLine = lastOfFirstL - 2;
+      if (!(await placeCaret(atL(anchorLine)))) {
+        report.stuck('בקרת LTR: Shift+חץ מטה', 'הלחיצה לא מיקמה סמן נקי');
+      } else {
+        await app.press('ArrowDown', 'ArrowDown', 40, 8);
+        await sleep(200);
+        const step = await selectedLines();
+        if (!(step.count === 1 && step.first === anchorLine + 1)) {
+          report.stuck('בקרת LTR: Shift+חץ מטה', `הקשה בודדת בחרה ${step.label} — אין ממה להסיק`);
+        } else {
+          for (let i = 0; i < 5; i++) {
+            await app.press('ArrowDown', 'ArrowDown', 40, 8);
+            await sleep(200);
+          }
+          const got = await selectedLines();
+          const crossed = got.first === anchorLine + 1 && got.last >= lastOfFirstL + 1;
+          if (crossed) {
+            report.pass('בקרת LTR: Shift+חץ מטה חוצה את הגבול — כלומר הפער שלמעלה הוא של RTL', got.label);
+          } else {
+            report.fail(
+              'בקרת LTR: Shift+חץ מטה נשבר גם במקטע לועזי — הפער אינו של `w:bidi`',
+              `עוגן ${anchorLine} (אומת: ${step.label}); 6 הקשות: ${got.label}; הגבול אחרי ${lastOfFirstL} — ` +
+                'זהה למקטע העברי, ולכן זה פער של טורים ולא של כיוון',
+            );
+          }
         }
       }
     }
