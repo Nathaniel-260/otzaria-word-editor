@@ -22,6 +22,7 @@ import {
   mergeFontSizes,
   observeFontSlice,
   readFontSlice,
+  type FontFamilyChoice,
   type FontOptionsSource,
   type FontsSliceLike,
 } from '../../src/engine/font-options';
@@ -465,5 +466,170 @@ describe('observeFontSlice — דיווח חוזר וזהה', () => {
 
     captured.emit?.({ options: [{ value: 'TaameyDavidCLM', label: 'David' }] });
     expect(reports).toBe(2);
+  });
+});
+
+/**
+ * זמינות הגופן — הבאג שנמדד, והגבול שנשמר.
+ *
+ * הטריגר אינו תיאורטי: `scripts/qa/font-availability-qa.mjs` מנה 67 שורות
+ * שהבורר מציג בכרום אמיתי, ומצא ש-`Aptos` — ברירת המחדל של Word 365 — אינה
+ * נפתרת במכונה בלי Office. השורה הכריזה „Aptos” וציירה Arial, ופס הדגימה
+ * הראה את הטקסט של המשתמש בגודל שבמסמך תחת שם של גופן אחר.
+ *
+ * שני חצאים נבדקים כאן, והשני חשוב כמו הראשון:
+ *
+ * 1. **שהמדידה קורית** למי שאין לו מזריק, ושהיא מפילה את הציור ולא את השורה.
+ * 2. **שהיא אינה קורית** לכל השאר. השש שלנו מוזרקות אחרי המנייה, והמנייה
+ *    עצמה כבר סוננה — מדידה שם הייתה מבהבת או עבודה כפולה על מאות שמות.
+ *
+ * ב-jsdom אין canvas, ולכן `isFamilyAvailable` האמיתית מחזירה `true` תמיד
+ * („בלי canvas אין לנו מה לומר”). כלומר בלי הכפיל המסלול הזה אינו נבדק בכלל,
+ * וזו הסיבה שכל בדיקה כאן מזריקה `resolves`.
+ */
+describe('mergeFontFamilies — זמינות', () => {
+  /** כפיל: כל שם נפתר, למעט מי שנמסר כשבור. */
+  const resolvesAllBut = (broken: readonly string[]) => {
+    const set = new Set(broken.map((name) => name.toLowerCase()));
+    return (family: string) => !set.has(family.trim().toLowerCase());
+  };
+
+  const find = (options: readonly FontFamilyChoice[], value: string) =>
+    options.find((option) => option.value === value);
+
+  it('גופן לטיני שאינו נפתר מסומן לא-זמין ומאבד את הציור', () => {
+    const merged = mergeFontFamilies(undefined, undefined, undefined, resolvesAllBut(['Aptos']));
+    const aptos = find(merged, 'Aptos');
+
+    expect(aptos?.available).toBe(false);
+    // וזה הלב: `previewFamily` נופל, ולכן שלושת מקומות הציור בפקד — השורה,
+    // התיבה ופס הדגימה — מפסיקים לצייר בו־זמנית.
+    expect(aptos?.previewFamily).toBeUndefined();
+  });
+
+  it('והשורה נשארת — מסמך נודד, והגופן עשוי להיות מותקן במכונה אחרת', () => {
+    const merged = mergeFontFamilies(undefined, undefined, undefined, resolvesAllBut(['Aptos']));
+    expect(values(merged)).toContain('Aptos');
+    expect(groupOf(merged, 'Aptos')).toBe(FONT_GROUP_TOP);
+  });
+
+  it('גופן לטיני שכן נפתר שומר על הציור', () => {
+    const merged = mergeFontFamilies(undefined, undefined, undefined, resolvesAllBut(['Aptos']));
+    const arial = find(merged, 'Arial');
+
+    expect(arial?.available).toBe(true);
+    expect(arial?.previewFamily).toBe('Arial, sans-serif');
+  });
+
+  it('ששת הגופנים שלנו אינם נמדדים — הם מוזרקות אחרי המנייה', () => {
+    // הכפיל אומר שאף אחד מהם אינו קיים. זה בדיוק המצב בשנייה הראשונה של
+    // ההפעלה (נמדד: `FrankRuhlCLM=false`), ואסור שהוא יפיל את הדגימה —
+    // הגופן יהיה שם בעוד רגע, ודגימה שנעלמת וחוזרת גרועה משתי האפשרויות.
+    const names = values(OTZARIA_FONT_FAMILIES);
+    const merged = mergeFontFamilies(undefined, undefined, undefined, resolvesAllBut(names));
+
+    for (const option of OTZARIA_FONT_FAMILIES) {
+      const row = find(merged, option.value);
+      expect(row?.available, option.value).toBe(true);
+      expect(row?.previewFamily, option.value).toBe(option.previewFamily);
+    }
+  });
+
+  it('המנייה אינה נמדדת שוב — היא כבר סוננה ב-keepAvailable', () => {
+    const merged = mergeFontFamilies(
+      undefined,
+      installed(['Narkisim'], ['Narkisim']),
+      () => true,
+      resolvesAllBut(['Narkisim']),
+    );
+    const row = find(merged, 'Narkisim');
+
+    expect(row?.available).toBe(true);
+    expect(row?.previewFamily).toBe('"Narkisim", sans-serif');
+  });
+
+  it('גופן מסמך שאינו נפתר מסומן — זה המקור שהבאג באמת חי בו', () => {
+    // הגשש שגילה את הבאג לא פתח מסמך, ולכן 67 השורות שהוא מנה לא כללו אפילו
+    // גופן מסמך אחד — כלומר המקור המסוכן ביותר לא נמדד. מסמך Word 365 נושא
+    // `Aptos` **ו-`Aptos Display`**, והשנייה מגיעה מכאן בלבד.
+    const merged = mergeFontFamilies(
+      [{ value: 'Aptos Display', label: 'Aptos Display' }],
+      undefined,
+      () => false,
+      resolvesAllBut(['Aptos Display']),
+    );
+    const row = find(merged, 'Aptos Display');
+
+    expect(row?.available).toBe(false);
+    expect(row?.previewFamily).toBeUndefined();
+    expect(values(merged)).toContain('Aptos Display');
+  });
+
+  it('וגופן מסמך שכן נפתר — למשל דרך אליאס עברי — נשאר מצויר', () => {
+    // `planFontAliases` מזריק `@font-face` לגופן עברי חסר, ואז הוא **נפתר**
+    // דרך התחליף. הדגימה בו נכונה ואינה פשרה: גוף המסמך מצויר באותו תחליף.
+    const merged = mergeFontFamilies(
+      [{ value: 'Guttman Yad', label: 'Guttman Yad' }],
+      undefined,
+      () => true,
+      () => true,
+    );
+    const row = find(merged, 'Guttman Yad');
+
+    expect(row?.available).toBe(true);
+    expect(row?.previewFamily).toBe('Guttman Yad');
+  });
+
+  it('Aptos מגיע גם מהמנוע — והשורה נמדדת פעם אחת, לא משתי דרכים', () => {
+    /*
+     * התרחיש שנמדד בפועל: מסמך שברירת המחדל שלו Aptos, כלומר המנוע **מדווח**
+     * עליו. השורה נתפסת ברשימת הלטינית שיושבת לפני המנוע ב-`sources`, ולכן
+     * לפני שגם המנוע נמדד ההגנה כאן הייתה סדר הרשומות בלבד — והערת התיעוד של
+     * `LATIN_FONT_FAMILIES` דווקא מזמינה להזיז אותה („נשארים כזנב אחרי
+     * אפשרויות המנוע”). הזזה כזאת הייתה מחזירה את הבאג ומשאירה הכול ירוק.
+     */
+    const merged = mergeFontFamilies(
+      [{ value: 'Aptos', label: 'Aptos', previewFamily: "'Aptos', sans-serif" }],
+      undefined,
+      undefined,
+      resolvesAllBut(['Aptos']),
+    );
+    const row = find(merged, 'Aptos');
+
+    expect(row?.available).toBe(false);
+    expect(row?.previewFamily).toBeUndefined();
+    expect(values(merged).filter((value) => value === 'Aptos')).toHaveLength(1);
+  });
+
+  it('נשאלים הלטינית וגופני המסמך — ולא מאות שמות המנייה', () => {
+    /*
+     * המנייה כבר סוננה ב-`keepAvailable` (system-fonts.ts), ולכן שאלה חוזרת
+     * עליה היא עבודה כפולה על מאות שמות. שוויון קבוצות ולא „מכיל”: הוא תופס
+     * גם „לא מודד את מי שצריך” וגם „מודד את כולם”, ולכן הוא גם השומר על
+     * העלות אם מישהו יסיר את `verify` מהמקורות.
+     */
+    const resolves = vi.fn((_family: string) => true);
+    const many = Array.from({ length: 300 }, (_, index) => `Family ${index}`);
+
+    mergeFontFamilies(
+      [{ value: 'Cambria', label: 'Cambria' }],
+      installed(many),
+      () => false,
+      resolves,
+    );
+
+    const asked = new Set(resolves.mock.calls.map(([name]) => name));
+    expect(asked).toEqual(new Set([...values(LATIN_FONT_FAMILIES), 'Cambria']));
+    expect(asked.has('Family 0')).toBe(false);
+    expect(asked.has('Family 299')).toBe(false);
+  });
+
+  it('בלי כפיל — ברירת המחדל אינה מפילה דבר', () => {
+    // `isFamilyAvailable` האמיתית מחזירה `true` כשאין canvas, ולכן ריצה בלי
+    // הזרקה חייבת להשאיר את כל הרשימה זמינה. בדיקה זו היא השומר על כך
+    // שהתיקון לא יכבה דגימות בסביבה שאינה יכולה למדוד.
+    const merged = mergeFontFamilies([{ value: 'Cambria', label: 'Cambria' }]);
+    expect(merged.every((option) => option.available)).toBe(true);
+    expect(merged.every((option) => option.previewFamily !== undefined)).toBe(true);
   });
 });

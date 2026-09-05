@@ -278,3 +278,75 @@ describe('בחירה שנייה בזמן שהראשונה באוויר', () => {
     expect(shown(harness, 'גופן')).toBe('Assistant');
   });
 });
+
+/**
+ * התפר שבין המיזוג לפקד — והוא היה חשוף לגמרי.
+ *
+ * `mergeFontFamilies` קובע `available`, `use-font-controls` הופך אותו ל-
+ * `unavailable`, והפקד מצייר לפיו. בדיקות היחידה מודדות את הצד הראשון,
+ * ובדיקות הרכיב מוסרות `unavailable` כ-prop — כלומר אף אחת לא עוברת בין
+ * השניים. היפוך הדגל במיפוי, או מחיקתו, השאיר את כל הבדיקות ירוקות.
+ */
+describe('בורר הגופן — גופן שאינו מותקן, מהמיזוג ועד ה-DOM', () => {
+  const FONTS = {
+    sizes: [],
+    families: [
+      {
+        value: 'Arial',
+        label: 'Arial',
+        previewFamily: 'Arial, sans-serif',
+        group: '',
+        hebrew: false,
+        available: true,
+        measured: true,
+      },
+      {
+        /*
+         * הפיקסטורה **סותרת את עצמה בכוונה**: המיזוג האמיתי מפיל את
+         * `previewFamily` יחד עם `available`, ולכן פיקסטורה „נאמנה” הייתה
+         * הופכת את בדיקת „אינו מצויר” לטאוטולוגיה — אין מה לצייר ממילא.
+         *
+         * כאן הציור **קיים** והדגל כבוי, וזו השאלה האמיתית: האם השרשרת
+         * מסרבת לצייר בזכות עצמה. זו גם הצורה שהמסלול השני מייצר —
+         * `withCurrent` מוסיף גופן מסמך עם `preview` מלא.
+         */
+        value: 'Aptos',
+        label: 'Aptos',
+        previewFamily: "'Aptos', sans-serif",
+        group: '',
+        hebrew: false,
+        available: false,
+        measured: true,
+      },
+    ],
+  };
+
+  const rowsOf = (harness: ReturnType<typeof mountUi>) =>
+    harness.wrapper.findAll('[role="option"]');
+
+  it('דגל הזמינות מהמיזוג מגיע לבורר כשורה מסומנת', async () => {
+    const harness = mountUi(HomeTab, { fontOptions: FONTS });
+    await harness.wrapper.find('input[data-tip-title="גופן"]').trigger('focus');
+    await settle();
+
+    const rows = rowsOf(harness);
+    const aptos = rows.find((row) => row.attributes('data-value') === 'Aptos');
+    const arial = rows.find((row) => row.attributes('data-value') === 'Arial');
+
+    expect(aptos?.classes()).toContain('unavailable');
+    // ‏`missing` ולא רק „לא זמין”: זה מה שאומר לשער ה-QA שהשורה **נמדדה**,
+    // ובלעדיו הוא היה פוטר אותה כאילו הוכרזה בלי מדידה.
+    expect(aptos?.attributes('data-availability')).toBe('missing');
+    expect(arial?.classes()).not.toContain('unavailable');
+    expect(arial?.attributes('data-availability')).toBe('measured');
+  });
+
+  it('ואינו מצויר בגופן שאינו קיים, גם דרך המסלול המלא', async () => {
+    const harness = mountUi(HomeTab, { fontOptions: FONTS });
+    await harness.wrapper.find('input[data-tip-title="גופן"]').trigger('focus');
+    await settle();
+
+    const aptos = rowsOf(harness).find((row) => row.attributes('data-value') === 'Aptos');
+    expect(aptos?.attributes('style')).toBeUndefined();
+  });
+});

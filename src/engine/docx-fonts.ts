@@ -225,6 +225,10 @@ export function shapeOf(font: DeclaredFont): keyof typeof SUBSTITUTES {
  * גרועה מלא לגעת.
  */
 export function isFamilyAvailable(name: string): boolean {
+  const key = familyProbeKey(name);
+  const remembered = familyAvailability.get(key);
+  if (remembered !== undefined) return remembered;
+
   const context = measurementContext();
   if (!context) return true;
 
@@ -233,11 +237,32 @@ export function isFamilyAvailable(name: string): boolean {
     return context.measureText(PROBE_TEXT).width;
   };
   const quoted = JSON.stringify(name);
-  return (
+  const available =
     width(`72px ${quoted}, monospace`) !== width('72px monospace') ||
-    width(`72px ${quoted}, serif`) !== width('72px serif')
-  );
+    width(`72px ${quoted}, serif`) !== width('72px serif');
+
+  familyAvailability.set(key, available);
+  return available;
 }
+
+/**
+ * זיכרון תשובות הזמינות, באותה מכניקה של `hebrewCoverage` ומאותם שני טעמים.
+ *
+ * **הרישיות** — `keepAvailable` שואל על כל שם שהמכונה מדווחת (נמדד: 287
+ * משפחות), ובורר הגופן שואל על גופני המסמך בכל מיזוג מחדש; בלי מיתות היו כאן
+ * שלוש רשומות ל-`Arial`/`ARIAL`/`arial`.
+ *
+ * **והדור** — וזה מה שהופך את המטמון לנכון ולא רק למהיר.
+ * `installDocumentFontAliases` דורס את ה-`@font-face` בכל מסמך, כלומר שם
+ * שאינו נפתר במסמך א' **כן** נפתר במסמך ב'. `familyProbeKey` נושא את הדור,
+ * ו-`advanceAliasGeneration` מנקה — ולכן תשובה אינה שורדת את ההזרקה שהפכה
+ * אותה לשגויה.
+ *
+ * זו הייתה הסיבה היחידה שהמיזוג לא מדד את גופני המסמך. היא נפלה: ההזרקה
+ * מתרחשת ב-`await` **לפני** `swap.open` (App.vue), ולכן כשמגיע דיווח הגופנים
+ * של מסמך האליאסים שלו כבר במקום.
+ */
+const familyAvailability = new Map<string, boolean>();
 
 /** מחרוזת המדידה לכיסוי עברית בלבד. ראו `coversHebrew`. */
 const HEBREW_PROBE_TEXT = 'אבגדהוזחטיכלמנסעפצקרשת';
@@ -297,6 +322,10 @@ function familyProbeKey(name: string): string {
 function advanceAliasGeneration(): void {
   aliasGeneration += 1;
   hebrewCoverage.clear();
+  // ניקוי זיכרון, ולא נכונות — וההבחנה חשובה כדי שלא ייכתב כאן שומר מיותר:
+  // המפתח נושא את הדור, ולכן דור חדש **מחטיא** בלאו הכי וקורא מדידה טרייה.
+  // בלי הניקוי המפה הייתה גדלה בכל מסמך שנפתח, וזה כל ההבדל.
+  familyAvailability.clear();
 }
 
 /**

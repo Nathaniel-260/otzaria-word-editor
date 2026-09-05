@@ -469,6 +469,7 @@ describe('פס הדגימה', () => {
 
   const bar = () => combo.find('.ribbon-combo-sample');
   const barFamily = () => (bar().element as HTMLElement).style.fontFamily;
+  const barSize = () => (bar().element as HTMLElement).style.fontSize;
 
   it('בלי טקסט אין פס — וזה בורר הגודל, שאין לו מה להדגים', async () => {
     await open();
@@ -551,6 +552,23 @@ describe('פס הדגימה', () => {
     await open();
     expect(bar().attributes('dir')).toBe('auto');
   });
+
+  it('הפס מצייר בגודל שהמסמך מדווח — לא בגודל קבוע של הרשימה', async () => {
+    // זה מה שהופך את הדגימה ל„איך הטקסט שלי ייראה”: הגופן שהסימון עומד עליו,
+    // ובגודל שבמסמך. הערך מגיע מוכן מ-`use-font-controls` (`sampleSize`).
+    await combo.setProps({ options: SAMPLED, modelValue: 'David', sample: 'שלום', sampleSize: '21px' });
+    await open();
+    expect(barSize()).toBe('21px');
+    expect(barFamily()).toBe('David');
+  });
+
+  it('בלי `sampleSize` הפס נשאר בגודלו הקבוע — קורא ישן אינו נשבר', async () => {
+    // התיבה של בורר הגודל, וכל קורא שלא העביר את הפרופ, אינם אמורים לקבל
+    // `font-size` inline — הגודל הקבוע שב-CSS נשאר.
+    await combo.setProps({ options: SAMPLED, modelValue: 'David', sample: 'שלום' });
+    await open();
+    expect(barSize()).toBe('');
+  });
 });
 
 describe('נגישות', () => {
@@ -611,5 +629,159 @@ describe('נגישות', () => {
       .filter((el) => el.attributes('aria-selected') === 'true')
       .map((el) => el.attributes('data-value'));
     expect(selected).toEqual(['Arial']);
+  });
+});
+
+/**
+ * גופן שהדפדפן אינו פותר — מה שמוצג עליו, ומה ש**אינו** מוצג.
+ *
+ * הבאג שנמדד (`scripts/qa/font-availability-qa.mjs`, 67 שורות בכרום
+ * אמיתי): שורת `Aptos` הכריזה „Aptos” וצוירה ב-Arial, ופס הדגימה הראה את
+ * הטקסט של המשתמש בגודל שבמסמך תחת שם של גופן אחר.
+ *
+ * שני חצאים, והשני הוא זה שנותן לתיקון ערך: הורדת הציור לבדה מותירה את הפס
+ * מצייר בגופן הממשק ב-24px, וזה נראה בדיוק כמו דגימה אמיתית. לכן גם הסימון.
+ */
+describe('גופן שאינו מותקן', () => {
+  /*
+   * ל-Aptos יש כאן `preview` **וגם** `unavailable`, וזה לא מקרי: בלי ה-
+   * `preview` הבדיקות „אינו מצויר” היו עוברות גם על פקד שמתעלם מהדגל לגמרי,
+   * כי ממילא לא היה מה לצייר. הצירוף הזה הוא מה שמודד את `paintFamily`.
+   *
+   * והוא גם המצב האמיתי של המסלול השני: `withCurrent` מוסיף את גופן המסמך עם
+   * `preview` מלא, ורק המדידה קובעת אם הוא זמין.
+   */
+  const WITH_MISSING: readonly ComboOption[] = [
+    { value: 'Arial', label: 'Arial', group: '', preview: 'Arial, sans-serif' },
+    { value: 'Aptos', label: 'Aptos', group: '', preview: "'Aptos', sans-serif", unavailable: true },
+  ];
+
+  const mountMissing = (sample = '') =>
+    mount(RibbonCombo, {
+      props: { modelValue: 'Arial', options: WITH_MISSING, title: 'גופן', sample },
+    });
+
+  const rowFor = (wrapper: VueWrapper, value: string) =>
+    wrapper.findAll('[role="option"]').find((el) => el.attributes('data-value') === value);
+
+  it('השורה מסומנת, ומסבירה למי שעוצר עליה', async () => {
+    const wrapper = mountMissing();
+    await wrapper.find('input').trigger('focus');
+    await nextTick();
+
+    const row = rowFor(wrapper, 'Aptos');
+    expect(row?.classes()).toContain('unavailable');
+    expect(row?.attributes('data-tip-title')).toBe('הגופן אינו מותקן במכונה — אין דגימה להציג');
+  });
+
+  it('והיא אינה מצוירת בגופן שאינו קיים — זה השקר עצמו', async () => {
+    const wrapper = mountMissing();
+    await wrapper.find('input').trigger('focus');
+    await nextTick();
+
+    // `style` חסר לגמרי, ולא `font-family` ריק: `previewFamily` נופל במיזוג
+    // (engine/font-options.ts), ולכן הפקד אינו מקבל מה לצייר בו מלכתחילה.
+    expect(rowFor(wrapper, 'Aptos')?.attributes('style')).toBeUndefined();
+  });
+
+  it('שורה שכן נפתרת אינה נוגעת — לא סימון ולא title', async () => {
+    const wrapper = mountMissing();
+    await wrapper.find('input').trigger('focus');
+    await nextTick();
+
+    const row = rowFor(wrapper, 'Arial');
+    expect(row?.classes()).not.toContain('unavailable');
+    expect(row?.attributes('data-tip-title')).toBeUndefined();
+    expect(row?.attributes('style')).toContain('Arial');
+  });
+
+  it('פס הדגימה מעומעם כשהסימון עומד על גופן שאינו מותקן', async () => {
+    const wrapper = mountMissing('שלום עולם');
+    await wrapper.find('input').trigger('focus');
+    await nextTick();
+
+    // נפתח על Arial, ולכן הפס נקי; חץ אחד מעביר ל-Aptos.
+    expect(wrapper.find('.ribbon-combo-sample').classes()).not.toContain('unavailable');
+
+    await wrapper.find('input').trigger('keydown', { key: 'ArrowDown' });
+    await nextTick();
+
+    expect(wrapper.find('[role="option"].active').attributes('data-value')).toBe('Aptos');
+    expect(wrapper.find('.ribbon-combo-sample').classes()).toContain('unavailable');
+  });
+
+  it('והפס מצייר בגודל שבמסמך אבל לא בגופן שאינו קיים', async () => {
+    /*
+     * הטענה חייבת להיות **חיובית** כדי שתוכל להיכשל. בלי `sampleSize` הסגנון
+     * של הפס יוצא `undefined`, ואז „אינו מכיל Aptos” נכון גם על פקד ריק ועל
+     * פקד שמתעלם מהדגל לגמרי. הגודל הוא מה שמוכיח שהסגנון אכן נבנה, ושדווקא
+     * הגופן הוא שנשמט ממנו.
+     */
+    const wrapper = mount(RibbonCombo, {
+      props: { modelValue: 'Arial', options: WITH_MISSING, title: 'גופן', sample: 'שלום עולם', sampleSize: '24px' },
+    });
+    await wrapper.find('input').trigger('focus');
+    await nextTick();
+    await wrapper.find('input').trigger('keydown', { key: 'ArrowDown' });
+    await nextTick();
+
+    const style = wrapper.find('.ribbon-combo-sample').attributes('style') ?? '';
+    expect(style).toContain('24px');
+    expect(style).not.toContain('Aptos');
+  });
+
+  it('התיבה הסגורה אינה מצוירת בגופן שאינו מותקן — מקום הציור השלישי', async () => {
+    const wrapper = mount(RibbonCombo, {
+      props: { modelValue: 'Aptos', options: WITH_MISSING, title: 'גופן' },
+    });
+    expect(wrapper.find('input').attributes('style')).toBeUndefined();
+
+    await wrapper.setProps({ modelValue: 'Arial' });
+    expect(wrapper.find('input').attributes('style')).toContain('Arial');
+  });
+
+  it('שורה שאינה מותקנת עדיין נבחרת — מסמך נודד, וזו בחירה חוקית', async () => {
+    // ה-CSS מנמק באורך למה **לא** `disabled`. בלי בדיקה, `aria-disabled` או
+    // שומר ב-`choose` היו עוברים בשקט והופכים את הנימוק לשקר.
+    const wrapper = mountMissing();
+    await wrapper.find('input').trigger('focus');
+    await nextTick();
+
+    await rowFor(wrapper, 'Aptos')?.trigger('pointerdown');
+    await nextTick();
+
+    expect(wrapper.emitted('update:modelValue')?.[0]).toEqual(['Aptos']);
+  });
+
+  it('השם הנגיש אומר שאין דגימה — העמעום והטולטיפ אינם מגיעים לקורא מסך', async () => {
+    const options: readonly ComboOption[] = [
+      ...WITH_MISSING,
+      { value: 'Narkisim', label: 'Narkisim', group: 'עברית', preview: 'Narkisim', hebrew: true },
+    ];
+    const wrapper = mount(RibbonCombo, { props: { modelValue: 'Arial', options, title: 'גופן' } });
+    await wrapper.find('input').trigger('focus');
+    await nextTick();
+
+    expect(rowFor(wrapper, 'Aptos')?.attributes('aria-label')).toBe(
+      'Aptos — הגופן אינו מותקן במכונה — אין דגימה להציג',
+    );
+    // שורה עברית זמינה מקבלת את שמה בלבד — זה הכלל שהיה כאן קודם, והוא נשמר.
+    expect(rowFor(wrapper, 'Narkisim')?.attributes('aria-label')).toBe('Narkisim');
+    // ושורה רגילה אינה מקבלת תווית, כדי שהתוכן שלה יוכרז כמו שהוא.
+    expect(rowFor(wrapper, 'Arial')?.attributes('aria-label')).toBeUndefined();
+  });
+
+  it('חיפוש אינו מאבד את הסימון', async () => {
+    const wrapper = mountMissing();
+    const input = wrapper.find('input');
+    await input.trigger('focus');
+    (input.element as HTMLInputElement).value = 'apt';
+    await input.trigger('input');
+    await nextTick();
+
+    const rows = wrapper.findAll('[role="option"]');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].classes()).toContain('unavailable');
+    expect(rows[0].attributes('data-tip-title')).toBeTruthy();
   });
 });
