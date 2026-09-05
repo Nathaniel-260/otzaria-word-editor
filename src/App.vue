@@ -58,8 +58,8 @@
         :is-opening="isOpening"
         :is-exiting="isExiting"
         :book-completion-enabled="bookCompletionEnabled"
-        @new-doc="openOpenDialog"
-        @open-doc="openOpenDialog"
+        @new-doc="openOpenDialog('new')"
+        @open-doc="openOpenDialog('open')"
         @save-doc="onSave(false)"
         @save-as-doc="onSave(true)"
         @print-doc="onPrint"
@@ -233,6 +233,7 @@
     <OpenDocumentDialog
       v-model:search-query="recentSearch"
       :is-open="isOpenDialogOpen"
+      :intent="openDialogIntent"
       :templates="DOCUMENT_TEMPLATES"
       :recents="recentDocuments"
       :busy="isOpening || saveSnapshot.isSaving"
@@ -782,6 +783,11 @@ const isShortcutsHelpOpen = ref(false);
  * טהורות שנשמרות כאן — `sessions/recent-documents.ts`.
  */
 const isOpenDialogOpen = ref(false);
+/**
+ * מאיזה כפתור נפתח „פתח מסמך”. נקבע לפני הפתיחה בלבד, ואינו מאופס בסגירה:
+ * הדיאלוג הוא `v-if`, ולכן כל פתיחה מרכיבה אותו מחדש עם הערך שנקבע לה.
+ */
+const openDialogIntent = ref<'new' | 'open'>('new');
 const recentDocuments = ref<RecentDocument[]>([]);
 
 /**
@@ -2730,6 +2736,14 @@ function ensureOpenTargetTab(): void {
 /**
  * „פתח מסמך”: מה שקורה סביב הדיאלוג.
  *
+ * ## מסך אחד, שתי נחיתות
+ *
+ * „מסמך חדש” ו„פתח קובץ” פותחים את אותו חלון — אבל לא באותו מקום בתוכו.
+ * ה-`intent` הוא כל ההבדל: `'new'` נוחת על רצועת התבניות, `'open'` נוחת על
+ * „עיון בקבצים…” ועל האחרונים, ובשני המקרים המיקוד הולך לאן שהעין הולכת.
+ * בלי זה שני כפתורים נפרדים ברצועה, ושני קיצורים נפרדים, הובילו לפיקסל
+ * זהה — ומי שביקש לפתוח קובץ נאלץ לגלול בעצמו בכל פעם.
+ *
  * ## הדיאלוג אינו מסלול פתיחה נוסף
  *
  * שני הכפתורים הוותיקים נשארו בדיוק כפי שהיו, והדיאלוג רק החליף את הדרך
@@ -2743,7 +2757,7 @@ function ensureOpenTargetTab(): void {
  * ולכן טאב מלוכלך מקבל שכן ואינו נדרס — בדיוק כמו בדפדפן. אחריו הטאב שאליו
  * פותחים נקי תמיד, וזו הסיבה שאין שם שאלה שנייה לשאול.
  */
-function openOpenDialog(): void {
+function openOpenDialog(intent: 'new' | 'open'): void {
   /*
    * שקט הוא לא תשובה. הכפתור ברצועה מנוטרל בזמן פתיחה ויש לו tooltip, אבל
    * `Ctrl+N`/`Ctrl+O` מגיעים לכאן דרך מפעיל הפעולות — שמדווח „טופל” ובולע
@@ -2772,13 +2786,32 @@ function openOpenDialog(): void {
     return;
   }
   recentSearch.value = '';
+  // אחרי שני השערים ולא לפניהם: פתיחה שנחסמה אינה משנה כלום, ובכלל זה את
+  // המקום שהפתיחה **הבאה** תנחת בו.
+  openDialogIntent.value = intent;
   isOpenDialogOpen.value = true;
 }
 
+/**
+ * „עיון בקבצים…” — והחלון **נשאר על המסך** בזמן שהבורר של אוצריא פתוח.
+ *
+ * קודם הוא נסגר לפני הקריאה, ושתי תוצאות רעות נבעו מזה. הראשונה היא מה
+ * שהעין רואה: המסך שהמשתמש עמד בו נעלם, ובמקומו צץ חלון מערכת שממורכז על
+ * חלון אוצריא — כלומר לא באותו מקום — וזה נקרא כקפיצה ולא כהמשך. כשהחלון
+ * נשאר, הבורר נפתח **מעליו**, וזה בדיוק מה שדיאלוג מערכת אמור להיראות.
+ *
+ * השנייה חמורה יותר: „בטל” בבורר החזיר את המשתמש לעורך במקום לאן שהוא בא
+ * ממנו. ביטול הוא „נמלכתי בדעתי לגבי הקובץ הזה”, לא „סגור את מסך הפתיחה”.
+ *
+ * ואין חלון ללחיצה שנייה: אוצריא פותחת את הבורר עם `lockParentWindow`,
+ * שמנטרל את חלון האפליקציה כל עוד הוא פתוח — כלומר החלון שנשאר מאחוריו
+ * גלוי אבל אינו לחיץ.
+ */
 async function onOpenDialogBrowse(): Promise<void> {
-  isOpenDialogOpen.value = false;
   // המסלול המלא הקיים, על כל השאלות שבו — הדיאלוג רק החליף את הדרך אליו.
-  await onPickAndOpen();
+  await onPickAndOpen(() => {
+    isOpenDialogOpen.value = false;
+  });
 }
 
 /**
@@ -2960,12 +2993,28 @@ function onOpenDialogForget(token: string): void {
   void saveRecentDocuments(recentDocuments.value);
 }
 
-async function onPickAndOpen(): Promise<void> {
+/**
+ * @param onLeavingPicker נקראת ברגע שבורר הקבצים ירד מהמסך **ולא** בביטול
+ *   נקי — כלומר כשיש מסמך לפתוח או שגיאה לדווח. „פתח מסמך” תולה בה את
+ *   סגירתו (ראו `onOpenDialogBrowse`): כל עוד הבורר פתוח הוא נשאר מאחוריו,
+ *   ובביטול הוא נשאר על המסך. הודעת שגיאה יושבת בשורת המצב, שהיא **מתחת**
+ *   לרקע המוצלל של המודאל — ולכן גם מסלול הכשל סוגר.
+ */
+async function onPickAndOpen(onLeavingPicker?: () => void): Promise<void> {
   if (isOpenBusy()) return;
-  try {
-    const file = await pickDocxFile();
-    if (!file) return;
 
+  let file: UserFile | null;
+  try {
+    file = await pickDocxFile();
+  } catch (error) {
+    onLeavingPicker?.();
+    setStatus(error instanceof Error ? error.message : 'בחירת הקובץ נכשלה', true);
+    return;
+  }
+  if (!file) return;
+  onLeavingPicker?.();
+
+  try {
     ensureOpenTargetTab();
 
     if (save && swap) {
@@ -4176,10 +4225,12 @@ const runShellAction = createShellActionRunner({
   openFind: (mode) => openFindDialog(mode),
   openLink: () => void linkDialog.open(),
   // Ctrl+N ו-Ctrl+O פותחים את אותו דיאלוג בדיוק כמו הכפתורים ברצועה: „מסמך
-  // חדש” ו„פתח קובץ” הם שני חצאי אותו מסך, ולא שתי פעולות שונות. הפעולות
-  // הישירות (`onNewDocument`/`onPickAndOpen`) נשארו בשימוש מתוך הדיאלוג עצמו.
-  newDocument: () => openOpenDialog(),
-  openDocument: () => openOpenDialog(),
+  // חדש” ו„פתח קובץ” הם שני חצאי אותו מסך, ולא שתי פעולות שונות. ה-`intent`
+  // הוא שקובע על איזה חצי הם נוחתים, וזה גם מה שמשמר את ההבדל בין שני
+  // הקיצורים. הפעולות הישירות (`onNewDocument`/`onPickAndOpen`) נשארו בשימוש
+  // מתוך הדיאלוג עצמו.
+  newDocument: () => openOpenDialog('new'),
+  openDocument: () => openOpenDialog('open'),
   // שני אלה אינם פקודות של ה-controller אלא Document API ישיר, בדיוק כמו
   // הכפתורים המקבילים ברצועה — ולכן אותה פונקציה, ואותו דיווח.
   selectAll: () => void runSelectAll(),
