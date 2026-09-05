@@ -407,6 +407,51 @@ describe('installDocumentFontAliases', () => {
     expect(document.querySelectorAll(`#${FONT_ALIAS_STYLE_ID}`)).toHaveLength(1);
   });
 
+  it('ממתינה לגופני מארח לפני שמקדמים את דור המטמון', async () => {
+    /*
+     * גופן שמגיע ב-`url(data:...)` נטען אחרי שה-`@font-face` נכתב. אם הדור
+     * מתקדם לפני ה-load, המיזוג שאחריו יכול לזכור `false` ולסמן את הגופן
+     * „אינו מותקן” עד המסמך הבא. המדמה מחזיק את הטעינה באמצע בדיוק, כדי
+     * שהבדיקה תיכשל אם ההמתנה תוסר או תעבור אחרי `advanceAliasGeneration`.
+     */
+    const probe = await fontProbe([]);
+    const previousFonts = Object.getOwnPropertyDescriptor(document, 'fonts');
+    let release!: () => void;
+    const loading = new Promise<void>((resolve) => { release = resolve; });
+    const load = vi.fn(async () => {
+      await loading;
+      return [];
+    });
+
+    Object.defineProperty(document, 'fonts', { configurable: true, value: { load } });
+    try {
+      tryCallMock.mockResolvedValue({
+        css: '@font-face{font-family:"Narkisim";src:url(data:font/woff2;base64,AA==)}',
+      });
+      const fontTable = '<w:font w:name="Narkisim"><w:charset w:val="B1"/></w:font>';
+      expect(probe.available('Narkisim')).toBe(false);
+
+      const installing = probe.install(fontTable);
+      await vi.waitFor(() => expect(tryCallMock).toHaveBeenCalled());
+      await vi.waitFor(() => expect(load).toHaveBeenCalled());
+
+      let settled = false;
+      void installing.then(() => { settled = true; });
+      await Promise.resolve();
+      expect(settled).toBe(false);
+
+      // מרגע שהדפדפן סיים לטעון, אותה משפחה באמת נפתרת דרך האליאס.
+      probe.hebrew.add('Narkisim');
+      release();
+      await installing;
+      expect(probe.available('Narkisim')).toBe(true);
+    } finally {
+      if (previousFonts) Object.defineProperty(document, 'fonts', previousFonts);
+      else Reflect.deleteProperty(document, 'fonts');
+      probe.restore();
+    }
+  });
+
   it('בסביבה בלי canvas שום גופן אינו נחשב חסר, ולכן אין מה להתקין', async () => {
     // הנפילה הבטוחה, מקצה לקצה: אין מדידה → אין החלפה → אין פנייה למארח.
     await expect(installDocumentFontAliases(REAL_FONT_TABLE)).resolves.toEqual([]);

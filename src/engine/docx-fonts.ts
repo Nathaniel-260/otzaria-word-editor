@@ -468,12 +468,41 @@ export async function installDocumentFontAliases(fontTableXml: string | null): P
   const hosted = await hostFontFaceCss(plan.needBytes);
 
   style.textContent = [plan.css, hosted].filter((part) => part !== '').join('\n');
+  // `@font-face` שמגיע כ-`url(data:...)` אינו בהכרח מוכן ברגע שה-CSS נכתב.
+  // דווקא כאן הפער חשוב: `swap.open` מחזיר את אפשרויות הגופנים מיד אחרינו,
+  // והן קוראות `isFamilyAvailable`. תשובת `false` באותו חלון נכנסת למטמון של
+  // הדור החדש ונשארת שם עד המסמך הבא — כלומר גופן שקיים דרך האליאס מוצג כאילו
+  // אינו מותקן. מבקשים רק את המשפחות שהמארח החזיר (לא `document.fonts.ready`,
+  // שעלול להמתין גם לגופנים זרים בדף), ורק אז פותחים את הדור למדידה.
+  if (hosted !== '') await loadHostedAliases(plan.needBytes);
   // אחרי הכתיבה ולא לפניה, ו-`hostFontFaceCss` שבאמצע הוא הסיבה: מדידה
   // שנעשית בזמן ה-await נמדדת מול הסגנון הקודם, ואם הדור כבר התקדם היא
   // נשמרת תחת הדור החדש ונשארת שם שגויה. כאן היא נשמרת תחת הדור הישן,
   // כלומר נזרקת בשורה הבאה.
   advanceAliasGeneration();
   return plan.missing.map((font) => font.name);
+}
+
+/**
+ * ממתינה לטעינת האליאסים שהמארח סיפק, בלי להפוך כשל טעינה לכשל פתיחת מסמך.
+ *
+ * `FontFaceSet.load` מבקש במפורש כל משפחה, ולכן גם `@font-face` שעדיין לא
+ * שימש בטקסט של המנוע מתחיל להיטען. `ready` לבדו אינו מספיק: הוא יכול להיפתר
+ * לפני שמשפחה שלא צוירה עדיין בכלל נכנסה למצב `loading`.
+ */
+async function loadHostedAliases(fonts: readonly DeclaredFont[]): Promise<void> {
+  const fontSet = typeof document === 'undefined' ? undefined : document.fonts;
+  if (!fontSet || typeof fontSet.load !== 'function' || fonts.length === 0) return;
+
+  await Promise.all(
+    fonts.map(async (font) => {
+      try {
+        await fontSet.load(`72px ${JSON.stringify(font.name)}`, PROBE_TEXT);
+      } catch {
+        // האליאס הוא שיפור פריסה; אם הדפדפן דוחה אותו נשארים במסלול ה-fallback.
+      }
+    }),
+  );
 }
 
 /**
