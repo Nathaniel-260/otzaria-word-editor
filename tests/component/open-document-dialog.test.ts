@@ -126,16 +126,20 @@ describe('OpenDocumentDialog — כרטיסי התבניות', () => {
     expect(card.text().trim()).toBe(DOCUMENT_TEMPLATES[0]!.label);
   });
 
-  it('הרמז וההערה מגיעים בטולטיפ', () => {
+  /**
+   * עד superdoc 2.11.0 נשא התיאור גם את ההערה „הטורים מצוירים הפוך בעורך;
+   * הקובץ נשמר נכון”. ‏2.12.0 מצייר את הטור הראשון בימין, ההערה ירדה
+   * (engine/templates.ts), ואין כרגע תבנית עם `note` — ולכן התיאור הוא הרמז
+   * לבדו. חיבור הרמז וההערה עצמו נשאר ב-`tipDescription`.
+   */
+  it('הרמז מגיע בטולטיפ', () => {
     const { wrapper } = open();
     const index = DOCUMENT_TEMPLATES.findIndex((template) => template.id === 'two-column');
     const card = wrapper.findAll('.tpl-card')[index]!;
     const template = DOCUMENT_TEMPLATES[index]!;
 
     expect(card.attributes('data-tip-title')).toBe(template.label);
-    expect(card.attributes('data-tip-desc')).toBe(
-      'גוף בשני טורים שווים, עם כותרת רצה. הטורים מצוירים הפוך בעורך; הקובץ נשמר נכון',
-    );
+    expect(card.attributes('data-tip-desc')).toBe('גוף בשני טורים שווים, עם כותרת רצה');
   });
 
   /**

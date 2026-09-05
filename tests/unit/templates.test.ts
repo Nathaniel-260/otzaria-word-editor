@@ -16,9 +16,6 @@ import {
   type TemplateId,
 } from '../../src/engine/templates';
 
-/** אותו נוסח בדיוק כמו `rtlColumnNote` ב-page-setup.ts (ראו page-setup.test.ts). */
-const RTL_COLUMN_NOTE = 'העמודה הראשונה מצוירת בצד שמאל, וגם הסימון עובר שמאל→ימין. הקובץ יישמר נכון.';
-
 interface FakeOptions {
   /** כיוון המקטע כפי ש-`sections.list()` מדווח אותו. ברירת מחדל: מסמך עברי. */
   sectionDirection?: 'rtl' | 'ltr';
@@ -205,13 +202,12 @@ describe('DOCUMENT_TEMPLATES', () => {
     expect(ids).toEqual(['annotated', 'blank', 'kuntres-a5', 'title-page', 'two-column'].sort());
   });
 
-  it('רק ל-two-column יש note על הכרטיס, והנוסח קבוע', () => {
+  it('אין כרטיס שנושא אזהרה — שני הפערים שהצדיקו אחת נסגרו', () => {
+    // ‏`two-column` נשא „הטורים מצוירים הפוך בעורך”, ו-`kuntres-a5` נשא
+    // „A4 במקום A5”. הראשון נסגר ב-superdoc 2.12.0 (`SD-4764`) והשני
+    // ב-`PAPER_SIZES`. אזהרה שחוזרת בלי שהפער חזר היא מה שהבדיקה הזאת תתפוס.
     for (const template of DOCUMENT_TEMPLATES) {
-      if (template.id === 'two-column') {
-        expect(template.note).toBe('הטורים מצוירים הפוך בעורך; הקובץ נשמר נכון');
-      } else {
-        expect(template.note, template.id).toBeUndefined();
-      }
+      expect(template.note, template.id).toBeUndefined();
     }
   });
 });
@@ -237,11 +233,13 @@ describe('applyTemplate — blank', () => {
 });
 
 describe('applyTemplate — two-column', () => {
-  it('קוראת ל-applyColumns עם 2, ומחזירה את הערת ה-RTL', async () => {
+  it('קוראת ל-applyColumns עם 2, ומסתיימת בלי הודעה', async () => {
     const { host, calls } = fakeHost();
     const outcome = await applyTemplate(host, 'two-column');
 
-    expect(outcome).toEqual({ ok: true, note: RTL_COLUMN_NOTE });
+    // עד 2.11.0 חזרה מכאן הערת ה-RTL של `applyColumns`. ‏2.12.0 מצייר את
+    // הטור הראשון בימין, ולכן התבנית מסתיימת בשקט — ראו page-setup.ts.
+    expect(outcome).toEqual({ ok: true });
     expect(calls).toContain('sections.setPageSetup'); // A4
     expect(calls).toContain('sections.setPageMargins'); // שוליים
     expect(calls).toContain('sections.setColumns');
@@ -465,19 +463,6 @@ describe('כשל בשלב אמצעי: השלבים ממשיכים, והתוצא�
     expect(calls).toContain('styles.apply');
     expect(calls).toContain('headerFooters.parts.create');
     expect(calls).toContain('sections.setPageNumbering');
-  });
-
-  it('כשל חלקי עדיין נושא את ההערה שכן הופקה (two-column)', async () => {
-    // ההערה מגיעה מ-`applyColumns` עצמו, כלומר משלב שהצליח — וכשל בשלב אחר
-    // אינו סיבה לבלוע אותה: המשתמש עדיין מקבל מסמך עם שני טורים, ועדיין צריך
-    // לדעת שהם מצוירים הפוך.
-    const { host } = fakeHost({ failing: ['sections.setPageMargins'] });
-    const outcome = await applyTemplate(host, 'two-column');
-
-    expect(outcome.ok).toBe(false);
-    if (!outcome.ok) {
-      expect(outcome.message).toContain(RTL_COLUMN_NOTE);
-    }
   });
 });
 

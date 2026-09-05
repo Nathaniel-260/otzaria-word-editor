@@ -136,12 +136,13 @@ const TEMPLATES = [
     minBlocks: 1,
     bodyTexts: [],
     /**
-     * `rtlColumnNote` — ההודעה שמגיעה **אחרי** הפעולה כ-`note` ב-
-     * `CommandOutcome`, ו-`onOpenDialogCreate` שם אותה בשורת המצב. היא נבדקת
-     * ולא מתעלמים ממנה: היא ההבדל בין „הטורים הפוכים והמשתמש יודע” לבין
-     * „הטורים הפוכים בשקט”.
+     * שקט. עד superdoc 2.11.0 הגיעה לכאן הערת ה-RTL של `applyColumns`
+     * („העמודה הראשונה מצוירת בצד שמאל…”), מפני שהמנוע צייר את הטור הראשון
+     * בשמאל. ‏2.12.0 מצייר אותו בימין (`SD-4764`, נמדד ב-
+     * `column-selection-probe.mjs`), ההערה ירדה — ומה שנשמר כאן הוא שהיא לא
+     * תחזור בשקט, ושלא תיכנס במקומה הודעה אחרת שאיש לא ביקש.
      */
-    expectStatusNote: /העמודה הראשונה מצוירת בצד שמאל/,
+    expectSilentStatus: true,
   },
   {
     id: 'annotated',
@@ -870,12 +871,12 @@ for (const t of wanted) {
         `לוג: ${log.length ? log.join(' | ').slice(0, 300) : 'נקי'}`,
     );
 
-    /* --- 11. ההערה שהתבנית מבטיחה שתופיע (רק ל„שני טורים”) --- */
-    if (t.expectStatusNote) {
+    /* --- 11. שקט בשורת המצב, למי שמבטיח אותו (רק „שני טורים”) --- */
+    if (t.expectSilentStatus) {
       claim(
         t,
-        'ההודעה על סדר הטורים הגיעה לשורת המצב',
-        t.expectStatusNote.test(status?.text ?? ''),
+        'התבנית מסתיימת בלי הודעה בשורת המצב',
+        !status?.text,
         `שורת מצב: „${status?.text ?? '—'}”`,
       );
     } else if (status?.text) {
