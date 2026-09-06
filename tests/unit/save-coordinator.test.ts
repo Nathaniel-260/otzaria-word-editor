@@ -1074,3 +1074,276 @@ describe('settled', () => {
     await save;
   });
 });
+
+describe('הקפאה (hold)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  it('עריכה בזמן הקפאה אינה מריצה שמירה', async () => {
+    const h = harness();
+    h.coordinator.adoptTarget({ token: 'tok', name: 'a.docx' });
+
+    h.coordinator.hold();
+    h.coordinator.markDirty();
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS * 4);
+
+    // זה כל הרעיון: פעולה כבדה שמפילה את התוסף לא תגיע לקובץ.
+    expect(h.exportCount()).toBe(0);
+    expect(h.coordinator.snapshot.isDirty).toBe(true);
+  });
+
+  it('שחרור ההקפאה מתזמן את מה שהמתין — ולא מחכה לעריכה הבאה', async () => {
+    // בלי הקריאה המפורשת ל-scheduleAutosave בשחרור, עריכה שנעשתה בזמן
+    // ההקפאה לא הייתה נכתבת לקובץ לעולם אם הכלי היה הפעולה האחרונה.
+    const h = harness();
+    h.coordinator.adoptTarget({ token: 'tok', name: 'a.docx' });
+
+    const release = h.coordinator.hold();
+    h.coordinator.markDirty();
+    release();
+
+    // השחרור אינו שמירה מיידית — הוא רק מחזיר את ההשהיה הרגילה.
+    expect(h.exportCount()).toBe(0);
+
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS);
+    expect(h.exportCount()).toBe(1);
+  });
+
+  it('הקפאה מבטלת סבב שכבר ממתין', async () => {
+    const h = harness();
+    h.coordinator.adoptTarget({ token: 'tok', name: 'a.docx' });
+
+    h.coordinator.markDirty();
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS - 100);
+    const release = h.coordinator.hold();
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS * 4);
+
+    expect(h.exportCount()).toBe(0);
+
+    release();
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS);
+    expect(h.exportCount()).toBe(1);
+  });
+
+  it('הקפאות מקוננות משתחררות רק עם האחרונה', async () => {
+    const h = harness();
+    h.coordinator.adoptTarget({ token: 'tok', name: 'a.docx' });
+
+    const outer = h.coordinator.hold();
+    const inner = h.coordinator.hold();
+    h.coordinator.markDirty();
+
+    outer();
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS * 2);
+    expect(h.exportCount()).toBe(0);
+
+    inner();
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS);
+    expect(h.exportCount()).toBe(1);
+  });
+
+  it('שחרור כפול אינו משחרר הקפאה של אחר', async () => {
+    const h = harness();
+    h.coordinator.adoptTarget({ token: 'tok', name: 'a.docx' });
+
+    const first = h.coordinator.hold();
+    h.coordinator.hold();
+    h.coordinator.markDirty();
+
+    first();
+    first();
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS * 2);
+
+    expect(h.exportCount()).toBe(0);
+  });
+
+  it('השחרור אינו מדליק מתג שהמשתמש כיבה', async () => {
+    // ההקפאה היא מנגנון פנימי; המתג הוא הבחירה של מי שיושב מול המסך.
+    const h = harness();
+    h.coordinator.adoptTarget({ token: 'tok', name: 'a.docx' });
+    h.coordinator.setAutosaveEnabled(false);
+
+    const release = h.coordinator.hold();
+    h.coordinator.markDirty();
+    release();
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS * 4);
+
+    expect(h.exportCount()).toBe(0);
+  });
+
+  it('reset מאפס את ההקפאה — מסמך חדש אינו יורש אותה', async () => {
+    const h = harness();
+    h.coordinator.adoptTarget({ token: 'tok', name: 'a.docx' });
+
+    h.coordinator.hold();
+    h.coordinator.reset({ token: 'tok2', name: 'b.docx' });
+    h.coordinator.markDirty();
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS);
+
+    expect(h.exportCount()).toBe(1);
+  });
+
+  it('ידית מלפני reset היא no-op ואינה מפחיתה מונה של המסמך החדש', async () => {
+    const h = harness();
+    h.coordinator.adoptTarget({ token: 'tok', name: 'a.docx' });
+
+    const stale = h.coordinator.hold();
+    h.coordinator.reset({ token: 'tok2', name: 'b.docx' });
+    h.coordinator.hold();
+    stale();
+
+    h.coordinator.markDirty();
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS * 2);
+
+    expect(h.exportCount()).toBe(0);
+  });
+
+  it('dispose מאפס, ושחרור אחריו אינו מתזמן דבר', async () => {
+    const h = harness();
+    h.coordinator.adoptTarget({ token: 'tok', name: 'a.docx' });
+
+    const release = h.coordinator.hold();
+    h.coordinator.markDirty();
+    h.coordinator.dispose();
+    release();
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS * 2);
+
+    expect(h.exportCount()).toBe(0);
+  });
+
+  it('אינה עוצרת סבב שכבר באוויר', async () => {
+    // מגבלה מתועדת, לא באג: `cancelAutosave` מנקה טיימר בלבד. מי שצריך עותק
+    // של „לפני” כותב צ׳קפוינט, ואינו מסתמך על ההקפאה.
+    vi.useRealTimers();
+    const h = harness();
+    h.coordinator.adoptTarget({ token: 'tok', name: 'a.docx' });
+    h.coordinator.markDirty();
+
+    let release!: () => void;
+    h.onUpload(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+
+    const saving = h.coordinator.saveNow();
+    await flush();
+    h.coordinator.hold();
+    release();
+
+    expect((await saving).status).toBe('saved');
+    expect(h.commits).toHaveLength(1);
+  });
+
+  it('תקרת זמן משחררת הקפאה שלא שוחררה', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const h = harness();
+    h.coordinator.adoptTarget({ token: 'tok', name: 'a.docx' });
+
+    h.coordinator.hold({ maxMs: 1000 });
+    h.coordinator.markDirty();
+    await vi.advanceTimersByTimeAsync(1000 + AUTOSAVE_DELAY_MS);
+
+    expect(h.exportCount()).toBe(1);
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it('שחרור לפני התקרה מבטל את שמירת החיים', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const h = harness();
+    h.coordinator.adoptTarget({ token: 'tok', name: 'a.docx' });
+
+    const release = h.coordinator.hold({ maxMs: 1000 });
+    release();
+    await vi.advanceTimersByTimeAsync(5000);
+
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it('isHeld מדווח על מצב ההקפאה', () => {
+    const h = harness();
+    expect(h.coordinator.isHeld).toBe(false);
+
+    const release = h.coordinator.hold();
+    expect(h.coordinator.isHeld).toBe(true);
+
+    release();
+    expect(h.coordinator.isHeld).toBe(false);
+  });
+});
+
+describe('שחזור מטיוטה', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  it('מסמך ששוחזר מסומן מלוכלך ואינו נכתב לקובץ מעצמו', async () => {
+    // הרגרסיה: הפעולה שהפילה את התוסף חוזרת לקובץ שתיים וחצי שניות אחרי
+    // העלייה, לפני שהמשתמש הספיק לקרוא את שורת המצב.
+    const h = harness();
+    h.coordinator.reset({ token: 'tok', name: 'a.docx' });
+
+    h.coordinator.markRestored();
+    expect(h.coordinator.snapshot.isDirty).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS * 4);
+    expect(h.exportCount()).toBe(0);
+  });
+
+  it('העריכה הראשונה אחרי שחזור מחדשת את השמירה האוטומטית', async () => {
+    const h = harness();
+    h.coordinator.reset({ token: 'tok', name: 'a.docx' });
+
+    h.coordinator.markRestored();
+    h.coordinator.markDirty();
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS);
+
+    expect(h.exportCount()).toBe(1);
+  });
+
+  it('שמירה ידנית אחרי שחזור משחררת את ההקפאה', async () => {
+    const h = harness();
+    h.coordinator.reset({ token: 'tok', name: 'a.docx' });
+
+    h.coordinator.markRestored();
+    expect((await h.coordinator.saveNow()).status).toBe('saved');
+
+    // נבדק **לפני** כל עריכה: `markDirty` משחרר בעצמו, ולכן בדיקה שעוברת
+    // דרכו הייתה ירוקה גם אם `saveNow` אינו משחרר כלום.
+    expect(h.coordinator.isHeld).toBe(false);
+
+    h.coordinator.markDirty();
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS);
+    expect(h.exportCount()).toBe(2);
+  });
+
+  it('שחזור אינו מדליק מתג שהמשתמש כיבה', async () => {
+    const h = harness();
+    h.coordinator.reset({ token: 'tok', name: 'a.docx' });
+    h.coordinator.setAutosaveEnabled(false);
+
+    h.coordinator.markRestored();
+    h.coordinator.markDirty();
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS * 4);
+
+    expect(h.exportCount()).toBe(0);
+  });
+
+  it('שחזור חוזר אינו מצטבר — עריכה אחת משחררת', async () => {
+    // טאב שנרדם ונפתח שוב עובר באותו מסלול. בלי שחרור הידית הקודמת, המונה
+    // היה עולה בלי שיירד, וה-autosave היה מוקפא לתמיד.
+    const h = harness();
+    h.coordinator.reset({ token: 'tok', name: 'a.docx' });
+
+    h.coordinator.markRestored();
+    h.coordinator.markRestored();
+    h.coordinator.markDirty();
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS);
+
+    expect(h.exportCount()).toBe(1);
+  });
+});
