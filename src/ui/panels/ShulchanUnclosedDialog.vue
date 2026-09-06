@@ -3,13 +3,17 @@
     <div
       v-if="isOpen"
       class="shunc-dialog"
+      :style="dragStyle"
       role="dialog"
       aria-modal="true"
       :aria-label="TITLE"
       tabindex="-1"
       @keydown.esc.stop="$emit('close')"
     >
-      <div class="shunc-header">
+      <div
+        class="shunc-header dialog-drag-handle"
+        @pointerdown="startDialogDrag"
+      >
         <span class="shunc-title">{{ TITLE }}</span>
         <button
           type="button"
@@ -108,6 +112,10 @@ import {
   type ParenFinding,
   type UnclosedScanMode,
 } from '../../engine/shulchan/unclosed-parens';
+import { useDialogDrag } from '../../composables/dialog-drag';
+
+/* הדיאלוג נגרר בכותרת שלו — composables/dialog-drag.ts. */
+const { dragStyle, startDialogDrag } = useDialogDrag();
 
 withDefaults(
   defineProps<{

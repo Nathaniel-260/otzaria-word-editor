@@ -4,12 +4,17 @@
     <div
       v-if="isOpen"
       class="index-dialog"
+      :style="dragStyle"
       role="dialog"
       aria-modal="true"
       :aria-label="DIALOG_TITLE"
       @keydown.esc.stop="$emit('close')"
+      @keydown.enter="onDialogEnter"
     >
-      <div class="id-header">
+      <div
+        class="id-header dialog-drag-handle"
+        @pointerdown="startDialogDrag"
+      >
         <span class="id-title">{{ DIALOG_TITLE }}</span>
         <button
           type="button"
@@ -82,6 +87,7 @@
         <button
           type="button"
           class="id-btn id-btn-primary"
+          data-default-action
           :disabled="!canSubmit"
           @pointerdown.prevent
           @click="onSubmit"
@@ -123,6 +129,13 @@ import {
   isValidIndexColumns,
   type IndexSettings,
 } from '../../engine/index-field';
+import { useDialogDrag } from '../../composables/dialog-drag';
+import { useDialogDefaultAction } from '../../composables/dialog-default-action';
+
+/* הדיאלוג נגרר בכותרת שלו — composables/dialog-drag.ts. */
+const { dragStyle, startDialogDrag } = useDialogDrag();
+/* Enter = הכפתור הראשי — composables/dialog-default-action.ts. */
+const { onDialogEnter } = useDialogDefaultAction();
 
 const props = withDefaults(
   defineProps<{

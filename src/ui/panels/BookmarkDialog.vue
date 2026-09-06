@@ -8,12 +8,17 @@
     <div
       v-if="isOpen"
       class="bookmark-dialog"
+      :style="dragStyle"
       role="dialog"
       aria-modal="true"
       :aria-label="DIALOG_TITLE"
       @keydown.esc.stop="$emit('close')"
+      @keydown.enter="onDialogEnter"
     >
-      <div class="bd-header">
+      <div
+        class="bd-header dialog-drag-handle"
+        @pointerdown="startDialogDrag"
+      >
         <span class="bd-title">{{ DIALOG_TITLE }}</span>
         <button
           type="button"
@@ -44,7 +49,6 @@
             :aria-invalid="showError"
             :aria-describedby="showError ? 'bd-name-error' : undefined"
             @input="edited = true"
-            @keydown.enter="onAdd"
           >
         </div>
 
@@ -102,6 +106,7 @@
         <button
           type="button"
           class="bd-btn bd-btn-primary"
+          data-default-action
           :disabled="!canAdd"
           @pointerdown.prevent
           @click="onAdd"
@@ -173,6 +178,13 @@ import {
   BOOKMARK_NAME_TAKEN_HINT,
   normalizeBookmarkName,
 } from '../../engine/bookmarks';
+import { useDialogDrag } from '../../composables/dialog-drag';
+import { useDialogDefaultAction } from '../../composables/dialog-default-action';
+
+/* הדיאלוג נגרר בכותרת שלו — composables/dialog-drag.ts. */
+const { dragStyle, startDialogDrag } = useDialogDrag();
+/* Enter = הכפתור הראשי — composables/dialog-default-action.ts. */
+const { onDialogEnter } = useDialogDefaultAction();
 
 const props = withDefaults(
   defineProps<{

@@ -9,12 +9,17 @@
     <div
       v-if="isOpen"
       class="link-dialog"
+      :style="dragStyle"
       role="dialog"
       aria-modal="true"
       :aria-label="dialogTitle"
       @keydown.esc.stop="$emit('close')"
+      @keydown.enter="onDialogEnter"
     >
-      <div class="ld-header">
+      <div
+        class="ld-header dialog-drag-handle"
+        @pointerdown="startDialogDrag"
+      >
         <span class="ld-title">{{ dialogTitle }}</span>
         <button
           type="button"
@@ -45,7 +50,6 @@
             aria-label="כתובת הקישור"
             :aria-invalid="showError"
             :aria-describedby="showError ? 'ld-href-error' : undefined"
-            @keydown.enter="submit"
           >
         </div>
 
@@ -69,7 +73,6 @@
             class="ld-input"
             placeholder="ברירת מחדל: הכתובת עצמה"
             aria-label="הטקסט שיוצג במקום הכתובת"
-            @keydown.enter="submit"
           >
         </div>
 
@@ -96,6 +99,7 @@
         <button
           type="button"
           class="ld-btn ld-btn-primary"
+          data-default-action
           :disabled="!canSubmit"
           @pointerdown.prevent
           @click="submit"
@@ -132,6 +136,13 @@
  */
 import { computed, nextTick, ref, watch } from 'vue';
 import { LINK_HREF_HINT, normalizeLinkHref } from '../../engine/payloads';
+import { useDialogDrag } from '../../composables/dialog-drag';
+import { useDialogDefaultAction } from '../../composables/dialog-default-action';
+
+/* הדיאלוג נגרר בכותרת שלו — composables/dialog-drag.ts. */
+const { dragStyle, startDialogDrag } = useDialogDrag();
+/* Enter = הכפתור הראשי — composables/dialog-default-action.ts. */
+const { onDialogEnter } = useDialogDefaultAction();
 
 const props = withDefaults(
   defineProps<{

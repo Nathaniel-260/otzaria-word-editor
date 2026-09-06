@@ -8,12 +8,17 @@
     <div
       v-if="isOpen"
       class="toc-dialog"
+      :style="dragStyle"
       role="dialog"
       aria-modal="true"
       :aria-label="DIALOG_TITLE"
       @keydown.esc.stop="$emit('close')"
+      @keydown.enter="onDialogEnter"
     >
-      <div class="td-header">
+      <div
+        class="td-header dialog-drag-handle"
+        @pointerdown="startDialogDrag"
+      >
         <span class="td-title">{{ DIALOG_TITLE }}</span>
         <button
           type="button"
@@ -102,6 +107,7 @@
         <button
           type="button"
           class="td-btn td-btn-primary"
+          data-default-action
           :disabled="!canSubmit"
           @pointerdown.prevent
           @click="onSubmit"
@@ -147,6 +153,13 @@ import {
   normalizeTocLevels,
   type TocSettings,
 } from '../../engine/toc';
+import { useDialogDrag } from '../../composables/dialog-drag';
+import { useDialogDefaultAction } from '../../composables/dialog-default-action';
+
+/* הדיאלוג נגרר בכותרת שלו — composables/dialog-drag.ts. */
+const { dragStyle, startDialogDrag } = useDialogDrag();
+/* Enter = הכפתור הראשי — composables/dialog-default-action.ts. */
+const { onDialogEnter } = useDialogDefaultAction();
 
 const props = withDefaults(
   defineProps<{

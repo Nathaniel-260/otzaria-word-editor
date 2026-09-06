@@ -3,13 +3,18 @@
     <div
       v-if="isOpen"
       class="shfw-dialog"
+      :style="dragStyle"
       role="dialog"
       aria-modal="true"
       :aria-label="TITLE"
       tabindex="-1"
       @keydown.esc.stop="$emit('close')"
+      @keydown.enter="onDialogEnter"
     >
-      <div class="shfw-header">
+      <div
+        class="shfw-header dialog-drag-handle"
+        @pointerdown="startDialogDrag"
+      >
         <span class="shfw-title">{{ TITLE }}</span>
         <button
           type="button"
@@ -84,7 +89,6 @@
             max="500"
             step="5"
             aria-label="אחוז ההגדלה של המילה הראשונה מעל גוף הפסקה"
-            @keydown.enter="onApply"
           >
           <span class="shfw-unit">%</span>
         </div>
@@ -106,7 +110,6 @@
             max="100"
             step="0.5"
             aria-label="גודל המילה הראשונה בנקודות"
-            @keydown.enter="onApply"
           >
           <span class="shfw-unit">נק'</span>
         </div>
@@ -160,6 +163,7 @@
         <button
           type="button"
           class="shfw-btn shfw-btn-primary"
+          data-default-action
           :disabled="!canApply"
           @pointerdown.prevent
           @click="onApply"
@@ -203,6 +207,13 @@ import {
   type FirstWordOptions,
 } from '../../engine/shulchan/first-word';
 import { useRememberedOptions } from '../../composables/useRememberedOptions';
+import { useDialogDrag } from '../../composables/dialog-drag';
+import { useDialogDefaultAction } from '../../composables/dialog-default-action';
+
+/* הדיאלוג נגרר בכותרת שלו — composables/dialog-drag.ts. */
+const { dragStyle, startDialogDrag } = useDialogDrag();
+/* Enter = הכפתור הראשי — composables/dialog-default-action.ts. */
+const { onDialogEnter } = useDialogDefaultAction();
 
 const props = withDefaults(
   defineProps<{

@@ -3,13 +3,18 @@
     <div
       v-if="isOpen"
       class="shcrop-dialog"
+      :style="dragStyle"
       role="dialog"
       aria-modal="true"
       :aria-label="TITLE"
       tabindex="-1"
       @keydown.esc.stop="onCancel"
+      @keydown.enter="onDialogEnter"
     >
-      <div class="shcrop-header">
+      <div
+        class="shcrop-header dialog-drag-handle"
+        @pointerdown="startDialogDrag"
+      >
         <span class="shcrop-title">{{ TITLE }}</span>
         <button
           type="button"
@@ -51,6 +56,7 @@
         <button
           type="button"
           class="shcrop-btn shcrop-btn-primary"
+          data-default-action
           :disabled="busy || existingMm !== null || !isValidCropMm(mm)"
           @pointerdown.prevent
           @click="onAdd"
@@ -92,6 +98,13 @@ import {
   isValidCropMm,
 } from '../../engine/shulchan/crop-marks';
 import { useRememberedOptions } from '../../composables/useRememberedOptions';
+import { useDialogDrag } from '../../composables/dialog-drag';
+import { useDialogDefaultAction } from '../../composables/dialog-default-action';
+
+/* הדיאלוג נגרר בכותרת שלו — composables/dialog-drag.ts. */
+const { dragStyle, startDialogDrag } = useDialogDrag();
+/* Enter = הכפתור הראשי — composables/dialog-default-action.ts. */
+const { onDialogEnter } = useDialogDefaultAction();
 
 const props = withDefaults(
   defineProps<{

@@ -4,12 +4,17 @@
     <div
       v-if="isOpen"
       class="citation-source-dialog"
+      :style="dragStyle"
       role="dialog"
       aria-modal="true"
       :aria-label="DIALOG_TITLE"
       @keydown.esc.stop="$emit('close')"
+      @keydown.enter="onDialogEnter"
     >
-      <div class="cs-header">
+      <div
+        class="cs-header dialog-drag-handle"
+        @pointerdown="startDialogDrag"
+      >
         <span class="cs-title">{{ DIALOG_TITLE }}</span>
         <button
           type="button"
@@ -91,7 +96,6 @@
             class="cs-input"
             placeholder="למשל: שולחן ערוך, אורח חיים"
             aria-label="כותרת המקור"
-            @keydown.enter="onSubmit"
           >
         </div>
 
@@ -122,7 +126,6 @@
             class="cs-input"
             placeholder="למשל: תשע״ה"
             aria-label="שנת ההוצאה"
-            @keydown.enter="onSubmit"
           >
         </div>
 
@@ -138,7 +141,6 @@
               type="text"
               class="cs-input"
               aria-label="שם כתב העת או הקובץ"
-              @keydown.enter="onSubmit"
             >
           </div>
           <div class="cs-row">
@@ -152,7 +154,6 @@
               type="text"
               class="cs-input"
               aria-label="כרך"
-              @keydown.enter="onSubmit"
             >
           </div>
           <div class="cs-row">
@@ -166,7 +167,6 @@
               type="text"
               class="cs-input"
               aria-label="טווח העמודים"
-              @keydown.enter="onSubmit"
             >
           </div>
         </template>
@@ -183,7 +183,6 @@
               class="cs-input"
               placeholder="למשל: ירושלים"
               aria-label="עיר ההוצאה"
-              @keydown.enter="onSubmit"
             >
           </div>
           <div class="cs-row">
@@ -198,7 +197,6 @@
               class="cs-input"
               placeholder="למשל: מוסד הרב קוק"
               aria-label="המוציא לאור"
-              @keydown.enter="onSubmit"
             >
           </div>
         </template>
@@ -234,6 +232,7 @@
         <button
           type="button"
           class="cs-btn cs-btn-primary"
+          data-default-action
           :disabled="!canSubmit"
           @pointerdown.prevent
           @click="onSubmit"
@@ -310,6 +309,13 @@ import {
   type CitationSourceDraft,
   type CitationSourceSummary,
 } from '../../engine/citations';
+import { useDialogDrag } from '../../composables/dialog-drag';
+import { useDialogDefaultAction } from '../../composables/dialog-default-action';
+
+/* הדיאלוג נגרר בכותרת שלו — composables/dialog-drag.ts. */
+const { dragStyle, startDialogDrag } = useDialogDrag();
+/* Enter = הכפתור הראשי — composables/dialog-default-action.ts. */
+const { onDialogEnter } = useDialogDefaultAction();
 
 const props = withDefaults(
   defineProps<{

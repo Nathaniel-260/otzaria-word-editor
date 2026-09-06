@@ -4,13 +4,18 @@
       v-if="isOpen"
       ref="rootRef"
       class="para-dialog"
+      :style="dragStyle"
       role="dialog"
       aria-modal="true"
       :aria-label="DIALOG_TITLE"
       tabindex="-1"
       @keydown.esc.stop="$emit('close')"
+      @keydown.enter="onDialogEnter"
     >
-      <div class="pd-header">
+      <div
+        class="pd-header dialog-drag-handle"
+        @pointerdown="startDialogDrag"
+      >
         <span class="pd-title">{{ DIALOG_TITLE }}</span>
         <button
           type="button"
@@ -42,7 +47,6 @@
               max="55.87"
               step="0.1"
               aria-label="כניסה לפני הטקסט, בסנטימטרים"
-              @keydown.enter="onSubmit"
             >
             <span class="pd-unit">ס"מ</span>
           </div>
@@ -60,7 +64,6 @@
               max="55.87"
               step="0.1"
               aria-label="כניסה אחרי הטקסט, בסנטימטרים"
-              @keydown.enter="onSubmit"
             >
             <span class="pd-unit">ס"מ</span>
           </div>
@@ -86,7 +89,6 @@
               step="0.1"
               :disabled="special === 'none'"
               aria-label="מידת הכניסה המיוחדת, בסנטימטרים"
-              @keydown.enter="onSubmit"
             >
             <span class="pd-unit">ס"מ</span>
           </div>
@@ -108,7 +110,6 @@
               min="0"
               step="1"
               aria-label="ריווח לפני הפסקה, בנקודות"
-              @keydown.enter="onSubmit"
             >
             <span class="pd-unit">נק'</span>
             <label
@@ -123,7 +124,6 @@
               min="0"
               step="1"
               aria-label="ריווח אחרי הפסקה, בנקודות"
-              @keydown.enter="onSubmit"
             >
             <span class="pd-unit">נק'</span>
           </div>
@@ -151,7 +151,6 @@
                 min="0"
                 step="1"
                 aria-label="גובה השורה, בנקודות"
-                @keydown.enter="onSubmit"
               >
               <span class="pd-unit">נק'</span>
             </template>
@@ -292,6 +291,7 @@
         <button
           type="button"
           class="pd-btn pd-btn-primary"
+          data-default-action
           :disabled="busy || !canSubmit"
           @pointerdown.prevent
           @click="onSubmit"
@@ -337,6 +337,13 @@ import {
   type TabAlignment,
   type TabLeader,
 } from '../../engine/paragraph-format';
+import { useDialogDrag } from '../../composables/dialog-drag';
+import { useDialogDefaultAction } from '../../composables/dialog-default-action';
+
+/* הדיאלוג נגרר בכותרת שלו — composables/dialog-drag.ts. */
+const { dragStyle, startDialogDrag } = useDialogDrag();
+/* Enter = הכפתור הראשי — composables/dialog-default-action.ts. */
+const { onDialogEnter } = useDialogDefaultAction();
 
 const DIALOG_TITLE = 'פסקה';
 const INVALID_HINT = 'הערכים חייבים להיות מספרים חוקיים ולא-שליליים.';
@@ -530,12 +537,18 @@ function onSubmit(): void {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
   width: 360px;
   max-height: calc(100vh - 200px);
-  overflow-block: auto;
+  /* הגוף גולל, לא הדיאלוג — אותה הכרעה, ומאותה סיבה, כמו ב-FontAdvancedDialog:
+     `overflow-block: auto` על השורש דחק את הפוטר („אישור” / „ביטול”) אל מתחת
+     לתקרה `calc(100vh - 200px)`, בלי דרך להגיע אליו. שם זה נמדד בשער. */
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   font-family: var(--font-main);
   user-select: none;
 }
 
 .pd-header {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -567,6 +580,9 @@ function onSubmit(): void {
 }
 
 .pd-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
   padding: 10px 12px;
   display: flex;
   flex-direction: column;
@@ -684,6 +700,7 @@ function onSubmit(): void {
 }
 
 .pd-footer {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: flex-end;

@@ -4,12 +4,17 @@
     <div
       v-if="isOpen"
       class="index-entry-dialog"
+      :style="dragStyle"
       role="dialog"
       aria-modal="true"
       :aria-label="DIALOG_TITLE"
       @keydown.esc.stop="$emit('close')"
+      @keydown.enter="onDialogEnter"
     >
-      <div class="ie-header">
+      <div
+        class="ie-header dialog-drag-handle"
+        @pointerdown="startDialogDrag"
+      >
         <span class="ie-title">{{ DIALOG_TITLE }}</span>
         <button
           type="button"
@@ -37,7 +42,6 @@
             class="ie-input"
             placeholder="למשל: שבת"
             aria-label="טקסט הערך הראשי במפתח"
-            @keydown.enter="onMark"
           >
         </div>
 
@@ -53,7 +57,6 @@
             class="ie-input"
             placeholder="למשל: הדלקת נרות"
             aria-label="תת-הערך, תחת הערך הראשי"
-            @keydown.enter="onMark"
           >
         </div>
 
@@ -124,6 +127,7 @@
         <button
           type="button"
           class="ie-btn ie-btn-primary"
+          data-default-action
           :disabled="!canMark"
           @pointerdown.prevent
           @click="onMark"
@@ -179,6 +183,13 @@ import {
   type IndexEntryDraft,
   type IndexEntrySummary,
 } from '../../engine/index-field';
+import { useDialogDrag } from '../../composables/dialog-drag';
+import { useDialogDefaultAction } from '../../composables/dialog-default-action';
+
+/* הדיאלוג נגרר בכותרת שלו — composables/dialog-drag.ts. */
+const { dragStyle, startDialogDrag } = useDialogDrag();
+/* Enter = הכפתור הראשי — composables/dialog-default-action.ts. */
+const { onDialogEnter } = useDialogDefaultAction();
 
 const props = withDefaults(
   defineProps<{

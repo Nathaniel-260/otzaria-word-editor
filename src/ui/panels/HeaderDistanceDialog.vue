@@ -3,13 +3,18 @@
     <div
       v-if="isOpen"
       class="headerdist-dialog"
+      :style="dragStyle"
       role="dialog"
       aria-modal="true"
       :aria-label="DIALOG_TITLE"
       tabindex="-1"
       @keydown.esc.stop="$emit('close')"
+      @keydown.enter="onDialogEnter"
     >
-      <div class="hd-header">
+      <div
+        class="hd-header dialog-drag-handle"
+        @pointerdown="startDialogDrag"
+      >
         <span class="hd-title">{{ DIALOG_TITLE }}</span>
         <button
           type="button"
@@ -39,7 +44,6 @@
             :max="HEADER_DISTANCE_MAX_CM"
             step="0.05"
             aria-label="מרחק הכותרת העליונה מקצה הדף, בסנטימטרים"
-            @keydown.enter="onSubmit"
           >
           <span class="hd-unit">ס"מ</span>
         </div>
@@ -58,7 +62,6 @@
             :max="HEADER_DISTANCE_MAX_CM"
             step="0.05"
             aria-label="מרחק הכותרת התחתונה מקצה הדף, בסנטימטרים"
-            @keydown.enter="onSubmit"
           >
           <span class="hd-unit">ס"מ</span>
         </div>
@@ -89,6 +92,7 @@
         <button
           type="button"
           class="hd-btn hd-btn-primary"
+          data-default-action
           :disabled="!canSubmit"
           @pointerdown.prevent
           @click="onSubmit"
@@ -134,6 +138,13 @@ import {
   normalizeHeaderDistanceCm,
   type HeaderDistanceSettings,
 } from '../../engine/page-setup';
+import { useDialogDrag } from '../../composables/dialog-drag';
+import { useDialogDefaultAction } from '../../composables/dialog-default-action';
+
+/* הדיאלוג נגרר בכותרת שלו — composables/dialog-drag.ts. */
+const { dragStyle, startDialogDrag } = useDialogDrag();
+/* Enter = הכפתור הראשי — composables/dialog-default-action.ts. */
+const { onDialogEnter } = useDialogDefaultAction();
 
 const props = withDefaults(
   defineProps<{

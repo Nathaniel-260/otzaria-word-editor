@@ -280,3 +280,21 @@ button:disabled {
 .status--error {
   color: var(--color-error);
 }
+
+/* ידית הגרירה של הדיאלוגים הצפים.
+   גלובלי ולא scoped: עשרים וארבע כותרות בעשרים וארבעה קבצים, וההתנהגות אחת
+   (composables/dialog-drag.ts). `touch-action: none` הוא מה שמונע מהמסך הנוגע
+   לפרש את הגרירה כגלילה ולבלוע את ה-pointermove באמצע. */
+.dialog-drag-handle {
+  cursor: move;
+  touch-action: none;
+}
+
+/* כפתור ברירת המחדל של דיאלוג — זה ש-Enter מפעיל.
+   ההדגשה אינה קישוט: המשתמש צריך לראות **איזה** כפתור יופעל לפני שהוא לוחץ
+   Enter, ובלעדיה „אישור” ו„ביטול” נראים כשתי אפשרויות שקולות. הרקע הכחול
+   כבר מסמן „ראשי”, והמשקל מסמן „ברירת מחדל”.
+   ההתנהגות עצמה: composables/dialog-default-action.ts. */
+[data-default-action] {
+  font-weight: 600;
+}

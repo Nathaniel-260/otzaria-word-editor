@@ -5,13 +5,18 @@
       v-if="isOpen"
       ref="dialogRef"
       class="insert-citation-dialog"
+      :style="dragStyle"
       role="dialog"
       aria-modal="true"
       :aria-label="DIALOG_TITLE"
       tabindex="-1"
       @keydown.esc.stop="$emit('close')"
+      @keydown.enter="onDialogEnter"
     >
-      <div class="ic-header">
+      <div
+        class="ic-header dialog-drag-handle"
+        @pointerdown="startDialogDrag"
+      >
         <span class="ic-title">{{ DIALOG_TITLE }}</span>
         <button
           type="button"
@@ -74,6 +79,7 @@
         <button
           type="button"
           class="ic-btn ic-btn-primary"
+          data-default-action
           :disabled="!canInsert"
           @pointerdown.prevent
           @click="onInsert"
@@ -114,6 +120,13 @@
  */
 import { computed, nextTick, ref, watch } from 'vue';
 import type { CitationSourceSummary } from '../../engine/citations';
+import { useDialogDrag } from '../../composables/dialog-drag';
+import { useDialogDefaultAction } from '../../composables/dialog-default-action';
+
+/* הדיאלוג נגרר בכותרת שלו — composables/dialog-drag.ts. */
+const { dragStyle, startDialogDrag } = useDialogDrag();
+/* Enter = הכפתור הראשי — composables/dialog-default-action.ts. */
+const { onDialogEnter } = useDialogDefaultAction();
 
 const props = withDefaults(
   defineProps<{

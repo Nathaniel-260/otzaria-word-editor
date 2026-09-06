@@ -3,13 +3,18 @@
     <div
       v-if="isOpen"
       class="shuni-dialog"
+      :style="dragStyle"
       role="dialog"
       aria-modal="true"
       :aria-label="title"
       tabindex="-1"
       @keydown.esc.stop="$emit('close')"
+      @keydown.enter="onDialogEnter"
     >
-      <div class="shuni-header">
+      <div
+        class="shuni-header dialog-drag-handle"
+        @pointerdown="startDialogDrag"
+      >
         <span class="shuni-title">{{ title }}</span>
         <button
           type="button"
@@ -44,6 +49,7 @@
         <button
           type="button"
           class="shuni-btn shuni-btn-primary"
+          data-default-action
           :disabled="busy || selectedIndex === null"
           @pointerdown.prevent
           @click="onSubmit"
@@ -70,6 +76,13 @@
  * וגם את „רוחב טורים” (FormEditingErrors המקורי).
  */
 import { ref, watch } from 'vue';
+import { useDialogDrag } from '../../composables/dialog-drag';
+import { useDialogDefaultAction } from '../../composables/dialog-default-action';
+
+/* הדיאלוג נגרר בכותרת שלו — composables/dialog-drag.ts. */
+const { dragStyle, startDialogDrag } = useDialogDrag();
+/* Enter = הכפתור הראשי — composables/dialog-default-action.ts. */
+const { onDialogEnter } = useDialogDefaultAction();
 
 const props = withDefaults(
   defineProps<{

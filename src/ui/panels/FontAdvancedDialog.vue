@@ -4,13 +4,18 @@
       v-if="isOpen"
       ref="rootRef"
       class="fontadv-dialog"
+      :style="dragStyle"
       role="dialog"
       aria-modal="true"
       :aria-label="DIALOG_TITLE"
       tabindex="-1"
       @keydown.esc.stop="$emit('close')"
+      @keydown.enter="onDialogEnter"
     >
-      <div class="fa-header">
+      <div
+        class="fa-header dialog-drag-handle"
+        @pointerdown="startDialogDrag"
+      >
         <span class="fa-title">{{ DIALOG_TITLE }}</span>
         <button
           type="button"
@@ -50,7 +55,6 @@
               step="1"
               placeholder="%"
               aria-label="מתיחה אופקית של התווים, באחוזים"
-              @keydown.enter="onSubmit"
             >
             <span class="fa-unit">%</span>
           </div>
@@ -66,7 +70,6 @@
               type="number"
               step="1"
               aria-label="ריווח בין תווים, בנקודות. שלילי = מכווץ"
-              @keydown.enter="onSubmit"
             >
             <span class="fa-unit">נק'</span>
           </div>
@@ -83,7 +86,6 @@
               min="0"
               step="1"
               aria-label="גודל מינימלי לקרנינג, בנקודות"
-              @keydown.enter="onSubmit"
             >
             <span class="fa-unit">נק'</span>
           </div>
@@ -104,7 +106,6 @@
               type="number"
               step="1"
               aria-label="מיקום התו בנקודות. חיובי = מוגבה, שלילי = מונמך"
-              @keydown.enter="onSubmit"
             >
             <span class="fa-unit">נק'</span>
           </div>
@@ -220,7 +221,6 @@
               min="0.5"
               step="0.5"
               aria-label="גודל הגופן המורכב, בנקודות"
-              @keydown.enter="onSubmit"
             >
             <span class="fa-unit">נק'</span>
           </div>
@@ -237,7 +237,6 @@
               maxlength="100"
               placeholder="למשל David"
               aria-label="שם הגופן המורכב"
-              @keydown.enter="onSubmit"
             >
           </div>
           <div class="fa-grid">
@@ -324,6 +323,7 @@
         <button
           type="button"
           class="fa-btn fa-btn-primary"
+          data-default-action
           :disabled="busy || !canSubmit"
           @pointerdown.prevent
           @click="onSubmit"
@@ -360,6 +360,13 @@
  */
 import { computed, nextTick, ref, watch } from 'vue';
 import type { FontAdvancedPatch } from '../../engine/font-advanced';
+import { useDialogDrag } from '../../composables/dialog-drag';
+import { useDialogDefaultAction } from '../../composables/dialog-default-action';
+
+/* הדיאלוג נגרר בכותרת שלו — composables/dialog-drag.ts. */
+const { dragStyle, startDialogDrag } = useDialogDrag();
+/* Enter = הכפתור הראשי — composables/dialog-default-action.ts. */
+const { onDialogEnter } = useDialogDefaultAction();
 
 const DIALOG_TITLE = 'גופן מתקדם';
 const INVALID_HINT = 'הערכים שהוקלדו אינם בטווח המותר — עיין בשדות המסומנים.';
@@ -524,12 +531,28 @@ function onSubmit(): void {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
   width: 380px;
   max-height: calc(100vh - 200px);
-  overflow-block: auto;
+  /*
+   * הגוף גולל, לא הדיאלוג.
+   *
+   * כאן היה `overflow-block: auto` על השורש. שבעה-עשר השדות שבפנים גבוהים
+   * מהתקרה `calc(100vh - 200px)`, והפוטר („אישור” / „ביטול”) הוא האחרון
+   * אחריהם — ולכן הוא נדחק מתחת לקצה המסך. נמדד בחלון של 600px: תחתית שורת
+   * הכפתורים ב-896, כמעט 300px מתחת לתחתית המסך, והשורש לא נעשה אזור גלילה
+   * בפועל — כלומר לא הייתה שום דרך להגיע אליה
+   * (scripts/qa/dialog-drag-qa.mjs מודד בדיוק את זה).
+   *
+   * העמודה מקבעת את הכותרת (הידית לגרירה) ואת הפוטר בקצוות, ומשאירה את
+   * הגלילה ל-`.fa-body` בלבד.
+   */
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   font-family: var(--font-main);
   user-select: none;
 }
 
 .fa-header {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -561,6 +584,11 @@ function onSubmit(): void {
 }
 
 .fa-body {
+  /* `min-height: 0` הוא מה שמתיר לפריט flex להתכווץ מתחת לגובה תוכנו — בלעדיו
+     העמודה הייתה נמתחת והפוטר היה יוצא מהמסגרת שוב. */
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
   padding: 10px 12px;
   display: flex;
   flex-direction: column;
@@ -657,6 +685,7 @@ function onSubmit(): void {
 }
 
 .fa-footer {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: flex-end;
