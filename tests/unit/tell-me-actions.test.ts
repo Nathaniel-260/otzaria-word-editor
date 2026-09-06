@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   TELL_ME_ACTIONS,
   DEFAULT_SUGGESTED_IDS,
@@ -8,6 +10,7 @@ import {
 } from '../../src/ui/shell/tell-me-actions';
 import { ICONS } from '../../src/ui/icons/icons';
 import { SHORTCUTS } from '../../src/ui/shortcuts/registry';
+import { RIBBON_TABS } from '../../src/ui/ribbon/tabs';
 
 describe('קטלוג הפקודות Tell Me (tell-me-actions)', () => {
   it('יש פקודות בקטלוג', () => {
@@ -28,9 +31,11 @@ describe('קטלוג הפקודות Tell Me (tell-me-actions)', () => {
     }
   });
 
-  it('לכל פקודה יש יעד ביצוע תקף (command או shellAction או customAction)', () => {
+  it('לכל פקודה יש יעד תקף (command / shellAction / customAction / ribbonTab)', () => {
     for (const action of TELL_ME_ACTIONS) {
-      const hasTarget = Boolean(action.command || action.shellAction || action.customAction);
+      const hasTarget = Boolean(
+        action.command || action.shellAction || action.customAction || action.ribbonTab,
+      );
       expect(hasTarget, `action ${action.id} has no execution target`).toBe(true);
     }
   });
@@ -90,6 +95,14 @@ describe('קטלוג הפקודות Tell Me (tell-me-actions)', () => {
       const style = (action.command.payload as { style?: string } | null)?.style;
       expect(style && known.has(style), `action ${action.id}: style '${style}' אינו ברג׳יסטרי`).toBe(true);
     }
+  });
+
+  it('כל ribbonTab בקטלוג הוא לשונית קיימת ברצועה', () => {
+    const tabs = new Set(RIBBON_TABS.map((t) => t.id));
+    const unknown = TELL_ME_ACTIONS.filter((a) => a.ribbonTab && !tabs.has(a.ribbonTab)).map(
+      (a) => `${a.id} → ${a.ribbonTab}`,
+    );
+    expect(unknown).toEqual([]);
   });
 
   it('מזהי הפעולות המוצעות קיימים כולם בקטלוג', () => {
@@ -152,9 +165,29 @@ describe('אלגוריתם חיפוש Tell Me (searchTellMeActions)', () => {
     expect(results[0].id).toBe('file-print');
   });
 
+  /** הבאג שדווח: „השלמה מהספר” החזירה „לא נמצאו פקודות מתאימות”. */
+  it('חיפוש "השלמה מהספר" מוצא את הפקד של אוצריא ראשון', () => {
+    const results = searchTellMeActions('השלמה מהספר');
+    expect(results[0]?.id).toBe('otzaria-book-completion');
+  });
+
+  /** צירוף חלקי של מילים מתוך השם — מה שמשתמש באמת מקליד. */
+  it('שתי מילים לא רצופות מתוך שם הפקד מוצאות אותו', () => {
+    expect(searchTellMeActions('השלמה ספר').map((r) => r.id)).toContain('otzaria-book-completion');
+    expect(searchTellMeActions('גבולות עמוד').map((r) => r.id)).toContain('layout-page-borders');
+  });
+
+  /** אות סופית אינה אמורה לשבור התאמת תחילית: „עמוד” מול „עמודים”. */
+  it('נרמול משווה אותיות סופיות לרגילות', () => {
+    expect(normalizeSearchTerm('מסמך')).toBe('מסמכ');
+    expect(searchTellMeActions('מספור עמודים').map((r) => r.id)).toContain('layout-page-numbering');
+  });
+
   it('שאילתה שאינה קיימת מחזירה רשימה ריקה', () => {
-    const results = searchTellMeActions('xyznonexistentquery123');
-    expect(results).toEqual([]);
+    expect(searchTellMeActions('xyznonexistentquery123')).toEqual([]);
+    // מילה נפוצה אחת מתוך שלוש אינה התאמה: „לא” הוא תחילית של מילה במילות
+    // המפתח של „סוגריים לא סגורים”, והשאילתה הזאת החזירה בגללה תוצאות.
+    expect(searchTellMeActions('זזזזז לא קיים')).toEqual([]);
   });
 
   /** האינדקס המנורמל נשמר לכל קטלוג בנפרד — קטלוג משלו אינו מקבל את של ברירת המחדל. */
@@ -166,5 +199,55 @@ describe('אלגוריתם חיפוש Tell Me (searchTellMeActions)', () => {
     expect(searchTellMeActions('הדפסה', own)).toEqual([]);
     // ברירת המחדל לא נפגעה
     expect(searchTellMeActions('הדפסה')[0]?.id).toBe('file-print');
+  });
+});
+
+/**
+ * שער הכיסוי: כל פקד ברצועה נמצא בחיפוש.
+ *
+ * הבאג שהוליד את הבדיקה: „השלמה מהספר” — כפתור גדול בלשונית „אוצריא” — פשוט
+ * לא היה בקטלוג, ולכן חיפוש שמו החזיר „לא נמצאו פקודות מתאימות”. הוא לא היה
+ * לבד: 55 מ-96 תוויות הרצועה לא היו ניתנות למציאה. הקטלוג מתוחזק ביד, ולכן
+ * פקד שנוסף לרצועה אינו מגיע לחיפוש מעצמו — וזה בדיוק מה שנספר כאן.
+ *
+ * הבדיקה קוראת את קובצי הלשוניות ולא רשימה מועתקת: רשימה מועתקת הייתה מזדקנת
+ * בדיוק כמו הקטלוג שהיא באה לשמור.
+ */
+describe('כיסוי הרצועה בחיפוש Tell Me', () => {
+  const TABS_DIR = join(process.cwd(), 'src/ui/ribbon/tabs');
+  /** `label="..."` בלבד — `:label="expr"` הוא ביטוי, לא תווית לחיפוש. */
+  const STATIC_LABEL = /(?<![:\w-])label="([^"]+)"/g;
+
+  const RIBBON_LABELS = readdirSync(TABS_DIR)
+    .filter((file) => file.endsWith('.vue'))
+    .flatMap((file) =>
+      [...readFileSync(join(TABS_DIR, file), 'utf8').matchAll(STATIC_LABEL)].map((m) => ({
+        file,
+        label: m[1],
+      })),
+    );
+
+  it('נאספו תוויות מכל לשוניות הרצועה', () => {
+    expect(RIBBON_LABELS.length).toBeGreaterThan(80);
+  });
+
+  it('כל תווית של פקד ברצועה מוחזרת בחיפוש שלה', () => {
+    const missing: string[] = [];
+
+    for (const { file, label } of RIBBON_LABELS) {
+      // „שמור בשם...” — שלוש הנקודות הן מוסכמה של „נפתח דיאלוג”, לא חלק מהשם.
+      const query = label.replace(/[.…]+$/u, '').trim();
+      const normalized = normalizeSearchTerm(query);
+      // „מוחזרת” אינו „מדורגת ראשונה”: „הסר” מחזיר בצדק גם „הסר קישור”. מה
+      // שנדרש הוא שהפריט של הפקד עצמו יהיה שם — לפי כותרת או מילת מפתח זהה.
+      const found = searchTellMeActions(query).some(
+        (action) =>
+          normalizeSearchTerm(action.title) === normalized ||
+          action.keywords.some((keyword) => normalizeSearchTerm(keyword) === normalized),
+      );
+      if (!found) missing.push(`${file}: ${label}`);
+    }
+
+    expect(missing).toEqual([]);
   });
 });

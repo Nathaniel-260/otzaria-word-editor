@@ -115,6 +115,7 @@
 import { ref, computed, type ComponentPublicInstance } from 'vue';
 import { RIBBON_PANEL_ID, nextTabIndex, ribbonTabId } from './aria';
 import { menuString } from './i18n';
+import { RIBBON_TABS } from './tabs';
 import SvgIcon from '../icons/SvgIcon.vue';
 import HomeTab from './tabs/HomeTab.vue';
 import FileTab from './tabs/FileTab.vue';
@@ -127,26 +128,7 @@ import DeveloperTab from './tabs/DeveloperTab.vue';
 import ShulchanTab from './tabs/ShulchanTab.vue';
 import OtzariaTab from './tabs/OtzariaTab.vue';
 
-interface TabDefinition {
-  id: string;
-  label: string;
-  className?: string;
-}
-
-const TABS: TabDefinition[] = [
-  { id: 'file', label: 'קובץ' },
-  { id: 'home', label: 'בית' },
-  { id: 'insert', label: 'הוספה' },
-  { id: 'layout', label: 'פריסה' },
-  { id: 'references', label: 'הפניות' },
-  { id: 'review', label: 'סקירה' },
-  { id: 'view', label: 'תצוגה' },
-  // „מפתחים” יושבת אחרי „תצוגה”, במקום שבו Word מציב אותה, ומחזיקה את המאקרו
-  // שישבו עד עכשיו ב„אוצריא” — ראו DeveloperTab.vue.
-  { id: 'developer', label: 'מפתחים' },
-  { id: 'shulchan', label: 'שולחן העורך' },
-  { id: 'otzaria', label: '✦ אוצריא', className: 'otzaria-tab' },
-];
+const TABS = RIBBON_TABS;
 
 /**
  * התוויות שמוצגות למשתמש, מתורגמות לפי שפת המשתמש (ui/ribbon/i18n).

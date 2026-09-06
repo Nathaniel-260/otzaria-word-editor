@@ -19,7 +19,8 @@
  */
 
 import { shortcutLabel, type ShellAction } from '../shortcuts/registry';
-import { alignmentPayload, lineHeightPayload, stylePayload } from '../../engine/payloads';
+import { RIBBON_TAB_LABELS, type RibbonTabId } from '../ribbon/tabs';
+import { alignmentPayload, lineHeightPayload, stylePayload, zoomPayload } from '../../engine/payloads';
 
 /**
  * הפעולות הייעודיות. איחוד מוקלד ולא `string`: מזהה שאינו כאן נופל בבנייה,
@@ -27,17 +28,19 @@ import { alignmentPayload, lineHeightPayload, stylePayload } from '../../engine/
  *
  * `clipboard-*` — הלוח אינו משטח פקודות של המנוע (אין `copy`/`cut`/`paste`
  * ברג׳יסטרי שלו); הוא עובר ב-engine/clipboard.ts, כמו בכפתורי „בית”.
- * `ribbon-shulchan` — כלי שולחן העורך הם כלי MacroKit עם דיאלוגים, לא פקודות
- * מנוע; הפעולה פותחת את הלשונית שלהם.
+ *
+ * מי שכל תפקידו להביא את המשתמש ללשונית שבה הפקד יושב אינו כאן אלא בשדה
+ * `ribbonTab` — ראו ההערה עליו.
  */
 export type TellMeCustomAction =
   | 'export-pdf'
   | 'export-otzaria'
   | 'about'
+  | 'exit-app'
+  | 'toggle-book-completion'
   | 'clipboard-copy'
   | 'clipboard-cut'
-  | 'clipboard-paste'
-  | 'ribbon-shulchan';
+  | 'clipboard-paste';
 
 export interface TellMeAction {
   /** מזהה ייחודי לפעולה */
@@ -60,6 +63,21 @@ export interface TellMeAction {
   shellAction?: ShellAction;
   /** פעולה ייעודית למעטפת שאינה ב-ShellAction — מטופלת ב-`onCustomActionFromTellMe` ב-App.vue */
   customAction?: TellMeCustomAction;
+  /**
+   * „הפקד יושב בלשונית הזאת” — פותח את הלשונית במקום להריץ משהו.
+   *
+   * רוב הפקדים בלשוניות „פריסה”, „הפניות”, „סקירה” ו„שולחן העורך” פותחים
+   * דיאלוג שחי בתוך קומפוננטת הלשונית ואינו נחשף החוצה: אין להם `command`
+   * ואין להם `shellAction`, ולכן הם היו **בלתי ניתנים למציאה** בחיפוש. פריט
+   * שמוליך אל הפקד עדיף על פריט שאינו קיים — וזו גם ההתנהגות של Word עצמו
+   * כשהפריט הוא גלריה.
+   */
+  ribbonTab?: RibbonTabId;
+}
+
+/** התיאור האחיד לפריט שכל תפקידו להוליך אל הלשונית שבה הפקד יושב. */
+function inTab(tab: RibbonTabId, control: string): string {
+  return `פתיחת לשונית „${RIBBON_TAB_LABELS[tab]}” — הפקד „${control}”`;
 }
 
 /**
@@ -102,7 +120,7 @@ export const TELL_ME_ACTIONS: readonly TellMeAction[] = [
     title: 'פתיחת קובץ',
     category: 'קובץ',
     description: 'פתיחת מסמך קיים מהמחשב',
-    keywords: ['פתח', 'פתיחה', 'קובץ', 'טעינה', 'open', 'load'],
+    keywords: ['פתח', 'פתח קובץ', 'פתיחה', 'קובץ', 'טעינה', 'open', 'load'],
     shortcut: 'Ctrl+O',
     icon: 'folder',
     shellAction: 'open-document',
@@ -125,6 +143,15 @@ export const TELL_ME_ACTIONS: readonly TellMeAction[] = [
     keywords: ['פי די אף', 'ייצוא', 'pdf', 'export'],
     icon: 'exportPdf',
     customAction: 'export-pdf',
+  },
+  {
+    id: 'file-exit',
+    title: 'יציאה',
+    category: 'קובץ',
+    description: 'סגירת העורך',
+    keywords: ['יציאה', 'צא', 'סגור', 'סגירה', 'exit', 'quit', 'close'],
+    icon: 'exit',
+    customAction: 'exit-app',
   },
   {
     id: 'help-shortcuts',
@@ -273,7 +300,7 @@ export const TELL_ME_ACTIONS: readonly TellMeAction[] = [
     title: 'כתב עילי (Superscript)',
     category: 'בית > גופן',
     description: 'הקטנת הטקסט והצבתו מעל גובה השורה',
-    keywords: ['כתב עילי', 'חזקה', 'למעלה', 'superscript'],
+    keywords: ['כתב עילי', 'כתב עליון', 'חזקה', 'למעלה', 'superscript'],
     shortcut: 'Ctrl+Shift+=',
     icon: 'superscript',
     shellAction: 'superscript',
@@ -513,7 +540,7 @@ export const TELL_ME_ACTIONS: readonly TellMeAction[] = [
     title: 'מעבר עמוד',
     category: 'הוספה > עמודים',
     description: 'התחלת עמוד חדש במיקום הסמן',
-    keywords: ['מעבר עמוד', 'עמוד חדש', 'דף חדש', 'שבירת עמוד', 'page break'],
+    keywords: ['מעבר עמוד', 'התחל בעמוד חדש', 'עמוד חדש', 'דף חדש', 'שבירת עמוד', 'page break'],
     shortcut: 'Ctrl+Enter',
     icon: 'pageBreak',
     shellAction: 'page-break',
@@ -567,6 +594,354 @@ export const TELL_ME_ACTIONS: readonly TellMeAction[] = [
     command: { id: 'table-of-contents-insert' },
   },
 
+  // --- הוספה: פקדים שהדיאלוג שלהם חי בתוך הלשונית ---
+  {
+    id: 'insert-image',
+    title: 'תמונות',
+    category: 'הוספה > איורים',
+    description: inTab('insert', 'תמונות'),
+    keywords: ['תמונה', 'תמונות', 'איור', 'צילום', 'image', 'picture'],
+    icon: 'image',
+    ribbonTab: 'insert',
+  },
+  {
+    id: 'insert-bookmark',
+    title: 'סימנייה',
+    category: 'הוספה > קישורים',
+    description: inTab('insert', 'סימנייה'),
+    keywords: ['סימנייה', 'סימניה', 'סימניות', 'bookmark'],
+    icon: 'bookmark',
+    ribbonTab: 'insert',
+  },
+  {
+    id: 'insert-remove-link',
+    title: 'הסר קישור',
+    category: 'הוספה > קישורים',
+    description: inTab('insert', 'הסר קישור'),
+    keywords: ['הסר קישור', 'הסרת קישור', 'ביטול קישור', 'unlink', 'remove link'],
+    icon: 'link',
+    ribbonTab: 'insert',
+  },
+  {
+    id: 'insert-header',
+    title: 'כותרת עליונה',
+    category: 'הוספה > כותרת עליונה ותחתונה',
+    description: inTab('insert', 'כותרת עליונה'),
+    keywords: ['כותרת עליונה', 'כותרת', 'ראש עמוד', 'header'],
+    icon: 'header',
+    ribbonTab: 'insert',
+  },
+  {
+    id: 'insert-footer',
+    title: 'כותרת תחתונה',
+    category: 'הוספה > כותרת עליונה ותחתונה',
+    description: inTab('insert', 'כותרת תחתונה'),
+    keywords: ['כותרת תחתונה', 'תחתית', 'רגל עמוד', 'footer'],
+    icon: 'footer',
+    ribbonTab: 'insert',
+  },
+  {
+    id: 'insert-page-number',
+    title: 'מספר עמוד',
+    category: 'הוספה > כותרת עליונה ותחתונה',
+    description: inTab('insert', 'מספר עמוד'),
+    keywords: ['מספר עמוד', 'מספרי עמודים', 'page number'],
+    icon: 'pageNumber',
+    ribbonTab: 'insert',
+  },
+  {
+    id: 'insert-hf-first-page',
+    title: 'שונה בעמוד ראשון',
+    category: 'הוספה > כותרת עליונה ותחתונה',
+    description: inTab('insert', 'שונה בעמוד ראשון'),
+    keywords: ['שונה בעמוד ראשון', 'עמוד ראשון', 'כותרת ראשונה', 'first page'],
+    icon: 'firstPageHeader',
+    ribbonTab: 'insert',
+  },
+  {
+    id: 'insert-hf-odd-even',
+    title: 'שונה בעמודים זוגיים ואי-זוגיים',
+    category: 'הוספה > כותרת עליונה ותחתונה',
+    description: inTab('insert', 'שונה בעמודים זוגיים ואי-זוגיים'),
+    keywords: ['שונה בעמודים זוגיים ואי-זוגיים', 'זוגי', 'אי-זוגי', 'odd even'],
+    icon: 'oddEvenPages',
+    ribbonTab: 'insert',
+  },
+  {
+    id: 'insert-hf-link-previous',
+    title: 'קשר לקודם',
+    category: 'הוספה > כותרת עליונה ותחתונה',
+    description: inTab('insert', 'קשר לקודם'),
+    keywords: ['קשר לקודם', 'קישור למקטע הקודם', 'link to previous'],
+    icon: 'link',
+    ribbonTab: 'insert',
+  },
+  {
+    id: 'insert-date-time',
+    title: 'תאריך ושעה',
+    category: 'הוספה > טקסט',
+    description: inTab('insert', 'תאריך ושעה'),
+    keywords: ['תאריך ושעה', 'תאריך', 'שעה', 'date', 'time'],
+    icon: 'dateTime',
+    ribbonTab: 'insert',
+  },
+  {
+    id: 'insert-update-fields',
+    title: 'עדכן שדות',
+    category: 'הוספה > טקסט',
+    description: inTab('insert', 'עדכן שדות'),
+    keywords: ['עדכן שדות', 'שדות', 'רענון שדות', 'update fields'],
+    icon: 'updateFields',
+    ribbonTab: 'insert',
+  },
+
+  // --- פריסה ---
+  {
+    id: 'layout-margins',
+    title: 'שוליים',
+    category: 'פריסה > הגדרת עמוד',
+    description: inTab('layout', 'שוליים'),
+    keywords: ['שוליים', 'שולי הדף', 'margins'],
+    icon: 'margins',
+    ribbonTab: 'layout',
+  },
+  {
+    id: 'layout-orientation',
+    title: 'כיוון הדף',
+    category: 'פריסה > הגדרת עמוד',
+    description: inTab('layout', 'כיוון'),
+    keywords: ['כיוון', 'כיוון הדף', 'לאורך', 'לרוחב', 'orientation'],
+    icon: 'orientation',
+    ribbonTab: 'layout',
+  },
+  {
+    id: 'layout-paper-size',
+    title: 'גודל הדף',
+    category: 'פריסה > הגדרת עמוד',
+    description: inTab('layout', 'גודל'),
+    keywords: ['גודל', 'גודל הדף', 'גודל נייר', 'a4', 'letter', 'paper size'],
+    icon: 'paperSize',
+    ribbonTab: 'layout',
+  },
+  {
+    id: 'layout-columns',
+    title: 'עמודות',
+    category: 'פריסה > הגדרת עמוד',
+    description: inTab('layout', 'עמודות'),
+    keywords: ['עמודות', 'טורים', 'שתי עמודות', 'columns'],
+    icon: 'columns',
+    ribbonTab: 'layout',
+  },
+  {
+    id: 'layout-line-numbers',
+    title: 'מספרי שורות',
+    category: 'פריסה > הגדרת עמוד',
+    description: inTab('layout', 'מספרי שורות'),
+    keywords: ['מספרי שורות', 'מספור שורות', 'line numbers'],
+    icon: 'numberList',
+    ribbonTab: 'layout',
+  },
+  {
+    id: 'layout-page-borders',
+    title: 'גבולות עמוד',
+    category: 'פריסה > הגדרת עמוד',
+    description: inTab('layout', 'גבולות עמוד'),
+    keywords: ['גבולות עמוד', 'מסגרת', 'גבול', 'page borders'],
+    icon: 'borders',
+    ribbonTab: 'layout',
+  },
+  {
+    id: 'layout-vertical-align',
+    title: 'יישור אנכי',
+    category: 'פריסה > מקטע',
+    description: inTab('layout', 'יישור אנכי'),
+    keywords: ['יישור אנכי', 'מיקום אנכי', 'גובה העמוד', 'vertical align'],
+    icon: 'lineSpacing',
+    ribbonTab: 'layout',
+  },
+  {
+    id: 'layout-page-numbering',
+    title: 'מספור עמודים',
+    category: 'פריסה > מקטע',
+    description: inTab('layout', 'מספור עמודים'),
+    keywords: ['מספור עמודים', 'תבנית מספור', 'מספר התחלה', 'page numbering'],
+    icon: 'pageNumber',
+    ribbonTab: 'layout',
+  },
+  {
+    id: 'layout-header-distance',
+    title: 'מרחק הכותרת',
+    category: 'פריסה > מקטע',
+    description: inTab('layout', 'מרחק הכותרת'),
+    keywords: ['מרחק הכותרת', 'מרחק כותרת', 'שולי כותרת', 'header distance'],
+    icon: 'header',
+    ribbonTab: 'layout',
+  },
+  {
+    id: 'layout-doc-defaults',
+    title: 'ברירות מחדל',
+    category: 'פריסה > מקטע',
+    description: inTab('layout', 'ברירות מחדל'),
+    keywords: ['ברירות מחדל', 'ברירת מחדל', 'גופן המסמך', 'defaults'],
+    icon: 'fontColor',
+    ribbonTab: 'layout',
+  },
+
+  // --- הפניות ---
+  {
+    id: 'refs-toc-mark-entry',
+    title: 'סמן ערך',
+    category: 'הפניות > תוכן עניינים',
+    description: inTab('references', 'סמן ערך'),
+    keywords: ['סמן ערך', 'סימון ערך', 'תוכן עניינים', 'mark entry'],
+    icon: 'bookmark',
+    ribbonTab: 'references',
+  },
+  {
+    id: 'refs-toc-update',
+    title: 'עדכן טבלה',
+    category: 'הפניות > תוכן עניינים',
+    description: inTab('references', 'עדכן טבלה'),
+    keywords: ['עדכן טבלה', 'רענון תוכן עניינים', 'update table'],
+    icon: 'updateFields',
+    ribbonTab: 'references',
+  },
+  {
+    id: 'refs-toc-custom',
+    title: 'התאמה אישית',
+    category: 'הפניות > תוכן עניינים',
+    description: inTab('references', 'התאמה אישית'),
+    keywords: ['התאמה אישית', 'התאמה', 'תוכן עניינים מותאם', 'custom'],
+    icon: 'toc',
+    ribbonTab: 'references',
+  },
+  {
+    id: 'refs-toc-remove',
+    title: 'הסר תוכן עניינים',
+    category: 'הפניות > תוכן עניינים',
+    description: inTab('references', 'הסר'),
+    keywords: ['הסר', 'הסר תוכן עניינים', 'מחיקת תוכן עניינים', 'remove toc'],
+    icon: 'reject',
+    ribbonTab: 'references',
+  },
+  {
+    id: 'refs-manage-notes',
+    title: 'נהל הערות',
+    category: 'הפניות > הערות',
+    description: inTab('references', 'נהל הערות'),
+    keywords: ['נהל הערות', 'ניהול הערות', 'הערות שוליים', 'manage notes'],
+    icon: 'book',
+    ribbonTab: 'references',
+  },
+  {
+    id: 'refs-index-mark',
+    title: 'סמן ערך למפתח',
+    category: 'הפניות > מפתח',
+    description: inTab('references', 'סמן ערך למפתח'),
+    keywords: ['סמן ערך למפתח', 'מפתח', 'אינדקס', 'mark index entry'],
+    icon: 'bookmark',
+    ribbonTab: 'references',
+  },
+  {
+    id: 'refs-index-insert',
+    title: 'הוסף מפתח',
+    category: 'הפניות > מפתח',
+    description: inTab('references', 'הוסף מפתח'),
+    keywords: ['הוסף מפתח', 'מפתח', 'אינדקס', 'insert index'],
+    icon: 'book',
+    ribbonTab: 'references',
+  },
+  {
+    id: 'refs-index-update',
+    title: 'עדכן מפתח',
+    category: 'הפניות > מפתח',
+    description: inTab('references', 'עדכן מפתח'),
+    keywords: ['עדכן מפתח', 'רענון מפתח', 'update index'],
+    icon: 'updateFields',
+    ribbonTab: 'references',
+  },
+  {
+    id: 'refs-index-settings',
+    title: 'הגדרות מפתח',
+    category: 'הפניות > מפתח',
+    description: inTab('references', 'הגדרות מפתח'),
+    keywords: ['הגדרות מפתח', 'מפתח', 'index settings'],
+    icon: 'toc',
+    ribbonTab: 'references',
+  },
+  {
+    id: 'refs-index-remove',
+    title: 'הסר מפתח',
+    category: 'הפניות > מפתח',
+    description: inTab('references', 'הסר מפתח'),
+    keywords: ['הסר מפתח', 'מחיקת מפתח', 'remove index'],
+    icon: 'reject',
+    ribbonTab: 'references',
+  },
+  {
+    id: 'refs-citation-insert',
+    title: 'הוסף ציטוט',
+    category: 'הפניות > ציטוטים',
+    description: inTab('references', 'הוסף ציטוט'),
+    keywords: ['הוסף ציטוט', 'ציטוט', 'מקור', 'citation'],
+    icon: 'comment',
+    ribbonTab: 'references',
+  },
+  {
+    id: 'refs-bibliography',
+    title: 'ביבליוגרפיה',
+    category: 'הפניות > ציטוטים',
+    description: inTab('references', 'ביבליוגרפיה'),
+    keywords: ['ביבליוגרפיה', 'רשימת מקורות', 'bibliography'],
+    icon: 'toc',
+    ribbonTab: 'references',
+  },
+  {
+    id: 'refs-sources',
+    title: 'נהל מקורות',
+    category: 'הפניות > ציטוטים',
+    description: inTab('references', 'נהל מקורות'),
+    keywords: ['נהל מקורות', 'ניהול מקורות', 'מקורות', 'manage sources'],
+    icon: 'book',
+    ribbonTab: 'references',
+  },
+  {
+    id: 'refs-bibliography-update',
+    title: 'עדכן ביבליוגרפיה',
+    category: 'הפניות > ציטוטים',
+    description: inTab('references', 'עדכן ביבליוגרפיה'),
+    keywords: ['עדכן ביבליוגרפיה', 'רענון ביבליוגרפיה', 'update bibliography'],
+    icon: 'updateFields',
+    ribbonTab: 'references',
+  },
+  {
+    id: 'refs-bibliography-remove',
+    title: 'הסר ביבליוגרפיה',
+    category: 'הפניות > ציטוטים',
+    description: inTab('references', 'הסר ביבליוגרפיה'),
+    keywords: ['הסר ביבליוגרפיה', 'מחיקת ביבליוגרפיה', 'remove bibliography'],
+    icon: 'reject',
+    ribbonTab: 'references',
+  },
+  {
+    id: 'refs-caption',
+    title: 'הוסף כיתוב',
+    category: 'הפניות > כיתובים',
+    description: inTab('references', 'הוסף כיתוב'),
+    keywords: ['הוסף כיתוב', 'כיתוב', 'תיאור תמונה', 'caption'],
+    icon: 'image',
+    ribbonTab: 'references',
+  },
+  {
+    id: 'refs-cross-refs-update',
+    title: 'עדכן הפניות',
+    category: 'הפניות > כיתובים',
+    description: inTab('references', 'עדכן הפניות'),
+    keywords: ['עדכן הפניות', 'הפניה מקושרת', 'cross reference'],
+    icon: 'updateFields',
+    ribbonTab: 'references',
+  },
+
   // --- תצוגה וסקירה ---
   {
     id: 'view-focus-mode',
@@ -607,6 +982,96 @@ export const TELL_ME_ACTIONS: readonly TellMeAction[] = [
     icon: 'trackChanges',
     shellAction: 'track-changes',
   },
+  {
+    id: 'review-accept-change',
+    title: 'קבל שינוי',
+    category: 'סקירה > שינויים',
+    description: 'קבלת השינוי הנוכחי במעקב אחר שינויים',
+    keywords: ['קבל שינוי', 'קבלת שינוי', 'אשר שינוי', 'accept change'],
+    icon: 'accept',
+    command: { id: 'acceptChange' },
+  },
+  {
+    id: 'review-reject-change',
+    title: 'דחה שינוי',
+    category: 'סקירה > שינויים',
+    description: 'דחיית השינוי הנוכחי במעקב אחר שינויים',
+    keywords: ['דחה שינוי', 'דחיית שינוי', 'בטל שינוי', 'reject change'],
+    icon: 'reject',
+    command: { id: 'rejectChange' },
+  },
+  {
+    id: 'review-accept-all',
+    title: 'קבל את כל השינויים',
+    category: 'סקירה > שינויים',
+    description: 'קבלת כל השינויים במסמך',
+    keywords: ['קבל את כל השינויים', 'קבל הכל', 'accept all'],
+    icon: 'accept',
+    command: { id: 'acceptAllChanges' },
+  },
+  {
+    id: 'review-reject-all',
+    title: 'דחה את כל השינויים',
+    category: 'סקירה > שינויים',
+    description: 'דחיית כל השינויים במסמך',
+    keywords: ['דחה את כל השינויים', 'דחה הכל', 'reject all'],
+    icon: 'reject',
+    command: { id: 'rejectAllChanges' },
+  },
+  {
+    id: 'review-spellcheck',
+    title: 'בדיקת איות',
+    category: 'סקירה > הגהה',
+    description: inTab('review', 'בדיקת איות'),
+    keywords: ['בדיקת איות', 'איות', 'שגיאות כתיב', 'הגהה', 'spellcheck'],
+    icon: 'proofing',
+    ribbonTab: 'review',
+  },
+  {
+    id: 'review-comment-new',
+    title: 'תגובה חדשה',
+    category: 'סקירה > תגובות',
+    description: inTab('review', 'תגובה חדשה'),
+    keywords: ['תגובה חדשה', 'תגובה', 'הערה', 'comment'],
+    icon: 'comment',
+    ribbonTab: 'review',
+  },
+  {
+    id: 'review-protect',
+    title: 'הגבל עריכה',
+    category: 'סקירה > הגנה',
+    description: inTab('review', 'הגבל עריכה'),
+    keywords: ['הגבל עריכה', 'הגנה', 'נעילה', 'קריאה בלבד', 'protect'],
+    icon: 'proofing',
+    ribbonTab: 'review',
+  },
+  {
+    id: 'view-actual-size',
+    title: 'גודל אמיתי',
+    category: 'תצוגה',
+    description: 'הצגת המסמך בגודלו האמיתי (100%)',
+    keywords: ['גודל אמיתי', 'מאה אחוז', '100%', 'זום', 'zoom', 'actual size'],
+    icon: 'zoom',
+    command: { id: 'zoom', payload: zoomPayload(100) },
+  },
+  {
+    id: 'view-page-width',
+    title: 'רוחב עמוד',
+    category: 'תצוגה',
+    description: inTab('view', 'רוחב עמוד'),
+    keywords: ['רוחב עמוד', 'התאם לרוחב', 'זום', 'fit width'],
+    icon: 'fitWidth',
+    ribbonTab: 'view',
+  },
+  {
+    id: 'font-advanced',
+    title: 'גופן מתקדם',
+    category: 'בית > גופן',
+    description: inTab('home', 'מתקדם'),
+    keywords: ['מתקדם', 'גופן מתקדם', 'ריווח תווים', 'דיאלוג גופן', 'advanced font'],
+    icon: 'fontColor',
+    ribbonTab: 'home',
+  },
 
   // --- אוצריא ---
   {
@@ -614,7 +1079,7 @@ export const TELL_ME_ACTIONS: readonly TellMeAction[] = [
     title: 'ציטוט מהקורא של אוצריא',
     category: 'אוצריא',
     description: 'הדבקת הקטע והמקור הפתוח כעת באוצריא אל תוך המסמך',
-    keywords: ['ציטוט', 'אוצריא', 'מקור', 'קורא', 'citation', 'otzaria'],
+    keywords: ['ציטוט', 'ציטוט מהקורא', 'אוצריא', 'מקור', 'קורא', 'citation', 'otzaria'],
     shortcut: 'Ctrl+Shift+Q',
     icon: 'book',
     shellAction: 'insert-citation',
@@ -634,7 +1099,7 @@ export const TELL_ME_ACTIONS: readonly TellMeAction[] = [
     title: 'פתיחת ספריית אוצריא',
     category: 'אוצריא',
     description: 'פתיחת חלון ספריית הספרים',
-    keywords: ['ספרייה', 'ספרים', 'פתח ספר', 'אוצריא', 'library'],
+    keywords: ['ספרייה', 'ספרים', 'פתח ספרייה', 'פתח ספר', 'אוצריא', 'library'],
     icon: 'book',
     shellAction: 'open-library',
   },
@@ -654,7 +1119,7 @@ export const TELL_ME_ACTIONS: readonly TellMeAction[] = [
     title: 'הקלטת מאקרו',
     category: 'מאקרו',
     description: 'התחלה או עצירה של הקלטת רצף פעולות',
-    keywords: ['מאקרו', 'הקלטה', 'הקלטת מאקרו', 'record', 'macro'],
+    keywords: ['מאקרו', 'הקלטה', 'הקלטת מאקרו', 'הקלט מאקרו', 'עצור הקלטה', 'record', 'macro'],
     shortcut: shortcutLabel('macro-record'),
     icon: 'macro',
     shellAction: 'macro-record',
@@ -664,7 +1129,7 @@ export const TELL_ME_ACTIONS: readonly TellMeAction[] = [
     title: 'הפעלת מאקרו אחרון',
     category: 'מאקרו',
     description: 'ביצוע חוזר של המאקרו שהוקלט לאחרונה',
-    keywords: ['הפעל מאקרו', 'נגן מאקרו', 'מאקרו', 'play macro'],
+    keywords: ['הפעל מאקרו', 'נגן מאקרו', 'נגן אחרון', 'מאקרו', 'play macro'],
     shortcut: shortcutLabel('macro-play'),
     icon: 'macro',
     shellAction: 'macro-play',
@@ -679,24 +1144,43 @@ export const TELL_ME_ACTIONS: readonly TellMeAction[] = [
     shellAction: 'macro-manage',
   },
 
+  {
+    id: 'otzaria-book-completion',
+    title: 'השלמה מהספר',
+    category: 'אוצריא',
+    description: 'בזמן הקלדה, אם הטקסט תואם את הספר הפתוח בקורא — Tab משלים מהמקור',
+    keywords: ['השלמה', 'השלמה מהספר', 'השלמה אוטומטית', 'ghost', 'אוצריא', 'ספר', 'קורא'],
+    icon: 'highlight',
+    customAction: 'toggle-book-completion',
+  },
+  {
+    id: 'otzaria-torah-styles',
+    title: 'סגנון תורני',
+    category: 'אוצריא',
+    description: inTab('otzaria', 'סגנון תורני'),
+    keywords: ['סגנון תורני', 'חידוש', 'קושיא', 'תירוץ', 'תורני'],
+    icon: 'bold',
+    ribbonTab: 'otzaria',
+  },
+
   // --- שולחן עורך ---
   {
     id: 'shulchan-first-word',
     title: 'מילה ראשונה מוגדלת ומודגשת',
     category: 'שולחן עורך',
-    description: 'פתיחת לשונית שולחן העורך — הכלי „מילה ראשונה”',
+    description: inTab('shulchan', 'מילה ראשונה'),
     keywords: ['מילה ראשונה', 'שולחן עורך', 'פתיח', 'מודגשת', 'ראשונה'],
-    icon: 'bold',
-    customAction: 'ribbon-shulchan',
+    icon: 'growFont',
+    ribbonTab: 'shulchan',
   },
   {
     id: 'shulchan-unclosed',
     title: 'חיפוש סוגריים לא סגורים',
     category: 'שולחן עורך',
-    description: 'פתיחת לשונית שולחן העורך — הכלי „סוגריים לא סגורים”',
+    description: inTab('shulchan', 'סוגריים לא סגורים'),
     keywords: ['סוגריים', 'סוגריים לא סגורים', 'שולחן עורך', 'הגהה'],
     icon: 'search',
-    customAction: 'ribbon-shulchan',
+    ribbonTab: 'shulchan',
   },
   {
     id: 'shulchan-uniform',
@@ -705,7 +1189,142 @@ export const TELL_ME_ACTIONS: readonly TellMeAction[] = [
     description: 'פתיחת לשונית שולחן העורך — גודל עמוד, שוליים ורוחב טורים אחידים',
     keywords: ['אחידות', 'אחיד', 'שוליים', 'טורים', 'שולחן עורך'],
     icon: 'alignJustify',
-    customAction: 'ribbon-shulchan',
+    ribbonTab: 'shulchan',
+  },
+  {
+    id: 'shulchan-common-errors',
+    title: 'שגיאות מצויות',
+    category: 'שולחן עורך',
+    description: inTab('shulchan', 'שגיאות מצויות'),
+    keywords: ['שגיאות מצויות', 'שגיאות', 'הגהה', 'תיקון', 'שולחן עורך'],
+    icon: 'proofing',
+    ribbonTab: 'shulchan',
+  },
+  {
+    id: 'shulchan-alt-text',
+    title: 'טקסט מתחלף',
+    category: 'שולחן עורך',
+    description: inTab('shulchan', 'טקסט מתחלף'),
+    keywords: ['טקסט מתחלף', 'מתחלף', 'החלפת טקסט', 'שולחן עורך'],
+    icon: 'bold',
+    ribbonTab: 'shulchan',
+  },
+  {
+    id: 'shulchan-paste-fix',
+    title: 'תיקון העתקה',
+    category: 'שולחן עורך',
+    description: inTab('shulchan', 'תיקון העתקה'),
+    keywords: ['תיקון העתקה', 'ניקוי הדבקה', 'הדבקה', 'שולחן עורך'],
+    icon: 'paste',
+    ribbonTab: 'shulchan',
+  },
+  {
+    id: 'shulchan-parens-to-notes',
+    title: 'סוגריים ⟵ הערות',
+    category: 'שולחן עורך',
+    description: inTab('shulchan', 'סוגריים ⟵ הערות'),
+    keywords: ['סוגריים להערות', 'סוגריים ⟵ הערות', 'הערות שוליים', 'שולחן עורך'],
+    icon: 'footnote',
+    ribbonTab: 'shulchan',
+  },
+  {
+    id: 'shulchan-notes-to-parens',
+    title: 'הערות ⟵ סוגריים',
+    category: 'שולחן עורך',
+    description: inTab('shulchan', 'הערות ⟵ סוגריים'),
+    keywords: ['הערות לסוגריים', 'הערות ⟵ סוגריים', 'הערות שוליים', 'שולחן עורך'],
+    icon: 'footnote',
+    ribbonTab: 'shulchan',
+  },
+  {
+    id: 'shulchan-uniform-line-spacing',
+    title: 'מרווח שורות אחיד',
+    category: 'שולחן עורך',
+    description: inTab('shulchan', 'מרווח שורות אחיד'),
+    keywords: ['מרווח שורות אחיד', 'מרווח אחיד', 'ריווח אחיד', 'שולחן עורך'],
+    icon: 'lineSpacing',
+    ribbonTab: 'shulchan',
+  },
+  {
+    id: 'shulchan-clear-line-spacing',
+    title: 'בטל מרווח אחיד',
+    category: 'שולחן עורך',
+    description: inTab('shulchan', 'בטל מרווח אחיד'),
+    keywords: ['בטל מרווח אחיד', 'ביטול מרווח', 'שולחן עורך'],
+    icon: 'lineSpacing',
+    ribbonTab: 'shulchan',
+  },
+  {
+    id: 'shulchan-page-size',
+    title: 'גודל עמוד ושוליים',
+    category: 'שולחן עורך',
+    description: inTab('shulchan', 'גודל עמוד ושוליים'),
+    keywords: ['גודל עמוד ושוליים', 'גודל עמוד', 'שוליים', 'אחידות', 'שולחן עורך'],
+    icon: 'paperSize',
+    ribbonTab: 'shulchan',
+  },
+  {
+    id: 'shulchan-column-width',
+    title: 'רוחב טורים',
+    category: 'שולחן עורך',
+    description: inTab('shulchan', 'רוחב טורים'),
+    keywords: ['רוחב טורים', 'טורים', 'עמודות', 'אחידות', 'שולחן עורך'],
+    icon: 'columns',
+    ribbonTab: 'shulchan',
+  },
+  {
+    id: 'shulchan-shrink',
+    title: 'צמצום מסמך',
+    category: 'שולחן עורך',
+    description: inTab('shulchan', 'צמצום מסמך'),
+    keywords: ['צמצום מסמך', 'צמצום', 'כיווץ', 'עמודים', 'שולחן עורך'],
+    icon: 'shrinkFont',
+    ribbonTab: 'shulchan',
+  },
+  {
+    id: 'shulchan-mark-pages',
+    title: 'סמן עמודים',
+    category: 'שולחן עורך',
+    description: inTab('shulchan', 'סמן עמודים'),
+    keywords: ['סמן עמודים', 'סימון עמודים', 'דפוס', 'שולחן עורך'],
+    icon: 'pageNumber',
+    ribbonTab: 'shulchan',
+  },
+  {
+    id: 'shulchan-check-pages',
+    title: 'בדוק עמודים',
+    category: 'שולחן עורך',
+    description: inTab('shulchan', 'בדוק עמודים'),
+    keywords: ['בדוק עמודים', 'בדיקת עמודים', 'דפוס', 'שולחן עורך'],
+    icon: 'proofing',
+    ribbonTab: 'shulchan',
+  },
+  {
+    id: 'shulchan-clear-marks',
+    title: 'הסר סימון',
+    category: 'שולחן עורך',
+    description: inTab('shulchan', 'הסר סימון'),
+    keywords: ['הסר סימון', 'ניקוי סימון', 'דפוס', 'שולחן עורך'],
+    icon: 'clearFormatting',
+    ribbonTab: 'shulchan',
+  },
+  {
+    id: 'shulchan-crop-marks',
+    title: 'סימני חיתוך',
+    category: 'שולחן עורך',
+    description: inTab('shulchan', 'סימני חיתוך'),
+    keywords: ['סימני חיתוך', 'חיתוך', 'דפוס', 'שולחן עורך'],
+    icon: 'borders',
+    ribbonTab: 'shulchan',
+  },
+  {
+    id: 'shulchan-split-doc',
+    title: 'פירוק מסמך',
+    category: 'שולחן עורך',
+    description: inTab('shulchan', 'פירוק מסמך'),
+    keywords: ['פירוק מסמך', 'פיצול מסמך', 'חלוקה', 'דפוס', 'שולחן עורך'],
+    icon: 'export',
+    ribbonTab: 'shulchan',
   },
 ];
 
@@ -725,12 +1344,29 @@ export const DEFAULT_SUGGESTED_IDS: readonly string[] = [
 ];
 
 /**
- * מנרמל מחרוזת עברית לחיפוש:
- * מסיר ניקוד, מוריד אותיות לועזיות לאותיות קטנות, ומסיר רווחים מיותרים.
+ * אותיות סופיות → הצורה הרגילה שלהן.
+ *
+ * בלי זה התאמת התחילית נשברת בדיוק במקום שבו המשתמש מקליד: „מסמך” אינה
+ * תחילית של „מסמכים”, „עמוד” אינה תחילית של „עמודים במסמך”, ו„טור” אינה
+ * תחילית של „טורים” — אף שלמשתמש אלה אותן מילים. הנרמול חל על השאילתה
+ * ועל האינדקס כאחד, ולכן שני הצדדים נפגשים באותה צורה.
+ */
+const FINAL_LETTERS: Record<string, string> = {
+  'ך': 'כ',
+  'ם': 'מ',
+  'ן': 'נ',
+  'ף': 'פ',
+  'ץ': 'צ',
+};
+
+/**
+ * מנרמל מחרוזת עברית לחיפוש: מסיר ניקוד, משווה אותיות סופיות לרגילות,
+ * מוריד אותיות לועזיות לאותיות קטנות, ומסיר רווחים מיותרים.
  */
 export function normalizeSearchTerm(text: string): string {
   return text
     .replace(/[\u0591-\u05C7]/g, '') // הסרת טעמים וניקוד
+    .replace(/[ךםןףץ]/g, (letter) => FINAL_LETTERS[letter])
     .trim()
     .toLowerCase();
 }
@@ -743,6 +1379,8 @@ interface IndexedAction {
   readonly category: string;
   readonly description: string;
   readonly keywords: readonly string[];
+  /** כל המילים שבמילות המפתח, שטוחות — לחיפוש מילה-מילה. */
+  readonly keywordWords: readonly string[];
 }
 
 interface CatalogIndex {
@@ -763,13 +1401,15 @@ function catalogIndex(actions: readonly TellMeAction[]): CatalogIndex {
 
   const entries = actions.map((action): IndexedAction => {
     const title = normalizeSearchTerm(action.title);
+    const keywords = action.keywords.map(normalizeSearchTerm);
     return {
       action,
       title,
       titleWords: title.split(/\s+/).filter(Boolean),
       category: normalizeSearchTerm(action.category),
       description: action.description ? normalizeSearchTerm(action.description) : '',
-      keywords: action.keywords.map(normalizeSearchTerm),
+      keywords,
+      keywordWords: [...new Set(keywords.flatMap((kw) => kw.split(/\s+/).filter(Boolean)))],
     };
   });
   const byId = new Map(actions.map((action) => [action.id, action]));
@@ -816,11 +1456,28 @@ export function searchTellMeActions(
       score += 60;
     }
 
-    // בדיקת מילים בתוך הכותרת
+    // בדיקת מילים בתוך הכותרת ובתוך מילות המפתח.
+    //
+    // מילות המפתח נבדקו עד עכשיו מול השאילתה **השלמה** בלבד, ולכן „השלמה ספר”
+    // לא מצא את „השלמה מהספר”: אף מילת מפתח אינה מכילה את שתי המילים ברצף.
+    // המשתמש מקליד שתיים-שלוש מילים מתוך שם הפקד, לא את שמו המדויק.
+    //
+    // **וכולן, לא אחת מהן.** מילה אחת קצרה ונפוצה שמתאימה הספיקה כדי לתת ניקוד:
+    // „זזזזז לא קיים” החזיר תוצאות, כי „לא” הוא תחילית של מילה במילות המפתח של
+    // „סוגריים לא סגורים”. מי שמקליד שלוש מילים מתכוון לשלושתן.
+    let matchedWords = 0;
+    let wordScore = 0;
     for (const qWord of queryWords) {
       if (entry.titleWords.some((w) => w.startsWith(qWord))) {
-        score += 35;
+        matchedWords += 1;
+        wordScore += 35;
+      } else if (entry.keywordWords.some((w) => w.startsWith(qWord))) {
+        matchedWords += 1;
+        wordScore += 25;
       }
+    }
+    if (matchedWords === queryWords.length) {
+      score += wordScore;
     }
 
     // מילות מפתח

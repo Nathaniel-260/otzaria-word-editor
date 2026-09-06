@@ -152,6 +152,7 @@ import {
   type TellMeAction,
   type TellMeCustomAction,
 } from './tell-me-actions';
+import type { RibbonTabId } from '../ribbon/tabs';
 import { shortcutLabel, type ShellAction } from '../shortcuts/registry';
 
 /*
@@ -170,6 +171,7 @@ const emit = defineEmits<{
   (e: 'run-command', id: string, payload?: unknown): void;
   (e: 'run-action', action: ShellAction): void;
   (e: 'custom-action', action: TellMeCustomAction): void;
+  (e: 'open-ribbon-tab', tab: RibbonTabId): void;
   (e: 'open-find', initialQuery?: string): void;
 }>();
 
@@ -245,6 +247,8 @@ function executeAction(action: TellMeAction): void {
     emit('run-action', action.shellAction);
   } else if (action.customAction) {
     emit('custom-action', action.customAction);
+  } else if (action.ribbonTab) {
+    emit('open-ribbon-tab', action.ribbonTab);
   }
 }
 

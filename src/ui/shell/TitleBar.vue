@@ -115,6 +115,7 @@
         @run-command="(id, payload) => $emit('run-command', id, payload)"
         @run-action="(action) => $emit('run-action', action)"
         @custom-action="(action) => $emit('custom-action', action)"
+        @open-ribbon-tab="(tab) => $emit('open-ribbon-tab', tab)"
       />
     </div>
 
@@ -133,6 +134,7 @@
 
 <script setup lang="ts">
 import type { TellMeCustomAction } from './tell-me-actions';
+import type { RibbonTabId } from '../ribbon/tabs';
 import { ref, computed } from 'vue';
 import SvgIcon from '../icons/SvgIcon.vue';
 import TellMeSearch from './TellMeSearch.vue';
@@ -187,6 +189,7 @@ defineEmits<{
   (e: 'run-command', id: string, payload?: unknown): void;
   (e: 'run-action', action: ShellAction): void;
   (e: 'custom-action', action: TellMeCustomAction): void;
+  (e: 'open-ribbon-tab', tab: RibbonTabId): void;
   (e: 'toggle-autosave'): void;
   (e: 'update-title', newTitle: string): void;
 }>();

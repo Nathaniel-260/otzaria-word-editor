@@ -35,6 +35,7 @@
         @run-command="onRunCommandFromTellMe"
         @run-action="onRunActionFromTellMe"
         @custom-action="onCustomActionFromTellMe"
+        @open-ribbon-tab="openRibbonTab"
         @toggle-autosave="toggleAutosave"
         @update-title="onTitleUpdate"
       />
@@ -566,6 +567,7 @@ import { enterFullscreen, exitFullscreen, isFullscreen, watchFullscreen } from '
 import SvgIcon from './ui/icons/SvgIcon.vue';
 import { copySelection, cutSelection, pasteFromClipboard, selectWholeDocument } from './engine/clipboard';
 import type { TellMeCustomAction } from './ui/shell/tell-me-actions';
+import type { RibbonTabId } from './ui/ribbon/tabs';
 import {
   DEFAULT_FONT_SIZE_PT,
   fontSizePayload,
@@ -3885,11 +3887,22 @@ function onCustomActionFromTellMe(action: TellMeCustomAction): void {
     case 'clipboard-paste':
       void pasteFromClipboard(activeSuperdoc.value).then((outcome) => reportCommand(outcome, 'clipboard-paste'));
       break;
-    case 'ribbon-shulchan':
-      ribbonTab.value = 'shulchan';
-      ribbonCollapsed.value = false;
+    case 'exit-app':
+      void onExit();
+      break;
+    case 'toggle-book-completion':
+      onToggleBookCompletion();
       break;
   }
+}
+
+/**
+ * „הפקד יושב בלשונית הזאת” מ-Tell Me: פותח את הלשונית ומוודא שהרצועה פרושׂה.
+ * ראו `ribbonTab` ב-`TellMeAction` — למה זה קיים בכלל.
+ */
+function openRibbonTab(tab: RibbonTabId): void {
+  ribbonTab.value = tab;
+  ribbonCollapsed.value = false;
 }
 
 function closeFindDialog(): void {
