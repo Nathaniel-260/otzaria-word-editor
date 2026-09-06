@@ -38,6 +38,17 @@ describe('Enter מפעיל את הכפתור הראשי', () => {
     await harness.wrapper.setProps({ isOpen: true });
     await settle();
 
+    /*
+     * שדה אחד מלא, ובכוונה: „אישור" נעול על דיאלוג שאין בו מה להחיל, ולכן
+     * Enter על דיאלוג ריק **אמור** לא לעשות דבר. מה שנמדד כאן הוא שה-Enter
+     * מגיע לכפתור, ולא שהוא מגיע גם כשאין לו מה לעשות.
+     */
+    const scale = dialog().querySelector<HTMLInputElement>('#fa-scale');
+    if (!scale) throw new Error('אין שדה מתיחה');
+    scale.value = '120';
+    scale.dispatchEvent(new Event('input'));
+    await settle();
+
     const root = dialog();
     expect(document.activeElement).toBe(root);
     enter(root);
@@ -68,8 +79,13 @@ describe('Enter מפעיל את הכפתור הראשי', () => {
     const harness = mountUi(FontAdvancedDialog, { props: { isOpen: true, busy: false } });
     await settle();
 
-    const select = dialog().querySelector('#fa-dstrike');
+    // בורר שפת ההגהה הוא ה-`<select>` היחיד שנשאר בדיאלוג; שאר הבוררים הפכו
+    // לכפתורי מיתוג, ועל כפתור ה-Enter הוא של הכפתור עצמו (SELF_ACTIVATING).
+    const select = dialog().querySelector<HTMLSelectElement>('#fa-lang');
     if (!select) throw new Error('אין בורר');
+    select.value = 'he-IL';
+    select.dispatchEvent(new Event('change'));
+    await settle();
     enter(select);
     await settle();
 

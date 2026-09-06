@@ -298,7 +298,15 @@ try {
    * Enter מהמקלדת, ולא `click()` על הכפתור: המיקוד יושב על שורש הדיאלוג —
    * שם הוא נוחת בפתיחה — וזו בדיוק הנקודה שבה Enter לא עשה כלום קודם.
    * ההוכחה שהוא פעל: הדיאלוג נסגר, כפי ש-`onFontAdvancedSubmit` סוגר אותו.
+   *
+   * שדה אחד מלא לפני כן, ובכוונה: „אישור” נעול על דיאלוג שאין בו מה להחיל
+   * (כפתור שנלחץ, סוגר, ולא עושה דבר הוא „ביטול” בתחפושת), ולכן Enter על
+   * דיאלוג ריק **אמור** לא לעשות דבר. מה שנמדד כאן הוא שה-Enter מגיע
+   * לכפתור — לא שהוא מגיע גם כשאין לו מה לעשות.
    */
+  const filled = await app.dialogFill('fa-scale', '120');
+  if (filled !== 'ok') report.fail('Enter מאשר', `מילוי „מתיחה אופקית” החזיר ${filled}`);
+  await app.sleep(150);
   await app.press('Enter', 'Enter', 13);
   await app.sleep(400);
   const afterEnter = await measure(FONT_ADVANCED);

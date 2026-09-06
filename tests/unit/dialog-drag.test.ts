@@ -14,8 +14,8 @@ import { describe, expect, it } from 'vitest';
 import { dialogDragPosition } from '../../src/composables/dialog-drag';
 
 const VIEWPORT = { width: 1280, height: 800 };
-/** דיאלוג במידות אמיתיות: `.fontadv-dialog` הוא 380 רוחב. */
-const DIALOG = { left: 40, top: 140, width: 380, height: 420 };
+/** דיאלוג במידות אמיתיות: `.fontadv-dialog` הוא 560 רוחב (שתי עמודות). */
+const DIALOG = { left: 40, top: 140, width: 560, height: 420 };
 
 describe('dialogDragPosition', () => {
   it('גרירה בתוך החלון מזיזה בדיוק כמו המצביע', () => {
@@ -58,7 +58,7 @@ describe('dialogDragPosition', () => {
    * הדיאלוג היה קופץ בגובה הפס העליון ברגע שנוגעים בו.
    */
   it('הפרש הקואורדינטות נשמר כשה-CSS אינו נכתב בקואורדינטות חלון', () => {
-    const rect = { left: 40, top: 188, width: 380, height: 300 };
+    const rect = { left: 40, top: 188, width: 560, height: 300 };
     const at = dialogDragPosition({ left: 40, top: 140 }, rect, { x: 10, y: 20 }, VIEWPORT);
     expect(at).toEqual({ left: 50, top: 160 });
   });
