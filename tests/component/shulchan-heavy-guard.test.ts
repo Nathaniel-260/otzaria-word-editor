@@ -54,4 +54,47 @@ describe('שולחן העורך — כל כלי עובר בשומר של הפע�
 
     expect(harness.wrapper.exists()).toBe(true);
   });
+
+  it('מפעילה את הכלי על המסמך שנבחר לפני שהשומר ממתין', async () => {
+    const source = withSelection();
+    const other = withSelection();
+    let entered!: () => void;
+    let release!: () => void;
+    const enteredGuard = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const releaseGuard = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const harness = mountUi(ShulchanTab, {
+      superdoc: source,
+      heavyActionGuard: async (action) => {
+        entered();
+        await releaseGuard;
+        return action();
+      },
+    });
+    await settle();
+
+    const button = harness.wrapper
+      .findAll('button')
+      .find((candidate) => candidate.text().includes('תיקון העתקה'));
+    expect(button, 'הכפתור „תיקון העתקה” חייב להיות בלשונית').toBeDefined();
+
+    const click = button!.trigger('click');
+    await enteredGuard;
+    await harness.setSuperdoc(other);
+    // ה-watch של הלשונית קורא את סימני החיתוך במסמך שנעשה פעיל; מאפסים את
+    // המדידות האלה כדי שהטענה למטה תמדוד רק את הכלי שהמתין בשומר.
+    source.reset();
+    other.reset();
+    release();
+    await click;
+    await settle(6);
+
+    // הצ׳קפוינט של המעטפת ממתין לפני הפעולה; בלי צילום המסמך ב-`runTool`
+    // הלחיצה הייתה מפעילה את „תיקון העתקה” על `other`, הטאב שאליו עברנו.
+    expect(source.ops()).toContain('blocks.list');
+    expect(other.ops()).not.toContain('blocks.list');
+  });
 });

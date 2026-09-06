@@ -381,15 +381,19 @@ function toolTooltip(available: string): string {
  */
 async function runTool<T extends { ok: boolean; message?: string }>(
   commandId: string,
-  action: () => Promise<T>,
+  action: (document: SuperDoc) => Promise<T>,
   summary: (result: T) => string,
 ): Promise<void> {
-  if (inFlight.value || !superdoc.value) return;
+  // הפעולה מתחילה רק אחרי שהשומר כתב checkpoint. בזמן ה-await אפשר לעבור
+  // טאב, ו-`superdoc.value` אז כבר שייך למסמך אחר. מצלם אותו כאן, לפני
+  // השומר, כדי שהעותק, ההקפאה והפעולה עצמה יישארו של אותו מסמך.
+  const document = superdoc.value;
+  if (inFlight.value || !document) return;
   inFlight.value = true;
   try {
     // כל 18 אתרי הקריאה עוברים כאן, ולכן זו נקודת החיבור היחידה שצריך
     // לרצועה — ראו `HEAVY_ACTION_GUARD`.
-    const result = await guardHeavy(action);
+    const result = await guardHeavy(() => action(document));
     if (!result.ok) {
       report({ ok: false, message: result.message ?? 'הפעולה נכשלה', reason: 'shulchan-failed' }, commandId);
       return;
@@ -407,13 +411,13 @@ const typosOpen = shallowRef(false);
 
 function onTyposSubmit(options: TyposOptions): void {
   typosOpen.value = false;
-  void runTool('shulchan-typos', () => runTypos(superdoc.value, options), (result) =>
+  void runTool('shulchan-typos', (document) => runTypos(document, options), (result) =>
     typosSummaryText(result),
   );
 }
 
 function onCopyFix(): void {
-  void runTool('shulchan-copy-fix', () => runCopyFix(superdoc.value), (result) => copyFixSummaryText(result));
+  void runTool('shulchan-copy-fix', (document) => runCopyFix(document), (result) => copyFixSummaryText(result));
 }
 
 const unclosedOpen = shallowRef(false);
@@ -453,7 +457,7 @@ const alternatingOpen = shallowRef(false);
 
 function onAlternatingSubmit(options: AlternatingOptions): void {
   alternatingOpen.value = false;
-  void runTool('shulchan-alternating', () => runTextAlternating(superdoc.value, options), (result) =>
+  void runTool('shulchan-alternating', (document) => runTextAlternating(document, options), (result) =>
     alternatingSummaryText(result),
   );
 }
@@ -473,7 +477,7 @@ function onBracketsTypeChange(value: string): void {
 function onBracketsToNotes(): void {
   void runTool(
     'shulchan-brackets-to-notes',
-    () => convertBracketsToFootnotes(superdoc.value, bracketsType.value),
+    (document) => convertBracketsToFootnotes(document, bracketsType.value),
     (result) => conversionSummaryText(result, 'to-notes'),
   );
 }
@@ -481,7 +485,7 @@ function onBracketsToNotes(): void {
 function onNotesToBrackets(): void {
   void runTool(
     'shulchan-notes-to-brackets',
-    () => convertFootnotesToBrackets(superdoc.value, bracketsType.value),
+    (document) => convertFootnotesToBrackets(document, bracketsType.value),
     (result) => conversionSummaryText(result, 'to-brackets'),
   );
 }
@@ -492,26 +496,26 @@ const firstWordOpen = shallowRef(false);
 
 function onFirstWordApply(options: FirstWordOptions): void {
   firstWordOpen.value = false;
-  void runTool('shulchan-first-word', () => applyFirstWordDesign(superdoc.value, options), (result) =>
+  void runTool('shulchan-first-word', (document) => applyFirstWordDesign(document, options), (result) =>
     firstWordSummaryText(result, false),
   );
 }
 
 function onFirstWordRemove(): void {
   firstWordOpen.value = false;
-  void runTool('shulchan-first-word-remove', () => removeFirstWordDesign(superdoc.value), (result) =>
+  void runTool('shulchan-first-word-remove', (document) => removeFirstWordDesign(document), (result) =>
     firstWordSummaryText(result, true),
   );
 }
 
 function onLineSpacingApply(): void {
-  void runTool('shulchan-line-spacing', () => applyExactLineSpacing(superdoc.value), (result) =>
+  void runTool('shulchan-line-spacing', (document) => applyExactLineSpacing(document), (result) =>
     lineSpacingSummaryText(result, false),
   );
 }
 
 function onLineSpacingRemove(): void {
-  void runTool('shulchan-line-spacing-remove', () => removeExactLineSpacing(superdoc.value), (result) =>
+  void runTool('shulchan-line-spacing-remove', (document) => removeExactLineSpacing(document), (result) =>
     lineSpacingSummaryText(result, true),
   );
 }
@@ -585,7 +589,7 @@ function onUniformSubmit(index: number): void {
   if (uniformMode === 'page') {
     const profile = uniformPageProfiles[index];
     if (!profile) return;
-    void runTool('shulchan-page-uniform', () => applyPageProfile(superdoc.value, profile).then((outcome) => ({
+    void runTool('shulchan-page-uniform', (document) => applyPageProfile(document, profile).then((outcome) => ({
       ok: outcome.ok,
       ...(outcome.ok ? {} : { message: outcome.message }),
     })), () => 'גודל העמוד והשוליים הוחלו על כל המקטעים');
@@ -593,7 +597,7 @@ function onUniformSubmit(index: number): void {
   }
   const profile = uniformColumnsProfiles[index];
   if (!profile) return;
-  void runTool('shulchan-columns-uniform', () => applyColumnsProfile(superdoc.value, profile).then((outcome) => ({
+  void runTool('shulchan-columns-uniform', (document) => applyColumnsProfile(document, profile).then((outcome) => ({
     ok: outcome.ok,
     ...(outcome.ok ? {} : { message: outcome.message }),
   })), () => 'רוחב הטורים הוחל על כל המקטעים מרובי-הטורים');
@@ -608,8 +612,8 @@ const settingsStore: SettingsStore = {
 };
 
 /** ספירת העמודים המצוירים אחרי התיישבות — הקירוב היחיד שיש (ראו doc-reduction.ts). */
-function countPaintedPagesSettled(): Promise<number | null> {
-  return settledPageCount(paintedHost(superdoc.value?.ui as Parameters<typeof paintedHost>[0]));
+function countPaintedPagesSettled(document: SuperDoc): Promise<number | null> {
+  return settledPageCount(paintedHost(document.ui as Parameters<typeof paintedHost>[0]));
 }
 
 const reductionOpen = shallowRef(false);
@@ -621,9 +625,9 @@ function onReductionSubmit(options: DocReductionOptions): void {
   reductionProgress.value = 'מתחיל…';
   void runTool(
     'shulchan-doc-reduction',
-    () =>
-      reduceDocument(superdoc.value, options, {
-        countPages: countPaintedPagesSettled,
+    (document) =>
+      reduceDocument(document, options, {
+        countPages: () => countPaintedPagesSettled(document),
         onProgress: (text) => {
           reductionProgress.value = text;
         },
@@ -646,8 +650,8 @@ const fallbackPageMarking: PageMarkingHandle = {
 const pageMarking = inject(PAGE_MARKING, fallbackPageMarking);
 
 /** מפתח המסמך לזיכרון, או `null` כשאין מסמך. */
-async function currentDocKey(): Promise<string | null> {
-  const blocks = await readShulchanBlocks(superdoc.value);
+async function currentDocKey(document: SuperDoc): Promise<string | null> {
+  const blocks = await readShulchanBlocks(document);
   return blocks === null ? null : documentKey(blocks);
 }
 
@@ -667,8 +671,8 @@ async function measureEdges(): Promise<PageEdgeText[]> {
 function onMarkPages(): void {
   void runTool(
     'shulchan-page-marking',
-    async () => {
-      const docKey = await currentDocKey();
+    async (document) => {
+      const docKey = await currentDocKey(document);
       if (docKey === null) return { ok: false, message: 'סימון העמודים נכשל: אין מסמך פתוח, או שהמסמך אינו תומך בפעולה', pages: 0 };
       const edges = await measureEdges();
       if (edges.length === 0) {
@@ -686,8 +690,8 @@ function onMarkPages(): void {
 function onCheckPages(): void {
   void runTool(
     'shulchan-page-check',
-    async () => {
-      const docKey = await currentDocKey();
+    async (document) => {
+      const docKey = await currentDocKey(document);
       if (docKey === null) return { ok: false, message: 'בדיקת העמודים נכשלה: אין מסמך פתוח, או שהמסמך אינו תומך בפעולה', text: '' };
       const snapshot = await loadPageMarks(settingsStore, docKey);
       if (snapshot === null) return { ok: false, message: 'בדיקת העמודים נכשלה: אין סימון שמור למסמך זה — יש לסמן תחילה', text: '' };
@@ -703,9 +707,9 @@ function onCheckPages(): void {
 function onUnmarkPages(): void {
   void runTool(
     'shulchan-page-unmark',
-    async () => {
+    async (document) => {
       pageMarking.setEnabled(false);
-      const docKey = await currentDocKey();
+      const docKey = await currentDocKey(document);
       if (docKey !== null) await clearPageMarks(settingsStore, docKey);
       return { ok: true };
     },
@@ -730,14 +734,14 @@ async function onOpenCropMarks(): Promise<void> {
 
 function onCropMarksAdd(mm: number): void {
   cropMarksOpen.value = false;
-  void runTool('shulchan-crop-marks-add', () => addCropMarks(superdoc.value, mm, settingsStore), (result) =>
+  void runTool('shulchan-crop-marks-add', (document) => addCropMarks(document, mm, settingsStore), (result) =>
     cropMarksSummaryText(result, false),
   );
 }
 
 function onCropMarksRemove(): void {
   cropMarksOpen.value = false;
-  void runTool('shulchan-crop-marks-remove', () => removeCropMarks(superdoc.value, settingsStore), (result) =>
+  void runTool('shulchan-crop-marks-remove', (document) => removeCropMarks(document, settingsStore), (result) =>
     cropMarksSummaryText(result, true),
   );
 }
@@ -751,7 +755,7 @@ watch(superdoc, (instance) => {
 const openDraft = inject(DRAFT_OPENER, async () => false);
 
 function onSplitNotes(): void {
-  void runTool('shulchan-split-notes', () => splitFootnotesToDocument(superdoc.value, openDraft), (result) =>
+  void runTool('shulchan-split-notes', (document) => splitFootnotesToDocument(document, openDraft), (result) =>
     splitNotesSummaryText(result),
   );
 }
