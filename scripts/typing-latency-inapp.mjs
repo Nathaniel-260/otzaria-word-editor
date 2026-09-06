@@ -150,7 +150,8 @@ await js(`(function () {
 /* ------------------------------ PowerShell: קלט אמיתי ומסך ------------------------------ */
 // שני שלבים: (1) לחיצת עכבר על שורת טקסט גלויה, כדי שפוקוס המקלדת של המערכת יעבור לחלון
 // ה-WebView (Chrome_WidgetWin_0); (2) הקשות SendInput ב-KEYEVENTF_UNICODE עם חותמת זמן
-// לכל הקשה, ועם --screen גם דגימת המסך עד שינוי בשורת הסמן. INPUT הוא 40 בתים ב-x64
+// לכל הקשה, ועם --screen גם דגימת המסך עד שינוי בשורת הסמן (סף 60 פיקסלים: אות עברית
+// קטנה משנה כ-100, הבהוב הסמן כ-30 והוא מסונן בבסיס הכפול). INPUT הוא 40 בתים ב-x64
 // (union של 32) — גודל שגוי מחזיר 0 עם ERROR_INVALID_PARAMETER ואין קלט בכלל.
 const PS = String.raw`
 param([string]$Mode, [int]$Hwnd, [int]$X, [int]$Y, [int]$Count, [int]$GapMs, [int]$RX, [int]$RY, [int]$RW, [int]$RH, [string]$Out)
@@ -224,7 +225,7 @@ if ($Mode -eq 'click') {
     $sent = [N]::SendChar($c)
     $seen = -1; $d = 0
     if ($base -ne $null) {
-      while (($sw.Elapsed.TotalMilliseconds - $t0) -lt 4000) { $cur = Grab; $d = [N]::Diff($base, $cur); $cur.Dispose(); if ($d -ge 120) { $seen = [Math]::Round($sw.Elapsed.TotalMilliseconds - $t0); break } }
+      while (($sw.Elapsed.TotalMilliseconds - $t0) -lt 4000) { $cur = Grab; $d = [N]::Diff($base, $cur); $cur.Dispose(); if ($d -ge 60) { $seen = [Math]::Round($sw.Elapsed.TotalMilliseconds - $t0); break } }
       $base.Dispose()
     }
     [void]$keys.Add(@{ i = $i; ch = [string]$c; t = $epoch; sent = $sent; screenMs = $seen; diff = $d })
@@ -255,13 +256,35 @@ try {
   } else {
     if (CLICK) {
       // שורת טקסט גלויה, בתוך החלון (בחלון צר הדף רחב מהחלון והשורות חורגות ממנו).
+      // שורה בלי קישורים: לחיצה על קישור במסמך פותחת ספר באוצריא ומחליפה לשונית.
       const pt = JSON.parse(
-        await js(`(function(){var W=innerWidth,H=innerHeight;var ls=[...document.querySelectorAll('.superdoc-line')].map(function(l){return l.getBoundingClientRect()}).filter(function(r){return r.height>8&&r.top>120&&r.bottom<H-40&&Math.min(r.right,W)-Math.max(r.left,0)>80;});if(!ls.length)return 'null';var r=ls[Math.min(ls.length-1,2)];var left=Math.max(r.left,0),right=Math.min(r.right,W);return JSON.stringify({x:Math.round((left+right)/2),y:Math.round(r.top+r.height/2)});})()`),
+        await js(`(function(){var W=innerWidth,H=innerHeight;var ls=[...document.querySelectorAll('.superdoc-line')].filter(function(l){return !l.querySelector('a,[href],[data-href],[data-link],[class*=link]');}).map(function(l){return l.getBoundingClientRect()}).filter(function(r){return r.height>8&&r.top>120&&r.bottom<H-40&&Math.min(r.right,W)-Math.max(r.left,0)>80;});if(!ls.length)return 'null';var r=ls[Math.min(ls.length-1,2)];var left=Math.max(r.left,0),right=Math.min(r.right,W);return JSON.stringify({x:Math.round((left+right)/2),y:Math.round(r.top+r.height/2)});})()`),
       );
       if (!pt) throw new Error('לא נמצאה שורת טקסט גלויה ללחיצה');
+      const tabBefore = state.tab;
+      // מיקום החלון נקרא מחדש: אוצריא עשויה להזיז את החלון (שחזור מיקום) גם שניות אחרי הפתיחה.
+      state.screen = JSON.parse(await js('JSON.stringify([screenX, screenY])'));
       const c = runPs({ Mode: 'click', Hwnd: hwnd, X: state.screen[0] + pt.x, Y: state.screen[1] + pt.y, Count: 0, GapMs: 0, RX: 0, RY: 0, RW: 0, RH: 0 });
       console.log(`לחיצה ב-(${state.screen[0] + pt.x},${state.screen[1] + pt.y}): ${c.click}; פוקוס המקלדת: ${c.focusBefore} → ${c.focusAfter}`);
-      await sleep(400);
+      // אחרי הלחיצה: העורך חייב להיות קיים ובאותה לשונית (החלפת לשונית מאפסת את __otzariaEditor לרגע).
+      let settled = false;
+      for (let i = 0; i < 20 && !settled; i++) {
+        await sleep(150);
+        settled = await js(`!!(window.__otzariaEditor && window.__otzariaEditor.container) && ((document.querySelector('.word-doctab.active') || {}).textContent || '').trim() === ${JSON.stringify(tabBefore)}`);
+      }
+      if (!settled) {
+        // הלחיצה החליפה לשונית (או שהעורך נעלם לרגע): חוזרים ללשונית המקורית דרך הדף. פוקוס
+        // המקלדת של המערכת כבר על חלון ה-WebView אחרי הלחיצה, ולכן די בפוקוס JS למשטח ההקלדה.
+        console.log('אחרי הלחיצה הלשונית/העורך לא במקום — חוזרים ללשונית „' + tabBefore + '”');
+        await js(`(function(){var t=Array.prototype.find.call(document.querySelectorAll('.word-doctab'),function(x){return (x.textContent||'').trim()===${JSON.stringify(tabBefore)}}); if(t) t.click(); return !!t;})()`);
+        for (let i = 0; i < 30 && !settled; i++) {
+          await sleep(200);
+          settled = await js(`!!(window.__otzariaEditor && window.__otzariaEditor.container)`);
+        }
+        if (!settled) throw new Error('העורך לא חזר אחרי הלחיצה');
+        await js(`(function(){var c=window.__otzariaEditor.container;var ta=c.querySelector('textarea, [contenteditable="true"]'); if(ta) ta.focus(); return document.activeElement&&document.activeElement.tagName;})()`);
+      }
+      await sleep(250);
     }
     let region = { RX: 0, RY: 0, RW: 0, RH: 0 };
     if (SCREEN) {
@@ -270,6 +293,8 @@ try {
       );
       if (!caret || caret.h <= 0) throw new Error('הסמן לא נמצא — ללחוץ במסמך קודם (בלי --no-click)');
       // שלוש שורות מגובה הסמן, לרוחב החלון: הסמן יורד שורה בזמן ההקלדה.
+      state.screen = JSON.parse(await js('JSON.stringify([screenX, screenY])'));
+      state.inner = JSON.parse(await js('JSON.stringify([innerWidth, innerHeight])'));
       region = { RX: state.screen[0], RY: state.screen[1] + caret.y - 8, RW: state.inner[0], RH: caret.h * 3 + 16 };
       console.log(`אזור המסך הנדגם: (${region.RX},${region.RY}) ${region.RW}×${region.RH}`);
     }
