@@ -43,14 +43,29 @@ async function clickToggle(label: string, times = 1): Promise<void> {
 
 const ADVANCED_BUTTON = tipSelector('מתקדם');
 
+/**
+ * הרכבה של הדיאלוג **על טקסט מסומן** — התנאי המוקדם שלו.
+ *
+ * `format.apply` מקבל SelectionTarget בלבד, ולכן דיאלוג שנפתח על סמן מכווץ
+ * נועל את „אישור" ואומר למה (ראו „בלי בחירה" למטה). זה המצב הרגיל של כל
+ * הבדיקות כאן — מי שפתח את „גופן מתקדם" סימן קודם — ולכן הוא כתוב פעם אחת
+ * בעזר, ולא בכל הרכבה. הבחירה מוצהרת ואינה ברירת מחדל שקטה של הדמה.
+ */
+function mountDialog(props: { isOpen: boolean; busy: boolean }, hasRange = true) {
+  return mountUi(FontAdvancedDialog, {
+    props,
+    superdoc: createSuperdocDouble({ selection: { hasRange, text: hasRange ? 'טקסט מסומן' : '' } }),
+  });
+}
+
 describe('FontAdvancedDialog (בדיד)', () => {
   it('סגור אינו מרונדר בכלל', () => {
-    mountUi(FontAdvancedDialog, { props: { isOpen: false, busy: false } });
+    mountDialog({ isOpen: false, busy: false });
     expect(document.querySelector('.fontadv-dialog')).toBeNull();
   });
 
   it('פתיחה ממקדת את שורש הדיאלוג', async () => {
-    const harness = mountUi(FontAdvancedDialog, { props: { isOpen: false, busy: false } });
+    const harness = mountDialog({ isOpen: false, busy: false });
     await harness.wrapper.setProps({ isOpen: true });
     await settle();
 
@@ -58,22 +73,35 @@ describe('FontAdvancedDialog (בדיד)', () => {
   });
 
   it('Escape סוגר', async () => {
-    const harness = mountUi(FontAdvancedDialog, { props: { isOpen: true, busy: false } });
+    const harness = mountDialog({ isOpen: true, busy: false });
     await settle();
 
     await teleported('.fontadv-dialog').trigger('keydown.esc');
     expect(harness.wrapper.emitted('close')).toHaveLength(1);
   });
 
-  it('busy מנטרל „אישור" ומשאיר „ביטול" חי', () => {
-    mountUi(FontAdvancedDialog, { props: { isOpen: true, busy: true } });
+  /**
+   * שדה מלא לפני הבדיקה, ובכוונה: על דיאלוג ריק „אישור” נעול ממילא מפני שאין
+   * מה להחיל, ובלי המילוי הבדיקה הייתה עוברת גם אילו `busy` לא היה נבדק כלל —
+   * כלומר השומר היחיד מפני שליחה כפולה היה נשאר בלי כיסוי.
+   */
+  it('busy מנטרל „אישור" גם כשיש מה להחיל, ומשאיר „ביטול" חי', async () => {
+    const harness = mountDialog({ isOpen: true, busy: false });
+    await settle();
+
+    await teleported('#fa-scale').setValue('120');
+    await settle();
+    expect(footerButton('אישור').attributes('disabled')).toBeUndefined();
+
+    await harness.wrapper.setProps({ busy: true });
+    await settle();
 
     expect(footerButton('אישור').attributes('disabled')).toBeDefined();
     expect(footerButton('ביטול').attributes('disabled')).toBeUndefined();
   });
 
   it('שדות לא-ממולאים אינם נשלחים — רק מה שהמשתמש מילא', async () => {
-    const harness = mountUi(FontAdvancedDialog, { props: { isOpen: true, busy: false } });
+    const harness = mountDialog({ isOpen: true, busy: false });
     await settle();
 
     await teleported('#fa-scale').setValue('150');
@@ -93,7 +121,7 @@ describe('FontAdvancedDialog (בדיד)', () => {
    * המסומן. ההנמקה ב-ui/panels/common/TriToggle.vue.
    */
   it('הכפתור מחזורי: דלוק, כבוי, ואז אינו נשלח כלל', async () => {
-    const harness = mountUi(FontAdvancedDialog, { props: { isOpen: true, busy: false } });
+    const harness = mountDialog({ isOpen: true, busy: false });
     await settle();
 
     await clickToggle('צל');
@@ -120,7 +148,7 @@ describe('FontAdvancedDialog (בדיד)', () => {
    * תקלה בדיוק שתוקנה ב„ברירות מחדל למסמך".
    */
   it('„אישור" נעול עד שיש מה להחיל, והמונה אומר כמה', async () => {
-    mountUi(FontAdvancedDialog, { props: { isOpen: true, busy: false } });
+    mountDialog({ isOpen: true, busy: false });
     await settle();
 
     expect(footerButton('אישור').attributes('disabled')).toBeDefined();
@@ -135,8 +163,255 @@ describe('FontAdvancedDialog (בדיד)', () => {
     expect(teleported('.fa-count').text()).toBe('2 שינויים יוחלו');
   });
 
+  /**
+   * הפער שדווח: המשתמש מילא את הדיאלוג, לחץ „אישור", והכול נעלם — הדיאלוג
+   * נסגר ולקח איתו את מה שהוקלד, ובשורת המצב הופיע „יש לסמן טקסט תחילה".
+   * התשובה הזאת קיימת מהרגע הראשון (`format.apply` מקבל SelectionTarget
+   * בלבד), ולכן היא נאמרת בפתיחה.
+   */
+  it('בלי טקסט מסומן — נאמר בפתיחה, ו„אישור" נעול גם אחרי שמולא שדה', async () => {
+    mountDialog({ isOpen: true, busy: false }, false);
+    await settle();
+
+    expect(teleported('.fa-notice-blocking').text()).toContain('מסומן');
+    expect(teleported('.fa-count').text()).toBe('אין טקסט מסומן');
+
+    await teleported('#fa-scale').setValue('120');
+    await settle();
+
+    // מולא שדה — ובכל זאת נעול, ובכל זאת אותה הודעה: אין על מה להחיל.
+    expect(footerButton('אישור').attributes('disabled')).toBeDefined();
+    expect(teleported('.fa-count').text()).toBe('אין טקסט מסומן');
+  });
+
+  /**
+   * הדיאלוג אינו חוסם את המסמך — אין מאחוריו רקע, והוא נגרר בכוונה. תשובה
+   * שנקראה פעם אחת בפתיחה הייתה מתיישנת בשני הכיוונים, ושניהם מחזירים בדיוק
+   * את הבאג שדווח: „אישור” פתוח על בחירה שהתכווצה, או נעול לנצח אחרי שהמשתמש
+   * סימן טקסט כמו שההודעה ביקשה.
+   */
+  it('סימון טקסט בזמן שהדיאלוג פתוח פותח את „אישור" בלי לסגור דבר', async () => {
+    const superdoc = createSuperdocDouble({ selection: { hasRange: false } });
+    mountUi(FontAdvancedDialog, { props: { isOpen: true, busy: false }, superdoc });
+    await settle();
+
+    expect(teleported('.fa-notice-blocking').text()).toContain('מסומן');
+    await teleported('#fa-scale').setValue('120');
+    await settle();
+    expect(footerButton('אישור').attributes('disabled')).toBeDefined();
+
+    // המשתמש סימן טקסט במסמך שמאחורי הדיאלוג.
+    superdoc.setSelection({ hasRange: true, text: 'טקסט מסומן' });
+    document.dispatchEvent(new Event('selectionchange'));
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    await settle();
+
+    expect(document.querySelector('.fa-notice-blocking')).toBeNull();
+    // והשדה שמולא לפני הסימון עדיין שם — לא נדרשה סגירה, ולכן לא אבד דבר.
+    expect(footerButton('אישור').attributes('disabled')).toBeUndefined();
+    expect(teleported('.fa-count').text()).toBe('שינוי אחד יוחל');
+  });
+
+  it('בחירה שהתכווצה בזמן שהדיאלוג פתוח נועלת את „אישור" מחדש', async () => {
+    const superdoc = createSuperdocDouble({ selection: { hasRange: true, text: 'טקסט' } });
+    mountUi(FontAdvancedDialog, { props: { isOpen: true, busy: false }, superdoc });
+    await settle();
+
+    await teleported('#fa-scale').setValue('120');
+    await settle();
+    expect(footerButton('אישור').attributes('disabled')).toBeUndefined();
+
+    superdoc.setSelection({ hasRange: false });
+    document.dispatchEvent(new Event('selectionchange'));
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    await settle();
+
+    expect(footerButton('אישור').attributes('disabled')).toBeDefined();
+    expect(teleported('.fa-notice-blocking').text()).toContain('מסומן');
+  });
+
+  /**
+   * הפס נקרא פעם אחת לסבב, ולכן בלי שחרור מפורש הוא היה נשאר על מה שנקרא
+   * ברגע הפתיחה — בדיוק בזרימה שההודעה החוסמת מבקשת, ומתחת לכיתוב שמתחייב
+   * „כך ייראה ב-Word”.
+   */
+  it('פס התצוגה המקדימה נקרא מחדש כשהבחירה משתנה תחת דיאלוג פתוח', async () => {
+    const superdoc = createSuperdocDouble({ selection: { hasRange: false } });
+    mountUi(FontAdvancedDialog, { props: { isOpen: true, busy: false }, superdoc });
+    await settle();
+
+    // בלי בחירה הפס מציג את פסוק ברירת המחדל.
+    expect(teleported('.fa-preview-strip').text()).not.toBe('טקסט חדש');
+
+    superdoc.setSelection({ hasRange: true, text: 'טקסט חדש' });
+    document.dispatchEvent(new Event('selectionchange'));
+    await new Promise((resolve) => setTimeout(resolve, 260));
+    await settle();
+
+    expect(teleported('.fa-preview-strip').text()).toBe('טקסט חדש');
+  });
+
+  /**
+   * `selectionchange` אינו נורה כשהמסמך עצמו מתחלף — סגירת לשונית או מעבר
+   * ביניהן. בלי המעקב על המסמך „אישור” היה נשאר פתוח על תשובה של מסמך שכבר
+   * אינו על המסך.
+   */
+  it('החלפת המסמך תחת דיאלוג פתוח נקראת מחדש', async () => {
+    const withRange = createSuperdocDouble({ selection: { hasRange: true, text: 'טקסט' } });
+    const harness = mountUi(FontAdvancedDialog, {
+      props: { isOpen: true, busy: false },
+      superdoc: withRange,
+    });
+    await settle();
+    await teleported('#fa-scale').setValue('120');
+    await settle();
+    expect(footerButton('אישור').attributes('disabled')).toBeUndefined();
+
+    harness.setSuperdoc(createSuperdocDouble({ selection: { hasRange: false } }));
+    await settle();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await settle();
+
+    expect(footerButton('אישור').attributes('disabled')).toBeDefined();
+    expect(teleported('.fa-notice-blocking').text()).toContain('מסומן');
+  });
+
+  /**
+   * „אין מסמך” אינו „אין יכולת”. בין מסמכים, ובזמן טעינה, המסמך הפעיל הוא
+   * `null` — והודעה שאומרת שם „אינו זמין בגרסה זו של המנוע” היא טענה שקרית
+   * על הבניין.
+   */
+  it('בלי מסמך פעיל — אין הודעה חוסמת ואין טענה על המנוע', async () => {
+    const harness = mountUi(FontAdvancedDialog, {
+      props: { isOpen: true, busy: false },
+      superdoc: createSuperdocDouble({ selection: { hasRange: true } }),
+    });
+    await settle();
+
+    harness.setSuperdoc(null);
+    await settle();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await settle();
+
+    expect(document.querySelector('.fa-notice-blocking')).toBeNull();
+  });
+
+  /**
+   * `HomeTab` מצהיר („הפתיחה מסבירה”) שכפתור „מתקדם” נשאר לחיץ גם בלי
+   * Document API. בלי המצב הזה הדיאלוג היה נפתח שקט, נמלא, ונכשל אחרי הסגירה.
+   */
+  it('בלי format.apply — נאמר בפתיחה שהפעולה אינה זמינה', async () => {
+    mountUi(FontAdvancedDialog, {
+      props: { isOpen: true, busy: false },
+      superdoc: createSuperdocDouble({ missing: ['format.apply'], selection: { hasRange: true } }),
+    });
+    await settle();
+
+    expect(teleported('.fa-notice-blocking').text()).toContain('אינו זמין');
+    expect(teleported('.fa-count').text()).toBe('אינו זמין');
+    await teleported('#fa-scale').setValue('120');
+    await settle();
+    expect(footerButton('אישור').attributes('disabled')).toBeDefined();
+  });
+
+  it('עם טקסט מסומן אין הודעה חוסמת, ו„אישור" נפתח כרגיל', async () => {
+    mountDialog({ isOpen: true, busy: false });
+    await settle();
+
+    expect(document.querySelector('.fa-notice-blocking')).toBeNull();
+
+    await teleported('#fa-scale').setValue('120');
+    await settle();
+    expect(footerButton('אישור').attributes('disabled')).toBeUndefined();
+  });
+
+  /**
+   * ההודעה על מה שהעורך אינו מצייר.
+   *
+   * היא אינה קישוט: זה בדיוק המקרה שדווח — „בחרתי עיצוב, לחצתי, לא קרה
+   * כלום". ארבעת האפקטים נכתבים ל-docx ומוצגים ב-Word, והעורך אינו מצייר
+   * אותם (נמדד; docs/engine-gaps.md, והתיקון ב-superdoc/docx-editor#3983).
+   * מה שנבדק כאן הוא החיווט; שההודעה **תואמת את הפיקסלים** נמדד ב-Chrome
+   * אמיתי ב-scripts/qa/font-advanced-qa.mjs, וזו הבדיקה שתיפול כשהמנוע
+   * יתוקן ותאמר להוריד אפקט מהרשימה.
+   */
+  it('אפקט שאינו מצויר אומר את זה, בשמו, ורק כשהוא נבחר', async () => {
+    mountDialog({ isOpen: true, busy: false });
+    await settle();
+
+    expect(document.querySelector('.fontadv-dialog .fa-notice:not(.fa-notice-blocking)')).toBeNull();
+
+    await clickToggle('צל');
+    const notice = teleported('.fontadv-dialog .fa-notice:not(.fa-notice-blocking)').text();
+    expect(notice).toContain('צל');
+    expect(notice).toContain('נשמר בקובץ');
+    expect(notice).toContain('אינו מצייר');
+    // מה שלא נבחר אינו מוזכר — ההודעה מתארת את הבחירה, לא את הפקד.
+    expect(notice).not.toContain('חרוט');
+
+    await clickToggle('חרוט');
+    expect(teleported('.fontadv-dialog .fa-notice:not(.fa-notice-blocking)').text()).toContain('חרוט');
+
+    // „כבוי" אינו „דלוק": ההודעה נעלמת יחד עם הבחירה.
+    await clickToggle('צל', 2);
+    await clickToggle('חרוט', 2);
+    expect(document.querySelector('.fontadv-dialog .fa-notice:not(.fa-notice-blocking)')).toBeNull();
+  });
+
+  /**
+   * שם הפקד הוא נתון, ולכן כל נוסח שמטה פועל אחריו נשען על ידיעת מין ומספר
+   * שאין כאן: „מסגרת לתו” היא נקבה ו„צל” זכר. הכותרת מוציאה את השמות מהמשפט.
+   */
+  it('ההודעה מונה את מה שנבחר, בשמו, בלי להטות פועל אחריו', async () => {
+    mountDialog({ isOpen: true, busy: false });
+    await settle();
+
+    await clickToggle('צל');
+    const single = teleported('.fontadv-dialog .fa-notice:not(.fa-notice-blocking)').text();
+    expect(single).toContain('נשמר בקובץ');
+    expect(single).toContain('צל');
+
+    await clickToggle('חרוט');
+    const both = teleported('.fontadv-dialog .fa-notice:not(.fa-notice-blocking)').text();
+    expect(both).toContain('צל, חרוט');
+  });
+
+  /**
+   * הרשימה אינה „האפקטים” אלא כל מה שנמדד כנכתב-ואינו-מצויר. „קרנינג” ו„גודל”
+   * של הגופן המורכב יושבים בשתי העמודות האחרות, ושתיקה עליהם הייתה חצי אמת על
+   * אותו דיאלוג בדיוק.
+   */
+  it('גם פקדים שאינם אפקטים נמנים — קרנינג, וגודל הגופן המורכב', async () => {
+    mountDialog({ isOpen: true, busy: false });
+    await settle();
+
+    await teleported('#fa-kerning').setValue('12');
+    await settle();
+    expect(teleported('.fontadv-dialog .fa-notice:not(.fa-notice-blocking)').text()).toContain('קרנינג');
+
+    await teleported('#fa-sizecs').setValue('24');
+    await settle();
+    const both = teleported('.fontadv-dialog .fa-notice:not(.fa-notice-blocking)').text();
+    expect(both).toContain('גודל הגופן המורכב');
+    // ומה שכן מצויר אינו נכנס לרשימה, גם כשהוא מולא באותו רגע.
+    await teleported('#fa-scale').setValue('120');
+    await settle();
+    expect(teleported('.fontadv-dialog .fa-notice:not(.fa-notice-blocking)').text()).not.toContain('מתיחה');
+  });
+
+  it('„קו חוצה כפול" מקבל נוסח משלו — הוא מצויר, אך כקו בודד', async () => {
+    mountDialog({ isOpen: true, busy: false });
+    await settle();
+
+    await clickToggle('קו חוצה כפול');
+    const notice = teleported('.fontadv-dialog .fa-notice:not(.fa-notice-blocking)').text();
+    expect(notice).toContain('בודד');
+    // ואינו נמנה עם ארבעת ה„אינם מצוירים": הוא כן מצויר.
+    expect(notice).not.toContain('אינו מצייר');
+  });
+
   it('„נקה הכל" מחזיר כל שדה ל„ללא שינוי"', async () => {
-    mountUi(FontAdvancedDialog, { props: { isOpen: true, busy: false } });
+    mountDialog({ isOpen: true, busy: false });
     await settle();
 
     await teleported('#fa-scale').setValue('120');
@@ -159,7 +434,7 @@ describe('FontAdvancedDialog (בדיד)', () => {
    * לרשימה של הרצועה — הרשימה שהמעטפת מזריקה — ולא לרשימה מקומית.
    */
   it('בורר הגופן שואב מרשימת הגופנים, והבחירה יוצאת ב-patch', async () => {
-    const harness = mountUi(FontAdvancedDialog, { props: { isOpen: true, busy: false } });
+    const harness = mountDialog({ isOpen: true, busy: false });
     await settle();
 
     const input = document.querySelector<HTMLInputElement>('.fontadv-dialog .fa-combo input');
@@ -209,7 +484,7 @@ describe('FontAdvancedDialog (בדיד)', () => {
    * כלומר גם ההתחלה וגם הסוף נעלמו. התקרה ההפוכה היא מה שמחזיר אותו פנימה.
    */
   it('„מתיחה אופקית" מקבלת תקרת רוחב הפוכה, אחרת הפס נחתך משני הצדדים', async () => {
-    mountUi(FontAdvancedDialog, { props: { isOpen: true, busy: false } });
+    mountDialog({ isOpen: true, busy: false });
     await settle();
 
     await teleported('#fa-scale').setValue('140');
@@ -222,7 +497,7 @@ describe('FontAdvancedDialog (בדיד)', () => {
   });
 
   it('„טקסט מוסתר = כן" מציג אזהרה גלויה', async () => {
-    mountUi(FontAdvancedDialog, { props: { isOpen: true, busy: false } });
+    mountDialog({ isOpen: true, busy: false });
     await settle();
 
     expect(document.querySelector('.fa-warning')).toBeNull();
@@ -288,5 +563,48 @@ describe('„גופן מתקדם" בלשונית „בית"', () => {
     await harness.wrapper.find(ADVANCED_BUTTON).trigger('click');
     await settle();
     expect(document.querySelector('.fontadv-dialog')).not.toBeNull();
+  });
+
+  /**
+   * החצי השני של הבאג שדווח.
+   *
+   * הדיאלוג היה נסגר **לפני** שההחלה יצאה לדרך, ולכן כשלון השאיר הודעה בשורת
+   * המצב ולקח איתו את שבעה-עשר השדות שמולאו. לא רק שלא קרה דבר — גם לא נשאר
+   * מה לתקן ולנסות שוב.
+   */
+  it('כשל משאיר את הדיאלוג פתוח, עם הערכים שהוקלדו', async () => {
+    const superdoc = createSuperdocDouble({
+      failures: { 'format.apply': { code: 'PRECONDITION_FAILED' } },
+      selection: { hasRange: true },
+    });
+    const harness = mountUi(HomeTab, { superdoc });
+    await settle();
+    await harness.wrapper.find(ADVANCED_BUTTON).trigger('click');
+    await settle();
+
+    await teleported('#fa-scale').setValue('200');
+    await settle();
+    await footerButton('אישור').trigger('click');
+    await settle();
+
+    expect(document.querySelector('.fontadv-dialog')).not.toBeNull();
+    expect((teleported('#fa-scale').element as HTMLInputElement).value).toBe('200');
+    expect(teleported('.fa-count').text()).toBe('שינוי אחד יוחל');
+  });
+
+  it('הצלחה סוגרת אותו, כמו קודם', async () => {
+    const harness = mountUi(HomeTab, {
+      superdoc: createSuperdocDouble({ selection: { hasRange: true } }),
+    });
+    await settle();
+    await harness.wrapper.find(ADVANCED_BUTTON).trigger('click');
+    await settle();
+
+    await teleported('#fa-scale').setValue('125');
+    await settle();
+    await footerButton('אישור').trigger('click');
+    await settle();
+
+    expect(document.querySelector('.fontadv-dialog')).toBeNull();
   });
 });

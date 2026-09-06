@@ -170,6 +170,51 @@ async function readSelectionTarget(
   return { target: info.selectionTarget };
 }
 
+/**
+ * האם יש **טווח** מסומן — השאלה שהדיאלוג שואל בפתיחה.
+ *
+ * `applyFontAdvanced` שואל אותה ממילא, אבל רק ברגע ה„אישור” — כלומר אחרי
+ * שהמשתמש כבר מילא שבעה-עשר פקדים. הוא היה מקבל אז „יש לסמן טקסט תחילה”
+ * בשורת המצב, על דיאלוג שכבר נסגר ולקח איתו את כל מה שהוקלד. הפקד הזה מזיז
+ * את אותה תשובה לפתיחה, וזו אותה קריאה בדיוק — `readSelectionTarget` —
+ * ולא שאלה שנייה שעלולה לענות אחרת.
+ *
+ * ארבע תשובות ולא שתיים, מפני שהן מובילות לשלוש הודעות שונות:
+ *
+ * - `'range'` — יש טווח. הדיאלוג פתוח לעסקים.
+ * - `'none'` — הסמן מכווץ. זה מה שהמשתמש יכול לתקן בעצמו, ולכן זו ההודעה
+ *   היחידה שאומרת לו מה לעשות.
+ * - `'unavailable'` — יש מסמך, ואין לו `format.apply`. הדיאלוג היה נפתח,
+ *   מתמלא, ונכשל ב„אינו זמין בגרסה זו”; ההצהרה ב-HomeTab („הפתיחה מסבירה”)
+ *   מחייבת שזה ייאמר בפתיחה ולא אחריה.
+ * - `'unknown'` — אין לדעת: אין מסמך פעיל (טעינה, או מעבר בין מסמכים), אין
+ *   `selection.current`, או שהקריאה לא ענתה. **אינו נועל דבר.** השער האמיתי
+ *   נשאר ב-`applyFontAdvanced` ממילא, וזו הקדמה של ההודעה בלבד — לא שער שני.
+ *
+ * קריאה שזרקה נספרת כ-`'none'` ולא כ-`'unknown'`, וזה מכוון: `applyFontAdvanced`
+ * עובר דרך אותה `readSelectionTarget` ויענה בדיוק אותו דבר, ולכן „פתוח לעסקים”
+ * היה הבטחה שתיכשל מיד. והדיאלוג שואל שוב בכל שינוי בחירה, כך שתשובה חולפת
+ * מתקנת את עצמה.
+ */
+export type SelectionReadiness = 'range' | 'none' | 'unavailable' | 'unknown';
+
+export async function hasRangeSelection(host: FontAdvancedTarget): Promise<SelectionReadiness> {
+  const doc = docOf(host);
+  /*
+   * „אין מסמך” אינו „אין יכולת”. `docOf` מחזיר `null` גם בין מסמכים וגם בזמן
+   * טעינה (App.vue מאפס את המסמך הפעיל ואז פותח), ודיאלוג שהיה אומר שם „אינו
+   * זמין בגרסה זו של המנוע” היה מוסר טענה שקרית על הבניין. `unavailable` שמור
+   * למשטח שיש לו מסמך ואין לו `format.apply` — הפער שהוא באמת מתאר.
+   */
+  if (!doc) return 'unknown';
+  if (typeof doc.format?.apply !== 'function') return 'unavailable';
+
+  const outcome = await readSelectionTarget(doc);
+  if (!('failure' in outcome)) return 'range';
+  const { failure } = outcome;
+  return !failure.ok && failure.reason === 'range-selection-required' ? 'none' : 'unknown';
+}
+
 /** מאמתת מספר שלם בתחום. `null` = פסול. */
 function intIn(value: number, min: number, max: number): number | null {
   return typeof value === 'number' && Number.isInteger(value) && value >= min && value <= max

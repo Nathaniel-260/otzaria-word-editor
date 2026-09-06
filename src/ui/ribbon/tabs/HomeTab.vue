@@ -1084,13 +1084,28 @@ function onOpenFontAdvanced(): void {
   fontAdvOpen.value = true;
 }
 
+/**
+ * הדיאלוג נסגר על **הצלחה בלבד**.
+ *
+ * הוא היה נסגר קודם לפני שההחלה בכלל יצאה לדרך, ולכן כשלון — „יש לסמן טקסט
+ * תחילה” הוא השכיח — השאיר הודעה בשורת המצב ולקח איתו את שבעה-עשר השדות
+ * שהמשתמש מילא. זה חצי מהבאג שדווח („בחרתי, לחצתי, ולא קרה כלום”): לא רק
+ * שלא קרה דבר, אלא שגם לא נשאר מה לתקן ולנסות שוב.
+ *
+ * הדיאלוג אינו חוסם את המסמך והוא שואל את מצב הבחירה מחדש בכל שינוי
+ * (FontAdvancedDialog.vue), ולכן „נשאר פתוח” אינו מבוי סתום: המשתמש מסמן
+ * טקסט, „אישור” נפתח, והוא לוחץ שוב על אותם ערכים.
+ *
+ * `busy` בזמן הריצה, כדי שהכפתור לא יישלח פעמיים על אותה בחירה.
+ */
 function onFontAdvancedSubmit(patch: FontAdvancedPatch): void {
-  fontAdvOpen.value = false;
   if (fontAdvInFlight.value) return;
   fontAdvInFlight.value = true;
   void (async () => {
     try {
-      report(await applyFontAdvanced(superdoc.value, patch), 'font-advanced');
+      const outcome = await applyFontAdvanced(superdoc.value, patch);
+      report(outcome, 'font-advanced');
+      if (outcome.ok) fontAdvOpen.value = false;
     } finally {
       fontAdvInFlight.value = false;
     }

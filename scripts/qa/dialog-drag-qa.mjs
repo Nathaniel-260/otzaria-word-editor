@@ -180,6 +180,27 @@ try {
   // „פסקה” קורא את עיצוב הפסקה לפני שהוא נפתח, ובלי סמן הקריאה נכשלת.
   await app.caret(0);
 
+  /*
+   * וטקסט **מסומן**, לא רק סמן.
+   *
+   * „גופן מתקדם” נועל את „אישור” כשאין בחירה, ואומר למה — העיצוב חל על מה
+   * שמסומן, ו-`format.apply` מקבל SelectionTarget בלבד (engine/font-advanced.ts).
+   * בלי הבחירה כאן, צעד 5 („Enter מאשר”) היה נמדד על כפתור שנעול מסיבה שאין
+   * לה שום קשר ל-Enter — כלומר שער אדום שאינו מצביע על מה שנשבר. נמדד: זה
+   * בדיוק מה שקרה.
+   *
+   * המסמך שנפתח בשער ריק, ולכן צריך גם מה לסמן. ארבעה תווים אינם משנים אף
+   * מדידת גאומטריה שלמטה — כולן על הדיאלוג, לא על העמוד.
+   */
+  await app.type('abcd', 30);
+  await app.press('Home', 'Home', 36);
+  await app.sleep(120);
+  for (let i = 0; i < 4; i += 1) {
+    await app.press('ArrowRight', 'ArrowRight', 39, 8);
+    await app.sleep(30);
+  }
+  await app.sleep(500);
+
   /**
    * שלוש המדידות של הפוטר, לדיאלוג אחד.
    *
@@ -310,10 +331,22 @@ try {
   await app.press('Enter', 'Enter', 13);
   await app.sleep(400);
   const afterEnter = await measure(FONT_ADVANCED);
-  if (afterEnter.found) {
-    report.fail('Enter מאשר', 'הדיאלוג נשאר פתוח');
-  } else {
+  if (!afterEnter.found) {
     report.pass('Enter מאשר', 'הדיאלוג נסגר, כמו לחיצה על „אישור”');
+  } else {
+    /*
+     * הדיאלוג נסגר על **הצלחה בלבד** (ראו HomeTab.onFontAdvancedSubmit), ולכן
+     * „נשאר פתוח” מערבב שתי טענות שונות: „ה-Enter לא הגיע לכפתור” ו„ההחלה
+     * נכשלה”. שורת המצב היא מה שמפריד ביניהן, ובלעדיה השער היה מאשים את
+     * ה-Enter בכשלון שאין לו שום קשר אליו — אותה טעות ייחוס שהבחירה שנוספה
+     * בראש הקובץ נועדה למנוע.
+     */
+    const status = await app.status();
+    if (status && status.error && status.text) {
+      report.fail('Enter מאשר', `ההחלה נכשלה, ולא ה-Enter: „${status.text}”`);
+    } else {
+      report.fail('Enter מאשר', 'הדיאלוג נשאר פתוח, ושורת המצב שקטה — ה-Enter לא הגיע לכפתור');
+    }
   }
 
   /* -------------------------------------------------------------- */

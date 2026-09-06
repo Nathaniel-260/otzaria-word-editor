@@ -8,6 +8,7 @@
       role="dialog"
       aria-modal="true"
       :aria-label="DIALOG_TITLE"
+      :aria-describedby="blockingText === '' ? undefined : 'fa-blocking-note'"
       tabindex="-1"
       @keydown.esc.stop="$emit('close')"
       @keydown.enter="onDialogEnter"
@@ -30,6 +31,21 @@
       </div>
 
       <div class="fa-body">
+        <!--
+          מה שחוסם נאמר **בפתיחה**, ולא אחרי שהדיאלוג נסגר ובלע את מה שהוקלד.
+          שתי סיבות שונות ושתי הודעות שונות — ראו `hasRangeSelection`
+          ב-engine/font-advanced.ts. `aria-describedby` מהשורש: „אישור” נעול
+          אינו ממוקד, ולכן הנימוק לא היה מגיע למי שקורא מסך דרכו.
+        -->
+        <p
+          v-if="blockingText !== ''"
+          id="fa-blocking-note"
+          class="fa-notice fa-notice-blocking"
+          role="alert"
+        >
+          {{ blockingText }}
+        </p>
+
         <div class="fa-columns">
           <!-- עמודה א׳: מספרים ואפקטים -->
           <div class="fa-column">
@@ -225,6 +241,20 @@
               :style="previewStyle"
             >{{ sampleText }}</span>
           </div>
+
+          <!--
+            מתחת לפס, ולא בתוך אחד המקטעים: הרשימה חוצה את שתי העמודות
+            (אפקטים, קרנינג, ומחסנית הכתב המורכב), והיא ההמשך הישיר של מה
+            שהכיתוב מעליה מתחייב עליו — „כך ייראה ב-Word”, ומה שהמסך לא
+            יראה. מופיעה רק כשנבחר משהו מהרשימה: הערת קבע היא הערה שלא נקראת.
+          -->
+          <p
+            v-if="undrawnText !== ''"
+            class="fa-notice"
+            role="note"
+          >
+            {{ undrawnText }}
+          </p>
         </div>
 
         <p
@@ -311,9 +341,9 @@
  * פס שמתיימר להיות Word הוא פס שמשקר, ופס שאומר „כך ייראה” על אפקט שלא
  * צויר גרוע מאין פס.
  */
-import { computed, inject, nextTick, reactive, ref, shallowRef, watch, type CSSProperties } from 'vue';
+import { computed, inject, nextTick, onBeforeUnmount, reactive, ref, shallowRef, watch, type CSSProperties } from 'vue';
 import type { SuperDoc } from 'superdoc';
-import type { FontAdvancedPatch } from '../../engine/font-advanced';
+import { hasRangeSelection, type FontAdvancedPatch, type SelectionReadiness } from '../../engine/font-advanced';
 import { ACTIVE_SUPERDOC } from '../../engine/document-api';
 import { readSelectionText } from '../../engine/font-preview';
 import { createFontSample } from '../../composables/font-sample';
@@ -331,7 +361,28 @@ const { onDialogEnter } = useDialogDefaultAction();
 const DIALOG_TITLE = 'גופן מתקדם';
 const INVALID_HINT = 'הערכים שהוקלדו אינם בטווח המותר — עיין בשדות המסומנים.';
 const UNCHANGED = 'ללא שינוי';
-const PREVIEW_CAPTION = 'תצוגה מקדימה (קירוב)';
+/*
+ * „ב-Word” ולא „תצוגה מקדימה” סתם — וזו הכרעה שנגזרת מהמדידה.
+ *
+ * הפס מצייר קירוב CSS גם לארבעת האפקטים שהעורך **אינו** מצייר (ראו `UNDRAWN`).
+ * כיתוב שאומר „תצוגה מקדימה” לבדו הבטיח מראה שהמסמך שמתחתיו לעולם לא יקבל,
+ * וההודעה שנוספה מתחת לרשת הכפתורים סותרת אותו במפורש.
+ *
+ * ההכרעה היא **לא** להוריד מהפס את האפקטים האלה: הוא המקום היחיד בעורך שבו
+ * אפשר לראות מה נבחר, וזה שווה יותר דווקא כשהעורך בולע אותם. מה שמשתנה הוא
+ * מה שהכיתוב מתחייב עליו — הקובץ, ולא המסך.
+ */
+const PREVIEW_CAPTION = 'כך ייראה ב-Word (קירוב)';
+/*
+ * „סמן טקסט במסמך” ולא „סגור, סמן, ופתח שוב”: הדיאלוג אינו חוסם את המסמך,
+ * והוא שואל שוב בכל שינוי בחירה (ראו `watchSelection`) — כלומר הסימון פותח את
+ * „אישור” בלי לסגור דבר, והשדות שכבר מולאו נשארים. עצה שמורה לסגור הייתה
+ * אומרת למשתמש לזרוק את עבודתו בדיוק כשאין בכך צורך.
+ */
+const NO_SELECTION_HINT = 'העיצוב חל על הטקסט המסומן — סמן טקסט במסמך, והכפתור ייפתח.';
+const NO_SELECTION_COUNT = 'אין טקסט מסומן';
+const UNAVAILABLE_HINT = 'עיצוב גופן מתקדם אינו זמין בגרסה זו של המנוע.';
+const UNAVAILABLE_COUNT = 'אינו זמין';
 
 const props = defineProps<{
   isOpen: boolean;
@@ -443,6 +494,166 @@ const sample = createFontSample({ read: () => readSelectionText(superdoc.value) 
 /** ref ברמה העליונה — כך התבנית כותבת `sampleText` ולא `sample.text.value`. */
 const sampleText = sample.text;
 
+/**
+ * מצב הבחירה — ההנמקה של ארבעת הערכים ב-`hasRangeSelection`.
+ *
+ * `'unknown'` **אינו** נועל דבר: דיאלוג שננעל על תשובה שטרם הגיעה גרוע
+ * מדיאלוג שמסתמך על השער שב-`applyFontAdvanced` ממילא.
+ */
+const selectionState = shallowRef<SelectionReadiness>('unknown');
+
+/** מונה סבבים — תשובה שאיחרה שייכת לסבב שלה, לא לזה שעל המסך. */
+let selectionRound = 0;
+
+async function probeSelection(): Promise<void> {
+  selectionRound += 1;
+  const mine = selectionRound;
+  const previous = selectionState.value;
+  const answer = await hasRangeSelection(superdoc.value);
+  if (mine !== selectionRound) return;
+  selectionState.value = answer;
+
+  /*
+   * ופס התצוגה המקדימה נקרא מחדש יחד איתו.
+   *
+   * `createFontSample` הוא תפס לסבב אחד — `begin()` שני באותו סבב אינו עושה
+   * דבר — ולכן בלי השחרור כאן הפס היה נשאר על מה שנקרא ברגע הפתיחה. בדיוק
+   * בזרימה שההודעה החוסמת מבקשת („סמן טקסט במסמך, והכפתור ייפתח”) הכפתור היה
+   * נפתח והפס היה ממשיך להראות את פסוק ברירת המחדל, מתחת לכיתוב שמתחייב „כך
+   * ייראה ב-Word”. וגם בכיוון השני: נפתח על בחירה א׳, המשתמש סימן ב׳, והפס
+   * מראה את א׳ בזמן שההחלה תיפול על ב׳.
+   */
+  if (answer !== previous) {
+    sample.end();
+    sample.begin();
+  }
+}
+
+/**
+ * ונשאל **שוב** בכל שינוי בחירה, לא רק בפתיחה.
+ *
+ * זה אינו ליטוש: הדיאלוג הזה אינו חוסם את המסמך — אין מאחוריו רקע, הוא נגרר
+ * בכוונה, והמשתמש יכול ללחוץ בטקסט בזמן שהוא פתוח. תשובה שנקראה פעם אחת
+ * בפתיחה הייתה מתיישנת בשני הכיוונים, ושניהם מחזירים בדיוק את הבאג שדווח:
+ *
+ * 1. נפתח **עם** בחירה, המשתמש הזיז את הדיאלוג ולחץ בטקסט כדי לקרוא אותו —
+ *    הבחירה התכווצה, „אישור” עדיין פתוח, וההחלה נכשלת אחרי שהדיאלוג נסגר.
+ * 2. נפתח **בלי** בחירה, המשתמש סימן טקסט כמו שההודעה ביקשה — והכפתור
+ *    היה נשאר נעול לנצח על הודעה שהוא רואה שאינה נכונה עוד.
+ *
+ * `selectionchange` ולא מאזין על העורך: זה האירוע שהדפדפן מפעיל על כל שינוי
+ * בבחירת המסמך, בעכבר ובמקלדת כאחד, ואינו מחייב להכיר את פנים המנוע.
+ * ההשהיה מקבצת את הרצף שגרירה מייצרת — עשרות אירועים לגרירה אחת — לקריאה
+ * אחת בסופה.
+ */
+const SELECTION_SETTLE_MS = 120;
+let selectionTimer: ReturnType<typeof setTimeout> | null = null;
+
+function onSelectionChanged(): void {
+  if (selectionTimer !== null) clearTimeout(selectionTimer);
+  selectionTimer = setTimeout(() => {
+    selectionTimer = null;
+    void probeSelection();
+  }, SELECTION_SETTLE_MS);
+}
+
+function watchSelection(on: boolean): void {
+  if (selectionTimer !== null) {
+    clearTimeout(selectionTimer);
+    selectionTimer = null;
+  }
+  if (on) document.addEventListener('selectionchange', onSelectionChanged);
+  else document.removeEventListener('selectionchange', onSelectionChanged);
+}
+
+// מאזין שנשאר אחרי שהרכיב פורק הוא דליפה, וגם קריאה למנוע שכבר אינו שלנו.
+onBeforeUnmount(() => watchSelection(false));
+
+/*
+ * והמסמך עצמו יכול להתחלף מתחת לדיאלוג הפתוח.
+ *
+ * `selectionchange` אינו נורה על מעבר בין לשוניות מסמך ולא על סגירת מסמך —
+ * `App.vue` מאפס את המסמך הפעיל ופותח אחר, ואין בזה שינוי בבחירת ה-DOM. בלי
+ * המעקב הזה „אישור” היה נשאר פתוח על תשובה ששייכת למסמך שכבר אינו על המסך,
+ * וכל לחיצה הייתה נכשלת. זו אותה התיישנות שהמאזין נועד לסגור, בכניסה אחרת.
+ */
+watch(superdoc, () => {
+  if (props.isOpen) void probeSelection();
+});
+
+/**
+ * מה שהמנוע **כותב ואינו מצייר** — נמדד ב-Chrome אמיתי על ה-dist הארוז:
+ * ה-docx יוצא קנוני, ו-`.superdoc-text-run` על המסך אינו משתנה. המדידה
+ * הושוותה גם בצילום מסך בייט-בבייט, פקד אחד לכל ריצה — ארבעת האפקטים,
+ * הקרנינג, וכל מחסנית הכתב המורכב. הרישום המלא ב-docs/engine-gaps.md.
+ *
+ * **הרשימה אינה „האפקטים”, אלא כל מה שנמדד.** גרסה קודמת מנתה את ארבעת
+ * האפקטים בלבד, ובדיוק לידם ישבו „קרנינג” ו„גודל” של הגופן המורכב שגם הם
+ * אינם מצוירים — כלומר הודעה שאמרה חצי אמת על אותה רשת פקדים.
+ *
+ * מה **שאינו** כאן, ולמה: `dstrike` מצויר (רק כקו בודד — נאמר בנפרד),
+ * `rtl` מגיע ל-DOM כ-`dir="rtl"`, ומתיחה/ריווח/הרמה/טקסט מוסתר מצוירים
+ * במלואם.
+ */
+const UNDRAWN_EFFECTS: readonly EffectKey[] = [
+  'outline',
+  'shadow',
+  'emboss',
+  'imprint',
+  // מחסנית הכתב המורכב: המנוע מרנדר מ-`w:b`/`w:i` בלבד. הפער מתועד למעלה
+  // בקובץ הפערים, ותיקון שלו נשלח כ-superdoc/docx-editor#3958.
+  'boldCs',
+  'italicCs',
+  'complexScript',
+];
+
+/** פקדים שאינם כפתורי מיתוג, ולכן אינם ב-`effects` — אותה מדידה בדיוק. */
+const UNDRAWN_FIELDS: readonly { chosen: () => boolean; label: string }[] = [
+  { chosen: () => patch.value.kerningPt !== undefined, label: 'קרנינג' },
+  { chosen: () => patch.value.fontSizeCsPt !== undefined, label: 'גודל הגופן המורכב' },
+  { chosen: () => patch.value.complexFontName !== undefined, label: 'גופן מורכב' },
+];
+
+const ALL_EFFECT_LABELS = new Map<EffectKey, string>(
+  [...EFFECTS, ...COMPLEX].map((effect) => [effect.key, effect.label]),
+);
+
+const undrawnChosen = computed(() => [
+  ...UNDRAWN_EFFECTS.filter((key) => effects[key] === 'yes').map(
+    (key) => ALL_EFFECT_LABELS.get(key) ?? key,
+  ),
+  ...UNDRAWN_FIELDS.filter((field) => field.chosen()).map((field) => field.label),
+]);
+
+/**
+ * ההודעה מופיעה רק על מה שנבחר **עכשיו**, ובלשון „ייכתב ולא יצויר”.
+ *
+ * הערת קבע שיושבת מתחת לרשת הכפתורים היא הערה שנקראת פעם אחת ואז נעלמת
+ * מהעין; מה שמופיע ברגע שנבחר האפקט הוא מה שנקרא. וזו אינה אזהרה על תקלה —
+ * הקובץ ייצא נכון, ו-Word יראה בדיוק את מה שנבחר.
+ */
+const undrawnText = computed(() => {
+  const parts: string[] = [];
+  const chosen = undrawnChosen.value;
+  if (chosen.length > 0) {
+    const names = chosen.join(', ');
+    /*
+     * ניסוח שאינו נזקק להתאמת מין ומספר, ובכוונה.
+     *
+     * „ייכתב … אותו” נכון ל„צל” ושגוי ל„מסגרת לתו”, שהיא נקבה; „ייכתבו …
+     * אותם” שגוי לפקד יחיד. שם הפקד הוא נתון — הוא נקרא מרשימת התוויות —
+     * ולכן כל נוסח שמטה פועל אחריו נשען על ידיעה שאין כאן. הכותרת „מה שנבחר
+     * …:” מוציאה את השמות מהמשפט, ומשאירה משפט אחד שנכון לכל הצירופים.
+     *
+     * ‏„נשמר בקובץ” ולא „יוצג ב-Word”: זה נכון גם ל„כתב מורכב” (`w:cs`), שאין
+     * לו מראה משלו כלל — הוא מסמן לקורא איך לקרוא את שאר המאפיינים.
+     */
+    parts.push(`מה שנבחר נשמר בקובץ, והעורך אינו מצייר אותו: ${names}.`);
+  }
+  if (effects.dstrike === 'yes') parts.push('הקו החוצה הכפול מצויר בעורך כקו בודד.');
+  return parts.join(' ');
+});
+
 function resetFields(): void {
   charScale.value = '';
   letterSpacing.value = '';
@@ -461,12 +672,17 @@ watch(
       // הפס משחרר את מה שקרא: פתיחה הבאה תקרא את הבחירה **שלה**, ולא תציג
       // לרגע את הטקסט של הפעם הקודמת.
       sample.end();
+      watchSelection(false);
       return;
     }
     // איפוס בכל פתיחה: הדיאלוג אינו זוכר ערכים בין פעמים, כדי שאישור
     // לא-מכוון לא יחזור על עיצוב של פעם קודמת על בחירה חדשה.
     resetFields();
     sample.begin();
+    // „לא ידוע” עד שהתשובה מגיעה: פתיחה אינה יורשת את מצב הפתיחה הקודמת.
+    selectionState.value = 'unknown';
+    void probeSelection();
+    watchSelection(true);
 
     await nextTick();
     rootRef.value?.focus();
@@ -575,9 +791,22 @@ const changeCount = computed(() => Object.keys(patch.value).length);
  * „אישור" נעול על דיאלוג שאין בו מה להחיל — אותה הכרעה שכבר תוקנה
  * ב„ברירות מחדל למסמך": כפתור שנלחץ וסוגר בלי לעשות דבר הוא „ביטול" בתחפושת.
  */
-const canSubmit = computed(() => !showError.value && changeCount.value > 0);
+/** מה שחוסם את הדיאלוג כולו, אם יש כזה. `''` = אין. */
+const blockingText = computed(() => {
+  if (selectionState.value === 'none') return NO_SELECTION_HINT;
+  if (selectionState.value === 'unavailable') return UNAVAILABLE_HINT;
+  return '';
+});
+
+const canSubmit = computed(
+  () => !showError.value && changeCount.value > 0 && blockingText.value === '',
+);
 
 const countText = computed(() => {
+  // הסיבה החוסמת גוברת על מניין השינויים: כשאין על מה להחיל, מספר השדות
+  // שמולאו אינו המידע שחסר.
+  if (selectionState.value === 'none') return NO_SELECTION_COUNT;
+  if (selectionState.value === 'unavailable') return UNAVAILABLE_COUNT;
   if (changeCount.value === 0) return 'אין מה להחיל';
   return changeCount.value === 1 ? 'שינוי אחד יוחל' : `${changeCount.value} שינויים יוחלו`;
 });
@@ -773,6 +1002,31 @@ function onSubmit(): void {
   font-size: 10.5px;
   line-height: 1.4;
   color: var(--color-error);
+}
+
+/*
+  „הערה” ולא „אזהרה”, ולכן לא `--color-error`: שום דבר לא נכשל — הקובץ ייצא
+  נכון, וזה מה שהעורך אינו מצייר. הצבע המשני הוא מה שמפריד בין השתיים,
+  ו-`.fa-warning` שמעליה נשארת אדומה מפני שהיא כן על תוכן שנעלם.
+*/
+.fa-notice {
+  margin: 0;
+  font-size: 10.5px;
+  line-height: 1.4;
+  color: var(--color-on-surface-variant);
+}
+
+/*
+  זו כן חוסמת — „אישור” נעול מאחוריה — ולכן היא נושאת את משקל האזהרה, ויושבת
+  בראש הגוף ולא בתוך אחד המקטעים: היא נכונה לדיאלוג כולו.
+*/
+.fa-notice-blocking {
+  padding: 6px 8px;
+  border: 1px solid var(--color-outline-variant);
+  border-radius: var(--radius-xs);
+  background: var(--color-surface-container-high);
+  color: var(--color-on-surface);
+  font-size: 11px;
 }
 
 .fa-group {

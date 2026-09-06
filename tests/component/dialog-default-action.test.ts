@@ -14,7 +14,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import FontAdvancedDialog from '../../src/ui/panels/FontAdvancedDialog.vue';
 import CitationSourceDialog from '../../src/ui/panels/CitationSourceDialog.vue';
-import { autoUnmount, mountUi, settle } from './harness';
+import { autoUnmount, createSuperdocDouble, mountUi, settle } from './harness';
 
 autoUnmount();
 
@@ -30,11 +30,27 @@ function enter(target: EventTarget, init: KeyboardEventInit = {}): void {
   target.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, ...init }));
 }
 
+/**
+ * „גופן מתקדם" **על טקסט מסומן** — התנאי המוקדם שלו.
+ *
+ * הדיאלוג נועל את „אישור" כשאין בחירה ואומר למה (ראו
+ * `hasRangeSelection` ב-engine/font-advanced.ts), ו-Enter הוא לחיצה על
+ * הכפתור הראשי — כלומר בלי בחירה גם הוא, בצדק, אינו עושה דבר. מה שנמדד כאן
+ * הוא המנגנון של Enter, ולכן הבחירה מוצהרת ואינה נסמכת על ברירת המחדל של
+ * הדמה.
+ */
+function mountFontAdvanced(props: { isOpen: boolean; busy: boolean }) {
+  return mountUi(FontAdvancedDialog, {
+    props,
+    superdoc: createSuperdocDouble({ selection: { hasRange: true, text: 'טקסט מסומן' } }),
+  });
+}
+
 describe('Enter מפעיל את הכפתור הראשי', () => {
   it('Enter על שורש הדיאלוג — המצב שבו הוא נפתח — שולח', async () => {
     // פתיחה אמיתית ולא הרכבה פתוחה: זה מה שמעביר את המיקוד לשורש, וזו הנקודה
     // שבה Enter לא עשה כלום קודם — אף שדה אינו ממוקד.
-    const harness = mountUi(FontAdvancedDialog, { props: { isOpen: false, busy: false } });
+    const harness = mountFontAdvanced({ isOpen: false, busy: false });
     await harness.wrapper.setProps({ isOpen: true });
     await settle();
 
@@ -58,7 +74,7 @@ describe('Enter מפעיל את הכפתור הראשי', () => {
   });
 
   it('Enter בשדה מספר שולח פעם אחת בלבד', async () => {
-    const harness = mountUi(FontAdvancedDialog, { props: { isOpen: true, busy: false } });
+    const harness = mountFontAdvanced({ isOpen: true, busy: false });
     await settle();
 
     const input = dialog().querySelector<HTMLInputElement>('#fa-scale');
@@ -76,7 +92,7 @@ describe('Enter מפעיל את הכפתור הראשי', () => {
   });
 
   it('Enter בבורר שולח — שם לא היה מטפל כלל', async () => {
-    const harness = mountUi(FontAdvancedDialog, { props: { isOpen: true, busy: false } });
+    const harness = mountFontAdvanced({ isOpen: true, busy: false });
     await settle();
 
     // בורר שפת ההגהה הוא ה-`<select>` היחיד שנשאר בדיאלוג; שאר הבוררים הפכו
@@ -93,7 +109,7 @@ describe('Enter מפעיל את הכפתור הראשי', () => {
   });
 
   it('כפתור ממוקד שומר את ה-Enter של עצמו', async () => {
-    const harness = mountUi(FontAdvancedDialog, { props: { isOpen: true, busy: false } });
+    const harness = mountFontAdvanced({ isOpen: true, busy: false });
     await settle();
 
     const cancel = [...dialog().querySelectorAll('.fa-footer .fa-btn')].find(
@@ -107,7 +123,7 @@ describe('Enter מפעיל את הכפתור הראשי', () => {
   });
 
   it('כפתור ראשי מנוטרל (busy) אינו נלחץ', async () => {
-    const harness = mountUi(FontAdvancedDialog, { props: { isOpen: true, busy: true } });
+    const harness = mountFontAdvanced({ isOpen: true, busy: true });
     await settle();
 
     enter(dialog());
@@ -117,7 +133,7 @@ describe('Enter מפעיל את הכפתור הראשי', () => {
   });
 
   it('Shift+Enter ו-Ctrl+Enter אינם אישור', async () => {
-    const harness = mountUi(FontAdvancedDialog, { props: { isOpen: true, busy: false } });
+    const harness = mountFontAdvanced({ isOpen: true, busy: false });
     await settle();
 
     enter(dialog(), { shiftKey: true });
@@ -133,7 +149,7 @@ describe('Enter מפעיל את הכפתור הראשי', () => {
    * לסגור את הדיאלוג באמצע מילה.
    */
   it('Enter של IME אינו אישור', async () => {
-    const harness = mountUi(FontAdvancedDialog, { props: { isOpen: true, busy: false } });
+    const harness = mountFontAdvanced({ isOpen: true, busy: false });
     await settle();
 
     enter(dialog(), { isComposing: true } as KeyboardEventInit);
