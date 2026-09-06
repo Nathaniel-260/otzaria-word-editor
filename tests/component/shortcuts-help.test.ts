@@ -82,6 +82,9 @@ vi.mock('../../src/sessions/save-coordinator', async (importOriginal) => ({
       };
     },
     markDirty: () => {},
+    markRestored: () => {},
+    hold: () => () => {},
+    isHeld: false,
     setAutosaveEnabled: () => {},
     adoptTarget: () => {},
     reset: () => {

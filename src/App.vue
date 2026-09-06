@@ -341,6 +341,7 @@ import {
   STATUS_NOTIFIER,
   DOCUMENT_GENERATION,
   FONT_MEMORY,
+  HEAVY_ACTION_GUARD,
   FONT_OPTIONS,
   READOUT_SELECTION,
   SPELLCHECK,
@@ -423,7 +424,12 @@ import {
   type LoadAttempt,
   type LoadSnapshot,
 } from './sessions/document-load';
-import { createSaveCoordinator, type SaveCoordinator, type SaveSnapshot } from './sessions/save-coordinator';
+import {
+  HEAVY_ACTION_HOLD_MAX_MS,
+  createSaveCoordinator,
+  type SaveCoordinator,
+  type SaveSnapshot,
+} from './sessions/save-coordinator';
 import { createEditor, type EditorSession } from './engine/create-editor';
 import { ACTIVE_MACROS, installMacros, type MacrosHandle } from './engine/macros';
 import { registerShulchanTools } from './engine/shulchan/tools-registration';
@@ -537,6 +543,7 @@ import {
   documentViewFor,
   draftAgeLabel,
   draftPathFor,
+  draftSlotPaths,
   emptyDocumentEntry,
   normalizeSession,
   sessionForEntry,
@@ -1475,10 +1482,10 @@ function initSessionKeeper(getSession: () => DocumentSession, id: DocumentSessio
     },
     // ההמרה מ-`Blob` כאן ולא ב-host/workspace.ts: כאן יושב מי שמחזיק את
     // המנוע, ושם יושב מי שמדבר עם הגשר.
-    writeDraft: async (content) =>
-      writeWorkspaceBytes(draftPathFor(id), new Uint8Array(await content.arrayBuffer())),
-    removeDraft: () => deleteWorkspaceEntry(draftPathFor(id)),
-    draftPath: draftPathFor(id),
+    writeDraft: async (content, path) =>
+      writeWorkspaceBytes(path, new Uint8Array(await content.arrayBuffer())),
+    removeDraft: (path) => deleteWorkspaceEntry(path),
+    draftPaths: draftSlotPaths(id),
     readCaret: (previous) => {
       const active = getSession().swap.current;
       if (!active) return Promise.resolve(null);
@@ -1486,6 +1493,7 @@ function initSessionKeeper(getSession: () => DocumentSession, id: DocumentSessio
     },
     isDirty: () => getSession().save.snapshot.isDirty === true,
     isSaving: () => getSession().save.snapshot.isSaving === true,
+    isHeld: () => getSession().save.isHeld === true,
     settleSave: () => getSession().save.settled(),
     // שגיאה ולא הודעה רגילה: זו אינה התקדמות אלא רשת ביטחון שאינה פרושה,
     // והמשתמש צריך לדעת שעליו לשמור בעצמו. רק כשהטאב פעיל — אזהרה על טאב
@@ -1501,6 +1509,35 @@ function initSessionKeeper(getSession: () => DocumentSession, id: DocumentSessio
     },
   });
 }
+
+/**
+ * עוטף פעולה כבדה על המסמך.
+ *
+ * הסדר אינו מקרי: **ההקפאה נלקחת לפני הצ׳קפוינט**, כדי שסבב autosave שכבר
+ * ממתין לא ייכנס לפעולה בזמן שהייצוא רץ. אחריה נכתב העותק, ורק אז מורצת
+ * הפעולה עצמה.
+ *
+ * השחרור ב-`finally`, ובנוסף תקרת זמן: לולאה סינכרונית תקועה אינה הבעיה —
+ * כשהיא נגמרת ה-`finally` רץ — אלא הבטחה שאינה נפתרת, וזו הייתה משאירה את
+ * המסמך בלי שמירה אוטומטית לצמיתות. ראו `SaveCoordinator.hold`.
+ *
+ * מה שההקפאה **אינה** חוסמת, ונכון שלא: Ctrl+S ו„שמור לפני שפותחים אחר”.
+ * `saveNow` אינו מסתכל על שום מתג, כי המשתמש ביקש לשמור במפורש.
+ */
+async function guardHeavyAction<T>(action: () => Promise<T>): Promise<T> {
+  const session = activeSession.value;
+  if (!session) return action();
+
+  const release = session.save.hold({ maxMs: HEAVY_ACTION_HOLD_MAX_MS });
+  try {
+    await session.keeper.checkpoint();
+    return await action();
+  } finally {
+    release();
+  }
+}
+
+provide(HEAVY_ACTION_GUARD, guardHeavyAction);
 
 /**
  * הרשומה הנשמרת בין הפעלות היא של **כל** הטאבים הפתוחים, לא רק של מי שכתב —
@@ -2161,7 +2198,7 @@ async function openDocumentInto(
       // כלי „שולחן העורך” נרשמים על ה-kit של המסמך הזה: מופיעים בדיאלוג
       // ניהול המאקרו וניתנים לקיצור מקלדת. הרישום פר-התקנה — ה-kit נבנה
       // מחדש בכל פתיחה, ואין צורך בביטול.
-      registerShulchanTools(macros.kit, () => editor.superdoc, (text) => setStatus(text));
+      registerShulchanTools(macros.kit, () => editor.superdoc, (text) => setStatus(text), guardHeavyAction);
       activeMacros.value = macros;
       editor.onDispose(() => {
         if (activeMacros.value === macros) activeMacros.value = null;
@@ -2568,7 +2605,12 @@ async function openDocumentInto(
   if (options.draft) {
     // מה שנפתח אינו מה שבדיסק. בלי הסימון הזה „שמור” היה חושב שאין מה לשמור,
     // והפס העליון היה מציג „נשמר” על עבודה שאינה שמורה בשום מקום.
-    save?.markDirty();
+    //
+    // `markRestored` ולא `markDirty`: השני היה מתזמן autosave, וזה היה כותב
+    // את הטיוטה לקובץ שתיים וחצי שניות אחרי העלייה — כלומר הפעולה שהפילה את
+    // התוסף חוזרת לקובץ מעצמה, לפני שהמשתמש הספיק לקרוא את שורת המצב.
+    // ההקפאה משתחררת בעריכה הראשונה או ב„שמור”.
+    save?.markRestored();
   }
 
   // האזנה למצב Undo/Redo
@@ -3978,7 +4020,25 @@ async function onReplaceText(replacement: string): Promise<void> {
 async function onReplaceAllText(replacement: string): Promise<void> {
   // נקרא לפני הפעולה: אחריה קבוצת ההתאמות כבר התרוקנה.
   const matches = searchAdapter?.getState().total ?? 0;
-  reportReplace(await searchAdapter?.replaceAll(replacement), `הוחלפו ${matches} מופעים`);
+  const adapter = searchAdapter;
+  if (!adapter) {
+    reportReplace(undefined, '');
+    return;
+  }
+  // פעולה אחת שמשנה את כל המסמך, ואין ממנה דרך חזרה אחרי קריסה — ראו
+  // `guardHeavyAction`.
+  //
+  // ה-`catch` אינו הגנה יתרה: `mutateAll` (engine/search.ts) עטוף ב-`finally`
+  // בלי `catch`, ולכן זריקה ממנו עולה עד לכאן — והמסלול הזה נקרא מהתבנית ואיש
+  // אינו ממתין לו, כלומר היא הייתה הופכת לדחייה לא-מטופלת והמשתמש לא היה
+  // רואה דבר. עכשיו הוא רואה כשל.
+  let outcome: Awaited<ReturnType<typeof adapter.replaceAll>> | undefined;
+  try {
+    outcome = await guardHeavyAction(() => adapter.replaceAll(replacement));
+  } catch (error) {
+    console.warn('[otzaria-word] „החלף הכל” נכשל', error);
+  }
+  reportReplace(outcome, `הוחלפו ${matches} מופעים`);
 }
 
 /**
@@ -5032,7 +5092,9 @@ async function recoverDraft(
     return null;
   }
 
-  return readDraftBytes(entry?.draft?.path ?? draftPathFor(documentId));
+  // הנפילה-לאחור על המשבצת הראשונה היא זהירות בלבד: ההחלטה `restore`/`ask`
+  // כבר דורשת רשומת טיוטה, ולכן `entry.draft.path` תמיד קיים כאן.
+  return readDraftBytes(entry?.draft?.path ?? draftPathFor(documentId, 'a'));
 }
 
 /** בייטי הטיוטה כ-Blob שאפשר למסור למנוע, או `null` כשאין. */

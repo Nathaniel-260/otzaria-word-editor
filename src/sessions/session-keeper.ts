@@ -27,11 +27,19 @@
  *
  * ## מה מוחק את הטיוטה — ומה **אינו** מוחק
  *
- * שני מסלולים בלבד, ושניהם אומרים „העבודה הזאת כבר לא נחוצה”:
+ * מסלול אחד בלבד: **`discardDraft`**, כלומר המשתמש אמר במפורש „למחוק את
+ * השינויים”. בקובץ הזה מוחקים רק כשנאמר.
  *
- * - **`noteSaved`** — העבודה בדיסק. מרגע זה הטיוטה אינה מוסיפה דבר, והשארתה
- *   פירושה שהפתיחה הבאה תעדיף עותק ישן על פני הקובץ עצמו.
- * - **`discardDraft`** — המשתמש אמר במפורש „למחוק את השינויים”.
+ * **`noteSaved` אינו מוחק — הוא מעביר.** הטיוטה עוברת ל-`previousDraft`,
+ * ונשארת שם עד השמירה הבאה. עד כאן היא נמחקה, בהיגיון נכון כשלעצמו — העבודה
+ * בדיסק, והשארתה הייתה גורמת לפתיחה הבאה להעדיף עותק ישן על הקובץ עצמו. מה
+ * שההיגיון הזה פספס: כשמה שהגיע לדיסק הוא בדיוק מה שהמשתמש רצה לבטל, לא
+ * נשאר בשום מקום עותק של „לפני”. ההפרדה לשני שדות היא מה שמאפשר את שניהם —
+ * `draft` ממשיך לומר „יש עבודה לא-שמורה”, ו-`previousDraft` מחזיק את העותק
+ * בלי להתחזות לעבודה.
+ *
+ * ההעברה חינם מפני שיש שתי משבצות: ב-SDK אין `move`, וב„נתיב אחד” היא הייתה
+ * קריאה, כתיבה ומחיקה של כל המסמך בכל שמירה. ראו `nextDraftPath`.
  *
  * **כתיבה שנכשלה אינה מוחקת.** טיוטה שעל הדיסק מאוחרת תמיד לשמירה האחרונה,
  * ולכן היא מחזיקה עבודה שאין בקובץ. „ישנה” היא ביחס למה שעל המסך, לא ביחס
@@ -55,6 +63,7 @@ import type { WorkspaceWrite } from '../host/workspace';
 import {
   activeEntry,
   emptySessionWithId,
+  nextDraftPath,
   withActiveEntry,
   type DocumentSessionId,
   type SessionDocument,
@@ -90,12 +99,15 @@ export interface SessionKeeperDeps {
   persist: (state: SessionState) => Promise<void>;
   /** מייצא את המסמך הפעיל, לטיוטה. */
   exportDocument: () => Promise<Blob>;
-  /** כותבת את הטיוטה, ומדווחת אם לא נכתבה ומדוע. */
-  writeDraft: (content: Blob) => Promise<WorkspaceWrite>;
-  /** מוחקת את קובץ הטיוטה. */
-  removeDraft: () => Promise<void>;
-  /** הנתיב שהטיוטה נכתבת אליו. נשמר ברשומה כדי שהפתיחה הבאה תדע איפה לחפש. */
-  draftPath: string;
+  /** כותבת את הטיוטה לנתיב שנבחר, ומדווחת אם לא נכתבה ומדוע. */
+  writeDraft: (content: Blob, path: string) => Promise<WorkspaceWrite>;
+  /** מוחקת קובץ טיוטה. */
+  removeDraft: (path: string) => Promise<void>;
+  /**
+   * שתי המשבצות שהטיוטה נכתבת אליהן (`draftSlotPaths`). הבחירה ביניהן
+   * היא של המודול הזה ולא של הקורא — ראו `nextDraftPath`.
+   */
+  draftPaths: readonly [string, string];
   /**
    * קוראת את מקום הסמן. מקבלת את העוגן הקודם כדי שהקריאה תוכל לדלג על פתירת
    * סדר הפסקאות כשהסמן לא עזב את הפסקה — ראו engine/caret-anchor.ts.
@@ -105,6 +117,17 @@ export interface SessionKeeperDeps {
   isDirty: () => boolean;
   /** האם שמירה רצה כרגע. ייצוא נוסף בזמן הזה נדחה ואינו מבוטל. */
   isSaving: () => boolean;
+  /**
+   * האם פעולה כבדה רצה כרגע (`SaveCoordinator.hold`).
+   *
+   * שער נפרד מ-`isSaving`, ונחוץ בדיוק כמוהו: תקרת ההשהיה
+   * (`DRAFT_MAX_WAIT_MS`) אינה נדחית על ידי הקלדה, ולכן ייצוא מלא יורה גם
+   * באמצע כלי שרץ דקה על כל המסמך — כלומר הקפאה שחלה על ה-autosave בלבד
+   * הייתה מותירה את המסלול היקר פתוח. וביציאה (`flush`) הסכנה גדולה יותר:
+   * ייצוא של מסמך חצי-מוחל היה נכתב לאותה משבצת שבה יושב הצ׳קפוינט שנכתב
+   * לפני הכלי, ודורס את העותק שכל התכונה נבנתה כדי לשמור.
+   */
+  isHeld: () => boolean;
   /**
    * ממתין לסבב השמירה שרץ. בשימוש ב-`flush` בלבד — ראו את ההנמקה שם.
    */
@@ -119,6 +142,9 @@ export interface SessionKeeperDeps {
    */
   onDraftTooLarge?: () => void;
 }
+
+/** ראו `writeDraftNow`. */
+type DraftWriteMode = 'timer' | 'final' | 'checkpoint';
 
 export interface SetDocumentOptions {
   /** גודל הקובץ בדיסק, כדי שנדע לזהות עריכה חיצונית בפתיחה הבאה. */
@@ -162,6 +188,24 @@ export interface SessionKeeper {
   noteChange(): void;
   /** המסמך נשמר לדיסק: הטיוטה אינה נדרשת יותר. */
   noteSaved(sourceSize?: number | null): Promise<void>;
+  /**
+   * כותבת עכשיו עותק של המסמך כפי שהוא — לפני פעולה שאין ממנה דרך חזרה אם
+   * התוסף קורס תוך כדי.
+   *
+   * ההבדל מ-`flush`: הוא כותב רק עבודה שאינה בדיסק, וכאן נדרש עותק גם
+   * כשהמסמך **נקי**. בתרחיש שבשבילו זה נבנה — „שמור” ואז כלי כבד — המסמך
+   * נקי בדיוק ברגע שהכלי מתחיל, והשמירה האוטומטית שאחריו תכתוב את התוצאה
+   * לקובץ. בלי העותק הזה לא נשאר בשום מקום „לפני”.
+   *
+   * מסמך מלוכלך נכתב כ-`draft`, כי זו באמת עבודה לא-שמורה ושחזור
+   * אוטומטי נכון לה. מסמך נקי נכתב ישירות כ-`previousDraft`: הוא זהה
+   * לדיסק, ורישום שלו כ-`draft` היה נפתח בעלייה הבאה כ„שינויים שלא נשמרו” שאינם קיימים.
+   *
+   * מתעלמת מ-`isHeld` — הקורא מקפיא לפניה בכוונה, כדי שסבב autosave לא
+   * יתחיל תוך כדי הייצוא. כשל ייצוא נרשם ללוג ואינו מפיל את הפעולה: זו רשת
+   * ביטחון, ומי שביקש להריץ כלי יריץ אותו גם בלעדיה.
+   */
+  checkpoint(): Promise<void>;
   /** המשתמש ביקש במפורש למחוק שינויים שלא נשמרו. ראו את המימוש. */
   discardDraft(): Promise<void>;
   /** כותב עכשיו את כל מה שיש. אידמפוטנטי — ראו host/lifecycle.ts. */
@@ -243,14 +287,39 @@ export function createSessionKeeper(deps: SessionKeeperDeps): SessionKeeper {
   }
 
   /**
-   * `final` = זו ההזדמנות האחרונה (יציאה), ואין סבב נוסף אחריה. ההבדל היחיד
-   * הוא מה עושים כששמירה רצה: בזמן רגיל דוחים, ביציאה ממתינים.
+   * שלושה מצבים, ולכל אחד כללים משלו:
+   *
+   * - `timer` — הסבב הרגיל. שמירה שרצה או הקפאה דוחות אותו לסבב הבא.
+   * - `final` — ההזדמנות האחרונה (יציאה), ואין סבב נוסף אחריה: לשמירה שרצה
+   *   הוא **ממתין** במקום לדחות. הקפאה, לעומת זאת, עוצרת גם אותו — ראו
+   *   `isHeld` ב-[SessionKeeperDeps].
+   * - `checkpoint` — עותק מפורש לפני פעולה כבדה. כותב גם מסמך נקי, ומתעלם
+   *   מההקפאה. ראו [SessionKeeper.checkpoint].
    */
-  async function writeDraftNow(final = false): Promise<void> {
+  async function writeDraftNow(mode: DraftWriteMode = 'timer'): Promise<void> {
     if (disposed) return;
     draftTimer = clearTimer(draftTimer);
-    if (!deps.isDirty() || revision === draftedRevision) {
+
+    // הצ׳קפוינט של מסמך נקי אינו „עבודה לא-שמורה”, ולכן הוא נרשם במצביע
+    // הקודמת ולא בטיוטה: שלושה צרכנים קוראים „יש טיוטה” כ„יש מה לשמור”.
+    const target: 'draft' | 'previousDraft' =
+      mode === 'checkpoint' && !deps.isDirty() ? 'previousDraft' : 'draft';
+
+    if (target === 'draft' && (!deps.isDirty() || revision === draftedRevision)) {
+      // בצ׳קפוינט זה אינו קיצור סתמי אלא בדיוק הנכון: העותק כבר על הדיסק.
       draftDeadline = null;
+      return;
+    }
+
+    // פעולה כבדה רצה. הייצוא נדחה — ובמסלול היציאה נעצר לגמרי, כי הוא היה
+    // כותב מסמך חצי-מוחל לאותה משבצת שבה יושב הצ׳קפוינט שלפני הכלי.
+    if (mode !== 'checkpoint' && deps.isHeld()) {
+      if (mode === 'timer') {
+        // דוחפים את התקרה, בדיוק כמו מול שמירה שרצה: בלי זה הטיימר שירה
+        // מפני שהתקרה הגיעה היה מתזמן את עצמו מחדש בלולאה לכל אורך הכלי.
+        draftDeadline = Date.now() + DRAFT_DELAY_MS;
+        scheduleDraft();
+      }
       return;
     }
 
@@ -269,11 +338,13 @@ export function createSessionKeeper(deps: SessionKeeperDeps): SessionKeeper {
        * נכתבת. ההמתנה בטוחה גם מפני שהיא מונעת שני ייצואים במקביל על אותו
        * מנוע — בדיוק מה שהדחייה נועדה למנוע.
        */
-      if (final) {
+      if (mode !== 'timer') {
         const mineBeforeWait = epoch;
         await deps.settleSave();
         if (disposed || mineBeforeWait !== epoch) return;
-        if (!deps.isDirty() || revision === draftedRevision) {
+        // הצ׳קפוינט ממשיך גם אם המסמך נקי עכשיו: השמירה שהסתיימה כתבה את
+        // „לפני” לדיסק, אבל העותק עדיין נדרש — הכלי עוד לא רץ.
+        if (target === 'draft' && (!deps.isDirty() || revision === draftedRevision)) {
           draftDeadline = null;
           return;
         }
@@ -297,7 +368,15 @@ export function createSessionKeeper(deps: SessionKeeperDeps): SessionKeeper {
     }
     if (disposed || mine !== epoch) return;
 
-    const written = await deps.writeDraft(exported);
+    // הנתיב נבחר **אחרי** הייצוא ולא לפניו: `noteSaved` עשוי היה להזיז
+    // מצביעים בזמן שהייצוא רץ, והבחירה חייבת לראות את המצב העדכני.
+    const entry = activeEntry(state);
+    const path = nextDraftPath(
+      deps.draftPaths,
+      entry?.[target] ?? null,
+      entry?.[target === 'draft' ? 'previousDraft' : 'draft'] ?? null,
+    );
+    const written = await deps.writeDraft(exported, path);
     if (disposed || mine !== epoch) return;
 
     if (written !== 'written') {
@@ -320,10 +399,12 @@ export function createSessionKeeper(deps: SessionKeeperDeps): SessionKeeper {
       return;
     }
 
-    draftedRevision = writing;
+    // מתקדם רק על הטיוטה: צ׳קפוינט של מסמך נקי אינו „העבודה עד כאן נכתבה”,
+    // והזזתו הייתה גורמת לסבב הבא לדלג על עבודה אמיתית.
+    if (target === 'draft') draftedRevision = writing;
     state = withActiveEntry(state, {
-      draft: {
-        path: deps.draftPath,
+      [target]: {
+        path,
         savedAt: Date.now(),
         documentToken: activeEntry(state)?.document?.token ?? null,
         sourceSize,
@@ -350,7 +431,7 @@ export function createSessionKeeper(deps: SessionKeeperDeps): SessionKeeper {
 
     draftTimer = clearTimer(draftTimer);
     const wait = Math.max(0, Math.min(DRAFT_DELAY_MS, draftDeadline - now));
-    draftTimer = setTimeout(() => schedule(writeDraftNow), wait);
+    draftTimer = setTimeout(() => schedule(() => writeDraftNow('timer')), wait);
   }
 
   return {
@@ -428,10 +509,17 @@ export function createSessionKeeper(deps: SessionKeeperDeps): SessionKeeper {
      * „למחוק”, ובקובץ הזה מוחקים רק כשנאמר.
      */
     async discardDraft() {
-      const hadDraft = activeEntry(state)?.draft !== null;
-      state = withActiveEntry(state, { draft: null });
+      const entry = activeEntry(state);
+      const recorded = [entry?.draft?.path, entry?.previousDraft?.path].filter(
+        (path): path is string => path !== undefined && path !== null,
+      );
+      // כשיש מה למחוק, מוחקים גם את שתי המשבצות ולא רק את מה שברשומה: קובץ
+      // שנכתב ורגע לפני שנרשם נקטע נשאר אחרת יתום לנצח, ואין ניקוי יתומים
+      // בעלייה. נתיב מגרסה קודמת נכלל דרך הרשומה.
+      const paths = recorded.length > 0 ? new Set([...recorded, ...deps.draftPaths]) : new Set<string>();
+      state = withActiveEntry(state, { draft: null, previousDraft: null });
       await run(async () => {
-        if (hadDraft) await deps.removeDraft();
+        for (const path of paths) await deps.removeDraft(path);
         await deps.persist(state);
       });
     },
@@ -462,13 +550,23 @@ export function createSessionKeeper(deps: SessionKeeperDeps): SessionKeeper {
       // הרגע שבו השמירה הסתיימה, בעוד המחיקה עצמה רצה אחרי סבב טיוטה שכבר
       // המתין — כלומר הרשומה הצביעה לקובץ שנמחק אחריה.
       await run(async () => {
-        if (activeEntry(state)?.draft === null) {
-          await persistNow();
-          return;
+        const entry = activeEntry(state);
+        if (entry?.draft) {
+          // **לא מוחקים — מעבירים מצביע.** עד כאן הטיוטה נמחקה בכל שמירה
+          // מוצלחת, ולכן אחרי autosave לא נשאר בשום מקום עותק של „לפני”:
+          // פעולה שהמשתמש לא רצה נכנסה לקובץ בלי דרך חזרה. ההעברה עצמה היא
+          // החלפת שדה ברשומה ותו לא — אפס בייטים בגשר, כי הקובץ כבר במקומו.
+          state = withActiveEntry(state, { draft: null, previousDraft: entry.draft });
         }
-        state = withActiveEntry(state, { draft: null });
-        await deps.removeDraft();
         await persistNow();
+      });
+    },
+
+    checkpoint() {
+      if (disposed) return Promise.resolve();
+      return run(() => writeDraftNow('checkpoint')).catch((error: unknown) => {
+        // רשת ביטחון, לא תנאי: מי שביקש להריץ כלי יריץ אותו גם בלי העותק.
+        console.warn('[otzaria-word] כתיבת עותק לפני הפעולה נכשלה', error);
       });
     },
 
@@ -480,7 +578,7 @@ export function createSessionKeeper(deps: SessionKeeperDeps): SessionKeeper {
         // הטיוטה קודם, והרשומה תמיד: `writeDraftNow` עשוי לצאת מוקדם — מסמך
         // נקי, או שכבר נכתבה טיוטה מאותו שינוי — ואז מצב תצוגה שהמתין
         // להשהיה שבוטלה כאן היה הולך לאיבוד.
-        if (deps.isDirty()) await writeDraftNow(true);
+        if (deps.isDirty()) await writeDraftNow('final');
         await persistNow();
       }).catch((error: unknown) => {
         console.warn('[otzaria-word] שמירת מצב ההפעלה נכשלה', error);
