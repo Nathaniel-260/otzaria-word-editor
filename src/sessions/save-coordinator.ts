@@ -98,10 +98,59 @@ export interface SaveSnapshot {
 /** debounce של autosave. ערך התכנית (§9.3). */
 export const AUTOSAVE_DELAY_MS = 2500;
 
+/**
+ * תקרת ההקפאה של פעולה כבדה. שמירת-חיים בלבד — ראו `hold`.
+ *
+ * חמש דקות ולא פחות: זו תקרה מפני ידית שלא תשוחרר לעולם, לא קצב. כלי חוקי
+ * שחורג ממנה יראה autosave מתחדש באמצעו — כלומר בדיוק ההתנהגות של היום,
+ * ולכן החריגה גרועה פחות מהקפאה נצחית.
+ */
+export const HEAVY_ACTION_HOLD_MAX_MS = 5 * 60_000;
+
 export interface SaveCoordinator {
   readonly snapshot: SaveSnapshot;
   /** אחרי עריכה. מתחיל autosave רק אם יש יעד כתיבה, והמתג דלוק. */
   markDirty(): void;
+  /**
+   * המסמך שנפתח אינו מה שבדיסק — אבל איש עוד לא ערך אותו. מסמן מלוכלך, כדי
+   * ש„שמור” ידע שיש מה לשמור, ומקפיא את ה-autosave עד `markDirty` (עריכה)
+   * או `saveNow` (המשתמש הכריע).
+   *
+   * בלי זה טיוטת שחזור נכתבה לקובץ שתיים וחצי שניות אחרי העלייה, **בכל
+   * עלייה**, לפני שהמשתמש הספיק לקרוא את שורת המצב — כלומר הפעולה שהפילה
+   * את התוסף חזרה לקובץ מעצמה. ההקפאה כאן ולא במעטפת מפני שרק כאן ידוע מה
+   * הבדיל בין השחזור לעריכה שאחריו: `markDirty` נקרא משלושה מקומות ואינו
+   * יכול להבחין ביניהם.
+   */
+  markRestored(): void;
+  /**
+   * מקפיאה את ה-autosave עד שהידית המוחזרת נקראת.
+   *
+   * **מונה, לא דגל.** כלי שקורא לכלי מקנן הקפאות, והשחרור קורה רק כשהאחרונה
+   * משוחררת.
+   *
+   * **נפרד לחלוטין מ-`setAutosaveEnabled`.** המתג הוא העדפה של המשתמש,
+   * נראית ונשמרת בין הפעלות; שימוש בו כהקפאה היה **מדליק** אותו בסוף הכלי
+   * למי שכיבה אותו, ו-`if (autosaveEnabled === enabled) return` היה הופך
+   * הקפאה על מתג כבוי ל-no-op. השחרור עובר דרך `scheduleAutosave`, שמכבד את
+   * המתג.
+   *
+   * שלוש דקויות שנבדקות:
+   * 1. **השחרור מתזמן את מה שהמתין.** `scheduleAutosave` נקרא בדיוק משני
+   *    מקומות — `markDirty` והמתג. בלי קריאה מפורשת כאן, עריכה שנעשתה בזמן
+   *    ההקפאה לא הייתה נכתבת לקובץ **לעולם** אם הכלי היה הפעולה האחרונה.
+   * 2. **`reset` ו-`dispose` מאפסים.** ידית שנקראת אחרי מעבר מסמך היא no-op,
+   *    אחרת המסמך החדש היה יורש הקפאה של הקודם — לצמיתות.
+   * 3. **אינה עוצרת סבב שכבר החל.** `cancelAutosave` מנקה `setTimeout` בלבד;
+   *    סבב שכבר ב-`exporting` יגיע ל-commit. מי שצריך עותק של „לפני” כותב
+   *    צ׳קפוינט — ראו `checkpoint` ב-sessions/session-keeper.ts.
+   *
+   * `maxMs` הוא שמירת-חיים לפעולה שה-`finally` שלה לא ירוץ לעולם (הבטחה
+   * שאינה נפתרת). בלעדיו ההקפאה נמשכת עד `reset`.
+   */
+  hold(options?: { maxMs?: number }): () => void;
+  /** האם יש הקפאה פעילה. נקרא מזוכר ההפעלה על טיימר, ולא על מסלול חם. */
+  readonly isHeld: boolean;
   /**
    * מתג „שמירה אוטומטית” של המשתמש. ברירת המחדל היא דלוק.
    *
@@ -154,6 +203,10 @@ export function createSaveCoordinator(deps: SaveCoordinatorDeps): SaveCoordinato
   let disposed = false;
   /** מזהה המסמך הנוכחי. כל reset מעלה אותו. */
   let epoch = 0;
+  /** כמה הקפאות פעילות. ראו [SaveCoordinator.hold]. */
+  let holdCount = 0;
+  /** ידית ההקפאה של שחזור טיוטה, אם יש. ראו [SaveCoordinator.markRestored]. */
+  let restoreRelease: (() => void) | null = null;
 
   function snapshot(): SaveSnapshot {
     return {
@@ -191,9 +244,11 @@ export function createSaveCoordinator(deps: SaveCoordinatorDeps): SaveCoordinato
    * - **אין יעד כתיבה.** בלעדיו כל סבב היה פותח „שמור בשם” מעצמו, שתיים
    *   וחצי שניות אחרי שהמשתמש הפסיק להקליד.
    * - **המסמך נקי.** אין מה לשמור.
+   * - **יש הקפאה.** פעולה כבדה רצה, או שהמסמך שוחזר מטיוטה ואיש עוד לא
+   *   הכריע מה לעשות איתו.
    */
   function scheduleAutosave(): void {
-    if (!autosaveEnabled || !targetToken || disposed) return;
+    if (!autosaveEnabled || !targetToken || disposed || holdCount > 0) return;
     if (dirtyRevision === savedRevision) return;
 
     cancelAutosave();
@@ -201,6 +256,50 @@ export function createSaveCoordinator(deps: SaveCoordinatorDeps): SaveCoordinato
       autosaveTimer = undefined;
       void saveNow();
     }, AUTOSAVE_DELAY_MS);
+  }
+
+  /** ראו [SaveCoordinator.hold]. */
+  function acquireHold(options: { maxMs?: number } = {}): () => void {
+    // ה-epoch מצולם כאן, ולא נקרא בשחרור: ידית ששייכת למסמך קודם אינה
+    // מפחיתה מונה שכבר אופס, ואחרת מסמך חדש היה נפתח עם מונה שלילי.
+    const mine = epoch;
+    let released = false;
+    let watchdog: ReturnType<typeof setTimeout> | undefined;
+
+    holdCount += 1;
+    // סבב שכבר ממתין מבוטל מיד — אחרת הקפאה שנלקחה שתי שניות אחרי עריכה
+    // הייתה חסרת ערך בדיוק במקרה שבו היא הכי נחוצה.
+    cancelAutosave();
+
+    const releaseHold = (): void => {
+      if (released) return;
+      released = true;
+      if (watchdog !== undefined) clearTimeout(watchdog);
+      if (mine !== epoch) return;
+      holdCount = Math.max(0, holdCount - 1);
+      if (holdCount === 0) scheduleAutosave();
+    };
+
+    if (options.maxMs !== undefined) {
+      watchdog = setTimeout(() => {
+        watchdog = undefined;
+        if (released) return;
+        console.warn('[otzaria-word] הקפאת השמירה האוטומטית שוחררה בתקרת זמן');
+        releaseHold();
+      }, options.maxMs);
+    }
+
+    return releaseHold;
+  }
+
+  /**
+   * משחרר את הקפאת השחזור, אם יש. נקרא מהעריכה הראשונה ומ„שמור” — שני
+   * הרגעים שבהם המשתמש הכריע מה לעשות עם מה ששוחזר.
+   */
+  function releaseRestoreHold(): void {
+    const held = restoreRelease;
+    restoreRelease = null;
+    held?.();
   }
 
   /**
@@ -351,6 +450,9 @@ export function createSaveCoordinator(deps: SaveCoordinatorDeps): SaveCoordinato
     options: { forceSaveAs?: boolean; suggestedName?: string } = {},
   ): Promise<SaveOutcome> {
     if (disposed) return Promise.resolve({ status: 'clean' });
+    // „שמור” הוא הכרעה על מה ששוחזר, בדיוק כמו עריכה. משוחרר **לפני**
+    // `cancelAutosave`: השחרור מתזמן טיימר, והביטול שאחריו מנקה אותו.
+    releaseRestoreHold();
     cancelAutosave();
 
     // שמירה שרצה **על אותו מסמך** — מצטרפים אליה. הלופ שלה כבר יטפל בשינוי
@@ -422,9 +524,27 @@ export function createSaveCoordinator(deps: SaveCoordinatorDeps): SaveCoordinato
     },
 
     markDirty() {
+      // עריכה היא ההכרעה: מרגע זה המסמך שעל המסך הוא של המשתמש, ואין סיבה
+      // להמשיך להחזיק את הקפאת השחזור.
+      releaseRestoreHold();
       dirtyRevision += 1;
       publish();
       scheduleAutosave();
+    },
+
+    markRestored() {
+      // שחזור חוזר (טאב שנרדם ונפתח שוב) אינו מצטבר: הידית הקודמת משוחררת
+      // לפני שנלקחת חדשה, אחרת המונה היה עולה בלי שיירד.
+      releaseRestoreHold();
+      restoreRelease = acquireHold();
+      dirtyRevision += 1;
+      publish();
+    },
+
+    hold: acquireHold,
+
+    get isHeld() {
+      return holdCount > 0;
     },
 
     async settled() {
@@ -455,6 +575,10 @@ export function createSaveCoordinator(deps: SaveCoordinatorDeps): SaveCoordinato
 
     reset(target) {
       cancelAutosave();
+      // הקפאה שייכת למסמך שהחזיק אותה. בלי האיפוס, כלי שרץ ברגע מעבר מסמך
+      // היה מוריש למסמך החדש autosave מוקפא שאיש כבר לא ישחרר.
+      holdCount = 0;
+      restoreRelease = null;
       // כל סבב שבאוויר שייך למסמך הקודם, ומכאן והלאה התוצאה שלו נזרקת.
       epoch += 1;
       dirtyRevision = 0;
@@ -473,6 +597,8 @@ export function createSaveCoordinator(deps: SaveCoordinatorDeps): SaveCoordinato
       // כמו מעבר מסמך: כל סבב שבאוויר הופך ל-stale, ולכן לא יעשה commit ולא
       // יאמץ יעד אחרי הפירוק.
       epoch += 1;
+      holdCount = 0;
+      restoreRelease = null;
       cancelAutosave();
     },
   };
