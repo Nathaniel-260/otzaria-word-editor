@@ -2529,3 +2529,89 @@ describe('פעולה כבדה — עותק לפני, והקפאה לאורכה',
     expect(stub.releaseCalls).toBe(1);
   });
 });
+
+describe('הגרסה שלפני השמירה האחרונה', () => {
+  /** רשומה שבה המסמך נשמר, והעותק שלפני השמירה עדיין במקומו. */
+  function sessionWithPrevious(documentToken: string | null = 'tok'): unknown {
+    return {
+      version: 2,
+      documents: [
+        {
+          id: 'doc-1',
+          document: { token: 'tok', name: 'חידושים.docx', writable: true },
+          caret: null,
+          draft: null,
+          previousDraft: {
+            path: 'session-draft-doc-1-a.docx',
+            savedAt: Date.now() - 120_000,
+            documentToken,
+            sourceSize: 120,
+          },
+        },
+      ],
+      activeId: 'doc-1',
+      view: { zoom: null, focusMode: false, ribbonTab: null, ribbonCollapsed: false },
+    };
+  }
+
+  it('נפתחת בטאב חדש, והקובץ עצמו אינו נוגע', async () => {
+    // הבטיחות של המסלול היא בדיוק בשני אלה: המסמך שעל המסך אינו מוחלף,
+    // ומה שנפתח אין לו יעד כתיבה — „שמור” בו פותח „שמור בשם”.
+    stub.storedSession = sessionWithPrevious();
+    stub.resolvedFile = { token: 'tok', url: 'loopback://fresh', name: 'חידושים.docx', size: 120 };
+    stub.draftsByPath['session-draft-doc-1-a.docx'] = new Uint8Array([80, 75, 3, 4]);
+
+    const wrapper = await mountShell();
+    stub.openSources.length = 0;
+
+    pressCtrl('KeyO');
+    await settle(8);
+    const entryPoint = document.querySelector<HTMLButtonElement>('.open-previous');
+    expect(entryPoint, 'הכפתור מופיע כשיש גרסה קודמת').not.toBeNull();
+
+    entryPoint!.click();
+    await settle(16);
+
+    expect(stub.openSources[0], 'הבייטים של הגרסה הקודמת').toBeInstanceOf(Blob);
+    // שתי טענות ולא אחת: „הכותרת מופיעה” נכון גם כשהטאב הפתוח **הוחלף**,
+    // וזו בדיוק התוצאה שהמסלול הזה אסור לו להגיע אליה.
+    const titles = wrapper.findAll('.word-doctab-title').map((el) => el.text());
+    expect(titles, 'שני טאבים — הפתוח נשאר').toHaveLength(2);
+    expect(titles[0], 'המסמך שהיה על המסך לא זז').toBe('חידושים');
+    expect(titles[1]).toContain('גרסה קודמת');
+    expect(wrapper.find('.word-statusbar').text()).toContain('מלפני השמירה האחרונה');
+    expect(stub.draftRemovals, 'פתיחה אינה מוחקת את העותק').toBe(0);
+  });
+
+  it('גרסה קודמת של מסמך אחר אינה מוצעת', async () => {
+    // המצביע שורד מעבר מסמך בכוונה, ולכן בלי בדיקת ה-token הכפתור היה מציע
+    // לפתוח גרסה של משהו אחר לגמרי.
+    stub.storedSession = sessionWithPrevious('other');
+    stub.resolvedFile = { token: 'tok', url: 'loopback://fresh', name: 'חידושים.docx', size: 120 };
+    stub.draftsByPath['session-draft-doc-1-a.docx'] = new Uint8Array([80, 75, 3, 4]);
+
+    await mountShell();
+
+    pressCtrl('KeyO');
+    await settle(8);
+
+    expect(document.querySelector('.open-previous')).toBeNull();
+  });
+
+  it('כשהעותק אינו במקומו — נאמר, ולא נפתח מסמך ריק', async () => {
+    stub.storedSession = sessionWithPrevious();
+    stub.resolvedFile = { token: 'tok', url: 'loopback://fresh', name: 'חידושים.docx', size: 120 };
+    // אין רשומה ב-`draftsByPath` — הקריאה תחזיר null.
+
+    const wrapper = await mountShell();
+    stub.openSources.length = 0;
+
+    pressCtrl('KeyO');
+    await settle(8);
+    document.querySelector<HTMLButtonElement>('.open-previous')!.click();
+    await settle(12);
+
+    expect(stub.openSources, 'לא נפתח דבר').toHaveLength(0);
+    expect(wrapper.find('.word-statusbar').text()).toContain('לא נמצאה');
+  });
+});
