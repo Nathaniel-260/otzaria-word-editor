@@ -51,9 +51,11 @@ import {
   DOCUMENT_GENERATION,
   FONT_MEMORY,
   FONT_OPTIONS,
+  HEAVY_ACTION_GUARD,
   READOUT_SELECTION,
   SPELLCHECK,
   STYLE_GALLERY,
+  type HeavyActionGuard,
   type SpellcheckHandle,
 } from '../../src/composables/keys';
 import { createFontMemory, type FontMemory } from '../../src/composables/use-font-controls';
@@ -1219,6 +1221,12 @@ export interface HarnessOptions {
    * המצב שרצועה במסמך פתוח נמצאת בו רוב הזמן. ראו engine/readout-hold.ts.
    */
   readoutSelection?: ReadoutSelection;
+  /**
+   * השומר לפעולה כבדה, כפי שהמעטפת מזריקה אותו. ברירת המחדל היא הפעולה
+   * כמות שהיא — אבל היא **מוזרקת**, כי פקד שנשען על מפתח שלא הוזרק נופל
+   * לברירת המחדל של ה-inject ונראה עובד.
+   */
+  heavyActionGuard?: HeavyActionGuard;
   props?: Record<string, unknown>;
 }
 
@@ -1268,6 +1276,8 @@ export function mountUi(component: Component, options: HarnessOptions = {}): Har
     options.styleGallery ?? fallbackStyleGallery(),
   );
   provide[ACTIVE_SUPERDOC as unknown as symbol] = superdocRef;
+  provide[HEAVY_ACTION_GUARD as unknown as symbol] =
+    options.heavyActionGuard ?? ((action: () => Promise<unknown>) => action());
   /**
    * מערכת המאקרו מלווה כל מסמך פתוח (App.vue קובע אותה יחד עם
    * `activeSuperdoc`), ולכן הכפיל עוקב אחרי אותו כלל: יש מופע — יש מערכת.

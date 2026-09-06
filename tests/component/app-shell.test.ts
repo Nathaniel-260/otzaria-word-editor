@@ -44,6 +44,7 @@ import { COMPLEX_SCRIPT_BOLD_NOTICE } from '../../src/engine/docx-preflight';
 import { NO_VBA, type DocumentVba } from '../../src/engine/vba-import';
 import { COMMAND_REPORTER, STATUS_NOTIFIER, type CommandReporter } from '../../src/composables/keys';
 import type { DocMetrics } from '../../src/engine/doc-metrics';
+import FindReplaceDialog from '../../src/ui/panels/FindReplaceDialog.vue';
 
 /**
  * המצב המשותף לכפילים. `vi.hoisted` נדרש: מפעלי ה-`vi.mock` מורמים אל מעל
@@ -55,6 +56,13 @@ const stub = vi.hoisted(() => ({
   /** מה ש-`saveNow` קיבל, לפי הסדר. */
   saveNowCalls: [] as Array<{ forceSaveAs?: boolean; suggestedName?: string } | undefined>,
   markDirtyCalls: 0,
+  /** האם „החלף הכל” של הכפיל זורק. */
+  replaceAllFails: false,
+  /** כמה פעמים המעטפת סימנה „שוחזר מטיוטה” — ולא „נערך”. */
+  markRestoredCalls: 0,
+  /** הקפאות ושחרורים של פעולה כבדה, לפי הסדר. */
+  holdCalls: 0,
+  releaseCalls: 0,
   resetCalls: 0,
   /** מה שנשמר להפעלה הבאה. */
   persistedAutosave: [] as boolean[],
@@ -274,6 +282,16 @@ vi.mock('../../src/sessions/save-coordinator', async (importOriginal) => ({
       markDirty: () => {
         stub.markDirtyCalls += 1;
       },
+      markRestored: () => {
+        stub.markRestoredCalls += 1;
+      },
+      hold: () => {
+        stub.holdCalls += 1;
+        return () => {
+          stub.releaseCalls += 1;
+        };
+      },
+      isHeld: false,
       setAutosaveEnabled: (enabled: boolean) => {
         stub.autosaveCalls.push(enabled);
       },
@@ -314,7 +332,10 @@ vi.mock('../../src/engine/search', async (importOriginal) => {
       find: () => ({ ok: true, snapshot: actual.idleSearchState() }),
       findDebounced: () => {},
       replace: async () => ({ ok: true, snapshot: actual.idleSearchState() }),
-      replaceAll: async () => ({ ok: true, snapshot: actual.idleSearchState() }),
+      replaceAll: async () => {
+        if (stub.replaceAllFails) throw new Error('ההחלפה נכשלה');
+        return { ok: true, snapshot: actual.idleSearchState() };
+      },
       dispose: () => {
         stub.disposeOrder.push('search');
       },
@@ -469,6 +490,10 @@ beforeEach(() => {
   stub.workspaceReadGate = null;
   for (const path of Object.keys(stub.draftsByPath)) delete stub.draftsByPath[path];
   stub.draftRemovals = 0;
+  stub.replaceAllFails = false;
+  stub.markRestoredCalls = 0;
+  stub.holdCalls = 0;
+  stub.releaseCalls = 0;
   stub.removedDrafts.length = 0;
   stub.storedRecents = null;
   stub.persistedRecents.length = 0;
@@ -928,7 +953,10 @@ describe('חזרה למה שהיה', () => {
     const wrapper = await mountShell();
 
     expect(stub.openSources[0], 'הבייטים של הטיוטה, לא ה-URL').toBeInstanceOf(Blob);
-    expect(stub.markDirtyCalls, 'עבודה שאינה בדיסק חייבת להיראות כך').toBeGreaterThan(0);
+    // `markRestored` ולא `markDirty`: השני היה מתזמן autosave, ואז הטיוטה
+    // ששוחזרה נכתבת לקובץ שתיים וחצי שניות אחרי העלייה — בכל עלייה.
+    expect(stub.markRestoredCalls, 'עבודה שאינה בדיסק חייבת להיראות כך').toBeGreaterThan(0);
+    expect(stub.markDirtyCalls, 'שחזור אינו עריכה').toBe(0);
     expect(wrapper.find('.word-statusbar').text()).toContain('שוחזרו שינויים');
   });
 
@@ -1064,11 +1092,14 @@ describe('חזרה למה שהיה', () => {
     expect(forgotten, 'רשומה ששכחה את המסמך האחרון').toEqual([]);
   });
 
-  it('שמירה אוטומטית מוחקת את הטיוטה — לא רק שמירה ידנית', async () => {
-    // הרגרסיה: הזוכר היה נתלה על `onSave` של המעטפת, ואילו ה-autosave יורה
-    // מתוך הקואורדינטור ואינו עובר שם. התוצאה הייתה טיוטה שנשארת חיה
-    // ומפסיקה להתעדכן — ואז נפתחת בהפעלה הבאה מעל עבודה חדשה ממנה, ונכתבת
-    // לקובץ. כאן הקואורדינטור מדווח כמו שהוא מדווח על סבב אוטומטי.
+  it('שמירה אוטומטית מעבירה את הטיוטה לקודמת — לא רק שמירה ידנית', async () => {
+    // הרגרסיה המקורית: הזוכר היה נתלה על `onSave` של המעטפת, ואילו ה-autosave
+    // יורה מתוך הקואורדינטור ואינו עובר שם. התוצאה הייתה טיוטה שנשארת חיה
+    // ומפסיקה להתעדכן — ואז נפתחת בהפעלה הבאה מעל עבודה חדשה ממנה.
+    //
+    // מה שהשתנה: היעד אינו מחיקה אלא העברה ל-`previousDraft`, כדי שיישאר
+    // עותק של „לפני” גם אחרי שמירה אוטומטית. שני חצאי החוזה נבדקים כאן —
+    // ש-`draft` התרוקן, ושהקובץ **לא** נמחק.
     stub.storedSession = storedSession({
       draft: { path: 'session-draft.docx', savedAt: 1, documentToken: 'tok', sourceSize: 120 },
     });
@@ -1081,7 +1112,12 @@ describe('חזרה למה שהיה', () => {
     stub.saveDeps?.onSaved?.({ token: 'tok', name: 'חידושים.docx', size: 250 });
     await settle(6);
 
-    expect(stub.draftRemovals, 'העבודה בדיסק — הטיוטה מיותרת ומסוכנת').toBe(1);
+    const record = stub.persistedSessions[stub.persistedSessions.length - 1] as {
+      documents?: Array<{ draft?: unknown; previousDraft?: { path?: string } | null }>;
+    } | null;
+    expect(record?.documents?.[0]?.draft, 'העבודה בדיסק — הטיוטה אינה „לא שמור” יותר').toBeNull();
+    expect(record?.documents?.[0]?.previousDraft?.path, 'ויש לאן לחזור').toBe('session-draft.docx');
+    expect(stub.draftRemovals, 'ההעברה היא החלפת מצביע, בלי קריאת גשר').toBe(0);
   });
 
   it('פתיחה רגילה אינה מוחקת שום טיוטה', async () => {
@@ -2443,5 +2479,139 @@ describe('קיצורי הטאבים', () => {
     expect(tabCount(wrapper)).toBe(1);
     expect(stub.openSources).toHaveLength(opened);
     expect(wrapper.text()).toContain('אין טאב שנסגר');
+  });
+});
+
+describe('פעולה כבדה — עותק לפני, והקפאה לאורכה', () => {
+  /**
+   * זו הבדיקה מקצה לקצה של המסלול שכל התכונה נבנתה בשבילו: פעולה אחת שמשנה
+   * את כל המסמך, ושאם התוסף קורס תוך כדי — אין ממנה דרך חזרה.
+   *
+   * `arrayBuffer` מוזרק, ובלי זה הבדיקה חסרת ערך: jsdom אינו מממש
+   * `Blob.prototype.arrayBuffer`, ולכן כתיבת הצ׳קפוינט הייתה נכשלת בשקט
+   * וה-`catch` שלה היה מחזיר „הצליח”. ראו את ההנמקה המלאה ליד הגיבוי של
+   * „לא לשמור”.
+   */
+  function fakeExport(): void {
+    const bytes = new Uint8Array([80, 75, 3, 4]);
+    const doc = Object.assign(new Blob([bytes]), {
+      arrayBuffer: () => Promise.resolve(bytes.buffer),
+    });
+    (stub.superdoc!.host as unknown as { export: () => Promise<Blob> }).export = () =>
+      Promise.resolve(doc);
+  }
+
+  it('„החלף הכל” כותב עותק לפני, ומקפיא ומשחרר את השמירה האוטומטית', async () => {
+    const wrapper = await mountShell();
+    fakeExport();
+    const before = stub.workspaceWrites.length;
+
+    wrapper.findComponent(FindReplaceDialog).vm.$emit('replace-all', 'רשב״י');
+    await settle(12);
+
+    const written = stub.workspaceWrites.slice(before).filter((write) => write.path.startsWith('session-draft-'));
+    expect(written.length, 'עותק אחד לפני הפעולה').toBe(1);
+    expect([...(written[0]?.bytes ?? [])], 'הבייטים של המסמך, לא מסמך ריק').toEqual([80, 75, 3, 4]);
+    expect(stub.holdCalls, 'ההקפאה נלקחה').toBe(1);
+    expect(stub.releaseCalls, 'ושוחררה בסוף').toBe(1);
+  });
+
+  it('ההקפאה משוחררת גם כשהפעולה נכשלת', async () => {
+    // בלי `finally` המסמך היה נשאר בלי שמירה אוטומטית עד מעבר מסמך.
+    const wrapper = await mountShell();
+    fakeExport();
+    stub.replaceAllFails = true;
+
+    wrapper.findComponent(FindReplaceDialog).vm.$emit('replace-all', 'רשב״י');
+    await settle(12);
+
+    expect(stub.holdCalls).toBe(1);
+    expect(stub.releaseCalls).toBe(1);
+  });
+});
+
+describe('הגרסה שלפני השמירה האחרונה', () => {
+  /** רשומה שבה המסמך נשמר, והעותק שלפני השמירה עדיין במקומו. */
+  function sessionWithPrevious(documentToken: string | null = 'tok'): unknown {
+    return {
+      version: 2,
+      documents: [
+        {
+          id: 'doc-1',
+          document: { token: 'tok', name: 'חידושים.docx', writable: true },
+          caret: null,
+          draft: null,
+          previousDraft: {
+            path: 'session-draft-doc-1-a.docx',
+            savedAt: Date.now() - 120_000,
+            documentToken,
+            sourceSize: 120,
+          },
+        },
+      ],
+      activeId: 'doc-1',
+      view: { zoom: null, focusMode: false, ribbonTab: null, ribbonCollapsed: false },
+    };
+  }
+
+  it('נפתחת בטאב חדש, והקובץ עצמו אינו נוגע', async () => {
+    // הבטיחות של המסלול היא בדיוק בשני אלה: המסמך שעל המסך אינו מוחלף,
+    // ומה שנפתח אין לו יעד כתיבה — „שמור” בו פותח „שמור בשם”.
+    stub.storedSession = sessionWithPrevious();
+    stub.resolvedFile = { token: 'tok', url: 'loopback://fresh', name: 'חידושים.docx', size: 120 };
+    stub.draftsByPath['session-draft-doc-1-a.docx'] = new Uint8Array([80, 75, 3, 4]);
+
+    const wrapper = await mountShell();
+    stub.openSources.length = 0;
+
+    pressCtrl('KeyO');
+    await settle(8);
+    const entryPoint = document.querySelector<HTMLButtonElement>('.open-previous');
+    expect(entryPoint, 'הכפתור מופיע כשיש גרסה קודמת').not.toBeNull();
+
+    entryPoint!.click();
+    await settle(16);
+
+    expect(stub.openSources[0], 'הבייטים של הגרסה הקודמת').toBeInstanceOf(Blob);
+    // שתי טענות ולא אחת: „הכותרת מופיעה” נכון גם כשהטאב הפתוח **הוחלף**,
+    // וזו בדיוק התוצאה שהמסלול הזה אסור לו להגיע אליה.
+    const titles = wrapper.findAll('.word-doctab-title').map((el) => el.text());
+    expect(titles, 'שני טאבים — הפתוח נשאר').toHaveLength(2);
+    expect(titles[0], 'המסמך שהיה על המסך לא זז').toBe('חידושים');
+    expect(titles[1]).toContain('גרסה קודמת');
+    expect(wrapper.find('.word-statusbar').text()).toContain('מלפני השמירה האחרונה');
+    expect(stub.draftRemovals, 'פתיחה אינה מוחקת את העותק').toBe(0);
+  });
+
+  it('גרסה קודמת של מסמך אחר אינה מוצעת', async () => {
+    // המצביע שורד מעבר מסמך בכוונה, ולכן בלי בדיקת ה-token הכפתור היה מציע
+    // לפתוח גרסה של משהו אחר לגמרי.
+    stub.storedSession = sessionWithPrevious('other');
+    stub.resolvedFile = { token: 'tok', url: 'loopback://fresh', name: 'חידושים.docx', size: 120 };
+    stub.draftsByPath['session-draft-doc-1-a.docx'] = new Uint8Array([80, 75, 3, 4]);
+
+    await mountShell();
+
+    pressCtrl('KeyO');
+    await settle(8);
+
+    expect(document.querySelector('.open-previous')).toBeNull();
+  });
+
+  it('כשהעותק אינו במקומו — נאמר, ולא נפתח מסמך ריק', async () => {
+    stub.storedSession = sessionWithPrevious();
+    stub.resolvedFile = { token: 'tok', url: 'loopback://fresh', name: 'חידושים.docx', size: 120 };
+    // אין רשומה ב-`draftsByPath` — הקריאה תחזיר null.
+
+    const wrapper = await mountShell();
+    stub.openSources.length = 0;
+
+    pressCtrl('KeyO');
+    await settle(8);
+    document.querySelector<HTMLButtonElement>('.open-previous')!.click();
+    await settle(12);
+
+    expect(stub.openSources, 'לא נפתח דבר').toHaveLength(0);
+    expect(wrapper.find('.word-statusbar').text()).toContain('לא נמצאה');
   });
 });

@@ -441,3 +441,22 @@ describe('OpenDocumentDialog — הכוונה שממנה נפתח', () => {
     expect(document.activeElement).toBe(newWrapper.find('.open-dialog').element);
   });
 });
+
+describe('OpenDocumentDialog — גרסה קודמת', () => {
+  it('אינו מרונדר כשאין גרסה קודמת', () => {
+    expect(open().wrapper.find('.open-previous').exists()).toBe(false);
+  });
+
+  it('מופיע עם הגיל, ופולט open-previous', async () => {
+    const { wrapper } = open({ previousVersion: { name: 'חידושים.docx', age: 'לפני 4 דקות' } });
+    const link = wrapper.find('.open-previous');
+    expect(link.text()).toBe('גרסה קודמת (לפני 4 דקות)');
+    await link.trigger('click');
+    expect(wrapper.emitted('open-previous')).toHaveLength(1);
+  });
+
+  it('בלי גיל — הכפתור עדיין מופיע, בלי סוגריים ריקים', () => {
+    const { wrapper } = open({ previousVersion: { name: 'חידושים.docx', age: '' } });
+    expect(wrapper.find('.open-previous').text()).toBe('גרסה קודמת');
+  });
+});

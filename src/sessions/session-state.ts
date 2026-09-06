@@ -63,9 +63,56 @@ export function createDocumentSessionId(): DocumentSessionId {
  * חייבת לקרות במפורש — ראו `discardDraft` ב-session-keeper.ts. בלי זה, נתיב
  * ייחודי לכל מסמך פירושו שקבצי טיוטה של מסמכים שנסגרו מצטברים במרחב הפרטי
  * במקום שקבוע אחד ומשותף היה ממחזר את עצמו אוטומטית.
+ *
+ * ה-`slot` הוא איזו משבצת מבין השתיים — ראו `DraftSlot`. מי שרוצה את שתיהן
+ * יקרא ל-`draftSlotPaths`, ומי שרוצה לדעת לאן לכתוב עכשיו ל-`nextDraftPath`.
  */
-export function draftPathFor(id: DocumentSessionId): string {
-  return `session-draft-${id}.docx`;
+export function draftPathFor(id: DocumentSessionId, slot: DraftSlot): string {
+  return `session-draft-${id}-${slot}.docx`;
+}
+
+/**
+ * שתי משבצות לטיוטה של מסמך, ולא נתיב אחד.
+ *
+ * ב-SDK של אוצריא אין `move` ואין `rename` — רשימת המתודות המלאה של המרחב
+ * הפרטי היא קריאה, כתיבה, רשימה, יצירת תיקייה, מחיקה ו-stat. לכן „לשמור את
+ * הטיוטה הקודמת” בנתיב אחד היה מתורגם לקריאה של כל הקובץ, כתיבה שלו לנתיב
+ * אחר ומחיקה — שלוש קריאות גשר ושתי המרות base64 של עד ~7.5MB, **על כל
+ * שמירה מוצלחת**. זה בדיוק המחיר שבגללו נפסלו רעיונות אחרים.
+ *
+ * עם שתי משבצות, „הקודמת” היא החלפת מצביע ברשומה ותו לא: אפס בייטים בגשר.
+ * זו אותה תבנית שכבר קיימת בגיבויי „לא לשמור” (`discard-backup.ts`), ומאותו
+ * טעם — הכתיבה הבאה דורסת משבצת במקום למחוק קובץ ולכתוב אחר.
+ */
+export type DraftSlot = 'a' | 'b';
+
+/** שתי המשבצות של המסמך, בסדר קבוע. */
+export function draftSlotPaths(id: DocumentSessionId): readonly [string, string] {
+  return [draftPathFor(id, 'a'), draftPathFor(id, 'b')];
+}
+
+/**
+ * לאיזו משבצת לכתוב עכשיו.
+ *
+ * `rewrite` הוא המצביע שנכתב מחדש — אם הוא כבר יושב על משבצת, דורסים אותה
+ * במקום לבזבז את השנייה. `keep` הוא המצביע השני, שאסור לגעת בו: הוא מחזיק
+ * את העותק שכל התכונה הזאת נבנתה כדי לשמור.
+ *
+ * נקראת **לפני** הכתיבה, כמו `nextBackupSlot`: כתיבה שנכשלה אינה מזיזה דבר
+ * ברשומה, ולכן הניסיון הבא חוזר לאותה משבצת.
+ *
+ * נתיב שאינו משבצת — רשומה שנכתבה בגרסה קודמת, `session-draft-<id>.docx` —
+ * אינו נדרס אלא ננטש: הכתיבה עוברת למשבצת, והקובץ הישן נמחק ב-`discardDraft`.
+ */
+export function nextDraftPath(
+  paths: readonly [string, string],
+  rewrite: SessionDraft | null,
+  keep: SessionDraft | null,
+): string {
+  const taken = keep?.path ?? null;
+  const current = rewrite?.path ?? null;
+  if (current !== null && current !== taken && paths.includes(current)) return current;
+  return paths.find((path) => path !== taken) ?? paths[0];
 }
 
 /** המסמך שהיה פתוח. `null` = מסמך חדש שאין לו קובץ. */
@@ -111,7 +158,26 @@ export interface SessionDocumentEntry {
   id: DocumentSessionId;
   document: SessionDocument | null;
   caret: CaretAnchor | null;
+  /**
+   * עבודה שאינה בדיסק. שלושה צרכנים קוראים „יש טיוטה” כ„יש עבודה לא-שמורה”,
+   * ולכן המשמעות הזאת חייבת להישמר — ראו `previousDraft`.
+   */
   draft: SessionDraft | null;
+  /**
+   * הגרסה שהייתה **לפני השמירה האחרונה**: `noteSaved` מעביר לכאן את `draft`
+   * במקום למחוק אותו, וכך נשאר עותק של „לפני” גם אחרי שמירה אוטומטית.
+   *
+   * שדה נפרד, ולא ערך נוסף בתוך `draft`, מפני ששלושה צרכנים מפרשים „יש
+   * טיוטה” כ„יש עבודה לא-שמורה”: הנקודה על טאב ממתין, `hasDraft` בהחלטת
+   * סגירת מסמך, והגיבוי של „לא לשמור” — והאחרון היה מגבה את הגרסה **הישנה**
+   * במקום את מה שעל המסך. כלומר שדה משותף לא היה תכונה חדשה אלא אובדן
+   * נתונים חדש.
+   *
+   * אינו עובר ב-`decideDraftRecovery`: ה-`sourceSize` שלו קדם לשמירה שאנחנו
+   * עשינו, והשוואה לגודל שבדיסק הייתה מציגה „הקובץ השתנה מחוץ לעורך” על
+   * קובץ שאנחנו כתבנו. נגיש רק כפעולה מפורשת של המשתמש.
+   */
+  previousDraft: SessionDraft | null;
 }
 
 export interface SessionState {
@@ -133,7 +199,7 @@ export function defaultView(): SessionView {
 
 /** רשומת מסמך ריקה — מסמך חדש שאין לו קובץ, סמן או טיוטה. */
 export function emptyDocumentEntry(id: DocumentSessionId = createDocumentSessionId()): SessionDocumentEntry {
-  return { id, document: null, caret: null, draft: null };
+  return { id, document: null, caret: null, draft: null, previousDraft: null };
 }
 
 /**
@@ -283,6 +349,9 @@ function readDocumentEntry(value: unknown): SessionDocumentEntry | null {
     document: readDocument(entry.document),
     caret: readCaret(entry.caret),
     draft: readDraft(entry.draft),
+    // רשומה שנכתבה לפני שהשדה קיים מחזירה כאן null, ולכן היא נקראת במלואה
+    // ואינה נזרקת — זו הסיבה שהגרסה לא עלתה.
+    previousDraft: readDraft(entry.previousDraft),
   };
 }
 
