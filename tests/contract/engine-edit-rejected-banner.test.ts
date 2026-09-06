@@ -46,11 +46,30 @@ describe('חוזה באנר edit-rejected', () => {
     expect(shell).toContain('This edit couldn’t be completed.');
   });
 
+  /** שורת הסלקטור של הכלל — בלי הערות, שגם הן מזכירות את שני העוגנים. */
+  const ruleLine = sheet
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split('\n')
+    .find((line) => line.includes(MUTATION_STATUS_CLASS) && line.includes(EDIT_REJECTED_HOOK));
+
   it('הכלל קיים בגיליון ומגודר בשער השפה', () => {
-    const rule = sheet
-      .split('\n')
-      .find((line) => line.includes(MUTATION_STATUS_CLASS) && line.includes(EDIT_REJECTED_HOOK));
-    expect(rule, 'אין בגיליון כלל שמסתיר את הבאנר').toBeTruthy();
-    expect(rule).toContain(`:root:not([${MENU_LOCALE_ATTRIBUTE}='en'])`);
+    expect(ruleLine, 'אין בגיליון כלל שמסתיר את הבאנר').toBeTruthy();
+    expect(ruleLine).toContain(`:root:not([${MENU_LOCALE_ATTRIBUTE}='en'])`);
+  });
+
+  it('הכלל מסתיר את ה-<p> כילד ישיר של העוטף, ובלי :has()', () => {
+    // `:has()` שעוגנו בתוך `.superdoc` הוא מה שגרם לחישוב סגנון של כל המסמך
+    // על כל הקשה (ראו הערת הפתיחה, סעיף 4). הבדיקה נועלת את הצורה שנמדדה.
+    expect(ruleLine).not.toContain(':has(');
+    expect(ruleLine).toContain(`.${MUTATION_STATUS_CLASS} > [${EDIT_REJECTED_HOOK}]`);
+    // ובאריזה: ה-<p> אכן ילד ישיר של העוטף — אחרת `>` היה מסתיר כלום. ברינדור
+    // המקומפל של Vue העוטף וה-<p> נוצרים ברצף, בלי createElementVNode שלישי
+    // ביניהם.
+    const wrapper = shell.indexOf(MUTATION_STATUS_CLASS);
+    const hook = shell.indexOf(EDIT_REJECTED_HOOK, wrapper);
+    expect(wrapper, 'העוטף לא נמצא באריזה').toBeGreaterThan(-1);
+    expect(hook, 'התכונה אינה מופיעה אחרי העוטף').toBeGreaterThan(wrapper);
+    const between = shell.slice(wrapper, hook);
+    expect((between.match(/createElementVNode\(|createBaseVNode\(|createVNode\(/g) ?? []).length).toBeLessThanOrEqual(1);
   });
 });
