@@ -130,3 +130,17 @@ export const PAGE_MARKING: InjectionKey<PageMarkingHandle> = Symbol('pageMarking
  * המסמך נפתח כטיוטה לא-שמורה, ו„שמור” בו פותח „שמור בשם”. `false` = לא נפתח.
  */
 export const DRAFT_OPENER: InjectionKey<(blob: Blob) => Promise<boolean>> = Symbol('draftOpener');
+
+/**
+ * עוטף פעולה כבדה על המסמך: עותק לפני, והקפאת שמירה אוטומטית לאורכה.
+ *
+ * שלוש נקודות בלבד קוראות לזה, והן כל המסלולים שבהם פעולה אחת משנה את כל
+ * המסמך ואינה ניתנת לביטול אחרי קריסה: `runTool` ברצועת „שולחן העורך”,
+ * הכלים הרשומים על ה-kit (קיצורים ודיאלוג המאקרו), ו„החלף הכל”.
+ *
+ * ברירת המחדל להזרקה — הפעולה כמות שהיא — קיימת בשביל בדיקות רכיב שמרכיבות
+ * לשונית בלי המעטפת שמספקת אותה.
+ */
+export type HeavyActionGuard = <T>(action: () => Promise<T>) => Promise<T>;
+
+export const HEAVY_ACTION_GUARD: InjectionKey<HeavyActionGuard> = Symbol('heavyActionGuard');

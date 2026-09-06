@@ -63,3 +63,45 @@ describe('shulchan/tools-registration', () => {
     expect(() => registerShulchanTools(kit, () => null, () => undefined)).not.toThrow();
   });
 });
+
+describe('shulchan/tools-registration — השומר לפעולה כבדה', () => {
+  it('כל כלי רשום עובר בשומר, והשומר נכנס לפניו ויוצא אחריו', async () => {
+    // הכלים כאן מגיעים בשני מסלולים שאינם עוברים ברצועה — קיצור מקלדת
+    // ודיאלוג ניהול המאקרו — ולכן `runTool` של הלשונית אינו מכסה אותם.
+    const { kit, tools } = fakeKit();
+    const order: string[] = [];
+    const { host } = fakeShulchanHost({ blocks: [{ blockId: 'p1', text: 'פתיחה. ואמרו: המשך.' }] });
+
+    registerShulchanTools(kit, () => host, () => undefined, async (action) => {
+      order.push('enter');
+      const result = await action();
+      order.push('exit');
+      return result;
+    });
+
+    await tools.find((tool) => tool.id === 'shulchan.text-alternating')!.run();
+
+    expect(order).toEqual(['enter', 'exit']);
+  });
+
+  it('כל תשעת הכלים עטופים, ולא רק הראשון', async () => {
+    const { kit, tools } = fakeKit();
+    let guarded = 0;
+    registerShulchanTools(kit, () => null, () => undefined, async (action) => {
+      guarded += 1;
+      return action();
+    });
+
+    for (const tool of tools) await tool.run();
+
+    expect(guarded).toBe(tools.length);
+  });
+
+  it('בלי שומר — הכלים רצים כרגיל', () => {
+    // ברירת המחדל קיימת בשביל קוראים שאין להם מעטפת.
+    const { kit, tools } = fakeKit();
+    registerShulchanTools(kit, () => null, () => undefined);
+
+    expect(tools).toHaveLength(9);
+  });
+});

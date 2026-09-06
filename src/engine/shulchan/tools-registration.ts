@@ -39,6 +39,14 @@ export function registerShulchanTools(
   kit: MacroKit,
   host: () => ShulchanTarget,
   onSummary: (text: string) => void,
+  /**
+   * עותק לפני הכלי, והקפאת שמירה אוטומטית לאורכו — ראו `HEAVY_ACTION_GUARD`.
+   *
+   * הכלים כאן מגיעים בשני מסלולים שאינם עוברים ברצועה: קיצור מקלדת ודיאלוג
+   * ניהול המאקרו. `runTool` של הלשונית אינו מכסה אותם, ולכן העטיפה חייבת
+   * להיות גם כאן. ברירת המחדל — הפעולה כמות שהיא — לקוראים שאין להם מעטפת.
+   */
+  guard: <T>(action: () => Promise<T>) => Promise<T> = (action) => action(),
 ): void {
   /* `kit.registerTool` זורק על id כפול או שם פסול, והקריאה לכאן יושבת על
      מסלול פתיחת המסמך: חריגה כאן הייתה מפילה פתיחה של מסמך בגלל לשונית
@@ -46,7 +54,7 @@ export function registerShulchanTools(
      והלשונית ברצועה עובדת בלעדיו. */
   const register: MacroKit['registerTool'] = (tool) => {
     try {
-      kit.registerTool(tool);
+      kit.registerTool({ ...tool, run: () => guard(() => Promise.resolve(tool.run())) });
     } catch (error) {
       console.warn(`[otzaria-word] רישום הכלי ${tool.id} נכשל`, error);
     }

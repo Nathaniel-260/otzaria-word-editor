@@ -17,8 +17,10 @@ import {
   documentViewFor,
   draftAgeLabel,
   draftPathFor,
+  draftSlotPaths,
   emptyDocumentEntry,
   emptySession,
+  nextDraftPath,
   normalizeSession,
   sessionForEntry,
   sessionFromLastDocument,
@@ -35,6 +37,7 @@ function session(patch: Partial<{
   view: SessionState['view'];
   caret: SessionState['documents'][number]['caret'];
   draft: SessionDraft | null;
+  previousDraft: SessionDraft | null;
 }> = {}): SessionState {
   const { view, ...entryPatch } = patch;
   const base = withActiveEntry(emptySession(), entryPatch);
@@ -47,7 +50,7 @@ describe('normalizeSession', () => {
       document: { token: 'tok', name: 'א.docx', writable: true },
       view: { zoom: 150, focusMode: true, ribbonTab: 'references', ribbonCollapsed: true },
       caret: anchor,
-      draft: { path: draftPathFor('tok'), savedAt: 17, documentToken: 'tok', sourceSize: 900 },
+      draft: { path: draftPathFor('tok', 'a'), savedAt: 17, documentToken: 'tok', sourceSize: 900 },
     });
 
     expect(normalizeSession(JSON.parse(JSON.stringify(stored)))).toEqual(stored);
@@ -72,7 +75,15 @@ describe('normalizeSession', () => {
 
     expect(read).toEqual({
       version: SESSION_VERSION,
-      documents: [{ id: 'd1', document: { token: 'tok', name: 'מסמך', writable: false }, caret: null, draft: null }],
+      documents: [
+        {
+          id: 'd1',
+          document: { token: 'tok', name: 'מסמך', writable: false },
+          caret: null,
+          draft: null,
+          previousDraft: null,
+        },
+      ],
       activeId: 'd1',
       view: defaultView(),
     });
@@ -168,7 +179,7 @@ describe('documentViewFor', () => {
 
 describe('decideDraftRecovery', () => {
   const draft: SessionDraft = {
-    path: draftPathFor('tok'),
+    path: draftPathFor('tok', 'a'),
     savedAt: 100,
     documentToken: 'tok',
     sourceSize: 5_000,
@@ -270,8 +281,9 @@ describe('activeEntry / withActiveEntry', () => {
     expect(activeEntry(next)?.document?.token).toBe('t');
   });
 
-  it('draftPathFor מייצרת נתיב שונה לכל מזהה מסמך', () => {
-    expect(draftPathFor('a')).not.toBe(draftPathFor('b'));
+  it('draftPathFor מייצרת נתיב שונה לכל מזהה מסמך ולכל משבצת', () => {
+    expect(draftPathFor('a', 'a')).not.toBe(draftPathFor('b', 'a'));
+    expect(draftPathFor('a', 'a')).not.toBe(draftPathFor('a', 'b'));
   });
 });
 
@@ -295,5 +307,108 @@ describe('sessionForEntry', () => {
     state.view.zoom = 200;
 
     expect(view.zoom, 'שינוי אצל טאב אחד אינו זולג לשני').toBeNull();
+  });
+});
+
+describe('משבצות הטיוטה', () => {
+  const slots = draftSlotPaths('doc-7');
+
+  function draftAt(path: string): SessionDraft {
+    return { path, savedAt: 1, documentToken: 'tok', sourceSize: 100 };
+  }
+
+  it('שתי משבצות שונות זו מזו', () => {
+    expect(slots[0]).not.toBe(slots[1]);
+    expect(slots[0]).toContain('doc-7');
+  });
+
+  it('רשומה ריקה כותבת למשבצת הראשונה', () => {
+    expect(nextDraftPath(slots, null, null)).toBe(slots[0]);
+  });
+
+  it('כתיבה חוזרת בלי שמירה דורסת את אותה משבצת', () => {
+    // הקלדה רצופה אינה צריכה לבזבז את המשבצת השנייה: שם יושב העותק שאותו
+    // התכונה נבנתה כדי לשמור.
+    expect(nextDraftPath(slots, draftAt(slots[0]), null)).toBe(slots[0]);
+  });
+
+  it('כשהקודמת תופסת משבצת, הכתיבה עוברת לשנייה', () => {
+    expect(nextDraftPath(slots, null, draftAt(slots[0]))).toBe(slots[1]);
+    expect(nextDraftPath(slots, null, draftAt(slots[1]))).toBe(slots[0]);
+  });
+
+  it('אינה דורסת את הקודמת גם כששני המצביעים על אותה משבצת', () => {
+    // מצב שאינו אמור לקרות, ואם קרה — עדיף לבזבז כתיבה מאשר למחוק את העותק.
+    expect(nextDraftPath(slots, draftAt(slots[1]), draftAt(slots[1]))).toBe(slots[0]);
+  });
+
+  it('נתיב מגרסה קודמת אינו נדרס — הכתיבה עוברת למשבצת', () => {
+    const legacy = draftAt('session-draft-doc-7.docx');
+    expect(nextDraftPath(slots, legacy, null)).toBe(slots[0]);
+    expect(nextDraftPath(slots, legacy, draftAt(slots[0]))).toBe(slots[1]);
+  });
+});
+
+describe('previousDraft ברשומה', () => {
+  it('רשומה שנכתבה לפני שהשדה קיים נקראת במלואה, עם null', () => {
+    // הסיבה שהגרסה לא עלתה: העלאה הייתה מוחקת לכל המשתמשים את הטאבים ואת
+    // הטיוטות שלהם, בשביל תוספת של שדה אופציונלי.
+    const stored = session({
+      document: { token: 'tok', name: 'א.docx', writable: true },
+      draft: { path: 'session-draft-doc.docx', savedAt: 17, documentToken: 'tok', sourceSize: 900 },
+    });
+    const withoutField = JSON.parse(JSON.stringify(stored)) as {
+      documents: Array<Record<string, unknown>>;
+    };
+    for (const entry of withoutField.documents) delete entry.previousDraft;
+
+    const read = normalizeSession(withoutField);
+    expect(read).not.toBeNull();
+    expect(activeEntry(read!)?.draft?.path).toBe('session-draft-doc.docx');
+    expect(activeEntry(read!)?.previousDraft).toBeNull();
+  });
+
+  it('previousDraft עובר הלוך ושוב', () => {
+    const previous: SessionDraft = {
+      path: draftPathFor('doc-1', 'b'),
+      savedAt: 42,
+      documentToken: 'tok',
+      sourceSize: 700,
+    };
+    const stored = session({ previousDraft: previous });
+
+    expect(normalizeSession(JSON.parse(JSON.stringify(stored)))).toEqual(stored);
+  });
+
+  it('previousDraft פגום מתאפס בלי לגעת בטיוטה', () => {
+    const stored = session({
+      draft: { path: 'session-draft-doc-a.docx', savedAt: 3, documentToken: 'tok', sourceSize: 10 },
+    }) as unknown as { documents: Array<Record<string, unknown>> };
+    for (const entry of stored.documents) entry.previousDraft = 'לא אובייקט';
+
+    const read = normalizeSession(JSON.parse(JSON.stringify(stored)));
+    expect(activeEntry(read!)?.previousDraft).toBeNull();
+    expect(activeEntry(read!)?.draft?.path).toBe('session-draft-doc-a.docx');
+  });
+
+  it('decideDraftRecovery אינו יודע על previousDraft', () => {
+    // הגרסה הקודמת ישנה מהדיסק **בכוונה**, ולכן השוואת גודל הייתה מציגה
+    // „הקובץ השתנה מחוץ לעורך” על קובץ שאנחנו כתבנו.
+    const entry = activeEntry(
+      session({
+        previousDraft: {
+          path: draftPathFor('doc-1', 'a'),
+          savedAt: 1,
+          documentToken: 'tok',
+          sourceSize: 100,
+        },
+      }),
+    );
+
+    expect(entry?.draft).toBeNull();
+    expect(decideDraftRecovery({ draft: entry?.draft ?? null, openingToken: 'tok', diskSize: 999 })).toEqual({
+      action: 'discard',
+      reason: 'none',
+    });
   });
 });

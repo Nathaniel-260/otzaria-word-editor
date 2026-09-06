@@ -273,10 +273,12 @@ import ShulchanUniformDialog from '../../panels/ShulchanUniformDialog.vue';
 import {
   COMMAND_REPORTER,
   DRAFT_OPENER,
+  HEAVY_ACTION_GUARD,
   PAGE_MARKING,
   STATUS_NOTIFIER,
   STYLE_GALLERY,
   type CommandReporter,
+  type HeavyActionGuard,
   type PageMarkingHandle,
 } from '../../../composables/keys';
 import { useRememberedOptions } from '../../../composables/useRememberedOptions';
@@ -340,6 +342,11 @@ const superdoc = inject(ACTIVE_SUPERDOC, shallowRef<SuperDoc | null>(null));
 const report = inject(COMMAND_REPORTER, fallbackReporter);
 const notify = inject(STATUS_NOTIFIER, () => undefined);
 const styleGallery = inject(STYLE_GALLERY, shallowRef<StyleGalleryState>(fallbackStyleGallery()));
+/**
+ * עותק לפני הכלי, והקפאת שמירה אוטומטית לאורכו. ברירת המחדל — הפעולה כמות
+ * שהיא — היא בשביל בדיקות שמרכיבות את הלשונית בלי המעטפת.
+ */
+const guardHeavy = inject<HeavyActionGuard>(HEAVY_ACTION_GUARD, (action) => action());
 
 /** סגנונות הפסקה של המסמך, לסינון „רק בסגנון” בעיצוב המילה הראשונה. */
 const styleOptions = computed(() => styleGallery.value.items.map((item) => ({ id: item.id, label: item.label })));
@@ -380,7 +387,9 @@ async function runTool<T extends { ok: boolean; message?: string }>(
   if (inFlight.value || !superdoc.value) return;
   inFlight.value = true;
   try {
-    const result = await action();
+    // כל 18 אתרי הקריאה עוברים כאן, ולכן זו נקודת החיבור היחידה שצריך
+    // לרצועה — ראו `HEAVY_ACTION_GUARD`.
+    const result = await guardHeavy(action);
     if (!result.ok) {
       report({ ok: false, message: result.message ?? 'הפעולה נכשלה', reason: 'shulchan-failed' }, commandId);
       return;
