@@ -582,25 +582,17 @@ async function sectionOtzariaTab() {
     await app.tab('✦ אוצריא');
 
     await step('מיקום הפקדים', async () => {
-      const names = ['ציטוט מהקורא', 'חיפוש באוצריא', 'פתח ספרייה', 'חידוש', 'קושיא', 'תירוץ'];
+      // „חידוש”/„קושיא”/„תירוץ” היו כאן, מנוטרלים עם הסבר. הם ירדו מהלשונית
+      // (הבקשה למנוע פתוחה — superdoc/docx-editor#3975), והמאקרו עברו
+      // ל„מפתחים” ונבדקים שם.
+      const names = ['ציטוט מהקורא', 'חיפוש באוצריא', 'פתח ספרייה', 'ייצוא לאוצריא', 'השלמה מהספר'];
       const results = {};
       for (const n of names) results[n] = await onScreen(app, n);
       log('מיקומים:', JSON.stringify(results));
       const off = Object.entries(results).filter(([, r]) => !r.ok);
       off.length
         ? report.fail('מיקום הפקדים', off.map(([n, r]) => `${n}: ${r.why}`).join('; '))
-        : report.pass('מיקום הפקדים', 'כל ששת הפקדים בתוך החלון');
-    });
-
-    await step('חידוש / קושיא / תירוץ — מוגבל מדעת', async () => {
-      for (const label of ['חידוש', 'קושיא', 'תירוץ']) {
-        const st = await app.state(label);
-        const tip = await tooltipOf(app, label);
-        log(`${label}:`, JSON.stringify(st), '| tooltip:', JSON.stringify(tip));
-        const explained = tip && /דרך ציבורית|סגנונות תורניים/.test(tip.desc || tip.title || '');
-        if (st.disabled && explained) report.pass(`${label} — מוגבל מדעת`, tip.desc || tip.title);
-        else report.fail(`${label} — מוגבל מדעת`, `disabled=${st.disabled}; tooltip=${JSON.stringify(tip)}`);
-      }
+        : report.pass('מיקום הפקדים', 'כל חמשת הפקדים בתוך החלון');
     });
 
     await step('ציטוט מהקורא — מסמך נכתב ל-doc.insert', async () => {
