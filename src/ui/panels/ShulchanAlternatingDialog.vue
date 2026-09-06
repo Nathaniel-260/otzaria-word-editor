@@ -3,13 +3,18 @@
     <div
       v-if="isOpen"
       class="shalt-dialog"
+      :style="dragStyle"
       role="dialog"
       aria-modal="true"
       :aria-label="TITLE"
       tabindex="-1"
       @keydown.esc.stop="$emit('close')"
+      @keydown.enter="onDialogEnter"
     >
-      <div class="shalt-header">
+      <div
+        class="shalt-header dialog-drag-handle"
+        @pointerdown="startDialogDrag"
+      >
         <span class="shalt-title">{{ TITLE }}</span>
         <button
           type="button"
@@ -41,7 +46,6 @@
             class="shalt-char"
             type="text"
             aria-label="התווים שאחריהם מתחיל קטע מודגש"
-            @keydown.enter="onSubmit"
           >
         </div>
         <div class="shalt-row">
@@ -55,7 +59,6 @@
             class="shalt-char"
             type="text"
             aria-label="התווים שבהם מסתיים קטע מודגש"
-            @keydown.enter="onSubmit"
           >
         </div>
       </div>
@@ -64,6 +67,7 @@
         <button
           type="button"
           class="shalt-btn shalt-btn-primary"
+          data-default-action
           :disabled="!canSubmit"
           @pointerdown.prevent
           @click="onSubmit"
@@ -96,6 +100,13 @@ import {
   type AlternatingOptions,
 } from '../../engine/shulchan/text-alternating';
 import { useRememberedOptions } from '../../composables/useRememberedOptions';
+import { useDialogDrag } from '../../composables/dialog-drag';
+import { useDialogDefaultAction } from '../../composables/dialog-default-action';
+
+/* הדיאלוג נגרר בכותרת שלו — composables/dialog-drag.ts. */
+const { dragStyle, startDialogDrag } = useDialogDrag();
+/* Enter = הכפתור הראשי — composables/dialog-default-action.ts. */
+const { onDialogEnter } = useDialogDefaultAction();
 
 const props = withDefaults(
   defineProps<{

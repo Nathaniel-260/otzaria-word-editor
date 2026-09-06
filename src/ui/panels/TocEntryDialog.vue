@@ -4,12 +4,17 @@
     <div
       v-if="isOpen"
       class="toc-entry-dialog"
+      :style="dragStyle"
       role="dialog"
       aria-modal="true"
       :aria-label="DIALOG_TITLE"
       @keydown.esc.stop="$emit('close')"
+      @keydown.enter="onDialogEnter"
     >
-      <div class="te-header">
+      <div
+        class="te-header dialog-drag-handle"
+        @pointerdown="startDialogDrag"
+      >
         <span class="te-title">{{ DIALOG_TITLE }}</span>
         <button
           type="button"
@@ -37,7 +42,6 @@
             class="te-input"
             placeholder="למשל: הלכות שבת"
             aria-label="טקסט הערך שיופיע בתוכן העניינים"
-            @keydown.enter="onMark"
           >
         </div>
 
@@ -104,6 +108,7 @@
         <button
           type="button"
           class="te-btn te-btn-primary"
+          data-default-action
           :disabled="!canMark"
           @pointerdown.prevent
           @click="onMark"
@@ -156,6 +161,13 @@ import {
   normalizeTocEntryText,
   type TocEntrySummary,
 } from '../../engine/toc';
+import { useDialogDrag } from '../../composables/dialog-drag';
+import { useDialogDefaultAction } from '../../composables/dialog-default-action';
+
+/* הדיאלוג נגרר בכותרת שלו — composables/dialog-drag.ts. */
+const { dragStyle, startDialogDrag } = useDialogDrag();
+/* Enter = הכפתור הראשי — composables/dialog-default-action.ts. */
+const { onDialogEnter } = useDialogDefaultAction();
 
 const props = withDefaults(
   defineProps<{

@@ -3,13 +3,18 @@
     <div
       v-if="isOpen"
       class="shtypos-dialog"
+      :style="dragStyle"
       role="dialog"
       aria-modal="true"
       :aria-label="TITLE"
       tabindex="-1"
       @keydown.esc.stop="$emit('close')"
+      @keydown.enter="onDialogEnter"
     >
-      <div class="shtypos-header">
+      <div
+        class="shtypos-header dialog-drag-handle"
+        @pointerdown="startDialogDrag"
+      >
         <span class="shtypos-title">{{ TITLE }}</span>
         <button
           type="button"
@@ -44,6 +49,7 @@
         <button
           type="button"
           class="shtypos-btn shtypos-btn-primary"
+          data-default-action
           :disabled="!canSubmit"
           @pointerdown.prevent
           @click="onSubmit"
@@ -76,6 +82,13 @@ import {
   type TyposOptions,
 } from '../../engine/shulchan/typos';
 import { useRememberedOptions } from '../../composables/useRememberedOptions';
+import { useDialogDrag } from '../../composables/dialog-drag';
+import { useDialogDefaultAction } from '../../composables/dialog-default-action';
+
+/* הדיאלוג נגרר בכותרת שלו — composables/dialog-drag.ts. */
+const { dragStyle, startDialogDrag } = useDialogDrag();
+/* Enter = הכפתור הראשי — composables/dialog-default-action.ts. */
+const { onDialogEnter } = useDialogDefaultAction();
 
 const props = withDefaults(
   defineProps<{

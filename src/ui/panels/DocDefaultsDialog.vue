@@ -4,13 +4,18 @@
       v-if="isOpen"
       ref="rootRef"
       class="docdef-dialog"
+      :style="dragStyle"
       role="dialog"
       aria-modal="true"
       :aria-label="DIALOG_TITLE"
       tabindex="-1"
       @keydown.esc.stop="$emit('close')"
+      @keydown.enter="onDialogEnter"
     >
-      <div class="dd-header">
+      <div
+        class="dd-header dialog-drag-handle"
+        @pointerdown="startDialogDrag"
+      >
         <span class="dd-title">{{ DIALOG_TITLE }}</span>
         <button
           type="button"
@@ -43,7 +48,6 @@
             maxlength="100"
             placeholder="ללא שינוי"
             aria-label="שם גופן ברירת המחדל של המסמך"
-            @keydown.enter="onSubmit"
           >
         </div>
         <div class="dd-row">
@@ -61,7 +65,6 @@
             step="0.5"
             :placeholder="sizePlaceholder"
             aria-label="גודל ברירת המחדל, בנקודות"
-            @keydown.enter="onSubmit"
           >
           <span class="dd-unit">נק'</span>
         </div>
@@ -82,6 +85,7 @@
         <button
           type="button"
           class="dd-btn dd-btn-primary"
+          data-default-action
           :disabled="busy || !canSubmit"
           @pointerdown.prevent
           @click="onSubmit"
@@ -109,6 +113,13 @@
  * `before` ל-record לא נמדדה, ושדה שנפתח עם ניחוש הוא שדה שמשקר.
  */
 import { computed, nextTick, ref, watch } from 'vue';
+import { useDialogDrag } from '../../composables/dialog-drag';
+import { useDialogDefaultAction } from '../../composables/dialog-default-action';
+
+/* הדיאלוג נגרר בכותרת שלו — composables/dialog-drag.ts. */
+const { dragStyle, startDialogDrag } = useDialogDrag();
+/* Enter = הכפתור הראשי — composables/dialog-default-action.ts. */
+const { onDialogEnter } = useDialogDefaultAction();
 
 const DIALOG_TITLE = 'ברירות מחדל למסמך';
 const INVALID_HINT = 'הערכים שהוקלדו אינם תקינים.';
