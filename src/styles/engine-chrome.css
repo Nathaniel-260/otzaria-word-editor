@@ -117,7 +117,23 @@
    העיגון הוא ב-`data-superdoc-v2-edit-rejected` — תכונה סמנטית — ולא
    במחלקה. tests/contract/engine-edit-rejected-banner.test.ts מאמת שהיא
    עדיין קיימת באריזה: אם SuperDoc יסגור את הבאג או ישנה את המבנה, הבדיקה
-   תיפול, וזה הסימן למחוק את הכלל הזה במקום להשאיר הסתרה של DOM שאינו קיים. */
-:root:not([data-menu-locale='en']) .superdoc__mutation-status:has([data-superdoc-v2-edit-rejected]) {
+   תיפול, וזה הסימן למחוק את הכלל הזה במקום להשאיר הסתרה של DOM שאינו קיים.
+   **למה `> [data-…]` ולא `:has()`, וזה נמדד.** הגרסה הראשונה של הכלל הסתירה
+   את העוטף דרך `.superdoc__mutation-status:has([data-superdoc-v2-edit-rejected])`,
+   וזה היה מקור האיטיות בהקלדה: `:has()` שהעוגן שלו יושב בתוך `.superdoc`
+   גרם ל-Blink לסמן את `.superdoc` כמושפע מ-`:has()`, ומרגע זה כל הוספה או
+   הסרה של צומת במסמך — כלומר כל תו שנקלד — תזמנה חישוב סגנון מחדש של
+   **כל תת-העץ** (2,748 אלמנטים במסמך של חמישה עמודים, 60–115ms לחישוב).
+   ב-50 הקשות נמדדו 42 חישובים כאלה ו-53 long tasks; מחיקת הכלל הזה בלבד,
+   בזמן ריצה ולפני ההקלדה, הורידה אותם ל-0 ול-3, ומחיקת כלל אקראי אחר לא
+   שינתה דבר (trace של Chrome, `disabled-by-default-devtools.timeline.invalidationTracking`:
+   „Affected by :has()” על `DIV.superdoc`, „Invalidation set invalidates
+   subtree”). הסלקטור כאן מסתיר את ה-`<p>` שנושא את התכונה ולא את העוטף —
+   העוטף הוא `height: 0` בלי ריפוד ורקע (SuperDoc.vue, `.superdoc__mutation-status`),
+   ולכן אין הבדל נראה — ובלי `:has()` בכלל. שער ההיגיינה
+   (tests/unit/css-hygiene.test.ts) חוסם `:has()` חדש בגיליונות, ו-
+   scripts/qa/typing-style-recalc-qa.mjs סופר את החישובים המלאים בזמן הקלדה
+   בדפדפן אמיתי, כדי שהתופעה לא תחזור בשקט. */
+:root:not([data-menu-locale='en']) .superdoc__mutation-status > [data-superdoc-v2-edit-rejected] {
   display: none;
 }
