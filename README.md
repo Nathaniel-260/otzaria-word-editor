@@ -122,6 +122,36 @@ const resolved = resolution.status === "uniform" ? resolution.value : void 0;
 התיקון החיווי נשאר יציב לאורך כל התרחיש — הקלדה, הזזת סמן, סימון טווח ולחיצה במקום
 אחר — ב‑0 הבהובים.
 
+## איטיות בהקלדה — חישוב סגנון של כל המסמך בכל תו
+
+„כשאני מקליד, לוקח כמה שניות עד שהתו מופיע.” נמדד ב‑Chrome על ה‑`dist` הארוז,
+במסמך של חמישה עמודים: על כל הקשה הדפדפן חישב סגנון מחדש (`UpdateLayoutTree`)
+ל‑**כל** עץ המסמך — 2,748 אלמנטים, 60–115ms לחישוב — 42 פעמים ב‑50 הקשות, עם
+53 long tasks. במסמך ריק זה לא קרה; במסמך אמיתי, על מכונה עמוסה ובתוך ה‑WebView
+של אוצריא, זה מה שמצטבר ל„כמה שניות”.
+
+המקור לא היה בקוד שרץ בהקלדה (פחות מאחוז מהזמן היה שלנו) אלא בכלל CSS יחיד
+ב‑[src/styles/engine-chrome.css](src/styles/engine-chrome.css): ההסתרה של באנר
+`edit-rejected` של המנוע נכתבה כ‑`.superdoc__mutation-status:has([data-superdoc-v2-edit-rejected])`.
+`:has()` שהעוגן שלו יושב **בתוך** `.superdoc` גורם ל‑Blink לסמן את `.superdoc`
+כמושפע מ‑`:has()`, ומאותו רגע כל הוספה או הסרה של צומת במסמך — כל תו — מתזמנת
+חישוב סגנון של תת‑העץ כולו (ב‑trace: „Affected by :has()” על `DIV.superdoc`,
+„Invalidation set invalidates subtree”). ההכרעה הייתה ניסוי מבוקר על אותו
+מסמך: מחיקת הכלל הזה בלבד, בזמן ריצה, הורידה את החישובים המלאים ל‑0 ואת ה‑long
+tasks ל‑3; מחיקת כלל אקראי אחר, או של ה‑`:has()` שברצועה, לא שינתה דבר.
+
+התיקון מסתיר את ה‑`<p>` שנושא את התכונה כילד ישיר של העוטף, בלי `:has()` —
+העוטף הוא `height: 0` בלי ריפוד, ואין הבדל נראה. שני שערים שומרים שזה לא
+יחזור: [tests/unit/css-hygiene.test.ts](tests/unit/css-hygiene.test.ts) חוסם כל
+`:has()` שלא אושר במפורש עם נימוק, ו‑`npm run check:typing-recalc`
+([scripts/qa/typing-style-recalc-qa.mjs](scripts/qa/typing-style-recalc-qa.mjs))
+מקליד במסמך של כמה עמודים תחת trace של ה‑renderer וסופר חישובי סגנון בגודל
+המסמך כולו — הוא אדום על הכלל הישן (112 חישובים ב‑40 הקשות) וירוק אחרי התיקון.
+לאבחון ידני יש [scripts/typing-latency-probe.mjs](scripts/typing-latency-probe.mjs):
+זמן מלחיצה עד ציור, long tasks, והודעות קונסולה לכל הקשה — גם על התוסף כשהוא
+רץ **בתוך אוצריא** (`--attach`, אחרי הרצת אוצריא עם
+`WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9444`).
+
 ## מצב מיקוד
 
 `F11`, הכפתור ב„תצוגה” או הכפתור בשורת המצב — ו‑`Escape`, `F11` או כפתור
