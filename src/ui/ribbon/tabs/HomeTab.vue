@@ -624,7 +624,10 @@ const currentLineHeight = computed(
 /** „1.5” ולא „1.50”, כדי שהערך יתאים לאפשרות בבורר. */
 const selectedLineSpacing = computed(() => currentLineHeight.value.toFixed(2).replace(/0$/, ''));
 
-/** צבע הפקד תמיד משקף את המסמך; ברירת המחדל היא מה שהכפתור יחיל בלחיצה. */
+/**
+ * צבע המסמך — מה שמסמן את המשבצת בפלטה, ולא הצבע שהכפתור יחיל. הצבע שהכפתור
+ * מחיל הוא בחירה שנדבקת לפקד עצמו; ראו `activeColor` ב-ColorPickerPopover.
+ */
 const textColor = computed(() => engineTextColor.value ?? '');
 const highlightColor = computed(() => engineHighlight.value ?? '');
 

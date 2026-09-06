@@ -196,6 +196,17 @@ describe('ColorPickerPopover', () => {
     await settle();
   };
 
+  /** הפס שמתחת לאייקון — הצבע שהלחיצה על הכפתור הראשי תחיל. */
+  const bar = (harness: ReturnType<typeof mountUi>) =>
+    harness.wrapper.find('.color-indicator-bar');
+
+  /** jsdom מנרמל צבע ל-`rgb(...)`, ולכן גם הערך המצופה עובר את אותו נרמול. */
+  const asCss = (color: string): string => {
+    const probe = document.createElement('div');
+    probe.style.backgroundColor = color;
+    return probe.style.backgroundColor;
+  };
+
   it('שבב מהפלטה פולט את הצבע, ובעקבותיו הפופאובר נסגר', async () => {
     const harness = mountUi(ColorPickerPopover, {
       props: { icon: 'fontColor', title: 'צבע גופן' },
@@ -241,24 +252,82 @@ describe('ColorPickerPopover', () => {
     expect(harness.wrapper.find('.palette-clear-btn').exists()).toBe(false);
   });
 
-  it('הכפתור הראשי מחיל את הצבע הנוכחי בלי לפתוח את הפלטה', async () => {
+  /*
+   * הפס והלחיצה הם ערך אחד — וזה **לא** צבע המסמך.
+   *
+   * הפס היה קשור ל-`modelValue`, כלומר לצבע שהמנוע מדווח על הבחירה, ולכן
+   * הכפתור הראשי החיל על הטקסט את הצבע שכבר יש לו: בסימון זה לא נראה בכלל
+   * (ברירת המחדל צהובה גם כך), ובצבע הגופן הצבע שנבחר נעלם מהפס ברגע שהסמן
+   * עבר לטקסט שחור. הפס הוא ההבטחה של הכפתור, ולכן הוא מראה את מה שהלחיצה
+   * תעשה — הבחירה האחרונה בפקד, שנדבקת אליו כמו ב-Word.
+   */
+  it('הפס והלחיצה הם הצבע שנבחר, ולא צבע הטקסט שהסמן עומד עליו', async () => {
     const harness = mountUi(ColorPickerPopover, {
-      props: { icon: 'fontColor', title: 'צבע גופן', modelValue: '#0055FF' },
+      props: {
+        icon: 'highlight',
+        title: 'צבע סימון',
+        defaultColor: '#FFFF00',
+        // מה שהמנוע מדווח על הבחירה — טקסט שכבר מסומן בכחול.
+        modelValue: '#0055FF',
+      },
     });
+    await open(harness);
+    await harness.wrapper.find('.color-swatch[data-tip-desc="#ffff00"]').trigger('click');
+    await settle();
+
+    expect((bar(harness).element as HTMLElement).style.backgroundColor).toBe(asCss('#ffff00'));
+
     await harness.wrapper.find('.color-main-btn').trigger('click');
     await settle();
 
-    expect(harness.wrapper.emitted('change')).toEqual([['#0055FF']]);
+    // הצבע נדבק: הלחיצה השנייה שולחת אותו שוב, ולא את הכחול של המסמך.
+    expect(harness.wrapper.emitted('change')).toEqual([['#ffff00'], ['#ffff00']]);
     expect(harness.wrapper.find('.color-palette-popover').exists()).toBe(false);
   });
 
-  it('בלי צבע מהמנוע הכפתור הראשי מחיל את ברירת המחדל', async () => {
+  it('טרם נבחר צבע — הפס והלחיצה הם ברירת המחדל', async () => {
     const harness = mountUi(ColorPickerPopover, {
       props: { icon: 'highlight', title: 'צבע סימון', defaultColor: '#FFFF00' },
     });
     await harness.wrapper.find('.color-main-btn').trigger('click');
 
     expect(harness.wrapper.emitted('change')).toEqual([['#FFFF00']]);
+    expect((bar(harness).element as HTMLElement).style.backgroundColor).toBe(asCss('#FFFF00'));
+  });
+
+  it('„ללא צבע” נדבק אף הוא: הלחיצה הבאה מנקה ואינה מחילה את ברירת המחדל', async () => {
+    const harness = mountUi(ColorPickerPopover, {
+      props: { icon: 'highlight', title: 'צבע סימון', defaultColor: '#FFFF00' },
+    });
+    await open(harness);
+    await harness.wrapper.find('.palette-clear-btn').trigger('click');
+    await settle();
+
+    // פס ריק — קו היקפי בלבד; „ללא צבע” הוא היעדר ולא צהוב.
+    expect(bar(harness).classes()).toContain('is-none');
+
+    await harness.wrapper.find('.color-main-btn').trigger('click');
+    await settle();
+
+    expect(harness.wrapper.emitted('change')).toEqual([[null], [null]]);
+  });
+
+  it('הצבע שיוחל נאמר גם במילים — הפס אינו נראה לקורא מסך', async () => {
+    const harness = mountUi(ColorPickerPopover, {
+      props: { icon: 'fontColor', title: 'צבע גופן', defaultColor: '#c00000' },
+    });
+    const main = () => harness.wrapper.find('.color-main-btn');
+
+    expect(tipOf(main()).title).toBe('צבע גופן');
+    expect(tipOf(main()).description).toBe('אדום כהה');
+    expect(main().attributes('aria-label')).toBe('צבע גופן, אדום כהה');
+
+    await open(harness);
+    await harness.wrapper.find('.color-swatch[data-tip-desc="#4f81bd"]').trigger('click');
+    await settle();
+
+    expect(tipOf(main()).description).toBe('כחול');
+    expect(main().attributes('aria-label')).toBe('צבע גופן, כחול');
   });
 
   it('לחיצה מחוץ לפקד סוגרת את הפלטה', async () => {
