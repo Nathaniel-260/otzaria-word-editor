@@ -10,6 +10,7 @@
         aria-orientation="horizontal"
         :aria-label="menuString('לשוניות הרצועה')"
         @keydown="onTabKeydown"
+        @wheel="handleWheelScroll"
       >
         <button
           v-for="(tab, index) in translatedTabs"
@@ -57,6 +58,7 @@
       class="word-ribbon-body"
       role="tabpanel"
       :aria-labelledby="ribbonTabId(currentTabId)"
+      @wheel="handleWheelScroll"
     >
       <FileTab
         v-if="currentTabId === 'file'"
@@ -114,6 +116,7 @@
 <script setup lang="ts">
 import { ref, computed, type ComponentPublicInstance } from 'vue';
 import { RIBBON_PANEL_ID, nextTabIndex, ribbonTabId } from './aria';
+import { handleWheelScroll } from '../../composables/wheel-scroll';
 import { menuString } from './i18n';
 import { RIBBON_TABS } from './tabs';
 import SvgIcon from '../icons/SvgIcon.vue';

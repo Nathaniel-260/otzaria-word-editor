@@ -6,6 +6,7 @@
       role="group"
       :aria-label="menuString('סגנונות')"
       @scroll.passive="measure"
+      @wheel="handleWheelScroll"
     >
       <button
         v-for="item in items"
@@ -72,6 +73,7 @@ import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, shallowRef
 import SvgIcon from '../../icons/SvgIcon.vue';
 import { menuString } from '../i18n';
 import { STYLE_GALLERY } from '../../../composables/keys';
+import { handleWheelScroll } from '../../../composables/wheel-scroll';
 import {
   fallbackStyleGallery,
   galleryScrollAvailability,

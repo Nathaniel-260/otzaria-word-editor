@@ -7,6 +7,7 @@
       aria-orientation="horizontal"
       aria-label="מסמכים פתוחים"
       @keydown="onTabKeydown"
+      @wheel="handleWheelScroll"
     >
       <button
         v-for="(tab, index) in tabs"
@@ -51,6 +52,7 @@
 <script setup lang="ts">
 import type { ComponentPublicInstance } from 'vue';
 import { nextTabIndex } from '../ribbon/aria';
+import { handleWheelScroll } from '../../composables/wheel-scroll';
 
 export interface DocumentTabItem {
   id: string;
