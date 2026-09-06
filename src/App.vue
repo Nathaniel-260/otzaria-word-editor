@@ -239,6 +239,7 @@
       :recents="recentDocuments"
       :busy="isOpening || saveSnapshot.isSaving"
       :discarded-count="discardedBackups.length"
+      :previous-version="previousVersion"
       @close="isOpenDialogOpen = false"
       @browse="onOpenDialogBrowse"
       @create-from-template="onOpenDialogCreate"
@@ -246,6 +247,7 @@
       @toggle-pin="onOpenDialogTogglePin"
       @forget-recent="onOpenDialogForget"
       @show-discarded="onShowDiscarded"
+      @open-previous="onOpenPreviousVersion"
     />
 
     <!--
@@ -2977,6 +2979,68 @@ function onShowDiscarded(): void {
  * העותק ברגע הזה הייתה משאירה את העבודה שוב בלי רשת. „הסר” הוא פעולה מפורשת
  * (`onForgetDiscarded`), וזו ההזדמנות היחידה למחוק אותה.
  */
+/**
+ * הגרסה שהייתה לפני השמירה האחרונה של המסמך הפעיל, אם יש כזאת.
+ *
+ * מותנית בהתאמת ה-token, ולא רק בקיום: מצביע „קודמת” שורד מעבר מסמך
+ * בכוונה (ראו %ssetDocument%s בזוכר), ולכן בלי הבדיקה הזאת הכפתור היה מציע
+ * לפתוח גרסה של מסמך אחר לגמרי.
+ */
+const previousVersion = computed<{ name: string; age: string } | null>(() => {
+  const state = activeSession.value?.keeper.state;
+  const entry = state ? activeEntry(state) : null;
+  const previous = entry?.previousDraft;
+  if (!previous) return null;
+  if (previous.documentToken !== (entry?.document?.token ?? null)) return null;
+  return {
+    name: entry?.document?.name ?? title.value,
+    age: draftAgeLabel(previous.savedAt, Date.now()) ?? '',
+  };
+});
+
+/**
+ * פותח את הגרסה שלפני השמירה האחרונה — **בטאב חדש, ובלי יעד כתיבה**.
+ *
+ * שני אלה הם כל הבטיחות של המסלול: המסמך שעל המסך אינו מוחלף, ו„שמור” על
+ * מה שנפתח פותח „שמור בשם”. כלומר אי אפשר להגיע מכאן לדריסה של הקובץ
+ * בטעות — וזה חשוב במיוחד למי שמגיע לכאן דווקא מפני שמשהו כבר השתבש.
+ */
+async function onOpenPreviousVersion(): Promise<void> {
+  if (isOpenBusy()) return;
+  const state = activeSession.value?.keeper.state;
+  const entry = state ? activeEntry(state) : null;
+  const previous = entry?.previousDraft;
+  if (!previous) return;
+
+  const label = entry?.document?.name ?? title.value;
+  const bytes = await readWorkspaceBytes(previous.path);
+  if (!bytes) {
+    // הקובץ אינו במקומו. אין מה לעשות מלבד לומר זאת — המצביע יתעדכן בשמירה
+    // הבאה ממילא, ומחיקה שלו כאן הייתה מוחקת את ההזדמנות היחידה לנסות שוב
+    // אחרי כשל חולף של הגשר.
+    setStatus(`הגרסה הקודמת של „${label}” לא נמצאה`, true);
+    return;
+  }
+
+  isOpenDialogOpen.value = false;
+  ensureOpenTargetTab();
+  const age = draftAgeLabel(previous.savedAt, Date.now());
+  const opened = await openDocument(undefined, {
+    draft: new Blob([bytes], { type: DOCX_MIME }),
+    name: `${label} — גרסה קודמת`,
+  });
+  if (!opened) {
+    setStatus(`הגרסה הקודמת של „${label}” לא נפתחה`, true);
+    return;
+  }
+
+  setStatus(
+    age
+      ? `נפתחה הגרסה של „${label}” מלפני השמירה האחרונה (${age}) — הקובץ עצמו לא השתנה`
+      : `נפתחה הגרסה של „${label}” מלפני השמירה האחרונה — הקובץ עצמו לא השתנה`,
+  );
+}
+
 async function onOpenDiscarded(slot: number): Promise<void> {
   if (isOpenBusy() || isDiscardedOpening.value) return;
   const entry = discardedBackups.value.find((item) => item.slot === slot);
