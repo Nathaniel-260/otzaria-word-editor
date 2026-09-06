@@ -21,7 +21,9 @@
  *   --drop-css <regex>   מוחק בזמן ריצה, לפני ההקלדה, כל כלל CSS שהסלקטור שלו
  *                        תואם. למדידה בלבד — כך הוכרע איזה כלל גרם לחישוב המלא.
  *   --trace <out.json>   שומר trace של ה-renderer (devtools.timeline + invalidationTracking)
- *   --profile <out.json> שומר פרופיל CPU
+ *   --trace-light        עם --trace: בלי invalidationTracking/stack (קל יותר; למסמכים גדולים)
+ *   --profile <out.json> שומר פרופיל CPU   --profile-interval <µs> (250)   --settle <ms> שהות אחרי פתיחה (3000)
+ *   --open-wait <ms>     כמה להמתין לפתיחת --docx (60000)
  *   --gap <ms>           הפער בין הקשות (80)   --n1/--n2/--n3  מספר הקשות בכל שלב (60/40/40)
  *   --port <n> --label <x> --dist <dir>
  *
@@ -41,6 +43,8 @@ const opt = (name, dflt) => {
 const DIST = opt('--dist', join(ROOT, 'dist'));
 const PROFILE_OUT = opt('--profile', null);
 const TRACE_OUT = opt('--trace', null);
+/** trace קל: בלי invalidationTracking ובלי stack — אלה מכבידים על הדף עצמו ומסיטים את המדידה במסמכים גדולים. */
+const TRACE_LIGHT = args.includes('--trace-light');
 const DROP_CSS = opt('--drop-css', null);
 const PORT = Number(opt('--port', 9361));
 const LABEL = opt('--label', 'lat');
@@ -49,6 +53,11 @@ const DOCX = opt('--docx', null);
 const TAB = opt('--tab', null);
 const ATTACH = opt('--attach', null);
 const COUNTS = [Number(opt('--n1', 60)), Number(opt('--n2', 40)), Number(opt('--n3', 40))];
+/** כמה להמתין לפתיחת המסמך שנמסר ב---docx. מסמך של מאות עמודים צריך יותר מדקה. */
+const OPEN_WAIT_MS = Number(opt('--open-wait', 60_000));
+/** שהות אחרי שהמסמך נפתח ולפני ההקלדה. מסמך גדול „מסדר את התצוגה” כמה שניות אחרי שהטקסט כבר בעץ, והקלדה בזמן הזה מודדת את הפתיחה. */
+const SETTLE_MS = Number(opt('--settle', 3000));
+const PROFILE_INTERVAL_US = Number(opt('--profile-interval', 250));
 
 const HOST_STUB = readFileSync(join(ROOT, 'scripts', 'qa', 'host-stub.js'), 'utf8');
 const QA_API = readFileSync(join(ROOT, 'scripts', 'qa', 'qa-api.js'), 'utf8');
@@ -242,11 +251,15 @@ try {
         ),
       );
       if (browse) await click(cdp, browse.x, browse.y);
-      for (let waited = 0; waited < 60_000; waited += 500) {
+      let openedLen = 0;
+      for (let waited = 0; waited < OPEN_WAIT_MS; waited += 500) {
         await sleep(500);
-        if ((await cdp.evaluate('(window.__otzariaEditor && window.__otzariaEditor.container.textContent.length) || 0')) > 2000) break;
+        openedLen = await cdp.evaluate('(window.__otzariaEditor && window.__otzariaEditor.container.textContent.length) || 0');
+        if (waited % 10_000 === 0 && waited > 0) console.log(`ממתין לפתיחה… ${waited / 1000}s, טקסט ${openedLen}, עמודים ${await cdp.evaluate('document.querySelectorAll("[data-page-index]").length')}`);
+        if (openedLen > 2000) break;
       }
-      await sleep(3000);
+      if (openedLen <= 2000) console.log('אזהרה: המסמך לא נפתח בזמן ההמתנה — הקונסולה עד כאן: ' + (await cdp.evaluate('JSON.stringify(window.__lat.consoleCounts)')));
+      await sleep(SETTLE_MS);
     }
 
     if (TAB) {
@@ -293,20 +306,25 @@ try {
 
     const installed = await cdp.evaluate('window.__lat.install()');
     if (installed !== 'ok') throw new Error('התקנת המדידה נכשלה: ' + installed);
+    // שגיאות שנצברו עד כאן — בפתיחה — נדפסות לפני האיפוס, כדי שפתיחה שנכשלה לא תיעלם.
+    const beforeTyping = JSON.parse(await cdp.evaluate('JSON.stringify(window.__lat.consoleCounts)'));
+    const loud = Object.entries(beforeTyping).filter(([k]) => /^(error|warn)/.test(k));
+    if (loud.length) console.log('קונסולה לפני ההקלדה: ' + loud.map(([k, v]) => `${v}× ${k}`).join(' | '));
     await cdp.evaluate('window.__lat.consoleCounts = {}');
 
     let tracer = null;
     if (TRACE_OUT) {
       tracer = await attachTo(ATTACH ? Number(ATTACH) : PORT);
       await tracer.cdp.send('Tracing.start', {
-        categories:
-          'devtools.timeline,disabled-by-default-devtools.timeline,disabled-by-default-devtools.timeline.invalidationTracking,blink.user_timing,disabled-by-default-devtools.timeline.stack',
+        categories: TRACE_LIGHT
+          ? 'devtools.timeline,disabled-by-default-devtools.timeline,blink.user_timing'
+          : 'devtools.timeline,disabled-by-default-devtools.timeline,disabled-by-default-devtools.timeline.invalidationTracking,blink.user_timing,disabled-by-default-devtools.timeline.stack',
         transferMode: 'ReportEvents',
       });
     }
     if (PROFILE_OUT) {
       await cdp.send('Profiler.enable');
-      await cdp.send('Profiler.setSamplingInterval', { interval: 250 });
+      await cdp.send('Profiler.setSamplingInterval', { interval: PROFILE_INTERVAL_US });
       await cdp.send('Profiler.start');
     }
 
