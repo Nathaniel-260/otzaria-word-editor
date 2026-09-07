@@ -54,6 +54,7 @@ import {
   type SectionWordCache,
 } from './book-completion';
 import { loadAcronymDictionary } from './acronym-dictionary';
+import { looksLikeAcronym } from './acronyms';
 import { parseAtTrigger } from './at-mention';
 import {
   getCurrentReaderState,
@@ -512,13 +513,18 @@ export function installBookCompletion(
     }
 
     // ראשי-תיבות הם מילה שלמה, ולכן נבדקים רק אחרי רווח ולא כהשלמת prefix.
-    if (snapshot.partialWord === '' && snapshot.precedingWords.length > 0) {
+    const lastWord =
+      snapshot.partialWord === '' ? (snapshot.precedingWords[snapshot.precedingWords.length - 1] ?? null) : null;
+    // הצורה נבדקת **לפני** הטעינה: אחרת כל מילה רגילה שההשלמה מהספר לא מצאה
+    // לה המשך הייתה מזריקה נכס של כמעט מגה-בייט, אחרי כל השהיה.
+    if (lastWord !== null && looksLikeAcronym(lastWord)) {
       const dictionary = await loadAcronymDictionary();
       if (token !== evalToken || disposed) return;
-      const lastWord = snapshot.precedingWords[snapshot.precedingWords.length - 1]!;
       const expansion = dictionary?.lookup(lastWord) ?? null;
       if (expansion) {
-        const ghostText = ` ${expansion}`;
+        // רווח מפריד רק כשאין אחד. הר"ת נבדק גם אחרי רווח שהוקלד וגם כשהסמן
+        // צמוד לאות האחרונה, והפרדה עיוורת הכניסה רווח כפול (נמדד בשער).
+        const ghostText = /\s$/.test(snapshot.rawBeforeText) ? expansion : ` ${expansion}`;
         suggestion = {
           kind: 'suggesting',
           ghostText,
@@ -562,6 +568,16 @@ export function installBookCompletion(
       return;
     }
     if (receipt?.success === false || disposed) return;
+
+    /*
+     * ההכנסה נחתה, וכל הערכה שנקבעה או שרצה לפניה מסתמכת על הטקסט שלפניה —
+     * כלומר הייתה מציעה שוב את אותה השלמה בדיוק. נמדד בשער: ה-ghost חזר
+     * מיד אחרי Tab ונשאר על המסך עד ההקשה הבאה. הטוקן פוסל את מי שבאוויר,
+     * וה-timer מבטל את מי שעוד לא יצא.
+     */
+    evalToken += 1;
+    if (debounceTimer !== undefined) clearTimeout(debounceTimer);
+    clearSuggestion();
 
     if (continueFrom !== null && cache) {
       const next = sliceWords(cache, continueFrom, WORDS_TO_SHOW);
