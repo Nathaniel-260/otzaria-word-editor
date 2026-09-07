@@ -43,6 +43,7 @@ import { createFontSample } from './font-sample';
 import { familyPickerOptions } from './font-family-options';
 import { applyOptimistically, withCurrent, type PickerOption } from './picker-value';
 import { ACTIVE_SUPERDOC } from '../engine/document-api';
+import { ensureFamilyDrawable } from '../engine/picker-fonts';
 import { captureRange, paintFamily, readSelectionText } from '../engine/font-preview';
 import { UNSETTLED_SELECTION } from '../engine/readout-hold';
 import {
@@ -287,6 +288,19 @@ export function useFontControls(): FontControls {
     void applyOptimistically(memory.pendingFamily, memory.family, payload, () =>
       familyCmd.run(payload),
     );
+    /*
+     * הגופן שנבחר אינו בהכרח גופן שהדפדפן מצייר, וזה תוקן אחרי שנמדד: המנייה
+     * מדווחת שמות GDI, ווריאנט משקל כמו `Guttman Kav-Light` נשאר שם שאינו
+     * נפתר — 43 כאלה מ-287 במכונה שנמדדה. בלי השליפה הטקסט נכתב עם השם הנכון
+     * ב-OOXML אבל מצויר ב-fallback.
+     *
+     * **אחרי** ההחלה ולא לפניה, ובלי `await`: ההחלה היא מה שהמשתמש ביקש והיא
+     * אינה אמורה להמתין לרשת של המארח. השליפה עומדת בפני עצמה — היא מזריקה
+     * `@font-face` ומודיעה, והבורר מתעורר בעצמו (App.vue).
+     *
+     * אינה זורקת בשום מסלול, ולכן אין כאן `catch`: ראו `ensureFamilyDrawable`.
+     */
+    void ensureFamilyDrawable(next);
   }
 
   function applySize(pt: number): void {

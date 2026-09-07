@@ -30,11 +30,19 @@ import type { InstalledFontsSnapshot } from '../../src/engine/system-fonts';
 
 const values = (options: readonly { value: string }[]) => options.map((option) => option.value);
 
-/** מנייה מזויפת. `hebrew` הוא מה שקובע לאיזו קבוצה שם נופל. */
-function installed(names: readonly string[], hebrew: readonly string[] = []): InstalledFontsSnapshot {
+/**
+ * מנייה מזויפת. `hebrew` הוא מה שקובע לאיזו קבוצה שם נופל, ו-`unresolved` הוא
+ * מה שהמנייה סימנה כמותקן שהדפדפן אינו פותר — כלומר מי שהמיזוג ימדוד מחדש.
+ */
+function installed(
+  names: readonly string[],
+  hebrew: readonly string[] = [],
+  unresolved: readonly string[] = [],
+): InstalledFontsSnapshot {
   return {
     families: names.map((name) => ({ value: name, label: name, previewFamily: `"${name}", sans-serif` })),
     hebrew: new Set(hebrew.map((name) => name.toLowerCase())),
+    unresolved: new Set(unresolved.map((name) => name.toLowerCase())),
     source: 'host',
   };
 }
@@ -135,6 +143,85 @@ describe('mergeFontFamilies — מה שמותקן במכונה', () => {
     expect(values(mergeFontFamilies([{ value: 'Cambria', label: 'Cambria' }]))).toEqual(
       values([...OTZARIA_FONT_FAMILIES, ...LATIN_FONT_FAMILIES, { value: 'Cambria' }]),
     );
+  });
+});
+
+/**
+ * גופן שהמכונה מדווחת עליו ושהדפדפן אינו מצייר.
+ *
+ * זה הצירוף שהסתיר 43 מ-287 גופנים **מותקנים** במכונה שנמדדה, חמישה מהם
+ * עבריים: המנייה מחקה אותם, והבורר לא ידע עליהם. עכשיו הם מגיעים — ומה שנבדק
+ * כאן הוא שהם מגיעים **מסומנים** ולא מוכרזים זמינים, כי שורה שמכריזה שם
+ * ומציירת גופן אחר היא בדיוק מה שהדגל קיים כדי למנוע.
+ */
+describe('mergeFontFamilies — מותקן שאינו מצוייר', () => {
+  const find = (options: readonly FontFamilyChoice[], value: string) =>
+    options.find((option) => option.value === value);
+
+  it('שם שהמנייה סימנה נמדד, ומגיע לא-זמין ובלי דגימה', () => {
+    const merged = mergeFontFamilies(
+      undefined,
+      installed(['David', 'Guttman Kav-Light'], ['David', 'Guttman Kav-Light'], [
+        'Guttman Kav-Light',
+      ]),
+      () => true,
+      // המכונה פותרת את David ולא את השני — בדיוק מה שנמדד בכרום.
+      (family) => family === 'David',
+    );
+
+    const flagged = find(merged, 'Guttman Kav-Light');
+    expect(flagged?.available).toBe(false);
+    expect(flagged?.measured).toBe(true);
+    expect(flagged?.previewFamily).toBeUndefined();
+    // והוא בקבוצת „עברית”, כלומר נגיש — לא מוסתר בזנב ולא נעלם.
+    expect(flagged?.group).toBe(FONT_GROUP_HEBREW);
+  });
+
+  it('שם שהמנייה לא סימנה אינו נמדד כלל — 287 מדידות בכל מיזוג הן ארבע שניות', () => {
+    const asked: string[] = [];
+    const merged = mergeFontFamilies(
+      undefined,
+      installed(['David', 'Narkisim'], ['David', 'Narkisim'], []),
+      () => true,
+      (family) => {
+        asked.push(family);
+        return true;
+      },
+    );
+
+    expect(asked).not.toContain('David');
+    expect(asked).not.toContain('Narkisim');
+    expect(find(merged, 'David')?.measured).toBe(false);
+    expect(find(merged, 'David')?.available).toBe(true);
+  });
+
+  it('„מותקן ואינו מצוייר” מסומן בנפרד מ„אינו מותקן”', () => {
+    // שתי השורות לא-זמינות, ושתיהן צריכות לומר למשתמש דברים שונים: `Aptos`
+    // באמת אינו במכונה, ו-`Guttman Kav-Light` מותקן והדפדפן אינו פותר אותו.
+    const merged = mergeFontFamilies(
+      undefined,
+      installed(['Guttman Kav-Light'], ['Guttman Kav-Light'], ['Guttman Kav-Light']),
+      () => true,
+      () => false,
+    );
+
+    expect(find(merged, 'Guttman Kav-Light')?.installedNotDrawable).toBe(true);
+    expect(find(merged, 'Aptos')?.available).toBe(false);
+    expect(find(merged, 'Aptos')?.installedNotDrawable).toBeUndefined();
+  });
+
+  it('אחרי שהבייטים הוזרקו — המדידה מחזירה זמין, והדגימה חוזרת', () => {
+    // זו הדרך שבה השורה מתעוררת אחרי `ensureFamilyDrawable`: אותה מנייה
+    // בדיוק, ומכונה שכבר פותרת את השם.
+    const snapshot = installed(['Guttman Kav-Light'], ['Guttman Kav-Light'], [
+      'Guttman Kav-Light',
+    ]);
+    const before = mergeFontFamilies(undefined, snapshot, () => true, () => false);
+    const after = mergeFontFamilies(undefined, snapshot, () => true, () => true);
+
+    expect(find(before, 'Guttman Kav-Light')?.available).toBe(false);
+    expect(find(after, 'Guttman Kav-Light')?.available).toBe(true);
+    expect(find(after, 'Guttman Kav-Light')?.previewFamily).toBeDefined();
   });
 });
 
@@ -535,7 +622,10 @@ describe('mergeFontFamilies — זמינות', () => {
     }
   });
 
-  it('המנייה אינה נמדדת שוב — היא כבר סוננה ב-keepAvailable', () => {
+  it('שם מהמנייה שהמנייה לא סימנה אינו נמדד שוב — סומכים על מה שכבר נמדד', () => {
+    // המנייה מדדה את כל השמות שהמארח דיווח (`measureUnresolved`), ומה שלא
+    // סומן שם נפתר. שאלה חוזרת עליו במיזוג היא מדידה של משפחה **מותקנת** —
+    // ~15ms כל אחת, סינכרונית בתוך `computed`.
     const merged = mergeFontFamilies(
       undefined,
       installed(['Narkisim'], ['Narkisim']),
@@ -603,10 +693,13 @@ describe('mergeFontFamilies — זמינות', () => {
 
   it('נשאלים הלטינית וגופני המסמך — ולא מאות שמות המנייה', () => {
     /*
-     * המנייה כבר סוננה ב-`keepAvailable` (system-fonts.ts), ולכן שאלה חוזרת
-     * עליה היא עבודה כפולה על מאות שמות. שוויון קבוצות ולא „מכיל”: הוא תופס
-     * גם „לא מודד את מי שצריך” וגם „מודד את כולם”, ולכן הוא גם השומר על
-     * העלות אם מישהו יסיר את `verify` מהמקורות.
+     * מדידה של משפחה **מותקנת** דורשת טעינת גופן מהדיסק אל ה-renderer, ~15ms
+     * (system-fonts.ts). 300 מהן בתוך `computed` סינכרוני הן כמה שניות של
+     * בלימה בכל פתיחת מסמך — כי `installDocumentFontAliases` מרוקן את מטמון
+     * המדידה. לכן נשאלים רק אלה שהמנייה סימנה, וכאן אין כאלה.
+     *
+     * שוויון קבוצות ולא „מכיל”: הוא תופס גם „לא מודד את מי שצריך” וגם „מודד
+     * את כולם”, ולכן הוא גם השומר על העלות אם מישהו יחליף את הפרדיקט בדגל.
      */
     const resolves = vi.fn((_family: string) => true);
     const many = Array.from({ length: 300 }, (_, index) => `Family ${index}`);

@@ -57,6 +57,9 @@ export function familyPickerOptions(
        */
       unavailable: option.available === false,
       measured: option.measured,
+      // מותקן שאינו מצוייר — הפקד אומר עליו משהו אחר מ„אינו מותקן”. ראו
+      // `installedNotDrawable` ב-engine/font-options.ts.
+      installedNotDrawable: option.installedNotDrawable,
     })),
     current,
     /*

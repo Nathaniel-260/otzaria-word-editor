@@ -90,7 +90,9 @@
           :data-value="row.option.value"
           :data-group="row.option.group ?? ''"
           :data-availability="availabilityOf(row.option)"
-          :data-tip-title="row.option.unavailable === true ? menuString(NOT_INSTALLED) : undefined"
+          :data-tip-title="
+            row.option.unavailable === true ? menuString(unavailableReason(row.option)) : undefined
+          "
           :aria-label="rowAria(row.option)"
           :style="rowStyle(row.option)"
           @pointerdown.prevent.stop="choose(row.option.value)"
@@ -379,6 +381,24 @@ watch(highlighted, (value) => emit('preview', value));
 const NOT_INSTALLED = 'הגופן אינו מותקן במכונה — אין דגימה להציג';
 
 /**
+ * מה שנאמר על גופן ש**כן** מותקן ושהדפדפן בכל זאת אינו מצייר.
+ *
+ * שתי מחרוזות ולא אחת, מפני ששני המצבים אומרים למשתמש לעשות דברים שונים:
+ * `Aptos` שאינו במכונה יסתדר במכונה אחרת, ו-`Guttman Kav-Light` שמותקן כאן
+ * לא — הוא פער בין מנייה שמדווחת שמות GDI לבין הדפדפן שאינו פותר אותם.
+ * המשתמש שדיווח על התקלה **התקין** את הגופנים החסרים, ו„אינו מותקן במכונה”
+ * היה השקר שהופך את השורה מחסרת-תועלת למבלבלת.
+ *
+ * מי מקבל איזו — `installedNotDrawable` שבמיזוג (engine/font-options.ts),
+ * שדלוק בדיוק על הצירוף הזה.
+ */
+const INSTALLED_NOT_DRAWABLE = 'הגופן מותקן אך הדפדפן אינו מצייר אותו — אין דגימה להציג';
+
+/** ההסבר שמתאים לשורה — ראו `INSTALLED_NOT_DRAWABLE`. */
+const unavailableReason = (option: ComboOption): string =>
+  option.installedNotDrawable === true ? INSTALLED_NOT_DRAWABLE : NOT_INSTALLED;
+
+/**
  * ה-`aria-label` של שורה, וזה שדרוש **שני** דברים ולכן אינו ביטוי בתבנית.
  *
  * 1. **דגימת הגליפים.** שורה עברית נושאת `::before` עם „אבגד”, וקורא מסך היה
@@ -410,7 +430,7 @@ const rowAria = (option: ComboOption): string | undefined => {
   const unavailable = option.unavailable === true;
   if (!unavailable && option.hebrew !== true) return undefined;
   const name = menuString(option.label);
-  return unavailable ? `${name} — ${menuString(NOT_INSTALLED)}` : name;
+  return unavailable ? `${name} — ${menuString(unavailableReason(option))}` : name;
 };
 
 /**

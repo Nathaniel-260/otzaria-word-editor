@@ -103,6 +103,19 @@ export interface FontFamilyChoice extends FontFamilyOption {
    * (`scripts/qa/font-availability-qa.mjs`).
    */
   measured: boolean;
+  /**
+   * המנייה דיווחה שהמשפחה **מותקנת**, והדפדפן בכל זאת אינו פותר אותה.
+   *
+   * זה בדיוק ורק הצירוף שבו „הגופן אינו מותקן במכונה” הוא שקר — ולכן זה מה
+   * שהשדה מסמן, ולא „מותקן” בכלל. שורה שנפתרת אינה נושאת אותו גם כשהמארח
+   * דיווח עליה: אין לאף אחד מה לומר עליה.
+   *
+   * מקורו `installed.unresolved` (system-fonts.ts), והוא מה שמפריד בין
+   * `Aptos` שאינו במכונה לבין `Guttman Kav-Light` שכן — ובו הפקד בוחר בין שתי
+   * מחרוזות. `undefined` ולא `false` כדי שהשדה לא ייכתב על מאות שורות שאין
+   * עליהן מה לומר.
+   */
+  installedNotDrawable?: true;
 }
 
 /** מה שהבוררים ב-Ribbon מציגים. */
@@ -250,28 +263,54 @@ export function mergeFontFamilies(
    *   הייתה נעלמת מ-Frank Ruhl ואז חוזרת. זה גרוע משתי האפשרויות, ולכן הן
    *   מוכרזות זמינות ואינן נשאלות.
    *
-   * - המנייה (`installed.families`) — **כבר סוננה** ב-`keepAvailable`
-   *   (system-fonts.ts). מדידה חוזרת כאן היא עבודה כפולה על מאות שמות.
+   * - המנייה (`installed.families`) — נמדדת, אבל **רק מה שהמנייה כבר סימנה**
+   *   (`installed.unresolved`). הנימוק שהיה כאן — „כבר סוננה ב-`keepAvailable`,
+   *   ומדידה חוזרת היא עבודה כפולה על מאות שמות” — נשען על מחיקה שנמדדה כשגויה
+   *   והוסרה: היום הרשימה מגיעה שלמה, ושם שאינו נפתר חייב להגיע לשורה מסומן
+   *   ולא מוכרז זמין. ראו `measureUnresolved` ב-system-fonts.ts.
+   *
+   *   ולמה זו אינה חזרה לעבודה הכפולה שהנימוק ההוא חשש ממנה: הפרדיקט מודד את
+   *   43 השמות שסומנו ולא את 287, וכל אחד מהם **זול** — הדפדפן אינו פותר אותו
+   *   ונופל לבסיס מיד, בלי טעינת גופן מהדיסק (~15ms) שהיא כל העלות שם.
+   *
+   *   וזו גם הדרך שבה השורה **מתעוררת**: אחרי ש-`ensureFamilyDrawable` הזריקה
+   *   בייטים (engine/picker-fonts.ts) ושכחה את התשובה הישנה, המדידה כאן היא
+   *   שמחזירה `true` ומחזירה את הדגימה.
    *
    * העלות אינה חשש: `isFamilyAvailable` ממותת בדור האליאסים (docx-fonts.ts),
    * ולכן שם נמדד פעם אחת לכל הזרקה — באותה מכניקה ש-`coversHebrew` חי בה
    * ממילא על אותו מיזוג.
+   *
+   * ## למה `verify` הוא פרדיקט ולא דגל
+   *
+   * היה כאן `boolean`, ושלושה מקורות הדליקו אותו על **כל** שורה שלהם. המנייה
+   * צריכה משהו שלישי: „מדוד את אלה שסומנו, וסמוך על השאר”. דגל היה מאלץ לבחור
+   * בין 287 מדידות סינכרוניות בכל מיזוג לבין הכרזה שמשקרת על 43 שורות.
    */
   const engineHebrew = engine.filter(isHebrew);
+  const verifyAll = () => true;
+  const verifyFlagged = (option: FontFamilyOption): boolean =>
+    typeof option?.value === 'string' && installed.unresolved.has(familyKey(option.value));
   const sources: readonly (readonly [
     readonly FontFamilyOption[],
     string,
     boolean?,
     number?,
-    boolean?,
+    ((option: FontFamilyOption) => boolean)?,
   ])[] = [
     [OTZARIA_FONT_FAMILIES, FONT_GROUP_TOP, true],
-    [LATIN_FONT_FAMILIES, FONT_GROUP_TOP, undefined, undefined, true],
-    [engine, FONT_GROUP_RECENT, undefined, RECENT_FONT_LIMIT, true],
-    [installed.families.filter(isHebrew), FONT_GROUP_HEBREW, true],
-    [engineHebrew, FONT_GROUP_HEBREW, true, undefined, true],
-    [installed.families.filter((option) => !isHebrew(option)), FONT_GROUP_ALL, false],
-    [engine, FONT_GROUP_ALL, false, undefined, true],
+    [LATIN_FONT_FAMILIES, FONT_GROUP_TOP, undefined, undefined, verifyAll],
+    [engine, FONT_GROUP_RECENT, undefined, RECENT_FONT_LIMIT, verifyAll],
+    [installed.families.filter(isHebrew), FONT_GROUP_HEBREW, true, undefined, verifyFlagged],
+    [engineHebrew, FONT_GROUP_HEBREW, true, undefined, verifyAll],
+    [
+      installed.families.filter((option) => !isHebrew(option)),
+      FONT_GROUP_ALL,
+      false,
+      undefined,
+      verifyFlagged,
+    ],
+    [engine, FONT_GROUP_ALL, false, undefined, verifyAll],
   ];
 
   const merged: FontFamilyChoice[] = [];
@@ -304,7 +343,7 @@ export function mergeFontFamilies(
        * להיפרד, בצרוף אחד שנמדד כאפשרי: שם שהמנייה סיווגה עברי בעליית
        * האפליקציה, ואליאס של מסמך מאוחר הפסיק לפתור.
        */
-      const measured = verify === true;
+      const measured = verify !== undefined && verify(option);
       const available = !measured || resolves(value);
       merged.push({
         value,
@@ -314,6 +353,9 @@ export function mergeFontFamilies(
         hebrew: hebrew ?? isHebrew(option),
         available,
         measured,
+        // המארח ספר את המכונה, ולכן שורה שלו שאינה נפתרת אינה „חסרה” אלא
+        // „מותקנת ולא מצוירת” — שני מצבים שהפקד אומר עליהם דברים שונים.
+        installedNotDrawable: installed.unresolved.has(key) || undefined,
       });
     }
   }

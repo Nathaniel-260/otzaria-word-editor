@@ -379,6 +379,7 @@ import {
   type FontOptions,
   type FontsSliceLike,
 } from './engine/font-options';
+import { onPickerFontsChanged } from './engine/picker-fonts';
 import {
   emptyInstalledFonts,
   loadInstalledFonts,
@@ -644,7 +645,26 @@ provide(FONT_MEMORY, createFontMemory());
  */
 const engineFontSlice = shallowRef<FontsSliceLike | null>(null);
 const installedFonts = shallowRef<InstalledFontsSnapshot>(emptyInstalledFonts());
+
+/**
+ * מקור שלישי, ובלעדיו השורה שנבחרה נשארת משקרת.
+ *
+ * `ensureFamilyDrawable` מזריקה `@font-face` לגופן שהמשתמש בחר ושהדפדפן לא
+ * פתר (engine/picker-fonts.ts). ההזרקה משנה את תשובת המדידה, אבל **לא** אף
+ * אחד משני הרפים שמעליה — ולכן בלי מנייה כאן המיזוג לא היה מורכב מחדש,
+ * והתיבה הסגורה הייתה ממשיכה לצייר את השם בגופן הממשק מיד אחרי שהמשתמש בחר
+ * אותו בהצלחה.
+ *
+ * מונה ולא רשימה: מה שהשתנה כבר יושב במטמון המדידה של docx-fonts.ts, וכל מה
+ * שנדרש כאן הוא לומר „הרכב שוב”.
+ */
+const drawableFontEpoch = shallowRef(0);
+onPickerFontsChanged(() => {
+  drawableFontEpoch.value += 1;
+});
 watchEffect(() => {
+  // הקריאה היא המנוי: בלעדיה `watchEffect` אינו תלוי במונה כלל.
+  void drawableFontEpoch.value;
   fontOptions.value = composeFontOptions(engineFontSlice.value, installedFonts.value);
 });
 
