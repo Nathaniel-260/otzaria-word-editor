@@ -105,6 +105,13 @@ describe('קטלוג הפקודות Tell Me (tell-me-actions)', () => {
     expect(unknown).toEqual([]);
   });
 
+  it('פקדים שהוסרו מהרצועה אינם נשארים בתוצאות החיפוש', () => {
+    // „סגנון תורני” ירד מלשונית „אוצריא”: להשאיר אותו כאן היה מוליך
+    // משתמש ללשונית שבה אין עוד פקד כזה.
+    const ids = searchTellMeActions('סגנון תורני').map((action) => action.id);
+    expect(ids).not.toContain('otzaria-torah-styles');
+  });
+
   it('מזהי הפעולות המוצעות קיימים כולם בקטלוג', () => {
     const actionIds = new Set(TELL_ME_ACTIONS.map((a) => a.id));
     for (const id of DEFAULT_SUGGESTED_IDS) {

@@ -1153,15 +1153,6 @@ export const TELL_ME_ACTIONS: readonly TellMeAction[] = [
     icon: 'highlight',
     customAction: 'toggle-book-completion',
   },
-  {
-    id: 'otzaria-torah-styles',
-    title: 'סגנון תורני',
-    category: 'אוצריא',
-    description: inTab('otzaria', 'סגנון תורני'),
-    keywords: ['סגנון תורני', 'חידוש', 'קושיא', 'תירוץ', 'תורני'],
-    icon: 'bold',
-    ribbonTab: 'otzaria',
-  },
 
   // --- שולחן עורך ---
   {
