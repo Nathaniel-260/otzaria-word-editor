@@ -2,28 +2,32 @@
  * מילון ראשי-התיבות: הפענוח (engine/acronyms.ts), הטעינה העצלה
  * (engine/acronym-dictionary.ts), והחוזה מול הנכס שהבנייה מייצרת בפועל.
  *
- * הבדיקה השלישית היא זו שהייתה חסרה: הקודמת מסרה לטוען `JSON.stringify(...)`
- * — מחרוזת מלאכותית שאינה מה שהבנייה מציבה — ולכן עברה בירוק גם כשהטוען
- * ציפה למחרוזת, הנכס הציב אובייקט, וההשלמה לא עבדה מעולם.
+ * הקבוצה האחרונה היא זו שהייתה חסרה: הבדיקה הקודמת מסרה לטוען
+ * `JSON.stringify(...)` — מחרוזת מלאכותית שאינה מה שהבנייה מציבה — ולכן עברה
+ * בירוק גם כשהטוען ציפה למחרוזת, הנכס הציב אובייקט, וההשלמה לא עבדה מעולם.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { createAcronymDictionary, looksLikeAcronym, type PackedAcronyms } from '../../src/engine/acronyms';
 import { loadAcronymDictionary, resetAcronymDictionary } from '../../src/engine/acronym-dictionary';
 import { ACRONYMS_GLOBAL } from '../../src/engine/acronyms-constants';
-import { buildAcronymsAsset } from '../../scripts/acronyms-asset';
+import { buildAcronymsAsset, packAcronyms, readAcronymsSource } from '../../scripts/acronyms-asset';
 
-const PACKED: PackedAcronyms = { 'א"א': ['אי אפשר', 'אמר אברהם'], 'רמב"ן': ['רבי משה בן נחמן'] };
+const PACKED: PackedAcronyms = { 'א"א': 'אי אפשר', 'רמב"ן': 'רבי משה בן נחמן' };
 
 describe('createAcronymDictionary', () => {
   const dictionary = createAcronymDictionary(PACKED);
 
-  it('מחזירה את הפירוש הראשון לר"ת מוכר', () => {
+  it('מחזירה את הפירוש לר"ת מוכר', () => {
     expect(dictionary.lookup('א"א')).toBe('אי אפשר');
     expect(dictionary.lookup('רמב"ן')).toBe('רבי משה בן נחמן');
   });
 
   it('גרשיים של מקלדת עברית (U+05F4) מוצאים את הערך', () => {
     expect(dictionary.lookup('רמב״ן')).toBe('רבי משה בן נחמן');
+  });
+
+  it('שני גרשים נפרדים שקולים לגרשיים', () => {
+    expect(dictionary.lookup("רמב''ן")).toBe('רבי משה בן נחמן');
   });
 
   it('ניקוד על המילה שהוקלדה אינו מונע התאמה', () => {
@@ -41,19 +45,31 @@ describe('createAcronymDictionary', () => {
 });
 
 describe('looksLikeAcronym', () => {
-  it('מזהה ר"ת בשני סוגי הגרשיים, עם ניקוד ובלעדיו', () => {
+  it('מזהה גרשיים בכל צורות הכתיב', () => {
     expect(looksLikeAcronym('א"א')).toBe(true);
     expect(looksLikeAcronym('רמב״ן')).toBe(true);
+    expect(looksLikeAcronym("רמב''ן")).toBe(true);
     expect(looksLikeAcronym('רַמְבַּ"ן')).toBe(true);
   });
 
-  it('דוחה מילה רגילה, גרש, וגרשיים בקצה', () => {
-    // אלה המילים שבלי השער הזה היו מזריקות את הנכס לחינם.
+  it('מזהה קיצור בגרש בסוף המילה', () => {
+    expect(looksLikeAcronym("ר'")).toBe(true);
+    expect(looksLikeAcronym("וכו'")).toBe(true);
+    expect(looksLikeAcronym('וכו׳')).toBe(true);
+  });
+
+  it('דוחה מילה רגילה וגרשיים בקצה', () => {
+    // אלה המילים שבלי השער הזה היו מזריקות את הנכס לחינם — ובראשן 3,862
+    // המילים הארמיות שבקובץ המקור, שאינן ראשי תיבות.
     expect(looksLikeAcronym('אמר')).toBe(false);
-    expect(looksLikeAcronym("וכו'")).toBe(false);
+    expect(looksLikeAcronym('אבדיקציה')).toBe(false);
     expect(looksLikeAcronym('שלום"')).toBe(false);
     expect(looksLikeAcronym('"שלום')).toBe(false);
     expect(looksLikeAcronym('')).toBe(false);
+  });
+
+  it('דוחה ערך מרובה מילים — `lookup` בודק מילה אחת', () => {
+    expect(looksLikeAcronym('א"ס ב"ה')).toBe(false);
   });
 });
 
@@ -127,13 +143,43 @@ describe('הנכס שהבנייה מייצרת', () => {
     expect(dictionary).not.toBeNull();
     expect(dictionary?.lookup('חז"ל')).toBe('חכמינו זכרונם לברכה');
     expect(dictionary?.lookup('חז״ל')).toBe('חכמינו זכרונם לברכה');
+    // מ-KleiKodesh, ואינו במילון אוצריא הרשמי כלל.
+    expect(dictionary?.lookup('רמב"ם')).toBe('רבי משה בן מימון');
+    // מפתח שנכתב בשני גרשים במקור, ונכנס לנכס בצורתו המנורמלת.
+    expect(dictionary?.lookup("ר'")).toBe('רבי');
   });
 
   it('כל מפתח בנכס עובר את השער שלפני הטעינה', () => {
-    const packed = runAsset() as Record<string, readonly string[]>;
+    const packed = runAsset() as Record<string, string>;
     const keys = Object.keys(packed);
 
-    expect(keys.length).toBeGreaterThan(13_000);
     expect(keys.filter((key) => !looksLikeAcronym(key))).toEqual([]);
+    // אף פירוש אינו הר"ת עצמו — הצעה כזאת אינה משלימה דבר.
+    expect(keys.filter((key) => packed[key] === key)).toEqual([]);
+  });
+
+  /**
+   * הספירה מדויקת ולא „לפחות”: החלפת קובץ הנתונים היא בדיוק הדבר שיזיז את
+   * המספרים האלה בשקט — ערך שיחדל להיות ר"ת פשוט ייעלם מההשלמה.
+   */
+  it('הסינון מדויק ומדווח', () => {
+    const source = readAcronymsSource();
+    const pack = packAcronyms(source);
+
+    expect(Object.keys(source).length).toBe(25_363);
+    expect(Object.keys(pack.packed).length).toBe(17_840);
+    expect(pack.dropped.notAcronym).toBe(6_508);
+    expect(pack.dropped.noExpansion).toBe(19);
+    expect(pack.fromVariants).toBe(349);
+  });
+
+  it('הנכס קטן מקובץ המקור, למרות שיש בו יותר ערכים מקודם', () => {
+    const source = readAcronymsSource();
+    const { packed } = packAcronyms(source);
+
+    // 17,840 ערכים ב-712KB, מול 13,067 ב-902KB לפני המיזוג — הכיווץ לפירוש
+    // יחיד מחזיר יותר ממה שההרחבה לוקחת.
+    expect(Buffer.byteLength(JSON.stringify(packed))).toBeLessThan(800_000);
+    expect(Buffer.byteLength(JSON.stringify(source))).toBeGreaterThan(2_000_000);
   });
 });

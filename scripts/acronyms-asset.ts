@@ -2,55 +2,90 @@
  * בניית נכס ראשי-התיבות — צד Node בלבד (vite.config.ts והבדיקות). ההיגיון
  * שצורך אותו ב-src/engine/acronyms.ts.
  *
- * ## למה מפתחות מנורמלים
+ * קובץ המקור הוא מיזוג של מילון אוצריא הרשמי ושל KleiKodeshProject, ושתי
+ * הפעולות כאן נובעות מכך שהמיזוג אינו הומוגני:
  *
- * `lookup` מנרמלת את המילה שהוקלדה (בלי ניקוד, גרשיים ישרים) כדי שמקלדת
- * עברית — שמייצרת ״ ולא " — תמצא את הערך. בלי נרמול סימטרי כאן, 44 מפתחות
- * מנוקדים בקובץ המקור היו בלתי נגישים לחלוטין.
+ * ## סינון: לא כל מפתח הוא ראשי תיבות
  *
- * ## שלוש טענות על הנתונים
+ * מ-25,363 המפתחות שבמקור, 6,508 אינם ראשי תיבות כלל — 3,862 מילים ארמיות
+ * בלי שום גרש (מילון מונחים שנכנס לאותו קובץ), 2,604 ערכים מרובי מילים
+ * ש-`lookup` אינו יכול להגיע אליהם ממילא (הוא בודק את המילה האחרונה
+ * שהוקלדה), ועוד 42 עם סוגריים, מקפים או תווים שנשברו בקידוד. הם נופלים
+ * בשער `looksLikeAcronym` — אותו שער עצמו שמונע טעינת הנכס אחרי מילה רגילה —
+ * ולכן הכנסתם לנכס הייתה מחייבת לפתוח אותו, כלומר להזריק 0.7MB אחרי כל
+ * הקלדה.
  *
- * `build` מאמת אותן במקום להניח: כל ערך הוא מערך לא-ריק של מחרוזות
- * (`createAcronymDictionary` מניח זאת), וכל מפתח עונה על `looksLikeAcronym`
- * (השער שלפני הטעינה — מפתח שאינו עונה עליו היה מילון שאיש לא יגיע אליו).
- * כשל בבנייה עדיף על תוסף שנפרס והשלמה שדולגת בשקט.
+ * ## כיווץ: פירוש אחד לכל ערך
+ *
+ * ל-8,877 מפתחות יש יותר מפירוש אחד, וה-UI מציג את הראשון. הנכס נושא רק
+ * אותו — קובץ המקור נשאר שלם, ולכן מחזור בין פירושים (כשימומש) יטען נכס שני
+ * משם.
+ *
+ * המספרים אינם הערכה: `tests/unit/acronyms.test.ts` מאמת כל אחד מהם על הקובץ
+ * עצמו, כדי שהחלפת נתונים שמזיזה אותם תיראה ולא תעבור בשקט.
  */
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { looksLikeAcronym } from '../src/engine/acronyms';
-import { normalizeWord } from '../src/engine/spellcheck';
+import { looksLikeAcronym, normalizeAcronym } from '../src/engine/acronyms';
 import { ACRONYMS_GLOBAL } from '../src/engine/acronyms-constants';
 
 /** מ-`cwd` ולא מ-`import.meta.url`: תחת jsdom הכתובת אינה file://, כמו ב-scripts/blank-docx.ts. */
 const SOURCE = resolve('src/data/acronyms.json');
 
-function packAcronyms(data: Record<string, unknown>): Record<string, string[]> {
-  const packed: Record<string, string[]> = Object.create(null);
-  /** מפתחות מנוקדים נדחים לסוף: הם כפילות של המנוקדים-לא, ואין להם להחליף אותם. */
-  const pointed: [string, string[]][] = [];
+export interface AcronymsPack {
+  readonly packed: Record<string, string>;
+  /** מה נשר, לפי סיבה. */
+  readonly dropped: { readonly notAcronym: number; readonly noExpansion: number };
+  /** מפתחות שנכנסו רק בצורתם המנורמלת (גרש כפול, ניקוד) ולא היו קיימים ישירות. */
+  readonly fromVariants: number;
+}
+
+export function packAcronyms(data: Record<string, unknown>): AcronymsPack {
+  const packed: Record<string, string> = Object.create(null);
+  /** מפתחות שצורתם הכתובה אינה המנורמלת. נדחים לסוף כדי שלא ידרסו ערך ישיר. */
+  const variants: [string, string][] = [];
+  let notAcronym = 0;
+  let noExpansion = 0;
 
   for (const [key, value] of Object.entries(data)) {
-    if (!Array.isArray(value) || value.length === 0 || value.some((item) => typeof item !== 'string' || item === '')) {
-      throw new Error(`acronyms.json: ל-"${key}" אין מערך פירושים לא-ריק של מחרוזות.`);
+    if (!Array.isArray(value) || value.some((item) => typeof item !== 'string')) {
+      throw new Error(`acronyms.json: הערך של "${key}" אינו מערך מחרוזות.`);
     }
     if (!looksLikeAcronym(key)) {
-      throw new Error(`acronyms.json: המפתח "${key}" אינו בצורת ר"ת, ולכן השער שלפני הטעינה לא יגיע אליו.`);
+      notAcronym += 1;
+      continue;
     }
 
-    const normalized = normalizeWord(key);
-    if (normalized === key) packed[key] = value as string[];
-    else pointed.push([normalized, value as string[]]);
+    const normalized = normalizeAcronym(key);
+    // „רש"י → רש"י” אינו פירוש. 19 ערכים כאלה במקור, כולם מ-KleiKodesh.
+    const expansion = (value as string[]).find(
+      (item) => item.trim() !== '' && normalizeAcronym(item) !== normalized,
+    );
+    if (expansion === undefined) {
+      noExpansion += 1;
+      continue;
+    }
+
+    if (normalized === key) packed[key] = expansion;
+    else variants.push([normalized, expansion]);
   }
 
-  for (const [key, value] of pointed) {
-    if (!(key in packed)) packed[key] = value;
+  let fromVariants = 0;
+  for (const [key, expansion] of variants) {
+    if (key in packed) continue;
+    packed[key] = expansion;
+    fromVariants += 1;
   }
 
-  return packed;
+  return { packed, dropped: { notAcronym, noExpansion }, fromVariants };
+}
+
+export function readAcronymsSource(source: string = SOURCE): Record<string, unknown> {
+  return JSON.parse(readFileSync(source, 'utf8')) as Record<string, unknown>;
 }
 
 /** תוכן `assets/acronyms.js`: השמה יחידה של ליטרל אובייקט ל-`window`. */
 export function buildAcronymsAsset(source: string = SOURCE): string {
-  const data = JSON.parse(readFileSync(source, 'utf8')) as Record<string, unknown>;
-  return `window.${ACRONYMS_GLOBAL} = ${JSON.stringify(packAcronyms(data))};\n`;
+  const { packed } = packAcronyms(readAcronymsSource(source));
+  return `window.${ACRONYMS_GLOBAL} = ${JSON.stringify(packed)};\n`;
 }
