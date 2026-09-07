@@ -49,62 +49,6 @@
         @click="$emit('toggle-book-completion')"
       />
     </RibbonGroup>
-
-    <!-- מאקרו: הקלטה וניהול. הפעולות עצמן ב-engine/macros.ts, דרך App.vue. -->
-    <RibbonGroup title="מאקרו">
-      <RibbonButton
-        icon="macro"
-        label="ניהול מאקרו"
-        shortcut-id="macro-manage"
-        variant="large"
-        :tooltip="macrosTooltip('רשימת המאקרו, קטעי הטקסט והסקריפטים — הרצה, עריכה ושיתוף')"
-        :disabled="!macrosAvailable"
-        @click="$emit('manage-macros')"
-      />
-      <RibbonStack>
-        <RibbonButton
-          :label="isRecording ? 'עצור הקלטה' : 'הקלט מאקרו'"
-          shortcut-id="macro-record"
-          variant="small"
-          :tooltip="macrosTooltip('מקליט את הפעולות במסמך — הקלדה, עיצוב, רשימות — לניגון חוזר')"
-          :active="isRecording"
-          :disabled="!macrosAvailable"
-          @click="$emit('macro-record')"
-        />
-        <RibbonButton
-          label="נגן אחרון"
-          shortcut-id="macro-play"
-          variant="small"
-          :tooltip="macrosTooltip('מריץ את המאקרו האחרון שהוקלט, מהמקום שבו הסמן עומד')"
-          :disabled="!macrosAvailable"
-          @click="$emit('macro-play')"
-        />
-      </RibbonStack>
-    </RibbonGroup>
-
-    <!-- תבניות תורניות. ראו ההסבר ב-script: אין למנוע דרך ציבורית ליצור סגנון. -->
-    <RibbonGroup title="סגנון תורני">
-      <RibbonStack>
-        <RibbonButton
-          label="חידוש"
-          variant="small"
-          :tooltip="TORAH_STYLE_UNAVAILABLE"
-          :disabled="true"
-        />
-        <RibbonButton
-          label="קושיא"
-          variant="small"
-          :tooltip="TORAH_STYLE_UNAVAILABLE"
-          :disabled="true"
-        />
-        <RibbonButton
-          label="תירוץ"
-          variant="small"
-          :tooltip="TORAH_STYLE_UNAVAILABLE"
-          :disabled="true"
-        />
-      </RibbonStack>
-    </RibbonGroup>
   </div>
 </template>
 
@@ -122,10 +66,8 @@
 import { computed, inject, shallowRef, watch } from 'vue';
 import type { SuperDoc } from 'superdoc';
 import RibbonGroup from '../common/RibbonGroup.vue';
-import RibbonStack from '../common/RibbonStack.vue';
 import RibbonButton from '../common/RibbonButton.vue';
 import { ACTIVE_SUPERDOC } from '../../../engine/document-api';
-import { ACTIVE_MACROS, type MacrosHandle } from '../../../engine/macros';
 import { isAvailable } from '../../../host/otzaria-client';
 import { canInsertText } from '../../../host/otzaria-reader';
 
@@ -141,45 +83,12 @@ defineEmits<{
   (e: 'search-otzaria'): void;
   (e: 'open-library'): void;
   (e: 'export-otzaria'): void;
-  (e: 'manage-macros'): void;
-  (e: 'macro-record'): void;
-  (e: 'macro-play'): void;
   (e: 'toggle-book-completion'): void;
 }>();
 
 const superdoc = inject(ACTIVE_SUPERDOC, shallowRef<SuperDoc | null>(null));
 
-/** מצב המאקרו של המסמך הפתוח; הוא אינו תלוי ב-SDK של אוצריא. */
-const macros = inject(ACTIVE_MACROS, shallowRef<MacrosHandle | null>(null));
-const macrosAvailable = computed(() => macros.value !== null);
-const isRecording = computed(() => macros.value?.recording.value ?? false);
-
-function macrosTooltip(available: string): string {
-  return macrosAvailable.value ? available : 'יש לפתוח מסמך תחילה';
-}
-
 const OUTSIDE_OTZARIA = 'זמין רק כשהעורך פועל בתוך אוצריא';
-
-/**
- * „חידוש”, „קושיא” ו„תירוץ” היו שלושה כפתורים בלי `@click` — כלומר שלושה
- * כפתורים שנראים עובדים ואינם עושים כלום. הם מסומנים מעכשיו „לא זמין”, כפי
- * ש-§12 בתכנית דורשת, ולא מומשו — כי אין למנוע דרך ציבורית לממש אותם:
- *
- * - `doc.styles.apply` מקבל `target: { scope: 'docDefaults' }` **בלבד**, כלומר
- *   הוא משנה את ברירת המחדל של המסמך כולו. הוא אינו יוצר סגנון בשם.
- * - `doc.styles.paragraph.setStyle` מחיל סגנון **קיים** לפי `styleId`, או אחד
- *   מארבעה תפקידים סמנטיים (`defaultParagraph`, `heading`, `title`,
- *   `subtitle`). אין בהם „חידוש”.
- * - בקטלוג הפעולות של המנוע (2.8.0) אין שום פעולה שיוצרת סגנון: `styles.*`
- *   הוא `apply`, `getCatalog` ושלושת ה-`paragraph.*`.
- *
- * ולכן אין למה לחווט: `linked-style` עם מזהה שאינו קיים במסמך פשוט נכשל,
- * ומיפוי „קושיא” אל סגנון בנוי כמו Heading 2 היה כפתור שעושה משהו אחר ממה
- * שכתוב עליו. המשך אמיתי הוא הוספת הסגנונות לקטלוג ה-docx — פעולה אחרת
- * לגמרי, שאין לה מסלול ציבורי ואין לעשות אותה ב-XML ידני (§12).
- */
-const TORAH_STYLE_UNAVAILABLE =
-  'סגנונות תורניים יתווספו בשלב הבא — אין למנוע דרך ציבורית ליצור סגנון פסקה חדש במסמך';
 
 /**
  * האם ה-SDK של אוצריא קיים. נקרא פעם אחת ב-setup ולא כערך reactive: הרצועה

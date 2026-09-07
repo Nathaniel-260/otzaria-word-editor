@@ -87,17 +87,15 @@ describe('פקדי הלשוניות פריסה, הפניות, סקירה, אוצ
     expect(app).toContain('openLibrary()');
   });
 
-  it('„סגנון תורני” מסומן „לא זמין” ואינו מבטיח פעולה שאין לה API', () => {
-    // §12: „פקד שאין לו API ציבורי אמין מסומן „לא זמין בגרסה זו”; לא מממשים
-    // אותו דרך XML ידני”. במנוע 2.8.0 אין פעולה שיוצרת סגנון פסקה בשם.
+  it('„חידוש”/„קושיא”/„תירוץ” אינם חוזרים כפקדים מנוטרלים', () => {
+    // הם היו כאן שלושה כפתורים מנוטרלים עם הסבר, כי אין למנוע פעולה ציבורית
+    // שיוצרת סגנון פסקה בשם (`doc.styles.apply` מקבל `scope:'docDefaults'`
+    // בלבד). הם ירדו מהלשונית כפקד שאינו נצרך; הבקשה למנוע נשארה פתוחה
+    // (superdoc/docx-editor#3975), ואם תתקבל — החזרה שלהם היא חיווט לפעולה
+    // אמיתית, לא `:disabled="true"`.
     const tab = SOURCES.get('OtzariaTab.vue')!;
     for (const label of ['חידוש', 'קושיא', 'תירוץ']) {
-      const control = controls(tab).find((candidate) => labelOf(candidate) === label);
-      expect(control, label).toBeDefined();
-      expect(control!, label).toContain(':disabled="true"');
-      expect(control!, label).toContain('TORAH_STYLE_UNAVAILABLE');
-      // התיאור הישן („החלת סגנון פסקת קושיא”) הבטיח פעולה שלא קיימת.
-      expect(control!, label).not.toContain('החלת סגנון');
+      expect(controls(tab).map(labelOf), label).not.toContain(label);
     }
   });
 

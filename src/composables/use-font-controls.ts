@@ -40,9 +40,10 @@ import { useCommand } from './useCommand';
 import { useFontOptions } from './useFontOptions';
 import { createFontPreview } from './font-preview';
 import { createFontSample } from './font-sample';
+import { familyPickerOptions } from './font-family-options';
 import { applyOptimistically, withCurrent, type PickerOption } from './picker-value';
 import { ACTIVE_SUPERDOC } from '../engine/document-api';
-import { isFamilyAvailable } from '../engine/docx-fonts';
+import { ensureFamilyDrawable } from '../engine/picker-fonts';
 import { captureRange, paintFamily, readSelectionText } from '../engine/font-preview';
 import { UNSETTLED_SELECTION } from '../engine/readout-hold';
 import {
@@ -262,34 +263,12 @@ export function useFontControls(): FontControls {
   const sizePt = computed(() => memory.pendingSize.value ?? engineSize.value ?? memory.size.value);
   const size = computed(() => String(sizePt.value));
 
-  const familyOptions = computed(() =>
-    withCurrent(
-      families.value.map((option) => ({
-        value: option.value,
-        label: option.label,
-        preview: option.previewFamily,
-        // הקיבוץ וכיסוי העברית נקבעים במיזוג ולא כאן — engine/font-options.ts.
-        group: option.group,
-        hebrew: option.hebrew,
-        /*
-         * הדגל הפוך לזה שבמיזוג (`available`) בכוונה: הפקד מסמן **חריגה**, ו-
-         * `unavailable` דלוק רק בשורה שיש עליה מה לומר. `available` היה מחייב
-         * את הפקד לצייר סימון על היעדר דגל — כלומר גם על כל בורר שאינו גופנים,
-         * שאין לו את השדה בכלל.
-         */
-        unavailable: option.available === false,
-        measured: option.measured,
-      })),
-      family.value,
-      /*
-       * גופן שאינו ברשימה מוצג בגופן עצמו, כמו כל שאר השורות — **אם** הדפדפן
-       * פותר אותו. `available` הוא מה שמונע מהמסלול הזה להיות היצרן השני של
-       * השורה המשקרת: הוא נגיש בהקלדת שם חופשי, ואז השורה והתיבה הסגורה היו
-       * מציירות שם שאינו קיים ב-fallback.
-       */
-      { preview: true, available: isFamilyAvailable },
-    ),
-  );
+  /*
+   * המיפוי עצמו יצא ל-composables/font-family-options.ts: הוא נדרש עכשיו גם
+   * בשני דיאלוגים („גופן מתקדם”, „ברירות מחדל למסמך”) שקודם ביקשו להקליד שם
+   * גופן ביד, ומיפוי מועתק הוא מיפוי שיתוקן פעם אחת בלבד.
+   */
+  const familyOptions = computed(() => familyPickerOptions(families.value, family.value));
 
   const sizeOptions = computed(() =>
     withCurrent(
@@ -309,6 +288,19 @@ export function useFontControls(): FontControls {
     void applyOptimistically(memory.pendingFamily, memory.family, payload, () =>
       familyCmd.run(payload),
     );
+    /*
+     * הגופן שנבחר אינו בהכרח גופן שהדפדפן מצייר, וזה תוקן אחרי שנמדד: המנייה
+     * מדווחת שמות GDI, ווריאנט משקל כמו `Guttman Kav-Light` נשאר שם שאינו
+     * נפתר — 43 כאלה מ-287 במכונה שנמדדה. בלי השליפה הטקסט נכתב עם השם הנכון
+     * ב-OOXML אבל מצויר ב-fallback.
+     *
+     * **אחרי** ההחלה ולא לפניה, ובלי `await`: ההחלה היא מה שהמשתמש ביקש והיא
+     * אינה אמורה להמתין לרשת של המארח. השליפה עומדת בפני עצמה — היא מזריקה
+     * `@font-face` ומודיעה, והבורר מתעורר בעצמו (App.vue).
+     *
+     * אינה זורקת בשום מסלול, ולכן אין כאן `catch`: ראו `ensureFamilyDrawable`.
+     */
+    void ensureFamilyDrawable(next);
   }
 
   function applySize(pt: number): void {

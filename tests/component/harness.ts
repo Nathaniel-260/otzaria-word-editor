@@ -429,6 +429,13 @@ export interface SuperdocDouble {
   /** הקלטים שמסלול מסוים קיבל, לפי הסדר. */
   inputs(op: string): unknown[];
   ops(): string[];
+  /**
+   * משנה את מה שהבחירה תדווח מהקריאה הבאה ואילך.
+   *
+   * הבחירה במסמך אינה קבועה, וממשק שקורא אותה יותר מפעם אחת אינו ניתן
+   * לבדיקה בלי זה — ראו ההערה ליד `hasRange` ב-`createSuperdocDouble`.
+   */
+  setSelection(next: { hasRange?: boolean; text?: string }): void;
   reset(): void;
 }
 
@@ -440,8 +447,16 @@ export function createSuperdocDouble(options: SuperdocDoubleOptions = {}): Super
   const failures = options.failures ?? {};
 
   const blockId = options.selection?.blockId === undefined ? 'block-1' : options.selection.blockId;
-  const hasRange = options.selection?.hasRange ?? false;
-  const selectionText = options.selection?.text ?? '';
+  /*
+   * הבחירה משתנה, ואינה קבועה בזמן ההרכבה.
+   *
+   * המנוע האמיתי מדווח את הבחירה **ברגע שנשאל**, והממשק שואל אותו יותר
+   * מפעם אחת: „גופן מתקדם”, למשל, אינו חוסם את המסמך ושואל מחדש בכל שינוי
+   * בחירה. כפיל שקופא על מה שנמסר לו בהרכבה אינו יכול להעמיד את המצב הזה
+   * בכלל — ובלעדיו „המשתמש סימן טקסט בזמן שהדיאלוג פתוח” אינו ניתן לבדיקה.
+   */
+  let hasRange = options.selection?.hasRange ?? false;
+  let selectionText = options.selection?.text ?? '';
 
   /**
    * זמינות הפעולות כ-Proxy. `readDocCapabilities` שואל מפה לפי שם הפעולה,
@@ -1173,6 +1188,11 @@ export function createSuperdocDouble(options: SuperdocDoubleOptions = {}): Super
     calls,
     inputs: (op) => calls.filter((call) => call.op === op).map((call) => call.input),
     ops: () => calls.map((call) => call.op),
+    /** משנה את מה שהבחירה תדווח מהקריאה הבאה ואילך — ראו ההערה ליד `hasRange`. */
+    setSelection: (next: { hasRange?: boolean; text?: string }) => {
+      if (next.hasRange !== undefined) hasRange = next.hasRange;
+      if (next.text !== undefined) selectionText = next.text;
+    },
     reset: () => {
       calls.length = 0;
     },

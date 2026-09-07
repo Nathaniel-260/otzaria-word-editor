@@ -12,6 +12,7 @@ import {
   applyFontAdvanced,
   buildInlinePatch,
   CHAR_SCALE_MAX,
+  hasRangeSelection,
   type FontAdvancedPatch,
 } from '../../src/engine/font-advanced';
 
@@ -202,5 +203,67 @@ describe('applyFontAdvanced', () => {
 
     expect(outcome.ok).toBe(false);
     expect(calls).toHaveLength(0);
+  });
+});
+
+/**
+ * `hasRangeSelection` היא אותה קריאה של `applyFontAdvanced`, מוקדמת.
+ *
+ * מה שהיא **אינה** עושה חשוב לא פחות ממה שהיא כן: היא מבדילה בין „אין בחירה”
+ * לבין „אין לדעת”. הדיאלוג נועל את „אישור” על הראשון בלבד — נעילה על מסמך
+ * שעדיין נטען הייתה חוסמת פעולה תקינה בלי שום דרך לפתוח אותה.
+ */
+describe('hasRangeSelection', () => {
+  it('טווח מסומן → range', async () => {
+    const { host } = fakeDoc({ apply: () => ({ success: true }) });
+
+    await expect(hasRangeSelection(host)).resolves.toBe('range');
+  });
+
+  it('סמן מכווץ → none, וזה מה שנועל את „אישור”', async () => {
+    const { host } = fakeDoc({ apply: () => ({ success: true }), selection: { empty: true } });
+
+    await expect(hasRangeSelection(host)).resolves.toBe('none');
+  });
+
+  it('בחירה בלי selectionTarget → none', async () => {
+    const { host } = fakeDoc({ apply: () => ({ success: true }), selection: { empty: false } });
+
+    await expect(hasRangeSelection(host)).resolves.toBe('none');
+  });
+
+  /**
+   * „אין מסמך” אינו „אין יכולת”, וזו אינה קפדנות לשונית: בין מסמכים, ובזמן
+   * טעינה, המסמך הפעיל הוא `null` — והודעה שאומרת שם „אינו זמין בגרסה זו של
+   * המנוע” היא טענה שקרית על הבניין, שאין למשתמש שום דרך להפריך.
+   */
+  it('אין מסמך פעיל → unknown, ואינו נועל דבר', async () => {
+    for (const host of [null, undefined, { activeEditor: null }] as never[]) {
+      await expect(hasRangeSelection(host)).resolves.toBe('unknown');
+    }
+  });
+
+  it('יש מסמך ואין format.apply → unavailable: זה הפער שההודעה מתארת', async () => {
+    const { host } = fakeDoc();
+    await expect(hasRangeSelection(host)).resolves.toBe('unavailable');
+  });
+
+  it('אין selection.current → unknown: „לא מוכן” אינו „אין בחירה”, ואינו נועל', async () => {
+    const doc = { format: { apply: () => ({ success: true }) } } as never;
+    await expect(hasRangeSelection({ activeEditor: { doc } } as never)).resolves.toBe('unknown');
+  });
+
+  /**
+   * קריאה שזרקה נספרת כ„אין בחירה” ולא כ„אין לדעת”, וזה מכוון: `applyFontAdvanced`
+   * עובר דרך אותה `readSelectionTarget` ויענה בדיוק אותו דבר. דיאלוג שהיה
+   * נפתח כאן והופך את הכפתור לזמין היה מבטיח החלה שתיכשל מיד.
+   */
+  it('קריאת הבחירה זרקה → נספר כאין בחירה, ולעולם אינה זורקת הלאה', async () => {
+    const doc = {
+      selection: { current: () => { throw new Error('boom'); } },
+      format: { apply: () => ({ success: true }) },
+    } as never;
+
+    await expect(hasRangeSelection({ activeEditor: { doc } } as never)).resolves.toBe('none');
   });
 });

@@ -13,6 +13,7 @@
       spellcheck="false"
       :value="shown"
       :disabled="disabled"
+      :placeholder="menuString(placeholder)"
       :data-tip-title="menuString(title)"
       :aria-label="menuString(title)"
       :aria-expanded="open"
@@ -89,7 +90,9 @@
           :data-value="row.option.value"
           :data-group="row.option.group ?? ''"
           :data-availability="availabilityOf(row.option)"
-          :data-tip-title="row.option.unavailable === true ? menuString(NOT_INSTALLED) : undefined"
+          :data-tip-title="
+            row.option.unavailable === true ? menuString(unavailableReason(row.option)) : undefined
+          "
           :aria-label="rowAria(row.option)"
           :style="rowStyle(row.option)"
           @pointerdown.prevent.stop="choose(row.option.value)"
@@ -235,6 +238,22 @@ const props = withDefaults(
      * `undefined` = הגודל הקבוע של הפס (בורר הגודל, שאין לו פס בכלל).
      */
     sampleSize?: string;
+    /**
+     * מה שמוצג בתיבה ריקה. `''` = אין.
+     *
+     * ברצועה התיבה לעולם אינה ריקה — תמיד יש גופן מוחל — אבל בדיאלוג שמרכיב
+     * patch היא **פותחת** ריקה, וריק בלי מילים אינו אומר „לא ייגע”.
+     */
+    placeholder?: string;
+    /**
+     * לאן חוזר המיקוד אחרי בחירה, Enter או Escape.
+     *
+     * `'document'` הוא הרצועה: מי שבחר גופן רוצה להמשיך להקליד בטקסט, וזו
+     * הייתה ההתנהגות היחידה כאן. `'stay'` הוא דיאלוג — שם המסמך אינו היעד
+     * הבא, ו-`focus()` עליו היה מוציא את המיקוד מדיאלוג שעדיין פתוח: ה-Escape
+     * שלו נשען על מיקוד בתוכו, ולכן הדיאלוג היה מפסיק להיסגר במקלדת.
+     */
+    focusReturn?: 'document' | 'stay';
   }>(),
   {
     modelValue: '',
@@ -246,6 +265,8 @@ const props = withDefaults(
     listMinWidth: '150px',
     sample: '',
     sampleSize: undefined,
+    placeholder: '',
+    focusReturn: 'document',
   },
 );
 
@@ -360,6 +381,24 @@ watch(highlighted, (value) => emit('preview', value));
 const NOT_INSTALLED = 'הגופן אינו מותקן במכונה — אין דגימה להציג';
 
 /**
+ * מה שנאמר על גופן ש**כן** מותקן ושהדפדפן בכל זאת אינו מצייר.
+ *
+ * שתי מחרוזות ולא אחת, מפני ששני המצבים אומרים למשתמש לעשות דברים שונים:
+ * `Aptos` שאינו במכונה יסתדר במכונה אחרת, ו-`Guttman Kav-Light` שמותקן כאן
+ * לא — הוא פער בין מנייה שמדווחת שמות GDI לבין הדפדפן שאינו פותר אותם.
+ * המשתמש שדיווח על התקלה **התקין** את הגופנים החסרים, ו„אינו מותקן במכונה”
+ * היה השקר שהופך את השורה מחסרת-תועלת למבלבלת.
+ *
+ * מי מקבל איזו — `installedNotDrawable` שבמיזוג (engine/font-options.ts),
+ * שדלוק בדיוק על הצירוף הזה.
+ */
+const INSTALLED_NOT_DRAWABLE = 'הגופן מותקן אך הדפדפן אינו מצייר אותו — אין דגימה להציג';
+
+/** ההסבר שמתאים לשורה — ראו `INSTALLED_NOT_DRAWABLE`. */
+const unavailableReason = (option: ComboOption): string =>
+  option.installedNotDrawable === true ? INSTALLED_NOT_DRAWABLE : NOT_INSTALLED;
+
+/**
  * ה-`aria-label` של שורה, וזה שדרוש **שני** דברים ולכן אינו ביטוי בתבנית.
  *
  * 1. **דגימת הגליפים.** שורה עברית נושאת `::before` עם „אבגד”, וקורא מסך היה
@@ -391,7 +430,7 @@ const rowAria = (option: ComboOption): string | undefined => {
   const unavailable = option.unavailable === true;
   if (!unavailable && option.hebrew !== true) return undefined;
   const name = menuString(option.label);
-  return unavailable ? `${name} — ${menuString(NOT_INSTALLED)}` : name;
+  return unavailable ? `${name} — ${menuString(unavailableReason(option))}` : name;
 };
 
 /**
@@ -516,6 +555,19 @@ function closeList(committed = false): void {
   emit('previewEnd', committed);
 }
 
+/**
+ * יציאה מהשדה — והשאלה היחידה היא לאן המיקוד הולך.
+ *
+ * שלושת המסלולים שמסיימים עריכה (בחירה, Enter, Escape) עשו את אותם שני
+ * הצעדים בשלושה העתקים. הם כאן פעם אחת מפני שנוסף להם תנאי: בדיאלוג אין
+ * לאן לצאת — ראו `focusReturn`.
+ */
+function leaveField(): void {
+  if (props.focusReturn === 'stay') return;
+  inputRef.value?.blur();
+  focusDocument(superdoc.value);
+}
+
 function toggle(): void {
   if (open.value) {
     closeList();
@@ -541,8 +593,7 @@ function choose(value: string): void {
   closeList(true);
   emit('done');
   if (value !== props.modelValue) emit('update:modelValue', value);
-  inputRef.value?.blur();
-  focusDocument(superdoc.value);
+  leaveField();
 }
 
 function onFocus(): void {
@@ -589,22 +640,29 @@ function onKeydown(event: KeyboardEvent): void {
     closeList();
     // גם ויתור הוא סיום: מי שלחץ Escape רוצה לחזור לכתוב, לא להישאר בתיבה.
     emit('done');
-    inputRef.value?.blur();
-    focusDocument(superdoc.value);
+    leaveField();
     return;
   }
 
   if (event.key === 'Enter') {
     if (!open.value) return;
     event.preventDefault();
+    /*
+     * ועוצר את ההתפשטות, בדיוק כמו ה-Escape שמעליו ומאותו טעם: ה-Enter הזה
+     * סוגר את הרשימה, והוא כבר נצרך. דיאלוג נותן ל-Enter להפעיל את הכפתור
+     * הראשי (composables/dialog-default-action.ts), ולכן בלי העצירה בחירת
+     * גופן מהרשימה הייתה גם **מאשרת את הדיאלוג** — כלומר לחיצה אחת שמחילה
+     * את מה שהמשתמש רק התחיל לבחור. רשימה סגורה אינה נכנסת לכאן בכלל
+     * (`if (!open.value) return`), ולכן Enter „רגיל” בתיבה מאשר כמו תמיד.
+     */
+    event.stopPropagation();
     const value = commitValue(built.value, activeIndex.value, query.value ?? '', props.normalize);
     if (value !== null) {
       choose(value);
     } else {
       closeList();
       emit('done');
-      inputRef.value?.blur();
-      focusDocument(superdoc.value);
+      leaveField();
     }
     return;
   }

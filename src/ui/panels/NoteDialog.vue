@@ -5,13 +5,18 @@
       v-if="isOpen"
       ref="dialogRef"
       class="note-dialog"
+      :style="dragStyle"
       role="dialog"
       aria-modal="true"
       :aria-label="DIALOG_TITLE"
       tabindex="-1"
       @keydown.esc.stop="$emit('close')"
+      @keydown.enter="onDialogEnter"
     >
-      <div class="np-header">
+      <div
+        class="np-header dialog-drag-handle"
+        @pointerdown="startDialogDrag"
+      >
         <span class="np-title">{{ DIALOG_TITLE }}</span>
         <button
           type="button"
@@ -68,7 +73,6 @@
             :disabled="selected === null || busy"
             :placeholder="selected === null ? 'יש לבחור הערה מהרשימה' : 'תוכן ההערה'"
             aria-label="תוכן ההערה שנבחרה"
-            @keydown.enter="onSubmit"
           >
         </div>
 
@@ -106,6 +110,7 @@
         <button
           type="button"
           class="np-btn np-btn-primary"
+          data-default-action
           :disabled="!canSubmit"
           @pointerdown.prevent
           @click="onSubmit"
@@ -161,6 +166,13 @@ import {
   type NoteRef,
   type NoteSummary,
 } from '../../engine/footnotes';
+import { useDialogDrag } from '../../composables/dialog-drag';
+import { useDialogDefaultAction } from '../../composables/dialog-default-action';
+
+/* הדיאלוג נגרר בכותרת שלו — composables/dialog-drag.ts. */
+const { dragStyle, startDialogDrag } = useDialogDrag();
+/* Enter = הכפתור הראשי — composables/dialog-default-action.ts. */
+const { onDialogEnter } = useDialogDefaultAction();
 
 const props = withDefaults(
   defineProps<{

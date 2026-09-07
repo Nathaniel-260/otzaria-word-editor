@@ -8,13 +8,18 @@
     <div
       v-if="isOpen"
       class="pagenum-dialog"
+      :style="dragStyle"
       role="dialog"
       aria-modal="true"
       :aria-label="DIALOG_TITLE"
       tabindex="-1"
       @keydown.esc.stop="$emit('close')"
+      @keydown.enter="onDialogEnter"
     >
-      <div class="pn-header">
+      <div
+        class="pn-header dialog-drag-handle"
+        @pointerdown="startDialogDrag"
+      >
         <span class="pn-title">{{ DIALOG_TITLE }}</span>
         <button
           type="button"
@@ -69,7 +74,6 @@
             step="1"
             :disabled="!restart"
             aria-label="המספר שממנו מתחיל מספור העמודים"
-            @keydown.enter="onSubmit"
           >
         </div>
 
@@ -101,6 +105,7 @@
         <button
           type="button"
           class="pn-btn pn-btn-primary"
+          data-default-action
           :disabled="!canSubmit"
           @pointerdown.prevent
           @click="onSubmit"
@@ -143,6 +148,13 @@ import {
   type PageNumberFormat,
   type PageNumberingSettings,
 } from '../../engine/page-setup';
+import { useDialogDrag } from '../../composables/dialog-drag';
+import { useDialogDefaultAction } from '../../composables/dialog-default-action';
+
+/* הדיאלוג נגרר בכותרת שלו — composables/dialog-drag.ts. */
+const { dragStyle, startDialogDrag } = useDialogDrag();
+/* Enter = הכפתור הראשי — composables/dialog-default-action.ts. */
+const { onDialogEnter } = useDialogDefaultAction();
 
 const props = withDefaults(
   defineProps<{

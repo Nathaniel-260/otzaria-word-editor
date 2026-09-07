@@ -4,12 +4,16 @@
     <div
       v-if="isOpen"
       class="macros-dialog"
+      :style="dragStyle"
       role="dialog"
       aria-modal="true"
       :aria-label="DIALOG_TITLE"
       @keydown.esc.stop="$emit('close')"
     >
-      <div class="md-header">
+      <div
+        class="md-header dialog-drag-handle"
+        @pointerdown="startDialogDrag"
+      >
         <span class="md-title">{{ DIALOG_TITLE }}</span>
         <button
           type="button"
@@ -674,6 +678,10 @@ import { computed, ref, shallowRef, watch } from 'vue';
 import type { BuiltinToolInfo, RecordedMacro, SavedScript, Snippet, VbaModule } from 'superdoc-macros';
 import type { MacrosHandle } from '../../engine/macros';
 import { MODULE_KIND_LABEL, NO_VBA, type DocumentVba } from '../../engine/vba-import';
+import { useDialogDrag } from '../../composables/dialog-drag';
+
+/* הדיאלוג נגרר בכותרת שלו — composables/dialog-drag.ts. */
+const { dragStyle, startDialogDrag } = useDialogDrag();
 
 const props = withDefaults(
   defineProps<{

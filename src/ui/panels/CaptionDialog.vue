@@ -4,12 +4,17 @@
     <div
       v-if="isOpen"
       class="caption-dialog"
+      :style="dragStyle"
       role="dialog"
       aria-modal="true"
       :aria-label="DIALOG_TITLE"
       @keydown.esc.stop="$emit('close')"
+      @keydown.enter="onDialogEnter"
     >
-      <div class="cp-header">
+      <div
+        class="cp-header dialog-drag-handle"
+        @pointerdown="startDialogDrag"
+      >
         <span class="cp-title">{{ DIALOG_TITLE }}</span>
         <button
           type="button"
@@ -43,7 +48,6 @@
             list="cp-label-options"
             placeholder="למשל: איור"
             aria-label="תווית הכיתוב, למשל איור או טבלה"
-            @keydown.enter="onSubmit"
           >
           <datalist id="cp-label-options">
             <option
@@ -66,7 +70,6 @@
             class="cp-input"
             placeholder="למשל: שרטוט המשכן"
             aria-label="הטקסט שיופיע אחרי מספר הכיתוב"
-            @keydown.enter="onSubmit"
           >
         </div>
 
@@ -151,6 +154,7 @@
         <button
           type="button"
           class="cp-btn cp-btn-primary"
+          data-default-action
           :disabled="!canSubmit"
           @pointerdown.prevent
           @click="onSubmit"
@@ -218,6 +222,13 @@ import {
   type CaptionPosition,
   type CaptionSummary,
 } from '../../engine/captions';
+import { useDialogDrag } from '../../composables/dialog-drag';
+import { useDialogDefaultAction } from '../../composables/dialog-default-action';
+
+/* הדיאלוג נגרר בכותרת שלו — composables/dialog-drag.ts. */
+const { dragStyle, startDialogDrag } = useDialogDrag();
+/* Enter = הכפתור הראשי — composables/dialog-default-action.ts. */
+const { onDialogEnter } = useDialogDefaultAction();
 
 const props = withDefaults(
   defineProps<{

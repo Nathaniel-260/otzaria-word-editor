@@ -383,6 +383,7 @@ import {
   loadInstalledFonts,
   type InstalledFontsSnapshot,
 } from './engine/system-fonts';
+import { onPickerFontsChanged } from './engine/picker-fonts';
 import {
   UNSETTLED_SELECTION,
   observeReadoutSelection,
@@ -642,7 +643,25 @@ provide(FONT_MEMORY, createFontMemory());
  */
 const engineFontSlice = shallowRef<FontsSliceLike | null>(null);
 const installedFonts = shallowRef<InstalledFontsSnapshot>(emptyInstalledFonts());
+/**
+ * מקור שלישי, ובלעדיו השורה שנבחרה נשארת משקרת.
+ *
+ * `ensureFamilyDrawable` מזריקה `@font-face` לגופן שהמשתמש בחר ושהדפדפן לא
+ * פתר (engine/picker-fonts.ts). ההזרקה משנה את תשובת המדידה, אבל **לא** אף
+ * אחד משני הרפים שמעליה — ולכן בלי מנייה כאן המיזוג לא היה מורכב מחדש,
+ * והתיבה הסגורה הייתה ממשיכה לצייר את השם בגופן הממשק מיד אחרי שהמשתמש בחר
+ * אותו בהצלחה.
+ *
+ * מונה ולא רשימה: מה שהשתנה כבר יושב במטמון המדידה של docx-fonts.ts, וכל מה
+ * שנדרש כאן הוא לומר „הרכב שוב”.
+ */
+const drawableFontEpoch = shallowRef(0);
+onPickerFontsChanged(() => {
+  drawableFontEpoch.value += 1;
+});
 watchEffect(() => {
+  // הקריאה היא המנוי: בלעדיה `watchEffect` אינו תלוי במונה כלל.
+  void drawableFontEpoch.value;
   fontOptions.value = composeFontOptions(engineFontSlice.value, installedFonts.value);
 });
 
@@ -1429,7 +1448,21 @@ function initSaveCoordinator(getSession: () => DocumentSession): SaveCoordinator
         // בלי השדה הזה היא `docx` קבוע (ראו `CommitOptions` ב-host/files.ts),
         // ומסמך מאקרו היה מוצע לשמירה בשם `ספר.docm.docx`.
         extension: sessionSaveExtension(getSession()),
-        title: 'שמירת המסמך',
+        // ללא `title` בכוונה — Otzaria/otzaria issue 1213.
+        //
+        // „שמור בשם” של תוסף באוצריא הוא **שני חלונות** בזה אחר זה: בורר
+        // התיקיות של המערכת, ואחריו דיאלוג שם הקובץ. שניהם מקבלים את הכותרת
+        // הזאת, והיא דורסת את „בחירת תיקייה לשמירת הקובץ” של השלב הראשון —
+        // כך שבורר התיקיות נראה כמו דיאלוג שמירה רגיל. משתמש שקיבל חלון
+        // בכותרת „שמירת המסמך” הקליד בשדה שלו שם קובץ, ובורר התיקיות של
+        // Windows דחה אותו ב„Path does not exist” תחת אותה כותרת — כאילו
+        // השמירה נכשלה, ולא כאילו נשאלה שאלה אחרת.
+        //
+        // בלי השדה הזה המאחז כותב „בחירת תיקייה לשמירת הקובץ” בשלב הראשון
+        // ו„שמירת קובץ” בשני — נכון בשניהם, ובלי שם הפעולה. משתשוחרר גרסת
+        // אוצריא שגוזרת כותרת נפרדת לכל שלב, יש להחזיר לכאן ולשני אתרי
+        // הייצוא את הכותרת (`'שמירת המסמך'`, `'ייצוא ל-PDF'`,
+        // `'ייצוא לספר אוצריא'`) — ואז היא תופיע גם על בורר התיקיות.
       }),
     onStateChange: (snapshot) => {
       const session = getSession();
@@ -3327,7 +3360,8 @@ async function onExportPdf(): Promise<void> {
   const outcome = await exportPdfDocument(
     activeSuperdoc.value,
     (input) => call('ui.exportPdf', { ...input }),
-    { fileName: pdfSuggestedName(title.value), title: 'ייצוא ל-PDF' },
+    // ללא `title` — ההסבר ב-`initSaveCoordinator` (Otzaria issue 1213).
+    { fileName: pdfSuggestedName(title.value) },
   );
 
   if (!outcome.ok) {
@@ -3381,7 +3415,7 @@ async function onExportOtzaria(): Promise<void> {
     const result = await commitUserFileWrite({
       writeToken: ticket.writeToken,
       suggestedName: otzariaBookFileName(title.value),
-      title: 'ייצוא לספר אוצריא',
+      // ללא `title` — ההסבר ב-`initSaveCoordinator` (Otzaria issue 1213).
       extension: 'txt',
     });
     // ה-commit צרך את ההעלאה — מכאן אין מה לבטל, גם אם הדיווח ייכשל.

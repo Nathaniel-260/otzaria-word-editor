@@ -47,15 +47,21 @@
  *    דורש דבר מהמארח.
  * 3. **כלום** — כשאין canvas אין לנו מה לומר, והבורר נשאר על הרשימה הקבועה.
  *
- * ## גם מה שהמארח אומר נמדד
+ * ## גם מה שהמארח אומר נמדד — אבל אינו נמחק
  *
  * המארח מונה דרך GDI, והדפדפן מרנדר דרך DirectWrite. השניים כמעט זהים אבל לא
  * לגמרי, ושם שהמארח מכיר והדפדפן אינו פותר הוא בדיוק התקלה שהפרויקט הזה כבר
  * מכיר: `lineRule="auto"` גוזר את גובה השורה מהגופן שנבחר **בפועל**, וגופן
  * שנפל ל-fallback מותח כל שורה במסמך (ראו docx-fonts.ts). לכן כל שם שחוזר
- * מהמארח עובר את אותה מדידה. אם אין במה למדוד — סומכים על המארח, כי ידיעה
- * חלקית עדיפה על היעדר ידיעה; אבל **ניחוש** בלי מדידה אינו שווה כלום, ולכן
- * שכבה 2 אינה רצה בלי canvas.
+ * מהמארח עובר את אותה מדידה.
+ *
+ * מה שהמדידה **עושה** בתוצאה שלה שונה בין שני המקורות, וזה תוקן אחרי שנמדד:
+ * ברשימת המארח היא מסמנת (`unresolved`), וברשימת המועמדים היא מוחקת. שם שהמארח
+ * דיווח עליו מותקן — אי-פתירה שלו היא פער GDI/DirectWrite ולא היעדר — ומחיקתו
+ * הסתירה 43 מ-287 גופנים מותקנים במכונה שנמדדה. ראו `measureUnresolved`.
+ *
+ * אם אין במה למדוד — סומכים על המארח, כי ידיעה חלקית עדיפה על היעדר ידיעה;
+ * אבל **ניחוש** בלי מדידה אינו שווה כלום, ולכן שכבה 2 אינה רצה בלי canvas.
  */
 import type { FontFamilyOption } from 'superdoc/ui';
 import { tryCall } from '../host/otzaria-client';
@@ -89,13 +95,27 @@ export interface InstalledFontsSnapshot {
   families: readonly FontFamilyOption[];
   /** המפתחות (lowercase) של המשפחות שמכסות עברית. */
   hebrew: ReadonlySet<string>;
+  /**
+   * המפתחות (lowercase) של המשפחות שהמארח דיווח עליהן ו**הדפדפן אינו פותר**.
+   *
+   * הן נשארות ברשימה — ראו „מה שהמנייה מדווחת אינו מסונן” ב-`loadInstalledFonts`
+   * — והקבוצה הזאת היא מה שמאפשר למיזוג לסמן אותן בלי למדוד מחדש את כולן.
+   *
+   * ריקה במסלול המדידה: שם שלא נפתר שם כלל אינו נכנס לרשימה.
+   */
+  unresolved: ReadonlySet<string>;
   /** מאיפה הגיע. לדיווח ולבדיקה — הבורר עצמו אינו מבחין. */
   source: 'host' | 'measured' | 'none';
 }
 
 /** אין ידיעה. מה שמסופק לפני שהמנייה נחתה, וגם כשאין במה למדוד. */
 export function emptyInstalledFonts(): InstalledFontsSnapshot {
-  return { families: [], hebrew: new Set<string>(), source: 'none' };
+  return {
+    families: [],
+    hebrew: new Set<string>(),
+    unresolved: new Set<string>(),
+    source: 'none',
+  };
 }
 
 /* ------------------------------------------------------------------ */
@@ -205,7 +225,7 @@ export async function loadInstalledFonts(
     // בלי canvas סומכים על המארח כמות שהוא: הוא ספר את המכונה, ואנחנו לא.
     if (!canMeasure()) return toSnapshot(reported, 'host');
     await fontsReady().catch(() => {});
-    return toSnapshot(await keepAvailable(reported, available), 'host');
+    return toSnapshot(reported, 'host', await measureUnresolved(reported, available));
   }
 
   // הנפילה לשכבה 2 שקטה לחלוטין מבחינת המשתמש — הרשימה פשוט מתכווצת. שורה
@@ -290,28 +310,101 @@ async function explainHostGap(call: typeof tryCall): Promise<void> {
 const YIELD_BUDGET_MS = 8;
 
 /**
- * מסננת למה שהדפדפן באמת פותר.
+ * מסננת למה שהדפדפן באמת פותר — **על רשימת המועמדים בלבד**.
  *
  * מוותרת על החוט כל `YIELD_BUDGET_MS` של עבודה: מדידה של מאות משפחות היא
  * סינכרונית מטבעה, וללא הוויתור היא הייתה בולעת פריים שלם בזמן שהמשתמש מקליד.
+ *
+ * למה זה חל על שכבה 2 ולא על רשימת המארח — ראו `measureUnresolved`.
  */
 async function keepAvailable(
   candidates: readonly InstalledFont[],
   available: (name: string) => boolean,
 ): Promise<InstalledFont[]> {
   const kept: InstalledFont[] = [];
-  let blockStart = performance.now();
-  for (let i = 0; i < candidates.length; i++) {
-    const font = candidates[i];
+  await forEachMeasured(candidates, (font) => {
     if (typeof font?.name === 'string' && available(font.name)) kept.push(font);
+  });
+  return kept;
+}
+
+/**
+ * אילו מהמשפחות שהמארח דיווח עליהן הדפדפן **אינו** פותר — בלי למחוק אף אחת.
+ *
+ * ## מה שהיה כאן, ולמה זו הייתה טעות
+ *
+ * רשימת המארח עברה ב-`keepAvailable`, כלומר בדיוק באותה מסננת שמסננת את
+ * רשימת המועמדים. שם היא נכונה; על רשימת המארח היא מחקה גופנים ש**מותקנים**.
+ *
+ * `fonts.listInstalled` מונה דרך GDI — משפחות של ארבעה סגנונות. וריאנט משקל
+ * (`Light`, `Semilight`, `Demi`) או מקופל לתוך משפחת הבסיס, או מדווח כמשפחה
+ * נפרדת שכרום אינו פותר: הוא מקלף אסימון סגנון מסוף השם ומחפש את השאר, וזה
+ * עובד ל-`Calibri Light` ונכשל ל-`Segoe UI Semilight`.
+ *
+ * **נמדד** ב-Windows 10, מנייה אמיתית של GDI מול מדידת רוחב בכרום: מ-287
+ * משפחות שהמארח מדווח, **43 אינן נפתרות לפי השם**, וחמש מהן עבריות —
+ * `Guttman Kav-Light`, `Guttman Yad-Light`, `Guttman Haim-Condensed`,
+ * `Segoe UI Semilight`, `Malgun Gothic Semilight`. כולן מותקנות במכונה, כולן
+ * מופיעות ברשימת הגופנים של אוצריא עצמה, וכולן נעדרו מהבורר. זו התלונה
+ * שהגיעה מהשטח, ושתי הדוגמאות שבה — `HadasaNew Light` ו-`Rashi` — הן מאותה
+ * צורה בדיוק.
+ *
+ * זו גם הייתה חריגה מהתכנון של המיזוג עצמו: כל מקור אחר **שומר** שם שאינו
+ * נפתר ורק מסמן אותו (`available` ב-font-options.ts — „השורה אינה נעלמת
+ * בכוונה”). רק רשימת המארח נמחקה, ולכן `Aptos` שאינו מותקן בכלל הוצג
+ * ו-`Guttman Kav-Light` שכן מותקן — לא.
+ *
+ * ## למה שכבה 2 כן ממשיכה להיות מסוננת
+ *
+ * ההבדל אינו טעם אלא מה שכל מקור **יודע**. המארח ספר את המכונה: שם שהוא מחזיר
+ * מותקן, ואי-פתירה שלו היא פער בין GDI ל-DirectWrite — ומשהו שאפשר לתקן,
+ * בבייטים מאוצריא (engine/picker-fonts.ts). רשימת המועמדים היא רשימה
+ * מתוחזקת ביד של ניחושים, ושם אי-פתירה היא התשובה היחידה שיש לשאלה „האם זה
+ * קיים כאן”.
+ *
+ * ## ולמה המדידה נשארת כאן ולא עוברת למיזוג
+ *
+ * המיזוג הוא `computed` סינכרוני. מדידה של משפחה **מותקנת** נמדדה ~15ms —
+ * טעינת הגופן מהדיסק אל ה-renderer — ולכן 287 שמות שם היו בולמים סביב ארבע
+ * שניות בכל פתיחת מסמך, מפני ש-`installDocumentFontAliases` מקדם את דור
+ * המדידה ומרוקן את המטמון. כאן זה קורה פעם אחת, אסינכרונית, עם ויתור על החוט.
+ *
+ * המיזוג כן מודד מחדש — אבל רק את מי שהקבוצה הזאת מסמנת: 43 שמות ולא 287, וכל
+ * אחד מהם **זול** (הדפדפן אינו פותר אותו ונופל לבסיס מיד, בלי טעינה מהדיסק).
+ * זה מה שמאפשר לשורה להתעורר אחרי שהבייטים הוזרקו.
+ */
+async function measureUnresolved(
+  reported: readonly InstalledFont[],
+  available: (name: string) => boolean,
+): Promise<Set<string>> {
+  const unresolved = new Set<string>();
+  await forEachMeasured(reported, (font) => {
+    const name = typeof font?.name === 'string' ? font.name.trim() : '';
+    if (name !== '' && !available(name)) unresolved.add(name.toLowerCase());
+  });
+  return unresolved;
+}
+
+/**
+ * הלולאה שמוותרת על החוט, לשני הקוראים שמעליה.
+ *
+ * הוצאה מ-`keepAvailable` כשנוסף קורא שני: תקציב הוויתור הוא מדידה
+ * (`YIELD_BUDGET_MS`), ושתי לולאות שמעתיקות אותו היו נפרדות ביום שהוא ישתנה.
+ */
+async function forEachMeasured(
+  fonts: readonly InstalledFont[],
+  visit: (font: InstalledFont) => void,
+): Promise<void> {
+  let blockStart = performance.now();
+  for (let i = 0; i < fonts.length; i++) {
+    visit(fonts[i]);
     // אחרי המדידה ולא לפניה: השם הראשון חייב להימדד לפני שיש מה למדוד עליו
     // זמן, ובדיקה לפני הלולאה הייתה מוותרת מיד על מקטע ריק.
-    if (performance.now() - blockStart >= YIELD_BUDGET_MS && i < candidates.length - 1) {
+    if (performance.now() - blockStart >= YIELD_BUDGET_MS && i < fonts.length - 1) {
       await yieldToBrowser();
       blockStart = performance.now();
     }
   }
-  return kept;
 }
 
 function yieldToBrowser(): Promise<void> {
@@ -333,6 +426,7 @@ function yieldToBrowser(): Promise<void> {
 function toSnapshot(
   fonts: readonly InstalledFont[],
   source: 'host' | 'measured',
+  unresolved: ReadonlySet<string> = new Set<string>(),
 ): InstalledFontsSnapshot {
   const families: FontFamilyOption[] = [];
   const hebrew = new Set<string>();
@@ -359,5 +453,5 @@ function toSnapshot(
   }
 
   families.sort((a, b) => a.label.localeCompare(b.label, 'he'));
-  return { families, hebrew, source };
+  return { families, hebrew, unresolved, source };
 }

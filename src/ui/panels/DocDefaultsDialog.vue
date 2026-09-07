@@ -4,13 +4,18 @@
       v-if="isOpen"
       ref="rootRef"
       class="docdef-dialog"
+      :style="dragStyle"
       role="dialog"
       aria-modal="true"
       :aria-label="DIALOG_TITLE"
       tabindex="-1"
       @keydown.esc.stop="$emit('close')"
+      @keydown.enter="onDialogEnter"
     >
-      <div class="dd-header">
+      <div
+        class="dd-header dialog-drag-handle"
+        @pointerdown="startDialogDrag"
+      >
         <span class="dd-title">{{ DIALOG_TITLE }}</span>
         <button
           type="button"
@@ -31,20 +36,22 @@
           patch לפי מפתח: מה שלא נשלח אינו נוגע בברירת המחדל הקיימת.
         -->
         <div class="dd-row">
-          <label
-            for="dd-family"
-            class="dd-label"
-          >גופן ברירת מחדל:</label>
-          <input
-            id="dd-family"
+          <span class="dd-label">גופן ברירת מחדל:</span>
+          <!--
+            אותו בורר של הרצועה, ומאותה רשימה — composables/font-family-options.ts.
+            כאן הייתה תיבת טקסט חופשי, כלומר בקשה להקליד שם גופן מהזיכרון
+            בעורך שיודע בדיוק מה מותקן במכונה ומה מכסה עברית.
+            `focus-return="stay"` מפני שהדיאלוג עדיין פתוח — ראו RibbonCombo.
+          -->
+          <RibbonCombo
             v-model="fontFamily"
-            class="dd-text"
-            type="text"
-            maxlength="100"
-            placeholder="ללא שינוי"
-            aria-label="שם גופן ברירת המחדל של המסמך"
-            @keydown.enter="onSubmit"
-          >
+            class="dd-combo"
+            :options="familyOptions"
+            width="170px"
+            title="גופן ברירת המחדל של המסמך"
+            :placeholder="UNCHANGED"
+            focus-return="stay"
+          />
         </div>
         <div class="dd-row">
           <label
@@ -61,7 +68,6 @@
             step="0.5"
             :placeholder="sizePlaceholder"
             aria-label="גודל ברירת המחדל, בנקודות"
-            @keydown.enter="onSubmit"
           >
           <span class="dd-unit">נק'</span>
         </div>
@@ -82,6 +88,7 @@
         <button
           type="button"
           class="dd-btn dd-btn-primary"
+          data-default-action
           :disabled="busy || !canSubmit"
           @pointerdown.prevent
           @click="onSubmit"
@@ -109,9 +116,19 @@
  * `before` ל-record לא נמדדה, ושדה שנפתח עם ניחוש הוא שדה שמשקר.
  */
 import { computed, nextTick, ref, watch } from 'vue';
+import { useDialogDrag } from '../../composables/dialog-drag';
+import { useFamilyPicker } from '../../composables/font-family-options';
+import RibbonCombo from '../ribbon/common/RibbonCombo.vue';
+import { useDialogDefaultAction } from '../../composables/dialog-default-action';
+
+/* הדיאלוג נגרר בכותרת שלו — composables/dialog-drag.ts. */
+const { dragStyle, startDialogDrag } = useDialogDrag();
+/* Enter = הכפתור הראשי — composables/dialog-default-action.ts. */
+const { onDialogEnter } = useDialogDefaultAction();
 
 const DIALOG_TITLE = 'ברירות מחדל למסמך';
 const INVALID_HINT = 'הערכים שהוקלדו אינם תקינים.';
+const UNCHANGED = 'ללא שינוי';
 
 const props = defineProps<{
   isOpen: boolean;
@@ -130,8 +147,14 @@ const fontFamily = ref('');
 const fontSize = ref('');
 
 const sizePlaceholder = computed(() =>
-  props.currentSizePt !== null ? String(props.currentSizePt) : 'ללא שינוי',
+  props.currentSizePt !== null ? String(props.currentSizePt) : UNCHANGED,
 );
+
+/**
+ * רשימת הגופנים, עם „ללא שינוי" בראשה: `fontFamily` הוא גם מה שהבורר עומד
+ * עליו וגם מה שנשלח, ו-`''` הוא בדיוק „אל תיגע בברירת המחדל הקיימת".
+ */
+const familyOptions = useFamilyPicker(() => fontFamily.value, UNCHANGED);
 
 watch(
   () => props.isOpen,
@@ -266,7 +289,6 @@ function onSubmit(): void {
   color: var(--color-on-surface-variant);
 }
 
-.dd-text,
 .dd-number {
   padding: 4px 8px;
   border: 1px solid var(--color-outline-variant);
@@ -276,17 +298,18 @@ function onSubmit(): void {
   font-family: var(--font-main);
   font-size: 12px;
   outline: none;
-  width: 120px;
-}
-
-.dd-number {
   width: 80px;
 }
 
-.dd-text:focus,
 .dd-number:focus {
   border-color: var(--word-blue);
   box-shadow: 0 0 0 1px var(--word-blue);
+}
+
+/* הבורר מגיע מהרצועה בגובה שלה (22px); כאן הוא נמדד מול `.dd-number` שלידו. */
+.dd-combo :deep(.ribbon-combo-input) {
+  height: 26px;
+  font-size: 12px;
 }
 
 .dd-note {
