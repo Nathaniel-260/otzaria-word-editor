@@ -210,8 +210,8 @@ export async function openPage(fileUrl, { port = Number(process.env.CDP_PORT ?? 
   const chrome = spawn(
     CHROME,
     [
-      '--headless',
-      '--disable-gpu',
+      // CDP_HEADED=1: חלון אמיתי עם GPU — למדידות שהמשתמש מרגיש (headless בלי GPU מנפח זמני ציור).
+      ...(process.env.CDP_HEADED ? ['--window-size=1400,900', '--no-first-run', '--no-default-browser-check'] : ['--headless', '--disable-gpu']),
       '--no-sandbox',
 
       /* ארבעת הדגלים שמתחת נוספו אחרי מדידה, ולא כ„היגיינה”.
