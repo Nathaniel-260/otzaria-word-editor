@@ -78,14 +78,26 @@ export function loadStaticSources(
   if (Date.now() < retryAfter) return Promise.resolve(null);
 
   pending = (async () => {
-    let packed: PackedStaticCompletion | null = null;
+    /*
+     * ה-`try` עוטף גם את בניית האינדקס, ולא רק את הטעינה: `buildStaticIndex`
+     * זורק על רשומה מעל 31 מילים, וזריקה משם הייתה דוחה את ההבטחה בלי לקבוע
+     * `retryAfter` — כלומר unhandled rejection בכל הקשה (‏`void evaluate()`),
+     * ובלי שראשי-התיבות שאחריה ייבדקו בכלל.
+     */
+    let indexes: StaticIndex[] | null = null;
     try {
-      packed = await loader();
+      const packed = await loader();
+      if (packed !== null) {
+        indexes = [
+          buildStaticIndex('talmudic-phrases', packed.phrases),
+          buildStaticIndex('authors', packed.authors),
+        ];
+      }
     } catch {
-      packed = null;
+      indexes = null;
     }
 
-    if (packed === null) {
+    if (indexes === null) {
       retryAfter = Date.now() + retryDelay;
       retryDelay = Math.min(retryDelay * 2, MAX_RETRY_DELAY_MS);
       return null;
@@ -93,10 +105,7 @@ export function loadStaticSources(
 
     retryAfter = 0;
     retryDelay = FIRST_RETRY_DELAY_MS;
-    loaded = [
-      buildStaticIndex('talmudic-phrases', packed.phrases),
-      buildStaticIndex('authors', packed.authors),
-    ];
+    loaded = indexes;
     return loaded;
   })().finally(() => {
     pending = null;

@@ -20,7 +20,10 @@ import { openApp, createReport } from './harness.mjs';
 
 const PORT = Number(process.env.QA_PORT ?? 9611);
 
-/** ר"ת שאומת מול src/data/acronyms.json: הפירוש הראשון שלו הוא זה. */
+/** מה שהנכס אמור להכיל בדיוק — ר' scripts/acronyms-asset.ts. */
+const EXPECTED_KEYS = 17_717;
+
+/** ר"ת שאומת מול src/data/acronyms.json: הפירוש שלו הוא זה. */
 const ACRONYM = 'חז"ל';
 const EXPANSION = 'חכמינו זכרונם לברכה';
 /** מילים עבריות רגילות. אף אחת אינה בצורת ר"ת, ולכן אינן אמורות לגעת בנכס. */
@@ -107,8 +110,10 @@ try {
 
     const state = await assetState();
     log('אחרי הר"ת:', JSON.stringify(state));
-    if (state.global !== 'object' || state.keys < 13_000) {
-      return report.fail('טעינת הנכס', `הנכס לא נטען: ${JSON.stringify(state)}`);
+    // ספירה מדויקת ולא „לפחות”: סינון שיישבר ויוריד אלפי מפתחות היה מדפיס
+    // מספר אחר ונשאר ירוק. אותו מספר נאכף ב-tests/unit/acronyms.test.ts.
+    if (state.global !== 'object' || state.keys !== EXPECTED_KEYS) {
+      return report.fail('טעינת הנכס', `נטענו ${state.keys} ערכים במקום ${EXPECTED_KEYS}: ${JSON.stringify(state)}`);
     }
     report.pass('טעינת הנכס', `${state.keys} ערכים`);
 

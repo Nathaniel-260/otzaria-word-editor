@@ -5,11 +5,13 @@
  * הבדיקה המרכזית כאן היא **גבול הרשומה**. המסלול המתבקש —
  * `buildSectionCache(entries.join('\n'))` — מאבד אותו: המטמון של הספר מחזיק
  * מערך שטוח של מילים, ולכן הצעה יכולה להתחיל בביטוי אחד ולהמשיך לזה שאחריו.
- * הבדיקה האחרונה כאן עוברת על **כל** המילים בשתי הרשימות האמיתיות ומאמתת
- * שכל תוצאה מוכלת ברשומה אחת — לא „מתחילה נכון”.
+ * הקבוצה „גבול הרשומה על הנתונים האמיתיים” מריצה **כל** שאילתה אפשרית על שתי
+ * הרשימות, ומודדת את שני המסלולים באותה לולאה: החדש 0 חציות, הקודם מאות.
+ * בלי הצד השני, „אין חציות” הייתה טענה שאינה יכולה להיכשל.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { buildStaticIndex, matchStaticCompletion } from '../../src/engine/static-completion';
+import { buildSectionCache, matchAtCursor } from '../../src/engine/book-completion';
 import { loadStaticSources, resetStaticSources } from '../../src/engine/static-completion-dictionary';
 import { STATIC_COMPLETION_GLOBAL } from '../../src/engine/static-completion-constants';
 import {
@@ -48,6 +50,41 @@ describe('matchStaticCompletion', () => {
 
   it('פיסוק במקור נשמר', () => {
     expect(match(['אבן'], 'גב')?.text).toBe('גבאי, מאיר בן יחזקאל');
+  });
+
+  /**
+   * הקצה נמשך עד סוף הטקסט ולא עד סוף המילה האחרונה. נמדד: „בן יוסף הכ”
+   * החזיר „הכהן (בעל הקצות” — סוגריים לא מאוזנים אל תוך ה-DOCX.
+   */
+  it('סוגר שאחרי המילה האחרונה אינו נחתך', () => {
+    const withParens = buildStaticIndex('authors', ['אריה ליב בן יוסף הכהן (בעל הקצות)']);
+    expect(matchStaticCompletion([withParens], { precedingWords: ['יוסף'], partialWord: 'הכ' })?.text).toBe(
+      'הכהן (בעל הקצות)',
+    );
+  });
+
+  it('אין הצעה עם סוגריים לא מאוזנים באף מקום בנתונים', () => {
+    const { phrases: p, authors: a } = readStaticCompletionSource();
+    const unbalanced: string[] = [];
+
+    for (const [name, entries] of [['talmudic-phrases', p], ['authors', a]] as [string, string[]][]) {
+      const index = buildStaticIndex(name, entries);
+      for (const entry of entries) {
+        const words = entry.trim().split(/\s+/);
+        for (let i = 0; i < words.length; i += 1) {
+          const found = matchStaticCompletion([index], {
+            precedingWords: words.slice(Math.max(0, i - 2), i),
+            partialWord: words[i]!.slice(0, 2),
+          });
+          if (!found) continue;
+          const opens = (found.text.match(/\(/g) ?? []).length;
+          const closes = (found.text.match(/\)/g) ?? []).length;
+          if (opens !== closes) unbalanced.push(found.text);
+        }
+      }
+    }
+
+    expect(unbalanced).toEqual([]);
   });
 
   it('הביטויים נבדקים לפני המחברים, באותו אורך הקשר', () => {
@@ -93,29 +130,54 @@ describe('matchStaticCompletion', () => {
 
 describe('גבול הרשומה על הנתונים האמיתיים', () => {
   const { phrases: realPhrases, authors: realAuthors } = readStaticCompletionSource();
-
-  it.each([
+  const LISTS: [string, string[]][] = [
     ['talmudic-phrases', realPhrases],
     ['authors', realAuthors],
-  ])('%s: כל תוצאה מוכלת ברשומה אחת', (name, entries) => {
-    const index = buildStaticIndex(name, entries);
-    const crossings: string[] = [];
+  ];
 
+  /**
+   * כל שאילתה אפשרית על הנתונים: כל מילה בכל רשומה, עם עד שתי מילות ההקשר
+   * שלפניה. תוצאה שחצתה גבול אינה רצף באף רשומה בודדת.
+   */
+  function countCrossings(entries: string[], probe: (context: string[], partial: string) => string | null): number {
+    let crossings = 0;
     for (const entry of entries) {
       const words = entry.trim().split(/\s+/);
       for (let i = 0; i < words.length; i += 1) {
-        const found = matchStaticCompletion([index], {
-          precedingWords: words.slice(Math.max(0, i - 2), i),
-          partialWord: words[i]!.slice(0, 2),
-        });
-        // תוצאה שחצתה גבול אינה רצף באף רשומה בודדת.
-        if (found && !entries.some((candidate) => candidate.includes(found.text))) {
-          crossings.push(`${entry} → ${found.text}`);
-        }
+        const text = probe(words.slice(Math.max(0, i - 2), i), words[i]!.slice(0, 2));
+        if (text !== null && !entries.some((candidate) => candidate.includes(text))) crossings += 1;
       }
     }
+    return crossings;
+  }
 
-    expect(crossings).toEqual([]);
+  it.each(LISTS)('%s: אף תוצאה אינה חוצה רשומה', (name, entries) => {
+    const index = buildStaticIndex(name, entries);
+    expect(
+      countCrossings(
+        entries,
+        (precedingWords, partialWord) =>
+          matchStaticCompletion([index], { precedingWords, partialWord })?.text ?? null,
+      ),
+    ).toBe(0);
+  });
+
+  /**
+   * ואותה מדידה בדיוק על המסלול של PR ‏#46 — `buildSectionCache` על הרשומות
+   * המחוברות ב-`\n`, ומנוע ההתאמה של הספר.
+   *
+   * בלי הבדיקה הזאת „אף תוצאה אינה חוצה” היא טענה שאינה יכולה להיכשל: באינדקס
+   * החדש חציה אינה אפשרית מבנית. כאן נמדד שהבאג שהיא מגנה מפניו אמיתי, ומה
+   * גודלו — כלומר גם המספר שמצוטט בתיעוד נשען על הרצה ולא על זיכרון.
+   */
+  it.each(LISTS)('%s: המסלול הקודם כן חצה, והרבה', (_name, entries) => {
+    const cache = buildSectionCache(entries.join('\n'));
+    const crossings = countCrossings(
+      entries,
+      (precedingWords, partialWord) =>
+        matchAtCursor(cache, { precedingWords, partialWord }, { minStandalonePartial: 2 })?.text ?? null,
+    );
+    expect(crossings).toBeGreaterThan(100);
   });
 });
 

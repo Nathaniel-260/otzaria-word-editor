@@ -157,22 +157,35 @@ if (existsSync(appPath) && readFileSync(appPath, 'utf8').includes(DICTIONARY_MAR
  * שיופיע בקוד, ואינו קיים באף אחד מהנכסים האחרים.
  */
 const LAZY_ASSETS = [
-  { file: 'assets/acronyms.js', marker: 'רבי משה בן מימון', what: 'מילון ראשי-התיבות', size: '0.7MB' },
-  { file: 'assets/static-completion.js', marker: 'אבן שואבת', what: 'רשימות ההשלמה הסטטיות', size: '32KB' },
+  { file: 'assets/acronyms.js', markers: ['רבי משה בן מימון'], what: 'מילון ראשי-התיבות', size: '0.7MB' },
+  {
+    file: 'assets/static-completion.js',
+    // סמן לכל קובץ נתונים ולא לכל נכס: השניים נארזים יחד, ו-`import` ישיר של
+    // `authors.json` בלבד (20KB) היה עובר בשקט תחת סמן מהביטויים.
+    markers: ['אבן שואבת', 'אבן גבאי, מאיר בן יחזקאל'],
+    what: 'רשימות ההשלמה הסטטיות',
+    size: '32KB',
+  },
 ];
 
-for (const { file, marker, what, size } of LAZY_ASSETS) {
+for (const { file, markers, what, size } of LAZY_ASSETS) {
   const path = join(DIST, file);
-  if (!existsSync(path)) {
+  const asset = existsSync(path) ? readFileSync(path, 'utf8') : null;
+  if (asset === null) {
     errors.push(`חסר ${file} — ${what} לא ייטענו`);
-  } else if (!readFileSync(path, 'utf8').includes(marker)) {
-    errors.push(`${file} אינו מכיל את הנתונים — התוסף שנארז חסר את ${what}`);
   }
-  if (existsSync(appPath) && readFileSync(appPath, 'utf8').includes(marker)) {
-    errors.push(
-      `assets/app.js מכיל את ${what} — הם נבלעו לבאנדל הראשי במקום להישאר נכס נפרד. ` +
-        `כל משתמש פורס עכשיו ${size} בעלייה בשביל תכונה שברירת המחדל שלה כבויה.`,
-    );
+  const app = existsSync(appPath) ? readFileSync(appPath, 'utf8') : null;
+
+  for (const marker of markers) {
+    if (asset !== null && !asset.includes(marker)) {
+      errors.push(`${file} אינו מכיל את „${marker}” — התוסף שנארז חסר חלק מ${what}`);
+    }
+    if (app !== null && app.includes(marker)) {
+      errors.push(
+        `assets/app.js מכיל את ${what} — הם נבלעו לבאנדל הראשי במקום להישאר נכס נפרד. ` +
+          `כל משתמש פורס עכשיו ${size} בעלייה בשביל תכונה שברירת המחדל שלה כבויה.`,
+      );
+    }
   }
 }
 

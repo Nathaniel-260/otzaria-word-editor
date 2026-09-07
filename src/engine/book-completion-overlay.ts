@@ -602,16 +602,26 @@ export function installBookCompletion(
     if (receipt?.success === false || disposed) return;
 
     /*
-     * ההכנסה נחתה, וכל הערכה שנקבעה או שרצה לפניה מסתמכת על הטקסט שלפניה —
-     * כלומר הייתה מציעה שוב את אותה השלמה בדיוק. נמדד בשער: ה-ghost חזר
-     * מיד אחרי Tab ונשאר על המסך עד ההקשה הבאה. הטוקן פוסל את מי שבאוויר,
-     * וה-timer מבטל את מי שעוד לא יצא.
+     * להשלמה בלי המשך — ר"ת, רשימה סטטית, שם ספר — ההכנסה היא סוף העניין,
+     * וכל הערכה שנקבעה או שרצה לפניה מסתמכת על הטקסט שלפניה: היא הייתה
+     * מציעה שוב את אותה השלמה בדיוק. נמדד: ה-ghost חזר מיד אחרי Tab ונשאר
+     * על המסך עד ההקשה הבאה. הטוקן פוסל את מי שבאוויר, וה-timer את מי שעוד
+     * לא יצא.
+     *
+     * **ורק שם.** להשלמה מהספר יש המשך, וההערכה המושהית היא מי שמצייר אותו
+     * בפועל: ה-`requestAnimationFrame` שלמטה נופל כשהמנוע עדיין לא מחזיר
+     * `getAnchorRect` מיד אחרי ההכנסה, ואין לו ניסיון שני. ביטול עיוור של
+     * ההערכה הותיר הצעה חיה ובלתי נראית — Tab נתפס והכניס חמש מילים בלי
+     * ששום דבר הוצג (נמדד ב-scripts/qa/book-completion-qa.mjs).
      */
-    evalToken += 1;
-    if (debounceTimer !== undefined) clearTimeout(debounceTimer);
-    clearSuggestion();
+    if (continueFrom === null) {
+      evalToken += 1;
+      if (debounceTimer !== undefined) clearTimeout(debounceTimer);
+      clearSuggestion();
+      return;
+    }
 
-    if (continueFrom !== null && cache) {
+    if (cache) {
       const next = sliceWords(cache, continueFrom, WORDS_TO_SHOW);
       // רווח מפריד ולא הצמדה: ההשלמה הקודמת הסתיימה במילה, וה-5 הבאות הן
       // המשך המשפט. `normalizeSelectedText` מטפל גם כאן בשבר שורה מהספר.

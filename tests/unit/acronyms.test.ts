@@ -159,6 +159,20 @@ describe('הנכס שהבנייה מייצרת', () => {
   });
 
   /**
+   * מה שהמסלול הזה מכניס למסמך נכתב כפי שהוא (בשונה מהמסלול הסטטי, שעובר
+   * דרך `normalizeSelectedText`), ולכן תוכן הפירוש הוא חלק מהחוזה. 503
+   * מפתחות ב-KleiKodesh הם לעזי רש"י שהפירוש היחיד שלהם „*” או „/”.
+   */
+  it('אין פירוש שהוא אשפה או רווח חריג', () => {
+    const packed = runAsset() as Record<string, string>;
+    const keys = Object.keys(packed);
+
+    expect(keys.filter((key) => !/[א-ת]/.test(packed[key]!))).toEqual([]);
+    expect(keys.filter((key) => packed[key]!.trim() !== packed[key])).toEqual([]);
+    expect(keys.filter((key) => /\s\s/.test(packed[key]!))).toEqual([]);
+  });
+
+  /**
    * הספירה מדויקת ולא „לפחות”: החלפת קובץ הנתונים היא בדיוק הדבר שיזיז את
    * המספרים האלה בשקט — ערך שיחדל להיות ר"ת פשוט ייעלם מההשלמה.
    */
@@ -167,17 +181,17 @@ describe('הנכס שהבנייה מייצרת', () => {
     const pack = packAcronyms(source);
 
     expect(Object.keys(source).length).toBe(25_363);
-    expect(Object.keys(pack.packed).length).toBe(17_840);
+    expect(Object.keys(pack.packed).length).toBe(17_717);
     expect(pack.dropped.notAcronym).toBe(6_508);
-    expect(pack.dropped.noExpansion).toBe(19);
-    expect(pack.fromVariants).toBe(349);
+    expect(pack.dropped.noExpansion).toBe(522);
+    expect(pack.fromVariants).toBe(232);
   });
 
   it('הנכס קטן מקובץ המקור, למרות שיש בו יותר ערכים מקודם', () => {
     const source = readAcronymsSource();
     const { packed } = packAcronyms(source);
 
-    // 17,840 ערכים ב-712KB, מול 13,067 ב-902KB לפני המיזוג — הכיווץ לפירוש
+    // 17,717 ערכים ב-710KB, מול 13,067 ב-902KB לפני המיזוג — הכיווץ לפירוש
     // יחיד מחזיר יותר ממה שההרחבה לוקחת.
     expect(Buffer.byteLength(JSON.stringify(packed))).toBeLessThan(800_000);
     expect(Buffer.byteLength(JSON.stringify(source))).toBeGreaterThan(2_000_000);

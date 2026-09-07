@@ -67,11 +67,45 @@ export interface StaticIndex {
   readonly byPrefix: ReadonlyMap<string, readonly number[]>;
 }
 
+/**
+ * מה שנכנס למסמך חייב להיות נקי.
+ *
+ * שתי רשומות ב-`authors.json` מכילות U+200F (סימן כיווניות), ובאחת הוא יושב
+ * **בין** מילים — כלומר הצעה שמתחילה באמצע השם הייתה נושאת אותו אל תוך
+ * ה-DOCX. `\s+` תופס גם רווח כפול, שקיים גם הוא בנתונים.
+ */
+function sanitizeEntry(text: string): string {
+  return text.replace(/[\u200E\u200F\u061C]/g, '').replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * מסירה סוגר שאין לו פותח בתוך ההשלמה עצמה.
+ *
+ * ההשלמה היא סיפא של הרשומה, ולכן הצעה שמתחילה **בתוך** הסוגריים נושאת את
+ * הסוגר בלי הפותח: „בעל הק” ברשומה „אריה ליב בן יוסף הכהן (בעל הקצות)” הציע
+ * „הקצות)”. הרשומות עצמן מאוזנות (נבדק: 0 חריגות ב-976), ולכן אחרי ההסרה
+ * הזאת מה שנכתב למסמך מאוזן תמיד.
+ */
+function dropOrphanClosers(text: string): string {
+  let depth = 0;
+  let out = '';
+  for (const ch of text) {
+    if (ch === '(') depth += 1;
+    else if (ch === ')') {
+      if (depth === 0) continue;
+      depth -= 1;
+    }
+    out += ch;
+  }
+  return out.trimEnd();
+}
+
 export function buildStaticIndex(name: string, sourceEntries: readonly string[]): StaticIndex {
   const entries: StaticEntry[] = [];
   const byPrefix = new Map<string, number[]>();
 
-  for (const text of sourceEntries) {
+  for (const raw of sourceEntries) {
+    const text = sanitizeEntry(raw);
     const runs = [...text.matchAll(WORD_RUN)];
     if (runs.length === 0) continue;
     if (runs.length > MAX_WORDS_PER_ENTRY) {
@@ -182,7 +216,12 @@ function matchInIndex(index: StaticIndex, contextWords: readonly string[], parti
     if (target >= entry.words.length) continue;
     if (partial !== '' && !entry.words[target]!.startsWith(partial)) continue;
 
-    const text = entry.text.slice(entry.spans[target]!.start, entry.spans[entry.spans.length - 1]!.end);
+    /*
+     * עד סוף **הטקסט**, ולא עד סוף המילה האחרונה. נמדד: „בן יוסף הכ” החזיר
+     * „הכהן (בעל הקצות” — הסוגר שאחרי המילה האחרונה נחתך, ומה שנכתב למסמך
+     * היה סוגריים לא מאוזנים. 58 מקרים כאלה בנתונים.
+     */
+    const text = dropOrphanClosers(entry.text.slice(entry.spans[target]!.start));
     if (text === '') continue;
     return { text, contextWordsUsed: contextWords.length, source: index.name };
   }
