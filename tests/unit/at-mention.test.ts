@@ -99,6 +99,47 @@ describe('parseAtTrigger', () => {
   });
 });
 
+/**
+ * הסף נמדד באורך בלבד: גרשיים אינו „מפעיל” ואינו נדרש. הבדיקות כאן רצות על
+ * המחרוזות כפי שהן נראות בזמן הקלדה — parseAtTrigger ואז isQueryable, כמו
+ * ב-overlay — כדי שלא נאמת סף על אובייקט טריגר שנבנה ביד.
+ */
+describe('סף שני התווים על טקסט שהוקלד', () => {
+  const queryable = (beforeCaret: string): boolean => {
+    const trigger = parseAtTrigger(beforeCaret);
+    return trigger !== null && isQueryable(trigger);
+  };
+
+  it('אות אחת אינה מפעילה', () => {
+    expect(queryable('@ר')).toBe(false);
+    expect(queryable('ראה @ר')).toBe(false);
+    expect(queryable('ב@ר')).toBe(false);
+  });
+
+  it('שתי אותיות מפעילות — בלי שום סימן פיסוק', () => {
+    expect(queryable('@רש')).toBe(true);
+    expect(queryable('ראה @רש')).toBe(true);
+    expect(queryable('ב@רש')).toBe(true);
+    expect(queryable('@פס')).toBe(true);
+  });
+
+  it('אות וגרשיים מפעילים — התו השני הוא שממלא את הסף', () => {
+    expect(queryable('@ר״')).toBe(true);
+    expect(queryable('@ר"')).toBe(true);
+    expect(queryable('@ר׳')).toBe(true);
+  });
+
+  it('הגרשיים נשמר בשאילתה כלשונו', () => {
+    expect(parseAtTrigger('@ר״')?.query).toBe('ר״');
+    expect(parseAtTrigger('@רש״י')?.query).toBe('רש״י');
+  });
+
+  it('רווח אינו נספר לסף — „@ר ” עדיין תו אחד', () => {
+    expect(queryable('@ר ')).toBe(false);
+    expect(queryable('@ר ב')).toBe(true);
+  });
+});
+
 describe('buildRefHref', () => {
   it('בונה קישור עומק לספר טקסט', () => {
     expect(buildRefHref(hit(), 'פסחים לד')).toBe('otzaria://open/book/42?index=1234');

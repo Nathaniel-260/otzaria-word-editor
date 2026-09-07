@@ -425,6 +425,65 @@ describe('installAtMention', () => {
     expect(resolveRefMock).not.toHaveBeenCalled();
   });
 
+  /**
+   * הסף מנקודת מבטו של המקליד: מה נשלח לאוצריא ומה נפתח על המסך. הדיווח
+   * מהשדה היה שרק אחרי גרשיים מופיעות הצעות — כאן נבדק שכל תו שני מספיק.
+   */
+  describe('סף שני התווים בנתיב המלא', () => {
+    it('אות אחת אחרי @ אינה שולחת שאילתה ואינה פותחת רשימה', async () => {
+      const { host } = fakeDoc('ראה @ר');
+      const handle = installAtMention(container, host as never);
+
+      container.dispatchEvent(new Event('input'));
+      await settle();
+
+      expect(resolveRefMock).not.toHaveBeenCalled();
+      expect(popup()).toBeNull();
+      handle.dispose();
+    });
+
+    it('שתי אותיות פותחות רשימה בלי שום סימן פיסוק', async () => {
+      const { host } = fakeDoc('ראה @רש');
+      const handle = installAtMention(container, host as never);
+
+      container.dispatchEvent(new Event('input'));
+      await settle();
+
+      expect(resolveRefMock).toHaveBeenCalledWith('רש', 8);
+      expect(options()).toHaveLength(1);
+      handle.dispose();
+    });
+
+    it('אות וגרשיים פותחים רשימה — הגרשיים אינו תנאי אלא תו שני', async () => {
+      const { host } = fakeDoc('ראה @ר״');
+      const handle = installAtMention(container, host as never);
+
+      container.dispatchEvent(new Event('input'));
+      await settle();
+
+      expect(resolveRefMock).toHaveBeenCalledWith('ר״', 8);
+      expect(options()).toHaveLength(1);
+      handle.dispose();
+    });
+
+    it('הקלדת התו השני פותחת את הרשימה על אותו אזכור', async () => {
+      // אותו אזכור בדיוק, שני מצבי הקלדה: „@ר” ואז „@רש”.
+      const first = fakeDoc('ראה @ר');
+      const handle = installAtMention(container, first.host as never);
+      container.dispatchEvent(new Event('input'));
+      await settle();
+      expect(popup()).toBeNull();
+      handle.dispose();
+
+      const second = fakeDoc('ראה @רש');
+      const handle2 = installAtMention(container, second.host as never);
+      container.dispatchEvent(new Event('input'));
+      await settle();
+      expect(popup()).not.toBeNull();
+      handle2.dispose();
+    });
+  });
+
   it('גלילה סוגרת את הרשימה — היא אינה נגררת עם הטקסט', async () => {
     const { host } = fakeDoc('@פסחים לד');
     const handle = installAtMention(container, host as never);
