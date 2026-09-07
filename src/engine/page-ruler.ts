@@ -1270,6 +1270,29 @@ export interface PageGlyphMeasure {
 /** אלמנטים מוחלפים: לחיצה עליהם היא בחירת אובייקט, לא של טקסט. */
 const REPLACED_TAGS = new Set(['IMG', 'SVG', 'CANVAS', 'VIDEO', 'PICTURE', 'OBJECT', 'IFRAME', 'EMBED']);
 
+/**
+ * האם נקודה בקואורדינטות החלון נופלת על עמוד מצויר.
+ *
+ * `null` פירושו „אין תשובה” — אין עמודים בעץ (לפני שהמסמך נצבע, או אחרי
+ * פירוק), ואז מי שקורא לא יסיק „מחוץ לעמוד” ממה שהוא בעצם „עוד לא יודע”.
+ *
+ * אותו עיגון ואותה קריאה טהורה כמו `measureAllPageRects`; זו הגרסה שמשרתת
+ * מאזין לחיצה, ולכן היא יוצאת בעמוד הראשון שמכיל את הנקודה ואינה אוספת
+ * מלבנים. הצורך: engine/click-focus.ts.
+ */
+export function pointOverPage(host: HTMLElement | null, xPx: number, yPx: number): boolean | null {
+  if (!host) return null;
+  const pages = host.querySelectorAll(`[${PAGE_INDEX_ATTRIBUTE}]`);
+  if (pages.length === 0) return null;
+  for (const node of pages) {
+    if (!(node instanceof HTMLElement)) continue;
+    const box = node.getBoundingClientRect();
+    if (!(box.width > 0) || !(box.height > 0)) continue;
+    if (xPx >= box.left && xPx <= box.right && yPx >= box.top && yPx <= box.bottom) return true;
+  }
+  return false;
+}
+
 /** התכונה שהמנוע מסמן בה לאיזה „סיפור” שייך פרגמנט: גוף, כותרת, הערה. */
 const STORY_ATTRIBUTE = 'data-layout-story';
 

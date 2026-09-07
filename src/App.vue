@@ -8,6 +8,7 @@
     ]"
     @pointermove="onPointerMove"
     @pointerleave="revealed = null"
+    @pointerdown.capture="keepCaret"
     @contextmenu="contextMenu.handleContextMenu"
   >
     <!--
@@ -600,9 +601,18 @@ import { createDirectionShortcut } from './ui/shortcuts/direction';
 import { watchUndoRedoKeys, type UndoRedoWatcher } from './ui/shortcuts/undo-redo-watch';
 import { createFocusRing } from './ui/shortcuts/focus-ring';
 import { focusDocument } from './engine/focus';
+import { createCaretKeeper } from './ui/shell/caret-keeper';
 
 const editorStackRef = ref<HTMLElement | null>(null);
 const shellRef = ref<HTMLElement | null>(null);
+
+/**
+ * לחיצה על רקע של פס מעטפת אינה לוקחת את הסמן מהמסמך — ראו
+ * ui/shell/caret-keeper.ts, ובו גם מה שנמדד בכל פס. אזור המסמך יוצא מהכלל:
+ * שם לחיצה כן מזיזה סמן, ומה שקורה בשטח האפור שבתוכו מטופל
+ * ב-engine/click-focus.ts.
+ */
+const keepCaret = createCaretKeeper({ documentArea: () => editorStackRef.value });
 
 const commandAdapter = shallowRef<CommandAdapter | null>(null);
 provide(COMMAND_ADAPTER, commandAdapter);
