@@ -20,6 +20,11 @@
  *   --no-click       בלי לחיצת עכבר אמיתית לפני ההקלדה (ברירת המחדל לוחצת על שורת
  *                    טקסט גלויה — פוקוס JS בלבד אינו מעביר את פוקוס המקלדת של
  *                    המערכת אל חלון ה-WebView, וההקשות נופלות ב-Flutter)
+ *   --target <מה>    איזו שורה ללחוץ: auto (השורה הגלויה השלישית), wide (שורה ברוחב
+ *                    העמוד — כותרת או מקטע של טור אחד), left / right (שורה בטור
+ *                    השמאלי/הימני של מקטע טורים; ב-SuperDoc השמאלי הוא הראשון בסדר
+ *                    המסמך), text:<קטע> (שורה שמכילה את הטקסט). שורה שאינה גלויה
+ *                    מגוללת אל המרכז. הדוח מציין מה נלחץ.
  *
  * הרצה: node scripts/typing-latency-inapp.mjs --screen
  */
@@ -38,6 +43,7 @@ const KEYS = Number(opt('--keys', 40));
 const SCREEN = args.includes('--screen');
 const GAP_MS = Math.max(Number(opt('--gap', 80)), SCREEN ? 350 : 0);
 const CLICK = !args.includes('--no-click');
+const TARGET = opt('--target', 'auto');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -127,18 +133,22 @@ if (state.text < 0) {
 /* ------------------------------ מכשור בדף ------------------------------ */
 await js(`(function () {
   delete window.__inapp;
-  var O = (window.__inapp = { keys: [], long: [], vis: [] });
+  var O = (window.__inapp = { keys: [], text: [], long: [], vis: [] });
   var epoch = function (t) { return performance.timeOrigin + t; };
   var c = window.__otzariaEditor.container;
-  var pendingKey = null;
+  var last = c.textContent;
   document.addEventListener('keydown', function (e) {
-    pendingKey = { key: e.key, down: epoch(performance.now()), mutated: null, painted: null };
-    O.keys.push(pendingKey);
+    O.keys.push({ key: e.key, down: epoch(performance.now()) });
   }, true);
+  // המוטציה הראשונה אחרי הקשה היא בדרך כלל שכבת הסמן/הבחירה, לא התו (נמדד: היא
+  // מגיעה ~10ms אחרי keydown, והתו עצמו ~50–150ms אחריו). לכן נרשם רק שינוי בטקסט
+  // של המסמך, וה-rAF הראשון אחריו הוא הציור. הרישום הוא סדרה, לא „ההקשה האחרונה”:
+  // בהקלדה מהירה התו של הקשה N מגיע אחרי keydown של N+1.
   new MutationObserver(function () {
-    var p = pendingKey; if (!p || p.mutated !== null) return;
-    p.mutated = epoch(performance.now());
-    requestAnimationFrame(function () { p.painted = epoch(performance.now()); });
+    var t = c.textContent; if (t === last) return;
+    var rec = { t: epoch(performance.now()), d: t.length - last.length, painted: null };
+    last = t; O.text.push(rec);
+    requestAnimationFrame(function () { rec.painted = epoch(performance.now()); });
   }).observe(c, { childList: true, subtree: true, characterData: true, attributes: true });
   document.addEventListener('visibilitychange', function () { O.vis.push({ t: Date.now(), vis: document.visibilityState }); });
   try {
@@ -257,10 +267,13 @@ try {
     if (CLICK) {
       // שורת טקסט גלויה, בתוך החלון (בחלון צר הדף רחב מהחלון והשורות חורגות ממנו).
       // שורה בלי קישורים: לחיצה על קישור במסמך פותחת ספר באוצריא ומחליפה לשונית.
+      // סיווג השורה לפי רוחבה מול העמוד שלה: wide = מעל 60% מרוחב העמוד; אחרת טור,
+      // ימני או שמאלי לפי מרכז השורה מול מרכז העמוד.
       const pt = JSON.parse(
-        await js(`(function(){var W=innerWidth,H=innerHeight;var ls=[...document.querySelectorAll('.superdoc-line')].filter(function(l){return !l.querySelector('a,[href],[data-href],[data-link],[class*=link]');}).map(function(l){return l.getBoundingClientRect()}).filter(function(r){return r.height>8&&r.top>120&&r.bottom<H-40&&Math.min(r.right,W)-Math.max(r.left,0)>80;});if(!ls.length)return 'null';var r=ls[Math.min(ls.length-1,2)];var left=Math.max(r.left,0),right=Math.min(r.right,W);return JSON.stringify({x:Math.round((left+right)/2),y:Math.round(r.top+r.height/2)});})()`),
+        await js(`(async function(target){var W=innerWidth,H=innerHeight;var all=[...document.querySelectorAll('.superdoc-line')].filter(function(l){return !l.querySelector('a,[href],[data-href],[data-link],[class*=link]');});var info=function(l){var r=l.getBoundingClientRect();var pg=l.closest('[data-page-index]');var pr=pg?pg.getBoundingClientRect():{left:0,right:W};var kind=r.width>(pr.right-pr.left)*0.6?'wide':((r.left+r.right)/2<(pr.left+pr.right)/2?'left':'right');var full=(l.textContent||'').trim();return {el:l,r:r,kind:kind,full:full,txt:full.slice(0,40)};};var vis=function(o){var r=o.r;return r.height>8&&r.top>120&&r.bottom<H-40&&Math.min(r.right,W)-Math.max(r.left,0)>80;};var match=function(o){return target==='auto'||(target.indexOf('text:')===0?o.full.indexOf(target.slice(5))>=0:o.kind===target);};var os=all.map(info);var cands=os.filter(match);var seen=cands.filter(vis);var pick=target==='auto'?seen[Math.min(seen.length-1,2)]:seen[0];if(!pick&&cands.length){cands[0].el.scrollIntoView({block:'center'});await new Promise(function(r){setTimeout(r,700)});var o=info(cands[0].el);if(vis(o))pick=o;}if(!pick)return JSON.stringify({error:cands.length?'not-visible':'no-match',kinds:os.reduce(function(m,o){m[o.kind]=(m[o.kind]||0)+1;return m;},{})});var r=pick.r;var left=Math.max(r.left,0),right=Math.min(r.right,W);return JSON.stringify({x:Math.round((left+right)/2),y:Math.round(r.top+r.height/2),kind:pick.kind,w:Math.round(r.width),txt:pick.txt});})(${JSON.stringify(TARGET)})`),
       );
-      if (!pt) throw new Error('לא נמצאה שורת טקסט גלויה ללחיצה');
+      if (!pt || pt.error) throw new Error(pt && pt.error === 'no-match' ? `אין שורה מסוג „${TARGET}” במסמך (יש: ${JSON.stringify(pt.kinds)})` : 'לא נמצאה שורת טקסט גלויה ללחיצה');
+      console.log(`שורת היעד: ${pt.kind}, רוחב ${pt.w}px, „${pt.txt}”`);
       const tabBefore = state.tab;
       // מיקום החלון נקרא מחדש: אוצריא עשויה להזיז את החלון (שחזור מיקום) גם שניות אחרי הפתיחה.
       state.screen = JSON.parse(await js('JSON.stringify([screenX, screenY])'));
@@ -326,22 +339,35 @@ if (O.keys.length === 0) {
   process.exit(1);
 }
 const n = Math.min(sent.length, O.keys.length);
-const host = [], paint = [], total = [], present = [], screen = [];
+// שיוך תו↔הקשה: כשמספר עדכוני הטקסט שווה למספר ההקשות — לפי סדר (המנוע מעבד הקשה
+// אחת בכל פעם ואינו מאחד); אחרת כל עדכון משויך להקשה האחרונה שקדמה לו.
+const inOrder = O.text.length === O.keys.length;
+const textOf = (i) => {
+  if (inOrder) return O.text[i] ?? null;
+  const k = O.keys[i], next = O.keys[i + 1];
+  return O.text.find((x) => x.t > k.down && (!next || x.t <= next.down)) ?? null;
+};
+const host = [], dom = [], paint = [], total = [], present = [], screen = [];
 for (let i = 0; i < n; i++) {
-  const s = sent[i], k = O.keys[i];
+  const s = sent[i], k = O.keys[i], x = textOf(i);
   host.push(k.down - s.t);
-  if (k.painted !== null) {
-    paint.push(k.painted - k.down);
-    total.push(k.painted - s.t);
-    if (s.screenMs >= 0) {
-      screen.push(s.screenMs);
-      present.push(s.t + s.screenMs - k.painted);
+  if (x) {
+    dom.push(x.t - k.down);
+    if (x.painted !== null) {
+      paint.push(x.painted - x.t);
+      total.push(x.painted - s.t);
+      if (s.screenMs >= 0) {
+        screen.push(s.screenMs);
+        present.push(s.t + s.screenMs - x.painted);
+      }
     }
   }
 }
+console.log(`עדכוני טקסט ב-DOM: ${O.text.length}${inOrder ? '' : ` (≠ ${O.keys.length} הקשות — השיוך לפי „ההקשה האחרונה שלפני”)`}`);
 console.log('\n== לכל הקשה (ms) ==');
 console.log('מערכת ההפעלה → keydown בדף:   ' + stat(host));
-console.log('keydown → ציור (rAF) בדף:      ' + stat(paint));
+console.log('keydown → התו ב-DOM:           ' + stat(dom) + '  (המנוע: עסקה → worker → ציור ל-DOM)');
+console.log('התו ב-DOM → ציור (rAF):        ' + stat(paint));
 console.log('הקשה → ציור בדף, יחד:          ' + stat(total));
 if (SCREEN) {
   console.log('ציור בדף → פיקסלים על המסך:    ' + stat(present) + '  (המארח: WebView2 → Capture → Flutter)');
@@ -349,13 +375,19 @@ if (SCREEN) {
   const unseen = sent.filter((s) => s.screenMs < 0).length;
   if (unseen) console.log(`הקשות בלי שינוי נראה באזור הנדגם: ${unseen} (הסמן יצא מהאזור, או שהתו התמזג עם הבא)`);
 }
-console.log(`תווים שלא נצפו כמצוירים בנפרד: ${O.keys.filter((k) => k.painted === null).length}`);
+if (O.text.length && O.keys.length) {
+  // המדד שהמשתמש מרגיש בהקלדה מהירה: כמה אחרי ההקשה האחרונה הטקסט מתיישב.
+  const lastKey = O.keys[O.keys.length - 1].down, lastText = O.text[O.text.length - 1].t;
+  console.log(`ההקשה האחרונה → התו האחרון ב-DOM: ${Math.round(lastText - lastKey)}ms (מרווח ההקלדה ${GAP_MS}ms; ערך שגדל בהרבה מעל הקשה בודדת = המנוע לא עומד בקצב, ההקשות נערמות)`);
+}
+console.log(`תווים שלא נצפו כמצוירים בנפרד: ${O.text.filter((x) => x.painted === null).length}`);
 const slow = [];
 for (let i = 0; i < n; i++) {
-  const s = sent[i], k = O.keys[i];
-  if (k.painted !== null && k.painted - s.t > 150) slow.push(`#${i} ‚${k.key}‘ ${Math.round(k.painted - s.t)}`);
+  const s = sent[i], k = O.keys[i], x = textOf(i);
+  // התו מ-SendInput (מקש unicode מגיע כ-`Unidentified` ב-e.key).
+  if (x && x.t - s.t > 150) slow.push(`#${i} ‚${s.ch || k.key}‘ ${Math.round(x.t - s.t)}`);
 }
-if (slow.length) console.log('הקשות איטיות (>150ms עד ציור): ' + slow.join(', '));
+if (slow.length) console.log('הקשות איטיות (>150ms עד התו ב-DOM): ' + slow.join(', '));
 const t0 = sent[0]?.t ?? 0;
 const long = O.long.filter((l) => l.start >= t0 - 200);
 console.log(`\nlong tasks בזמן ההקלדה: ${long.length}${long.length ? ' — ' + long.map((l) => l.dur + 'ms').join(', ') : ''}`);
