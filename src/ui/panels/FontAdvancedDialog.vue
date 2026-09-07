@@ -505,10 +505,9 @@ const selectionState = shallowRef<SelectionReadiness>('unknown');
 /** מונה סבבים — תשובה שאיחרה שייכת לסבב שלה, לא לזה שעל המסך. */
 let selectionRound = 0;
 
-async function probeSelection(): Promise<void> {
+async function probeSelection(refreshSample = false): Promise<void> {
   selectionRound += 1;
   const mine = selectionRound;
-  const previous = selectionState.value;
   const answer = await hasRangeSelection(superdoc.value);
   if (mine !== selectionRound) return;
   selectionState.value = answer;
@@ -523,7 +522,7 @@ async function probeSelection(): Promise<void> {
    * ייראה ב-Word”. וגם בכיוון השני: נפתח על בחירה א׳, המשתמש סימן ב׳, והפס
    * מראה את א׳ בזמן שההחלה תיפול על ב׳.
    */
-  if (answer !== previous) {
+  if (refreshSample) {
     sample.end();
     sample.begin();
   }
@@ -553,7 +552,7 @@ function onSelectionChanged(): void {
   if (selectionTimer !== null) clearTimeout(selectionTimer);
   selectionTimer = setTimeout(() => {
     selectionTimer = null;
-    void probeSelection();
+    void probeSelection(true);
   }, SELECTION_SETTLE_MS);
 }
 
@@ -578,7 +577,7 @@ onBeforeUnmount(() => watchSelection(false));
  * וכל לחיצה הייתה נכשלת. זו אותה התיישנות שהמאזין נועד לסגור, בכניסה אחרת.
  */
 watch(superdoc, () => {
-  if (props.isOpen) void probeSelection();
+  if (props.isOpen) void probeSelection(true);
 });
 
 /**

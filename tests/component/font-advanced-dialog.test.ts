@@ -251,6 +251,23 @@ describe('FontAdvancedDialog (בדיד)', () => {
     expect(teleported('.fa-preview-strip').text()).toBe('טקסט חדש');
   });
 
+  it('פס התצוגה המקדימה מתחלף גם בין שני טווחים מסומנים', async () => {
+    const superdoc = createSuperdocDouble({ selection: { hasRange: true, text: 'טקסט ראשון' } });
+    mountUi(FontAdvancedDialog, { props: { isOpen: true, busy: false }, superdoc });
+    await settle();
+
+    expect(teleported('.fa-preview-strip').text()).toBe('טקסט ראשון');
+
+    // שתי הבחירות הן טווחים, לכן readiness נשאר 'range'. זה המקרה שבו
+    // רענון שתלוי רק במעבר none↔range היה משאיר את הטווח הקודם בפס.
+    superdoc.setSelection({ hasRange: true, text: 'טקסט שני' });
+    document.dispatchEvent(new Event('selectionchange'));
+    await new Promise((resolve) => setTimeout(resolve, 260));
+    await settle();
+
+    expect(teleported('.fa-preview-strip').text()).toBe('טקסט שני');
+  });
+
   /**
    * `selectionchange` אינו נורה כשהמסמך עצמו מתחלף — סגירת לשונית או מעבר
    * ביניהן. בלי המעקב על המסמך „אישור” היה נשאר פתוח על תשובה של מסמך שכבר
