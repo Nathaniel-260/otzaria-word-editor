@@ -29,6 +29,7 @@ import ReferencesTab from '../../src/ui/ribbon/tabs/ReferencesTab.vue';
 import ReviewTab from '../../src/ui/ribbon/tabs/ReviewTab.vue';
 import ViewTab from '../../src/ui/ribbon/tabs/ViewTab.vue';
 import ShulchanTab from '../../src/ui/ribbon/tabs/ShulchanTab.vue';
+import DeveloperTab from '../../src/ui/ribbon/tabs/DeveloperTab.vue';
 import OtzariaTab from '../../src/ui/ribbon/tabs/OtzariaTab.vue';
 import Ribbon from '../../src/ui/ribbon/Ribbon.vue';
 import {
@@ -69,13 +70,16 @@ const TABS: ReadonlyArray<{
   { name: 'סקירה', component: ReviewTab },
   { name: 'תצוגה', component: ViewTab },
   { name: 'שולחן העורך', component: ShulchanTab },
+  // „מפתחים” נסרקת כאן מאז שפקדי המאקרו ירדו מ„אוצריא”: הם היו נמדדים דרך
+  // הלשונית ההיא, וכפילות בין שתי לשוניות אינה כיסוי.
+  { name: 'מפתחים', component: DeveloperTab },
 ];
 
 /** מה שמזהה כפתור בהודעת כשל — כדי שאפשר יהיה למצוא אותו בקובץ. */
 function nameOf(button: DOMWrapper<Element>): string {
   return (
     // ההסבר ולא הכותרת, כשיש: בפקד מנוטרל הוא נושא את *הסיבה*, וזה מה
-    // שהבדיקות כאן מזהות לפיו („סגנונות תורניים יתווספו בשלב הבא”).
+    // שהבדיקות כאן מזהות לפיו („הוספת תגובה — תתווסף בשלב הבא…”).
     tipMessage(button) ||
     button.attributes('aria-label') ||
     button.text().trim() ||
@@ -209,6 +213,8 @@ describe('הפקדים שמנוטרלים בכוונה', () => {
     הפניות: [],
     תצוגה: [],
     'שולחן העורך': [],
+    // המאקרו אינם תלויים ב-SDK של אוצריא אלא במסמך פתוח בלבד, וכאן יש מסמך.
+    מפתחים: [],
   };
 
   for (const tab of TABS) {
@@ -409,7 +415,7 @@ describe('„אוצריא”', () => {
     Reflect.deleteProperty(window, 'Otzaria');
   });
 
-  it('בתוך אוצריא: פקדי ה-SDK והמאקרו חיים, ושלושת הסגנונות התורניים מנוטרלים', async () => {
+  it('בתוך אוצריא: אין בלשונית פקד מת, ואין בה פקד מנוטרל לצמיתות', async () => {
     const probes = await probeAll(OtzariaTab);
 
     const dead = probes
@@ -417,15 +423,17 @@ describe('„אוצריא”', () => {
       .map((item) => item.name);
     expect(dead).toEqual([]);
 
-    // התוויות של „סגנון תורני” הן ה-title, כלומר ההסבר למה הם מנוטרלים.
-    const disabled = probes.filter((item) => item.disabled);
-    expect(disabled).toHaveLength(3);
-    for (const item of disabled) {
-      expect(item.name).toContain('סגנונות תורניים יתווספו בשלב הבא');
-    }
+    // „סגנון תורני” — שלושה כפתורים מנוטרלים, שירדו מהלשונית כפקד שאינו
+    // נצרך (הבקשה למנוע נשארה פתוחה: superdoc/docx-editor#3975). בלעדיהם
+    // אין כאן פקד שהניטרול שלו קבוע: כל מה שמנוטרל, מנוטרל מפני שאין SDK
+    // או שאין מסמך.
+    const permanentlyDisabled = probes.filter((item) =>
+      item.name.includes('סגנונות תורניים'),
+    );
+    expect(permanentlyDisabled).toEqual([]);
   });
 
-  it('מחוץ לאוצריא: פקדי ה-SDK מנוטרלים, והמאקרו — שאינו תלוי ב-SDK — נשאר חי', async () => {
+  it('מחוץ לאוצריא: פקדי ה-SDK מנוטרלים, והייצוא — שאינו תלוי בו — נשאר חי', async () => {
     Reflect.deleteProperty(window, 'Otzaria');
     const harness = mountUi(OtzariaTab, { superdoc: withSelection() });
     await settle();
@@ -434,12 +442,42 @@ describe('„אוצריא”', () => {
       .findAll('button')
       .filter((button) => button.attributes('disabled') === undefined)
       .map((button) => button.text().trim());
-    // המאקרו רץ כולו בעורך ואינו קורא ל-SDK של אוצריא, ולכן ניטרול שלו מחוץ
-    // לאוצריא היה לוקח מהמשתמש יכולת שעובדת. פקדי הציטוט/חיפוש/ספרייה כן
-    // מנוטרלים — הם בדיוק מה שאין בלי ה-SDK.
+    // פקדי הציטוט/חיפוש/ספרייה מנוטרלים — הם בדיוק מה שאין בלי ה-SDK.
     // „ייצוא לאוצריא” נשאר חי מחוץ לאוצריא: מסלול השמירה ממומש ב-dev-stub,
     // וכך הוא נבדק בדפדפן — כמו „שמור בשם” בלשונית „קובץ”.
-    expect(live).toEqual(['ייצוא לאוצריא', 'ניהול מאקרו', 'הקלט מאקרו', 'נגן אחרון']);
+    // המאקרו — שאינו תלוי ב-SDK ולכן נשאר חי גם כאן — עברו ל„מפתחים”,
+    // ונמדדים שם.
+    expect(live).toEqual(['ייצוא לאוצריא']);
+  });
+});
+
+describe('„מפתחים”', () => {
+  /**
+   * שלושת פקדי המאקרו ישבו ב„אוצריא”, וזה מה שנמדד כאן אחרי שירדו משם:
+   * מערכת המאקרו רצה כולה בעורך ואינה נוגעת ב-SDK של אוצריא, ולכן הם חיים
+   * גם מחוץ לאוצריא — ומנוטרלים בלי מסמך, כי אין מה להקליט.
+   */
+  it('בלי ה-SDK של אוצריא: שלושת פקדי המאקרו חיים', async () => {
+    const harness = mountUi(DeveloperTab, { superdoc: withSelection() });
+    await settle();
+
+    const live = harness.wrapper
+      .findAll('button')
+      .filter((button) => button.attributes('disabled') === undefined)
+      .map((button) => button.text().trim());
+    expect(live).toEqual(['ניהול מאקרו', 'הקלט מאקרו', 'נגן אחרון']);
+  });
+
+  it('בלי מסמך: שלושתם מנוטרלים, ולא נכשלים בלחיצה', async () => {
+    const harness = mountUi(DeveloperTab, { superdoc: null });
+    await settle();
+
+    const buttons = harness.wrapper.findAll('button');
+    expect(buttons).toHaveLength(3);
+    for (const button of buttons) {
+      expect(button.attributes('disabled'), button.text().trim()).not.toBeUndefined();
+      expect(tipMessage(button)).toBe('יש לפתוח מסמך תחילה');
+    }
   });
 });
 
