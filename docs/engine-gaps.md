@@ -579,6 +579,12 @@ supported by v2 yet”).
   „Cannot read properties of undefined (reading 'trim')”.
 - **אין API להזזת הסמן בין stories.** `doc.selection` הוא קריאה בלבד, ולכן
   אי אפשר להעביר את הסמן אל גוף הכותרת העליונה או אל הכותרת התחתונה.
+- **`doc.insert` אינו מזיז את הסמן אל סוף מה שהוכנס**, ואין פעולה שתזיז אותו
+  (אותה קריאה-בלבד שלמעלה: יש `selection.current` ו-`selection.delete`, ואין
+  `selection.set`). נמדד ב-`scripts/qa/acronym-completion-qa.mjs`: קבלת השלמה
+  ב-Tab על „חז"ל ” כותבת „חכמינו זכרונם לברכה”, והתו הבא שהוקלד נחת **לפני**
+  הטקסט שנכתב — „חז"ל א חכמינו זכרונם לברכה”. נוגע לכל השלמה שמכניסה טקסט
+  ליד הסמן (engine/book-completion-overlay.ts), ולא לראשי-התיבות בלבד.
 - **`selection.current` אינו מדווח מקטע**, ואין מיפוי ציבורי סמן→מקטע.
   לכן פעולות מקטע חלות על כל המקטעים.
 - **כתובת מקטע היא `section-<index>`, ו-`refStability` שלה `'ephemeral'` —
