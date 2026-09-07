@@ -152,7 +152,7 @@ export interface MatchOptions {
  * התאימה למילה הראשונה בספר שמתחילה באות הזאת, וההצעה שהוצגה הייתה טקסט
  * אקראי מהעמוד. הקשר תואם הוא האות החזקה, ובלעדיו נדרשות שלוש אותיות.
  */
-function hasEnoughSignal(contextLen: number, partial: string, minStandalone: number): boolean {
+export function hasEnoughSignal(contextLen: number, partial: string, minStandalone: number): boolean {
   if (contextLen >= 2) return true;
   if (contextLen === 1) return partial.length >= 1;
   return partial.length >= minStandalone;

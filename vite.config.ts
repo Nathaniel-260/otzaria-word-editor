@@ -5,6 +5,8 @@ import { fileURLToPath } from 'node:url';
 import { TORAH_DICTIONARY_FILE, TORAH_DICTIONARY_GLOBAL } from './src/engine/spellcheck';
 import { ACRONYMS_FILE } from './src/engine/acronyms-constants';
 import { buildAcronymsAsset } from './scripts/acronyms-asset';
+import { STATIC_COMPLETION_FILE } from './src/engine/static-completion-constants';
+import { buildStaticCompletionAsset } from './scripts/static-completion-asset';
 import { patchBlankDocumentXml, patchBlankStylesXml } from './src/engine/blank-document';
 import { deriveHebrewBlankDocx } from './scripts/blank-docx';
 
@@ -329,6 +331,27 @@ function acronymsAsset(): Plugin {
   };
 }
 
+/** ביטויים תלמודיים ושמות מחברים, באותה תבנית נכס עצל בדיוק. */
+function staticCompletionAsset(): Plugin {
+  return {
+    name: 'otzaria-static-completion',
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        if (!req.url || req.url.split('?')[0] !== `/${STATIC_COMPLETION_FILE}`) return next();
+        res.setHeader('Content-Type', 'text/javascript; charset=utf-8');
+        res.end(buildStaticCompletionAsset());
+      });
+    },
+    generateBundle() {
+      this.emitFile({
+        type: 'asset',
+        fileName: STATIC_COMPLETION_FILE,
+        source: buildStaticCompletionAsset(),
+      });
+    },
+  };
+}
+
 const BLANK_DOCX_MODULE = 'virtual:otzaria-blank-docx';
 
 /**
@@ -358,6 +381,7 @@ export default defineConfig({
     hebrewBlankDocx(),
     torahDictionaryAsset(),
     acronymsAsset(),
+    staticCompletionAsset(),
     inlineEngineWorkers(),
     deferredEntry(),
   ],

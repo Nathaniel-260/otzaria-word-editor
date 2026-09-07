@@ -55,6 +55,8 @@ import {
 } from './book-completion';
 import { loadAcronymDictionary } from './acronym-dictionary';
 import { looksLikeAcronym } from './acronyms';
+import { loadStaticSources } from './static-completion-dictionary';
+import { matchStaticCompletion } from './static-completion';
 import { parseAtTrigger } from './at-mention';
 import {
   getCurrentReaderState,
@@ -506,6 +508,36 @@ export function installBookCompletion(
           blockId: snapshot.blockId,
           story: snapshot.story,
           continueFrom: bookMatch.nextWordIndex,
+        };
+        showGhost(ghostText);
+        return;
+      }
+    }
+
+    /*
+     * הרשימות הסטטיות — ביטויים תלמודיים ושמות מחברים — הן ה-fallback של
+     * הספר, ולפני ראשי-התיבות.
+     *
+     * אין כאן מתיחה אחורה על מילות ההקשר כמו בספר: הרשומות אינן מנוקדות,
+     * המשתמש הקליד בדיוק את מה שכתוב בהן, ואין מה לתקן בדיעבד. לכן ההחלפה
+     * היא על המילה החלקית בלבד, ואין `continueFrom` — ההשלמה כבר מגיעה עד סוף
+     * הרשומה, ומעבר לה אין מה להציע.
+     */
+    const staticSources = await loadStaticSources();
+    if (token !== evalToken || disposed) return;
+    if (staticSources) {
+      const staticMatch = matchStaticCompletion(staticSources, snapshot);
+      const ghostText = staticMatch ? normalizeSelectedText(staticMatch.text) : '';
+      if (ghostText !== '') {
+        suggestion = {
+          kind: 'suggesting',
+          ghostText,
+          insertText: ghostText,
+          replaceStart: snapshot.replaceStart,
+          cursorOffset: snapshot.cursorOffset,
+          blockId: snapshot.blockId,
+          story: snapshot.story,
+          continueFrom: null,
         };
         showGhost(ghostText);
         return;

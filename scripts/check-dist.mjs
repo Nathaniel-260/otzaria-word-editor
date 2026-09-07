@@ -150,6 +150,32 @@ if (existsSync(appPath) && readFileSync(appPath, 'utf8').includes(DICTIONARY_MAR
   );
 }
 
+/**
+ * אותו שער בדיוק לשני נכסי ההשלמה, ומאותה סיבה: הם 0.75MB יחד, התכונה שלהם
+ * כבויה כברירת מחדל, ו-`import` ישיר של קובץ ה-JSON היה מכניס אותם לבאנדל
+ * הראשי בלי ששום דבר ייכשל. כל סמן הוא ערך אמיתי מהנתונים שאין סיבה אחרת
+ * שיופיע בקוד, ואינו קיים באף אחד מהנכסים האחרים.
+ */
+const LAZY_ASSETS = [
+  { file: 'assets/acronyms.js', marker: 'רבי משה בן מימון', what: 'מילון ראשי-התיבות', size: '0.7MB' },
+  { file: 'assets/static-completion.js', marker: 'אבן שואבת', what: 'רשימות ההשלמה הסטטיות', size: '32KB' },
+];
+
+for (const { file, marker, what, size } of LAZY_ASSETS) {
+  const path = join(DIST, file);
+  if (!existsSync(path)) {
+    errors.push(`חסר ${file} — ${what} לא ייטענו`);
+  } else if (!readFileSync(path, 'utf8').includes(marker)) {
+    errors.push(`${file} אינו מכיל את הנתונים — התוסף שנארז חסר את ${what}`);
+  }
+  if (existsSync(appPath) && readFileSync(appPath, 'utf8').includes(marker)) {
+    errors.push(
+      `assets/app.js מכיל את ${what} — הם נבלעו לבאנדל הראשי במקום להישאר נכס נפרד. ` +
+        `כל משתמש פורס עכשיו ${size} בעלייה בשביל תכונה שברירת המחדל שלה כבויה.`,
+    );
+  }
+}
+
 const files = [];
 function walk(dir, prefix = '') {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
