@@ -13,6 +13,8 @@
  *   2. כל מחלקה שמופיעה בסלקטור בגלובלים (src/styles/*.css) קיימת באמת
  *      בקומפוננטה או בקוד.
  *   3. כל var(--word-*) שנצרך אכן מוגדר — טוקן שלא הוגדר פשוט לא צובע כלום.
+ *   4. אין `:has()` בסלקטור שלא אושר במפורש. ראו „:has() בסלקטורים” למטה —
+ *      זה אינו סגנון אלא ביצועים שנמדדו.
  */
 import { describe, expect, it } from 'vitest';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
@@ -132,6 +134,95 @@ describe('סלקטורים בגלובלים', () => {
     }
 
     expect([...new Set(dead)]).toEqual([]);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* :has() בסלקטורים                                                    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * `:has()` שהעוגן שלו יכול לשבת בתוך עץ המסמך של המנוע (`.superdoc`) הוא
+ * מוקש ביצועים שנמדד ולא הונח: כלל אחד כזה ב-engine-chrome.css —
+ * `.superdoc__mutation-status:has([data-superdoc-v2-edit-rejected])` — גרם
+ * ל-Blink לסמן את `.superdoc` כמושפע מ-`:has()`, ומרגע זה כל תו שנקלד תזמן
+ * חישוב סגנון מחדש של כל עץ המסמך: 42 חישובים של 2,748 אלמנטים (60–115ms
+ * כל אחד) ב-50 הקשות, ו-53 long tasks. מחיקת הכלל לבדה הורידה את שניהם
+ * ל-0 ול-3; מחיקת כלל אחר לא שינתה דבר. הסיפור המלא בהערה ליד הכלל
+ * ב-engine-chrome.css, והמדידה החוזרת ב-scripts/qa/typing-style-recalc-qa.mjs.
+ *
+ * הכלל כאן גס בכוונה: **כל** `:has()` בגיליונות ובקומפוננטות חייב להופיע
+ * ברשימה למטה עם הנימוק למה העוגן שלו אינו יכול להיות אב של צומת במסמך.
+ * מי שמוסיף `:has()` חדש נדרש להחליט, לא לגלוש.
+ */
+describe(':has() בסלקטורים', () => {
+  /**
+   * `.word-ribbon-group:has(+ .word-ribbon-group--end)` — העוגן הוא קבוצה
+   * ברצועה, מחוץ ל-`.editor-stack`, ולכן שינוי DOM במסמך אינו עובר דרכו.
+   * נמדד באותו ניסוי: מחיקת הכלל הזה בזמן ריצה לא שינתה את מספר החישובים
+   * המלאים (44 מול 42 בבסיס), בעוד מחיקת כלל הבאנר הורידה אותם ל-0.
+   */
+  const ALLOWED = new Set(['.word-ribbon-group:has(+ .word-ribbon-group--end)']);
+
+  /** פיצול רשימת סלקטורים בפסיקים שמחוץ לסוגריים — `:has(a, b)` נשאר שלם. */
+  function splitSelectorList(selector: string): string[] {
+    const parts: string[] = [];
+    let depth = 0;
+    let current = '';
+    for (const ch of selector) {
+      if (ch === '(') depth += 1;
+      if (ch === ')') depth -= 1;
+      if (ch === ',' && depth === 0) {
+        parts.push(current);
+        current = '';
+        continue;
+      }
+      current += ch;
+    }
+    parts.push(current);
+    return parts.map((part) => part.replace(/\s+/g, ' ').trim()).filter(Boolean);
+  }
+
+  /** כל הסלקטורים עם `:has(` בגיליון או בבלוקי `<style>` של קומפוננטה. */
+  function hasSelectors(source: string): string[] {
+    // בקומפוננטה רק בלוקי <style> הם CSS; התבנית מכילה '{' של Vue ואינה נסרקת.
+    const css = (
+      source.includes('<style')
+        ? [...source.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/g)].map((m) => m[1]).join('\n')
+        : source
+    ).replace(/\/\*[\s\S]*?\*\//g, ' ');
+    const out: string[] = [];
+    for (const block of css.matchAll(/(?:^|\})([^{}]*)\{/g)) {
+      const selector = block[1].trim();
+      if (!selector.includes(':has(')) continue;
+      for (const single of splitSelectorList(selector)) {
+        if (single.includes(':has(')) out.push(single);
+      }
+    }
+    return out;
+  }
+
+  it('הסורק אכן מזהה :has() (הגנה מפני regex שהפסיק להתאים)', () => {
+    expect(hasSelectors('.a:has(> .b) > .c { color: red; }\n.d { }')).toEqual(['.a:has(> .b) > .c']);
+    expect(hasSelectors('/* .x:has(.y) בהערה */ .z { }')).toEqual([]);
+  });
+
+  it('כל :has() בקוד מאושר במפורש', () => {
+    const found: string[] = [];
+    for (const file of [...STYLE_SHEETS, ...CODE_FILES.filter((f) => f.endsWith('.vue'))]) {
+      for (const selector of hasSelectors(CONTENT.get(file) ?? '')) {
+        if (!ALLOWED.has(selector)) found.push(`${selector} (${short(file)})`);
+      }
+    }
+    expect(found).toEqual([]);
+  });
+
+  it('הרשימה המאושרת אינה מתה — כל כלל בה עוד קיים', () => {
+    const present = new Set<string>();
+    for (const file of [...STYLE_SHEETS, ...CODE_FILES]) {
+      for (const selector of hasSelectors(CONTENT.get(file) ?? '')) present.add(selector);
+    }
+    expect([...ALLOWED].filter((selector) => !present.has(selector))).toEqual([]);
   });
 });
 
