@@ -1079,6 +1079,9 @@ watch(activeIndex, async (index) => {
 .ribbon-combo-sample.specimen {
   line-height: 20px;
   white-space: normal;
+  /* ממורכז ולא `start` כמו מצב הבחירה: זה משפט קבוע ולא הטקסט של המשתמש,
+     והשורה השלישית שלו קצרה מהשתיים שמעליה בכל גופן. */
+  text-align: center;
 }
 
 .ribbon-combo-sample.specimen > span {
