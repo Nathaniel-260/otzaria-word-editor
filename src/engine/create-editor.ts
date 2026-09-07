@@ -15,6 +15,7 @@ import 'superdoc/style.css';
 // אחרי גיליון המנוע, ובכוונה: הכללים שם מעברתים את שכבת הכותרות שהוא מצייר.
 import '../styles/engine-chrome.css';
 import { splashStage, SPLASH_STAGES } from '../host/splash';
+import { installClickFocus } from './click-focus';
 import { installFormatPainter } from './format-painter';
 import { localizeEngineChrome } from './hf-chrome';
 import { installPointerSnap } from './pointer-snap';
@@ -259,6 +260,10 @@ export function createEditor(options: CreateEditorOptions): Promise<EditorSessio
         // למופע עצמו: המופע מוכר רק ב-onReady, ו-`session.onDispose` הוא גם מה
         // שמטפל במקרה שהפירוק כבר רץ.
         session.onDispose(installWordSelection(container, ready).dispose);
+        // לחיצה בשטח האפור שסביב העמוד אינה מוציאה את המיקוד מהמסמך, ולחיצה
+        // שנחתה שם כשהמיקוד היה ברצועה מחזירה אותו — ראו click-focus.ts.
+        // כאן ולא לפני הבנאי: החזרת המיקוד היא דרך המופע.
+        session.onDispose(installClickFocus(container, ready).dispose);
         // מברשת עיצוב: המנוע מחיל רק כשמישהו קורא ל-notifyPointerUp/notifyKeyUp
         // של ui.formatPainter, וזה בדיוק מה ש-SuperToolbar עושה — אבל הוא לא קם
         // כש-ui: false. ראו format-painter.ts.
