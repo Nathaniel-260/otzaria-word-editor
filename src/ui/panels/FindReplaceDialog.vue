@@ -2,11 +2,15 @@
   <div
     v-if="isOpen"
     class="find-replace-dialog"
+    :style="dragStyle"
     role="dialog"
     aria-label="חיפוש והחלפה"
     @keydown.esc.stop="$emit('close')"
   >
-    <div class="fr-header">
+    <div
+      class="fr-header dialog-drag-handle"
+      @pointerdown="startDialogDrag"
+    >
       <div
         class="fr-tabs"
         role="tablist"
@@ -168,6 +172,10 @@
  */
 import { ref, computed, watch, nextTick } from 'vue';
 import { REPLACE_UNAVAILABLE_TEXT } from '../../engine/search';
+import { useDialogDrag } from '../../composables/dialog-drag';
+
+/* הדיאלוג נגרר בכותרת שלו — composables/dialog-drag.ts. */
+const { dragStyle, startDialogDrag } = useDialogDrag();
 
 const props = withDefaults(
   defineProps<{

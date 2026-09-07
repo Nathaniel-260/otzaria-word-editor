@@ -7,11 +7,17 @@
       class="color-btn-wrapper"
       :class="{ active: isOpen }"
     >
+      <!--
+        שם הצבע בתיאור ובשם הנגיש, ולא רק בפס: הפס הוא הסימן היחיד למה
+        שהלחיצה תעשה, והוא ויזואלי בלבד. הכותרת נשארת „צבע גופן” כדי שהחיפוש
+        בטולטיפ ובבדיקות ימשיך למצוא את הפקד.
+      -->
       <button
         type="button"
         class="color-main-btn"
         :data-tip-title="menuString(title)"
-        :aria-label="menuString(title)"
+        :data-tip-desc="activeColorName"
+        :aria-label="`${menuString(title)}, ${activeColorName}`"
         :disabled="disabled"
         @pointerdown.prevent
         @click="applyCurrentColor"
@@ -22,7 +28,8 @@
         />
         <div
           class="color-indicator-bar"
-          :style="{ backgroundColor: modelValue || defaultColor }"
+          :class="{ 'is-none': activeColor === null }"
+          :style="{ backgroundColor: activeColor ?? 'transparent' }"
         />
       </button>
       <button
@@ -133,7 +140,7 @@
           <input
             ref="customColorRef"
             type="color"
-            :value="modelValue || defaultColor"
+            :value="activeColor || defaultColor"
             class="custom-color-input"
             @change="selectColor(($event.target as HTMLInputElement).value)"
           >
@@ -144,7 +151,7 @@
 </template>
 
 <script setup lang="ts">
-import { inject, ref, shallowRef, onMounted, onUnmounted } from 'vue';
+import { computed, inject, ref, shallowRef, onMounted, onUnmounted } from 'vue';
 import type { SuperDoc } from 'superdoc';
 import { ACTIVE_SUPERDOC } from '../../../engine/document-api';
 import { focusDocument } from '../../../engine/focus';
@@ -201,6 +208,30 @@ function shadeName(family: string, index: number): string {
   return index === 0 ? name : `${name}, ${menuString('גוון')} ${index + 1}`;
 }
 
+/**
+ * שם הצבע מתוך שתי הפלטות, ובנפילה חזרה הקוד עצמו.
+ *
+ * צבע מותאם אישית אינו נמצא באף אחת מהן, ואין לו שם — הקוד הוא מה שיש. שתי
+ * הפלטות כתובות באותיות קטנות, והערך שמגיע לכאן לא בהכרח (`#FFFF00` הוא
+ * ברירת המחדל של הסימון), ולכן ההשוואה על גרסה קטנה.
+ */
+function colorName(hex: string): string {
+  const lower = hex.toLowerCase();
+  const standard = STANDARD_COLORS.find((color) => color.hex === lower);
+  if (standard) return menuString(standard.name);
+  for (const col of THEME_COLUMNS) {
+    const index = col.shades.indexOf(lower);
+    if (index !== -1) return shadeName(col.family, index);
+  }
+  return hex.toUpperCase();
+}
+
+/**
+ * `modelValue` הוא **צבע המסמך** — מה שהמנוע מדווח על הבחירה — ולא הצבע של
+ * הפקד. הוא מסמן את המשבצת בפלטה („הטקסט המסומן כבר אדום כהה”), וזה כל
+ * תפקידו. מה שהכפתור הראשי מחיל, ומה שהפס מתחת לאייקון מראה, הוא `activeColor`
+ * שלמטה.
+ */
 const props = withDefaults(
   defineProps<{
     modelValue?: string;
@@ -235,6 +266,34 @@ const customColorRef = ref<HTMLInputElement | null>(null);
 const isOpen = ref(false);
 const superdoc = inject(ACTIVE_SUPERDOC, shallowRef<SuperDoc | null>(null));
 
+/**
+ * הבחירה האחרונה בפקד הזה. `undefined` = טרם נבחר בו דבר.
+ *
+ * שלושה מצבים ולא שניים, מפני ש-„ללא צבע” הוא בחירה: `null` פירושו שהלחיצה
+ * על הכפתור הראשי **מנקה**, ואינו אותו דבר כמו „טרם נבחר”, שבו הלחיצה מחילה
+ * את ברירת המחדל.
+ */
+const chosen = ref<string | null | undefined>(undefined);
+
+/**
+ * הצבע שהלחיצה על הכפתור הראשי תחיל — והצבע שהפס מתחת לאייקון מראה. אלה
+ * חייבים להיות אותו ערך: הפס הוא ההבטחה של הכפתור.
+ *
+ * למה לא צבע המסמך, שהיה כאן קודם: פס שמשקף את הטקסט שהסמן עומד עליו הופך את
+ * הכפתור הראשי לחסר משמעות — הוא מחיל על הטקסט את הצבע שכבר יש לו. בסימון זה
+ * גם היה בלתי-נראה (ברירת המחדל צהובה בכל מקרה), ובצבע הגופן זה איבד את הצבע
+ * שהמשתמש בחר ברגע שהסמן עבר לטקסט שחור. ב-Word הצבע נדבק לכפתור עד הבחירה
+ * הבאה, וזה מה שקורה כאן.
+ */
+const activeColor = computed<string | null>(() =>
+  chosen.value === undefined ? props.defaultColor : chosen.value,
+);
+
+/** אותו ערך במילים — לטולטיפ ולקורא מסך, שאינם רואים את הפס. */
+const activeColorName = computed(() =>
+  activeColor.value === null ? menuString('ללא צבע') : colorName(activeColor.value),
+);
+
 const { popoverStyle } = usePopoverPosition(containerRef, popoverRef, isOpen);
 
 function toggleDropdown(): void {
@@ -248,8 +307,11 @@ function toggleDropdown(): void {
  * פקודת צבע למנוע והחזירה מיקוד למסמך — עוד לפני שהמשתמש סיים לבחור.
  */
 function selectColor(hex: string | null): void {
-  // `modelValue` נשאר מחרוזת — הוא מזין את פס הצבע שעל הכפתור, ו-CSS צריך שם
-  // ערך ולא null. רק ה-`change`, כלומר מה שהופך ל-payload, נושא את ההבחנה.
+  // הבחירה נדבקת לכפתור: מכאן והלאה זה מה שהפס מראה ומה שלחיצה תחיל, עד
+  // הבחירה הבאה. גם „ללא צבע” נדבק — ראו `chosen`.
+  chosen.value = hex;
+  // `modelValue` נשאר מחרוזת. רק ה-`change`, כלומר מה שהופך ל-payload, נושא
+  // את ההבחנה בין „ללא צבע” לבין מחרוזת ריקה.
   emit('update:modelValue', hex ?? '');
   emit('change', hex);
   isOpen.value = false;
@@ -267,8 +329,7 @@ function openCustomColorPicker(): void {
 
 function applyCurrentColor(): void {
   if (props.disabled) return;
-  const color = props.modelValue || props.defaultColor;
-  emit('change', color);
+  emit('change', activeColor.value);
 }
 
 function handleClickOutside(event: MouseEvent): void {
@@ -328,12 +389,20 @@ onUnmounted(() => {
   border-radius: var(--radius-sm) 0 0 var(--radius-sm);
 }
 
+/* הפס שמתחת לאייקון — הצבע שהלחיצה תחיל, ולא צבע הטקסט שהסמן עומד עליו.
+   ראו `activeColor`. */
 .color-indicator-bar {
   width: 16px;
   height: 3px;
   border-radius: 1px;
   margin-top: 1px;
   box-shadow: 0 0 1px rgba(0, 0, 0, 0.4);
+}
+
+/* „ללא צבע” הוא היעדר, ולכן הפס ריק — קו היקפי בלבד, כמו `.clear-icon` בפלטה.
+   `inset` ולא `border`: הגובה נשאר 3px בדיוק כמו בכל צבע אחר, בלי קפיצה. */
+.color-indicator-bar.is-none {
+  box-shadow: inset 0 0 0 1px var(--color-outline);
 }
 
 .color-arrow-btn {

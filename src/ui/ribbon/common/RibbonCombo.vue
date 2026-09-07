@@ -13,6 +13,7 @@
       spellcheck="false"
       :value="shown"
       :disabled="disabled"
+      :placeholder="menuString(placeholder)"
       :data-tip-title="menuString(title)"
       :aria-label="menuString(title)"
       :aria-expanded="open"
@@ -235,6 +236,22 @@ const props = withDefaults(
      * `undefined` = הגודל הקבוע של הפס (בורר הגודל, שאין לו פס בכלל).
      */
     sampleSize?: string;
+    /**
+     * מה שמוצג בתיבה ריקה. `''` = אין.
+     *
+     * ברצועה התיבה לעולם אינה ריקה — תמיד יש גופן מוחל — אבל בדיאלוג שמרכיב
+     * patch היא **פותחת** ריקה, וריק בלי מילים אינו אומר „לא ייגע”.
+     */
+    placeholder?: string;
+    /**
+     * לאן חוזר המיקוד אחרי בחירה, Enter או Escape.
+     *
+     * `'document'` הוא הרצועה: מי שבחר גופן רוצה להמשיך להקליד בטקסט, וזו
+     * הייתה ההתנהגות היחידה כאן. `'stay'` הוא דיאלוג — שם המסמך אינו היעד
+     * הבא, ו-`focus()` עליו היה מוציא את המיקוד מדיאלוג שעדיין פתוח: ה-Escape
+     * שלו נשען על מיקוד בתוכו, ולכן הדיאלוג היה מפסיק להיסגר במקלדת.
+     */
+    focusReturn?: 'document' | 'stay';
   }>(),
   {
     modelValue: '',
@@ -246,6 +263,8 @@ const props = withDefaults(
     listMinWidth: '150px',
     sample: '',
     sampleSize: undefined,
+    placeholder: '',
+    focusReturn: 'document',
   },
 );
 
@@ -516,6 +535,19 @@ function closeList(committed = false): void {
   emit('previewEnd', committed);
 }
 
+/**
+ * יציאה מהשדה — והשאלה היחידה היא לאן המיקוד הולך.
+ *
+ * שלושת המסלולים שמסיימים עריכה (בחירה, Enter, Escape) עשו את אותם שני
+ * הצעדים בשלושה העתקים. הם כאן פעם אחת מפני שנוסף להם תנאי: בדיאלוג אין
+ * לאן לצאת — ראו `focusReturn`.
+ */
+function leaveField(): void {
+  if (props.focusReturn === 'stay') return;
+  inputRef.value?.blur();
+  focusDocument(superdoc.value);
+}
+
 function toggle(): void {
   if (open.value) {
     closeList();
@@ -541,8 +573,7 @@ function choose(value: string): void {
   closeList(true);
   emit('done');
   if (value !== props.modelValue) emit('update:modelValue', value);
-  inputRef.value?.blur();
-  focusDocument(superdoc.value);
+  leaveField();
 }
 
 function onFocus(): void {
@@ -589,22 +620,29 @@ function onKeydown(event: KeyboardEvent): void {
     closeList();
     // גם ויתור הוא סיום: מי שלחץ Escape רוצה לחזור לכתוב, לא להישאר בתיבה.
     emit('done');
-    inputRef.value?.blur();
-    focusDocument(superdoc.value);
+    leaveField();
     return;
   }
 
   if (event.key === 'Enter') {
     if (!open.value) return;
     event.preventDefault();
+    /*
+     * ועוצר את ההתפשטות, בדיוק כמו ה-Escape שמעליו ומאותו טעם: ה-Enter הזה
+     * סוגר את הרשימה, והוא כבר נצרך. דיאלוג נותן ל-Enter להפעיל את הכפתור
+     * הראשי (composables/dialog-default-action.ts), ולכן בלי העצירה בחירת
+     * גופן מהרשימה הייתה גם **מאשרת את הדיאלוג** — כלומר לחיצה אחת שמחילה
+     * את מה שהמשתמש רק התחיל לבחור. רשימה סגורה אינה נכנסת לכאן בכלל
+     * (`if (!open.value) return`), ולכן Enter „רגיל” בתיבה מאשר כמו תמיד.
+     */
+    event.stopPropagation();
     const value = commitValue(built.value, activeIndex.value, query.value ?? '', props.normalize);
     if (value !== null) {
       choose(value);
     } else {
       closeList();
       emit('done');
-      inputRef.value?.blur();
-      focusDocument(superdoc.value);
+      leaveField();
     }
     return;
   }

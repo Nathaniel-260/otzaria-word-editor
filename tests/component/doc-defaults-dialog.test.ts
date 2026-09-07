@@ -35,6 +35,27 @@ function footerButton(label: string): DOMWrapper<Element> {
   return new DOMWrapper(found);
 }
 
+/**
+ * בחירת גופן בבורר — כפי שהמשתמש בוחר: פתיחה בעכבר ולחיצה על שורה.
+ *
+ * שם הגופן היה תיבת טקסט חופשי, ולכן הבדיקות כאן היו `setValue`. הבורר אינו
+ * מחיל טקסט שהוקלד ולא אושר (`onBlur` מוותר בכוונה), ולכן „בחירה” חייבת
+ * להיות בחירה. `'ללא שינוי'` היא השורה שמחזירה ל„לא ייגע”.
+ */
+async function chooseFont(label: string): Promise<void> {
+  const input = document.querySelector<HTMLInputElement>('.docdef-dialog .dd-combo input');
+  if (!input) throw new Error('אין בורר גופן בדיאלוג');
+  input.dispatchEvent(new FocusEvent('focus'));
+  await settle();
+
+  const row = [...document.querySelectorAll('.docdef-dialog .ribbon-combo-option')].find(
+    (option) => option.textContent?.trim() === label,
+  );
+  if (!row) throw new Error(`אין שורה „${label}” ברשימת הגופנים`);
+  await new DOMWrapper(row).trigger('pointerdown');
+  await settle();
+}
+
 describe('DocDefaultsDialog', () => {
   it('הקלדת תו בודד בשדה הגודל אינה מפילה את הדיאלוג', async () => {
     mountUi(DocDefaultsDialog, { props: { isOpen: true, busy: false, currentSizePt: null } });
@@ -90,7 +111,7 @@ describe('DocDefaultsDialog', () => {
     await settle();
 
     expect(document.querySelector('.docdef-dialog')).not.toBeNull();
-    await teleported('#dd-family').setValue('Assistant');
+    await chooseFont('Assistant');
     await footerButton('אישור').trigger('click');
     await settle();
 
@@ -120,23 +141,36 @@ describe('DocDefaultsDialog', () => {
     });
     await settle();
 
-    await teleported('#dd-family').setValue('David');
+    await chooseFont('David');
     await settle();
     expect(footerButton('אישור').attributes('disabled')).toBeUndefined();
 
     // וריקון חוזר נועל אותו שוב — המצב נגזר מהשדות, ולא נקבע פעם אחת.
-    await teleported('#dd-family').setValue('');
+    await chooseFont('ללא שינוי');
     await settle();
     expect(footerButton('אישור').attributes('disabled')).toBeDefined();
   });
 
-  it('רווחים בלבד אינם „מילוי” — הכפתור נשאר נעול', async () => {
+  /**
+   * טקסט שהוקלד ולא אושר אינו „מילוי”. זה מה שהחליף את המקרה של „רווחים
+   * בלבד”: בתיבת טקסט חופשי אפשר היה להשאיר רווחים בשדה, ובבורר אי אפשר
+   * להשאיר בו דבר שלא נבחר — `onBlur` מוותר, בדיוק כדי לא להחיל בטעות.
+   */
+  it('הקלדה בלי בחירה אינה „מילוי” — הכפתור נשאר נעול', async () => {
     mountUi(DocDefaultsDialog, {
       props: { isOpen: true, busy: false, currentSizePt: 12 },
     });
     await settle();
 
-    await teleported('#dd-family').setValue('   ');
+    const input = document.querySelector<HTMLInputElement>('.docdef-dialog .dd-combo input');
+    if (!input) throw new Error('אין בורר גופן בדיאלוג');
+    input.dispatchEvent(new FocusEvent('focus'));
+    input.value = 'Dav';
+    input.dispatchEvent(new Event('input'));
+    await settle();
+    expect(footerButton('אישור').attributes('disabled')).toBeDefined();
+
+    input.dispatchEvent(new FocusEvent('blur'));
     await settle();
     expect(footerButton('אישור').attributes('disabled')).toBeDefined();
   });
