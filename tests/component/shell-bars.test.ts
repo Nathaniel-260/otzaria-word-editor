@@ -158,6 +158,23 @@ describe('נתוני שורת המצב', () => {
     expect(text).toContain('נשמר');
   });
 
+  /*
+   * בחלון צר ההודעה נחתכת בשלוש נקודות, והטולטיפ הוא מה שמחזיק את סופה
+   * (scripts/qa/narrow-window-qa.mjs מודד את החיתוך עצמו — כאן אין פריסה).
+   * מה שנבדק הוא שהתכונה נושאת את ההודעה **הנוכחית**: `data-tip-title` קבוע,
+   * או כזה שנשאר על הודעה קודמת, הוא בדיוק הכשל שאין לו תסמין על המסך.
+   */
+  it('ההודעה המלאה נמצאת בטולטיפ, ומתעדכנת איתה', async () => {
+    const long = 'סמנו במסמך את הטקסט לחיפוש, ואז לחצו „חיפוש באוצריא”';
+    const harness = mountUi(StatusBar, { props: { statusText: long } });
+    await settle();
+
+    expect(harness.wrapper.find('.status-message').attributes('data-tip-title')).toBe(long);
+
+    await harness.wrapper.setProps({ statusText: 'נשמר' });
+    expect(harness.wrapper.find('.status-message').attributes('data-tip-title')).toBe('נשמר');
+  });
+
   it('כפתור מצב המיקוד מדווח את מצבו ואינו „דלוק תמיד”', async () => {
     const harness = mountUi(StatusBar, { props: { isFocusMode: false } });
     await settle();

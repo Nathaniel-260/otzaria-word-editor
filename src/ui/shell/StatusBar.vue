@@ -29,10 +29,17 @@
         v-if="(pageText || wordText) && statusText"
         class="status-divider"
       />
+      <!-- הטולטיפ נושא את ההודעה המלאה, מפני שבחלון צר היא נחתכת בשלוש נקודות
+           (ראו `.status-message`) וזו הדרך היחידה לקרוא את סופה. הוא מוצג גם
+           כשההודעה שלמה: „חתוכה” ו„שלמה” משתנות עם רוחב החלון ועם אורך ההודעה,
+           ותכונה שמופיעה ונעלמת לפי מדידה הייתה עולה ב-ResizeObserver על פס
+           שמתעדכן בכל הקלדה. קוראי מסך אינם תלויים בה ממילא: ל-`footer` יש
+           `role="status"`, והוא מכריז את הטקסט המלא בלי קשר לחיתוך. -->
       <div
         v-if="statusText"
         class="status-item status-message"
         :class="{ error: isError }"
+        :data-tip-title="statusText"
       >
         <span>{{ statusText }}</span>
       </div>
@@ -251,6 +258,20 @@ function resetZoom(): void {
    פריט flex אינו מצטמצם מתחת לתוכן שלו בלי זה. */
 .statusbar-start {
   min-width: 0;
+  /* גם אחרי שההודעה התכווצה עד לריפוד שלה נשאר רוחב מזערי — הריפוד של שני
+     פריטי המדידה, שני הקווים והנקודות. נמדד: בחלון של 340 פיקסלים הוא עוד
+     חורג ב-6 מעל בקרת הזום. חיתוך הוא צורת הכישלון הנכונה כאן: פס מצב שאיבד
+     את סוף הטקסט עדיין קריא, פס שנצבע על גבי הזום אינו. */
+  overflow: hidden;
+}
+
+/* בקרת הזום ומצב המיקוד אינם נסוגים. `min-width: 0` על `.statusbar-start`
+   מצמצם את **התיבה** שלו, אבל טקסט ב-`nowrap` בתוכו גולש ממנה החוצה וממשיך
+   להיצבע — ומה שהוא נצבע מעליו הוא הפס הזה. נמדד: בחלון של 560 פיקסלים
+   ההודעה „סמנו במסמך את הטקסט לחיפוש…” כיסתה 28 פיקסלים מסרגל הזום, ובחלון
+   של 420 — ‏168, כלומר את הסרגל ואת „100%” יחד. */
+.statusbar-end {
+  flex-shrink: 0;
 }
 
 .status-item {
@@ -258,6 +279,13 @@ function resetZoom(): void {
   border-radius: var(--radius-xs);
   cursor: default;
   white-space: nowrap;
+}
+
+/* מספר העמודים ומספר המילים קצרים וברוחב כמעט קבוע, והקווים המפרידים הם
+   פיקסל. מה שמתקצר הוא ההודעה בלבד — היא היחידה שאורכה אינו חסום. */
+.status-item:not(.status-message),
+.status-divider {
+  flex-shrink: 0;
 }
 
 .status-item:hover {
@@ -270,9 +298,15 @@ function resetZoom(): void {
   background: var(--color-outline-variant);
 }
 
+/* ההודעה נחתכת בשלוש נקודות ולא נדחפת מהשורה. `min-width: 0` הוא מה שמאפשר
+   את זה בכלל: ברירת המחדל `auto` מקבעת את הרוחב המזערי על רוחב התוכן, ופריט
+   שאינו יכול לרדת מתחתיו אינו מצטמצם — הוא גולש. הטקסט המלא בטולטיפ. */
 .status-message {
   color: var(--color-on-surface);
   font-weight: 500;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .status-message.error {
