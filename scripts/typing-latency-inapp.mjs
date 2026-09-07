@@ -225,6 +225,10 @@ if ($Mode -eq 'click') {
 } else {
   $letters = -join (0x05D0..0x05EA | ForEach-Object { [char]$_ })
   $keys = New-Object System.Collections.ArrayList
+  # CPU של כל התהליכים במחשב לפני ואחרי הפרץ: בנייה או חבילת בדיקות של סשן אחר על שתי ליבות
+  # מכפילה את עלות ההקשה, ובלי השורה הזאת המדידה נראית תקינה. מודדים לפי TotalProcessorTime.
+  function CpuSnap { $h = @{}; Get-Process -ErrorAction SilentlyContinue | ForEach-Object { try { $h[$_.Id] = @($_.Name, $_.TotalProcessorTime.TotalMilliseconds) } catch {} }; return $h }
+  $cpu0 = CpuSnap; $cpuT0 = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
   $sw = [System.Diagnostics.Stopwatch]::StartNew()
   for ($i = 0; $i -lt $Count; $i++) {
     $c = $letters[$i % $letters.Length]
@@ -243,6 +247,16 @@ if ($Mode -eq 'click') {
   }
   $result.keys = $keys
   $result.focusAfter = [N]::FocusClass()
+  $cpu1 = CpuSnap; $cpuDt = [Math]::Max(1, [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - $cpuT0)
+  $mine = @{}; $others = @{}
+  foreach ($id in $cpu1.Keys) {
+    if (-not $cpu0.ContainsKey($id)) { continue }
+    $nm = $cpu1[$id][0]; $pct = 100 * ($cpu1[$id][1] - $cpu0[$id][1]) / $cpuDt
+    if ($pct -le 0) { continue }
+    if ($nm -eq 'otzaria' -or $nm -eq 'msedgewebview2' -or $id -eq $PID) { $mine[$nm] = [double]($mine[$nm]) + $pct } else { $others[$nm] = [double]($others[$nm]) + $pct }
+  }
+  $top = $others.GetEnumerator() | Sort-Object Value -Descending | Select-Object -First 3 | ForEach-Object { @{ name = $_.Key; pct = [Math]::Round($_.Value) } }
+  $result.cpu = @{ logical = [Environment]::ProcessorCount; measured = [Math]::Round(($mine.Values | Measure-Object -Sum).Sum); others = [Math]::Round(($others.Values | Measure-Object -Sum).Sum); top = @($top) }
 }
 $result | ConvertTo-Json -Compress -Depth 4 | Out-File -Encoding utf8 $Out
 `;
@@ -316,7 +330,7 @@ try {
     await sleep(2500);
     const O = JSON.parse(await js('JSON.stringify(window.__inapp)'));
     const textAfter = await js('window.__otzariaEditor.container.textContent.length');
-    result = { sent: r.keys, O, textBefore, textAfter, focus: `${r.focusBefore} → ${r.focusAfter}` };
+    result = { sent: r.keys, O, textBefore, textAfter, focus: `${r.focusBefore} → ${r.focusAfter}`, cpu: r.cpu };
   }
 } finally {
   ws.close();
@@ -334,6 +348,14 @@ const stat = (xs) => {
 };
 const failed = sent.filter((k) => k.sent !== 'ok');
 console.log(`\nנשלחו ${sent.length} הקשות${failed.length ? ` (${failed.length} נכשלו: ${failed[0].sent})` : ''}; keydown בדף: ${O.keys.length}; טקסט ב-DOM ${result.textBefore} → ${result.textAfter}; פוקוס המקלדת: ${result.focus}`);
+if (result.cpu) {
+  // עומס זר בזמן הפרץ (בנייה, vitest, Chrome של שער QA מסשן אחר): על שתי ליבות הוא מכפיל את
+  // עלות ההקשה, והתוצאה נראית כמו „המארח איטי”. מדידה עם עומס זר ניכר אינה מדידה.
+  const c = result.cpu;
+  const top = (c.top || []).map((t) => `${t.name} ${t.pct}%`).join(', ');
+  const foreign = c.others > 50 * (c.logical / 4);
+  console.log(`CPU בזמן הפרץ (אחוז מליבה לוגית אחת, ${c.logical} ליבות לוגיות): אוצריא+WebView2+הכלי ${c.measured}%, תהליכים אחרים ${c.others}%${top ? ` (${top})` : ''}${foreign ? ' — ⚠ עומס זר במחשב: המדידה מזוהמת, להריץ שוב כשהמחשב שקט' : ''}`);
+}
 if (O.keys.length === 0) {
   console.log('אף הקשה לא הגיעה לדף: פוקוס המקלדת של המערכת אינו על חלון ה-WebView (Chrome_WidgetWin_0). להריץ בלי --no-click, או ללחוץ במסמך ידנית.');
   process.exit(1);
