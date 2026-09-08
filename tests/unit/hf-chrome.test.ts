@@ -273,4 +273,48 @@ describe('השער שחוסך מעברים', () => {
 
     expect(scanned).toEqual([]);
   });
+
+  it('הקלדה במסמך שאין בו שכבת כותרות אינה סורקת כלל', async () => {
+    // ה-observer יושב על משטח העריכה, ולכן כל תו מעיר אותו. בלי מסננת
+    // הרשומות גם `hasChrome` לבדו — `querySelector` על שורש המסמך — נמדד
+    // 120 פעמים ב-40 תווים. עכשיו הרשומה נבדקת, ולא העץ.
+    const root = document.createElement('div');
+    const paragraph = document.createElement('p');
+    paragraph.textContent = 'פסקה רגילה במסמך';
+    root.append(paragraph);
+    document.body.append(root);
+
+    active = localizeEngineChrome(root);
+
+    const scanned: string[] = [];
+    const one = root.querySelector.bind(root);
+    const all = root.querySelectorAll.bind(root);
+    root.querySelector = ((selector: string) => {
+      scanned.push(selector);
+      return one(selector);
+    }) as typeof root.querySelector;
+    root.querySelectorAll = ((selector: string) => {
+      scanned.push(selector);
+      return all(selector);
+    }) as typeof root.querySelectorAll;
+
+    paragraph.append(document.createTextNode('ועוד תו'));
+    paragraph.firstChild!.nodeValue = 'פסקה רגילה במסמך!';
+    await flush();
+
+    expect(scanned).toEqual([]);
+  });
+
+  it('שכבה שנכנסת לעץ כן מעירה את המעבר — הרשומה נוגעת בה', async () => {
+    const root = document.createElement('div');
+    root.innerHTML = '<p>פסקה רגילה במסמך</p>';
+    document.body.append(root);
+    active = localizeEngineChrome(root);
+
+    // בדיוק מה שקורה כשהסמן נכנס לכותרת: המנוע מוסיף את השכבה לעץ.
+    root.append(headerFooterChrome());
+    await flush();
+
+    expect(textOf(root, '[data-sd-hf-label] > span')).toBe('כותרת עליונה');
+  });
 });

@@ -251,9 +251,68 @@ function hasChrome(root: ParentNode): boolean {
   return root.querySelector(`[${HF_HOOKS.activeGroup}],[${HF_HOOKS.continuationLabel}]`) !== null;
 }
 
-/** מעבר אחד על כל מה שקיים כרגע. אידמפוטנטי — ראו `relabel`. */
-function localizeOnce(root: ParentNode): void {
-  if (!hasChrome(root)) return;
+/**
+ * כל העיגונים שהעברות נוגעת בהם, כסלקטור אחד. משמש את מסננת המוטציות בלבד:
+ * `localizeOnce` שואל על כל אחד בנפרד מפני שהוא עושה בכל אחד דבר אחר.
+ */
+const CHROME_SELECTOR = [
+  HF_HOOKS.activeGroup,
+  HF_HOOKS.label,
+  HF_HOOKS.continuationLabel,
+  HF_HOOKS.options,
+  HF_HOOKS.exit,
+  HF_HOOKS.option,
+]
+  .map((attribute) => `[${attribute}]`)
+  .join(',');
+
+/** האם הצומת יושב בתוך שכבת הכותרות (או הוא עצמו העיגון). */
+function withinChrome(node: Node | null): boolean {
+  const element = node instanceof Element ? node : (node?.parentElement ?? null);
+  return element !== null && element.closest(CHROME_SELECTOR) !== null;
+}
+
+/**
+ * האם יש בכלל טעם לעבור. **זה מה שמוציא את העברות ממסלול ההקלדה.**
+ *
+ * ה-observer יושב על ה-container שהמנוע מרנדר לתוכו, ולכן הוא מתעורר על כל
+ * שינוי DOM במסמך — כל תו. `hasChrome` לבדו לא הספיק: הוא כן חסך את שבעת
+ * המעברים, אבל הוא עצמו `querySelector` על שורש המסמך, ובפרופיל הקלדה נמדדו
+ * 120 סריקות כאלה ב-40 תווים. הרשומות עצמן זולות לבדיקה: `closest` מהיעד
+ * מטפס עשרות אלמנטים לכל היותר, במקום סריקה של אלפים.
+ *
+ * שלושת הסוגים, וכל אחד מסיבה משלו:
+ *
+ *   - `attributes` — `attributeFilter` כבר מצמצם ל-region/variant, ולכן כל
+ *     רשומה כזאת היא של השכבה בהגדרה.
+ *   - `characterData` — Vue כותב את התג ואת תא היחידה מחדש כשינוי טקסט על
+ *     צומת קיים. היעד הוא ה-Text node, ולכן העיגון נמצא מהאב שלו.
+ *   - `childList` — כאן נכנסת השכבה עצמה כשהסמן נכנס לכותרת. נבדקים רק
+ *     ה-`addedNodes`: הסרה אינה משאירה דבר לתרגם.
+ */
+function touchesChrome(records: readonly MutationRecord[]): boolean {
+  for (const record of records) {
+    if (record.type === 'attributes') return true;
+    if (record.type === 'characterData') {
+      if (withinChrome(record.target)) return true;
+      continue;
+    }
+    for (const node of [...record.addedNodes]) {
+      if (withinChrome(node)) return true;
+      if (node instanceof Element && node.querySelector(CHROME_SELECTOR) !== null) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * מעבר אחד על כל מה שקיים כרגע. אידמפוטנטי — ראו `relabel`.
+ *
+ * מחזירה האם השכבה בכלל הייתה שם: זו התשובה שמסננת המוטציות נשענת עליה —
+ * ראו `localizeEngineChrome`.
+ */
+function localizeOnce(root: ParentNode): boolean {
+  if (!hasChrome(root)) return false;
 
   for (const group of [...root.querySelectorAll(`[${HF_HOOKS.activeGroup}]`)]) {
     setAttribute(group, 'aria-label', HF_TEXTS.groupLabel);
@@ -297,6 +356,8 @@ function localizeOnce(root: ParentNode): void {
       return isUnit(name) ? HF_UNIT_TEXT[name] : null;
     });
   }
+
+  return true;
 }
 
 export interface EngineChromeLocalizer {
@@ -319,15 +380,26 @@ export function localizeEngineChrome(root: ParentNode): EngineChromeLocalizer {
     return { refresh: () => {}, dispose: () => {} };
   }
 
-  localizeOnce(root);
+  /**
+   * האם השכבה על המסך כרגע — הרשת מתחת למסננת המוטציות.
+   *
+   * המסננת מזהה את דרכי הרינדור שנמדדו (טקסט על צומת קיים, הכנסת תת-עץ,
+   * שינוי region/variant), אבל לא כל דרך אפשרית: תכונת עיגון שנוספת לאלמנט
+   * קיים, למשל, אינה ב-`attributeFilter` ואינה תיראה. כל עוד השכבה **אינה**
+   * על המסך — המצב השכיח, וזה מסלול ההקלדה — המסננת היא הכול. משהיא שם,
+   * חוזרים למעבר על כל מוטציה, כמו שהיה: תווית שנשארה באנגלית היא באג
+   * שהמשתמש רואה, ובזמן שהסמן בכותרת גם אין מסמך שלם למדוד.
+   */
+  let showing = localizeOnce(root);
 
   // ב-jsdom יש MutationObserver, אבל סביבת בדיקה מצומצמת עשויה לא לספק אותו,
   // ואז העברות עדיין נכונה — פשוט בלי חידוש אחרי patch של המנוע.
   const observer =
     typeof MutationObserver === 'undefined'
       ? null
-      : new MutationObserver(() => {
-          localizeOnce(root);
+      : new MutationObserver((records) => {
+          if (!showing && !touchesChrome(records)) return;
+          showing = localizeOnce(root);
           observer?.takeRecords();
         });
 
@@ -342,7 +414,9 @@ export function localizeEngineChrome(root: ParentNode): EngineChromeLocalizer {
   });
 
   return {
-    refresh: () => localizeOnce(root),
+    refresh: () => {
+      showing = localizeOnce(root);
+    },
     dispose: () => observer?.disconnect(),
   };
 }
