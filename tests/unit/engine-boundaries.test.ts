@@ -161,3 +161,46 @@ describe('מדידת העמוד המצויר', () => {
     ).toBe(false);
   });
 });
+
+/**
+ * החריגה השלישית: טווח ה-pm של השורה המצוירת.
+ *
+ * מה שמצדיק אותה: `End` בשורה עברית מעביר את הסמן לתחילתה במקום לסופה (נמדד
+ * ב-superdoc 2.12.0; הטבלה בהערת הפתיחה של engine/rtl-line-end.ts), והמשתמש
+ * שלוחץ `End` ומקליד נקודה מקבל אותה כתו הראשון בפסקה. כדי לתקן צריך לדעת
+ * איפה נגמרת **השורה המצוירת** שהסמן בה — וזו תוצאה של פריסה, שאין לה API
+ * ציבורי: `readMountedLayoutData` מתאר שורות ב-`fromRun`/`toChar` ואינו נותן
+ * את אורכי הריצות, כלומר אי אפשר להמיר אותם להיסט בלי לנחש.
+ *
+ * מה שהחריגה **אינה** מתירה, וזה מה שנמדד כאן: מקום שני שנוגע באותם עיגונים,
+ * וכל דבר שאינו קריאת תכונה. הזזת הסמן עצמה נעשית דרך ה-API של המנוע
+ * (`authoring.setSelectionTarget`) ולא דרך ה-DOM.
+ */
+describe('טווח ה-pm של השורה המצוירת', () => {
+  const READER = 'engine/rtl-line-end.ts';
+
+  function normalize(path: string): string {
+    return path.split(sep).join('/');
+  }
+
+  it('רק rtl-line-end.ts נוגע בעיגונים של השורה', () => {
+    const offenders = hits(/data-pm-(?:start|end)|data-source-node-id/).filter(
+      (hit) => !normalize(hit).startsWith(READER),
+    );
+
+    expect(offenders).toEqual([]);
+  });
+
+  it('הקריאה היא תכונות בלבד — אינה בונה, מוחקת או כותבת', () => {
+    const reader = sources.find(({ path }) => normalize(path) === READER);
+    expect(reader, READER).toBeDefined();
+
+    const source = reader?.text ?? '';
+    expect(source).toMatch(/getAttribute/);
+    expect(
+      /innerHTML|textContent|setAttribute|insertAdjacent|appendChild|removeChild|createElement/.test(
+        source,
+      ),
+    ).toBe(false);
+  });
+});
