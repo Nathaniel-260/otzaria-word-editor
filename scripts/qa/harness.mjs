@@ -186,11 +186,21 @@ function makeApi(cdp) {
       if (active !== label) throw new Error(`לחיצה על „${label}” לא החליפה לשונית (פעילה: ${active})`);
     },
 
-    /** לחיצה על פקד לפי שמו. מחזירה false כשהוא לא נמצא או אינו מוצג. */
+    /**
+     * לחיצה על פקד לפי שמו. מחזירה false כשהוא לא נמצא או אינו מוצג.
+     *
+     * קבוצה שהתכווצה (חלון צר — ראו ui/ribbon/overflow.ts) מחביאה את פקדיה
+     * מאחורי צ'יפ אחד, ולכן הפתיחה קודמת למדידה. זה בדיוק מה שהמשתמש עושה.
+     */
     async click(name, opts = {}) {
-      const rect = JSON.parse(
-        await js(`JSON.stringify(window.__qa.rect(${JSON.stringify(name)}, ${JSON.stringify(opts)}))`),
-      );
+      const args = `${JSON.stringify(name)}, ${JSON.stringify(opts)}`;
+      let rect = JSON.parse(await js(`JSON.stringify(window.__qa.hit(${args}))`));
+      // `pending` = הייתה קבוצה מכווצת והיא נפתחה; הפקד מצויר רק אחרי ש-Vue
+      // רינדר את הפאנל, ולכן המדידה השנייה.
+      if (rect?.pending) {
+        await sleep(150);
+        rect = JSON.parse(await js(`JSON.stringify(window.__qa.rect(${args}))`));
+      }
       if (!rect) return false;
       await clickAt(rect.x, rect.y);
       await sleep(opts.after ?? 400);

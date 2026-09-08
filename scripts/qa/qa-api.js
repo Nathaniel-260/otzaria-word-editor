@@ -121,6 +121,10 @@
     var shown = [];
     var hidden = [];
     Array.prototype.forEach.call(nodes, function (el) {
+      // הצ'יפ של קבוצה מכווצת נושא את שם הקבוצה, ויש שמות שהם גם שם של פקד
+      // („תוכן עניינים”). הוא פותח את הקבוצה ואינו הפקד — `Q.reveal` הוא מי
+      // שנוגע בו, לפי מיקומו בעץ ולא לפי שמו.
+      if (el.classList.contains('word-group-chip') && !opts.chips) return;
       if (!match(el, name, opts.exact)) return;
       (Q.rectOf(el) ? shown : hidden).push(el);
     });
@@ -177,6 +181,7 @@
     var holders = {};
     var names = [];
     Array.prototype.forEach.call(body.querySelectorAll('button, select, input'), function (el) {
+      if (el.classList.contains('word-group-chip')) return;
       var n = nameOf(el);
       if (!n || !Q.rectOf(el)) return;
       if (holders[n]) return holders[n].push(el);
@@ -239,9 +244,50 @@
   };
 
   /** המלבן ללחיצה. `null` כשהפקד לא נמצא או אינו מוצג. */
+  /**
+   * פותח קבוצה מכווצת שמחזיקה את הפקד המבוקש, כדי שאפשר יהיה ללחוץ עליו.
+   *
+   * מחזיר true כשנפתחה משהו — ואז הקורא חייב להמתין פריים לפני שהוא מודד:
+   * הפקד עדיין `display: none` עד שה-Vue מרנדר את הפאנל.
+   */
+  Q.reveal = function (name, opts) {
+    opts = opts || {};
+    // סריקה משלו ולא `Q.el`: הפקד המכווץ מוסתר, וברשימת המוסתרים הוא מתחרה
+    // בשורות של תיבת ה-Tell Me שנושאות בדיוק את אותם שמות. כאן מחפשים
+    // **בתוך** הקבוצות המכווצות, ולכן אין במי להתחלף.
+    var groups = document.querySelectorAll('.word-ribbon-group--collapsed:not(.is-open)');
+    for (var i = 0; i < groups.length; i++) {
+      var nodes = groups[i].querySelectorAll(opts.selector || NAME_SEL);
+      for (var j = 0; j < nodes.length; j++) {
+        if (nodes[j].classList.contains('word-group-chip')) continue;
+        if (!match(nodes[j], name, opts.exact)) continue;
+        var chip = groups[i].querySelector('.word-group-chip');
+        if (!chip) return false;
+        chip.click();
+        return true;
+      }
+    }
+    return false;
+  };
+
   Q.rect = function (name, opts) {
     var el = Q.el(name, opts);
     return el ? Q.rectOf(el) : null;
+  };
+
+  /**
+   * מלבן ללחיצה, ואם הפקד חבוי בקבוצה מכווצת — פותח אותה ומחזיר
+   * `{ pending: true }`, כלומר „מדוד שוב בעוד פריים”.
+   *
+   * למה זה ולא קריאה נפרדת ל-`Q.reveal` לפני כל לחיצה: זו הייתה נסיעת CDP
+   * שנייה **בכל לחיצה בכל שער**, גם כשאין ולו קבוצה מכווצת אחת בדף. הנסיעה
+   * הנוספת קורית עכשיו רק כשבאמת היה מה לפתוח.
+   */
+  Q.hit = function (name, opts) {
+    var el = Q.el(name, opts);
+    var r = el ? Q.rectOf(el) : null;
+    if (r) return r;
+    return Q.reveal(name, opts) ? { pending: true } : null;
   };
 
   /** שני סוגי בוררים: `<select>` נייטיב, ובורר החיפוש (RibbonCombo). */

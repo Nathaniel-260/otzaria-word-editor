@@ -13,6 +13,13 @@
  * מעלה. כלומר 327 פיקסלים של פקדים שאין דרך להגיע אליהם בגלגלת; כרום אינו
  * מתרגם ציר אנכי לציר אופקי בעצמו.
  *
+ * ## למה החלון והלשונית השתנו
+ *
+ * מרגע שהקבוצות מתכווצות כשאין מקום (ui/ribbon/overflow.ts) הרצועה כמעט
+ * אינה גולשת: „בית” נכנסת בשלמותה גם ב-340px. הגלישה שנשארה היא של לשונית
+ * שיש בה קבוצות שכיווצן אינו מקטין אותן — „הוספה” ב-420px גולשת 141px —
+ * וזה מה שנמדד כאן עכשיו. הגלגלת עצמה לא השתנתה.
+ *
  * נמדד כאן גם מה שנשאר של הדפדפן, ובכוונה: `deltaX` (מחווה אופקית, וגם
  * Shift+גלגלת שכרום ממיר לציר X) — הקוד שלנו מוותר עליו, ולכן השורה הזאת היא
  * מה שיגלה אם הדפדפן יפסיק לגלול אותו.
@@ -29,8 +36,14 @@ import { openApp, createReport } from './harness.mjs';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const TMP = join(ROOT, 'tmp');
 
-/** חלון צר בכוונה: זה מה שמכריח את הרצועה לגלוש. */
-const WINDOW = { width: 900, height: 700 };
+/** חלון צר בכוונה: זה מה שמכריח את הרצועה לגלוש גם אחרי הכיווץ. */
+const WINDOW = { width: 420, height: 700 };
+
+/** הלשונית שגולשת בחלון הזה. ראו „למה החלון והלשונית השתנו” למעלה. */
+const OVERFLOWING_TAB = 'הוספה';
+
+/** הגלריה יושבת ב„בית”, והיא נראית רק כשיש לרצועה מקום מלא. */
+const GALLERY_WINDOW = { width: 1400, height: 700 };
 
 /** גלגול אחד של גלגלת אמיתית בכרום. */
 const NOTCH = 100;
@@ -116,7 +129,7 @@ try {
     mobile: false,
   });
   await app.sleep(400);
-  await app.tab('בית');
+  await app.tab(OVERFLOWING_TAB);
 
   /* -------------------------------------------------------------- */
   /* 1 — הרצועה גולשת בכלל                                            */
@@ -203,10 +216,18 @@ try {
   }
 
   /* -------------------------------------------------------------- */
-  /* 7 — קינון: הגלריה קודם, והרצועה כשנגמרה                          */
+  /* 7 — קינון: הגלגלת מעל גלריית הסגנונות גוללת אותה, ולא את הרצועה  */
   /* -------------------------------------------------------------- */
-  /* הגלריה יושבת בקצה השני של הרצועה; בלי לגלול אליה היא מחוץ למסך. */
-  await park(BODY, start.direction === 'rtl' ? -start.overflow : start.overflow);
+  /* הגלריה ב„בית”, ובחלון מלא: ברוחב שבו הרצועה גולשת היא יושבת בתוך
+     פופאובר של קבוצה מכווצת, ואז אין כאן קינון למדוד. */
+  await app.cdp.send('Emulation.setDeviceMetricsOverride', {
+    width: GALLERY_WINDOW.width,
+    height: GALLERY_WINDOW.height,
+    deviceScaleFactor: 1,
+    mobile: false,
+  });
+  await app.sleep(400);
+  await app.tab('בית');
   const gallery = await measure(GALLERY);
   if (!gallery || !gallery.onScreen) {
     report.skip('קינון גלריה-ברצועה', 'הגלריה אינה על המסך בחלון הזה');
@@ -214,30 +235,24 @@ try {
     report.skip('קינון גלריה-ברצועה', 'הגלריה נכנסת כולה — אין בה מה לגלול');
   } else {
     await park(GALLERY, 0);
-    const ribbonAtEnd = (await measure(BODY)).scrollLeft;
+    const ribbonBefore = (await measure(BODY)).scrollLeft;
     await wheel(gallery.x, gallery.y, { deltaY: NOTCH });
     const inner = await measure(GALLERY);
     const outer = await measure(BODY);
 
-    if (inner.scrollLeft !== 0 && outer.scrollLeft === ribbonAtEnd) {
+    if (inner.scrollLeft !== 0 && outer.scrollLeft === ribbonBefore) {
       report.pass('הגלגלת מעל הגלריה גוללת את הגלריה', `גלריה ${inner.scrollLeft}, רצועה לא זזה`);
     } else {
       report.fail(
         'הגלגלת מעל הגלריה גוללת את הגלריה',
-        `גלריה ${inner.scrollLeft}, רצועה ${ribbonAtEnd} → ${outer.scrollLeft}`,
+        `גלריה ${inner.scrollLeft}, רצועה ${ribbonBefore} → ${outer.scrollLeft}`,
       );
     }
 
-    /* הגלריה בהתחלה וגלגול אחורה: אין לה לאן, וזה אמור להמשיך לרצועה. */
-    await park(GALLERY, 0);
-    const before = (await measure(BODY)).scrollLeft;
-    await wheel(gallery.x, gallery.y, { deltaY: -NOTCH });
-    const chained = await measure(BODY);
-    if (Math.abs(chained.scrollLeft) < Math.abs(before)) {
-      report.pass('כשנגמרה הגלריה, הגלגול ממשיך לרצועה', `${before} → ${chained.scrollLeft}`);
-    } else {
-      report.fail('כשנגמרה הגלריה, הגלגול ממשיך לרצועה', `הרצועה נשארה ב-${chained.scrollLeft}`);
-    }
+    /* המשך הגלגול מהגלריה אל הרצועה אינו נמדד יותר, ולא כי הוא ירד מהקוד:
+       „בית” אינה גולשת בשום רוחב מרגע שהקבוצות מתכווצות, ולכן אין לרצועה
+       לאן להמשיך. השרשור עצמו נשמר ב-tests/unit/wheel-scroll.test.ts. */
+    report.skip('כשנגמרה הגלריה, הגלגול ממשיך לרצועה', '„בית” אינה גולשת יותר — אין לאן להמשיך');
   }
 
   /* -------------------------------------------------------------- */
