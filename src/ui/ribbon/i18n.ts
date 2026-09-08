@@ -79,6 +79,8 @@ const EN: Readonly<Record<string, string>> = {
   'לשוניות הרצועה': 'Ribbon tabs',
   'הצג את הרצועה': 'Show the ribbon',
   'כווץ את הרצועה': 'Collapse the ribbon',
+  'אין מקום לקבוצה ברוחב הזה — לחיצה פותחת את הפקדים שלה':
+    'No room for this group at this width — click to open its controls',
 
   // ── לשונית „קובץ” ──────────────────────────────────────────────────
   'קובץ ומסמך': 'File & Document',

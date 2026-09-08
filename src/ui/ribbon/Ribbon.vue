@@ -55,6 +55,7 @@
     <div
       v-show="!isCollapsed"
       :id="RIBBON_PANEL_ID"
+      ref="bodyRef"
       class="word-ribbon-body"
       role="tabpanel"
       :aria-labelledby="ribbonTabId(currentTabId)"
@@ -117,6 +118,7 @@
 import { ref, computed, type ComponentPublicInstance } from 'vue';
 import { RIBBON_PANEL_ID, nextTabIndex, ribbonTabId } from './aria';
 import { handleWheelScroll } from '../../composables/wheel-scroll';
+import { provideRibbonOverflow } from './overflow';
 import { menuString } from './i18n';
 import { RIBBON_TABS } from './tabs';
 import SvgIcon from '../icons/SvgIcon.vue';
@@ -132,6 +134,13 @@ import ShulchanTab from './tabs/ShulchanTab.vue';
 import OtzariaTab from './tabs/OtzariaTab.vue';
 
 const TABS = RIBBON_TABS;
+
+/**
+ * הכיווץ של הקבוצות כשאין מקום, כמו ב-Word — במקום פס גלילה. הבקר יושב כאן
+ * מפני שגוף הרצועה הוא המידה שכל הקבוצות מתחלקות בה (ui/ribbon/overflow.ts).
+ */
+const bodyRef = ref<HTMLElement | null>(null);
+provideRibbonOverflow(bodyRef);
 
 /**
  * התוויות שמוצגות למשתמש, מתורגמות לפי שפת המשתמש (ui/ribbon/i18n).
