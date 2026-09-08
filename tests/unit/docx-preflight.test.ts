@@ -26,6 +26,7 @@ import {
   CONTENT_PARTS,
   crc32 as moduleCrc32,
   DEFAULT_TAB_STOP_TWIPS,
+  FONT_TABLE_PART,
   preflightDocx,
   preflightSource,
   readDocxPart,
@@ -883,6 +884,30 @@ describe('preflightSource', () => {
     // שכלל לא נקרא.
     const { vba } = await preflightSource('http://127.0.0.1:1/doc.docx');
     expect(vba).toEqual(NO_VBA);
+  });
+
+  it('ספרייה אחת מזינה גם את טבלת הגופנים וגם את התיקונים', async () => {
+    // הקוראים חולקים את הרשומות שנקראו פעם אחת (ראו `preflightSource`), ולכן
+    // מה שנמדד כאן הוא שאף אחד מהם לא נפגע מהשיתוף: התיקון נכתב, טבלת
+    // הגופנים חוזרת, והתוצאה זהה לקריאה נפרדת של כל אחד מהם.
+    const fontTable = '<w:fonts xmlns:w="ns"><w:font w:name="David"/></w:fonts>';
+    const both = buildZip([
+      { name: FONT_TABLE_PART, content: fontTable },
+      { name: SETTINGS_PART, content: SETTINGS_WITH_ZERO },
+    ]);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(both)),
+    );
+
+    const result = await preflightSource('http://127.0.0.1:1/doc.docx');
+
+    expect(result.fontTable).toBe(await readDocxPart(both, FONT_TABLE_PART));
+    expect(result.fontTable).toBe(fontTable);
+    const separately = await preflightDocx(both);
+    expect(separately).not.toBeNull();
+    expect(result.notice).toBe(separately?.notice ?? null);
+    expect(new Uint8Array(await (result.source as Blob).arrayBuffer())).toEqual(separately!.bytes);
   });
 
   it('URL שאין בו מה לתקן נמסר כבייטים שנקראו — בלי קריאה שנייה מהמנוע', async () => {

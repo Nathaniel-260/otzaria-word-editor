@@ -583,14 +583,28 @@ export async function preflightSource(
   }
 
   const asRead = (): Blob => (source instanceof Blob ? source : new Blob([bytes], { type: DOCX_MIME }));
-  const fontTable = await readDocxPart(bytes, FONT_TABLE_PART);
+
+  // **ספרייה מרכזית אחת לשני הקוראים.** קודם `readDocxPart` פתח את הארכיון
+  // בשביל טבלת הגופנים ו-`preflightDocx` פתח אותו שוב בשביל התיקונים; אותה
+  // ספרייה, אותם בייטים, פעמיים. הרשומות הן תצוגות (`subarray`) אל אותם
+  // בייטים ואף אחד מהשניים אינו כותב לתוכן — `preflightDocx` בונה מערך חדש
+  // — ולכן שיתוף כאן אינו קושר ביניהם.
+  //
+  // המאקרו אינו שותף: `extractVbaFromDocx` הוא של superdoc-macros, עם קורא
+  // ZIP משלו ובלי API שמקבל רשומות שנקראו. הוא גם כבר עושה את הזול קודם —
+  // מסמך בלי מאקרו מקבל תשובה מיד אחרי חיפוש החלק, בלי לפרוס דבר — ולכן
+  // „לבדוק תחילה אם קיים חלק VBA” היה פותח את החבילה **פעם נוספת**, לא
+  // חוסך פתיחה.
+  const entries = readZip(bytes);
+
+  const fontTable = await partText(entries, FONT_TABLE_PART);
   // על בייטי המקור ולא על המתוקנים: התיקונים נוגעים לחלקי ה-XML של הגוף
   // והסגנונות, ואין טעם לקרוא את המאקרו מעותק שנכתב מחדש.
   const vba = await readDocumentVba(bytes);
 
   let repaired: DocxRepair | null;
   try {
-    repaired = await preflightDocx(bytes);
+    repaired = await repairEntries(entries);
   } catch (error) {
     // „לתקן, ולא לחסום” גם כאן: הזריקה היחידה שנשארה בפנים היא הקצאה של
     // ארכיון גדול מדי, ומסמך שהיה נפתח בלי השלב הזה ייפתח בלעדיו.
@@ -615,7 +629,15 @@ export async function preflightSource(
  * כשהדחיסה אינה נתמכת — שלושה מקרים שבהם פשוט אין לנו מה לומר עליו.
  */
 export async function readDocxPart(bytes: Bytes, name: string): Promise<string | null> {
-  const entry = readZip(bytes)?.find((candidate) => candidate.name === name);
+  return partText(readZip(bytes), name);
+}
+
+/** אותו דבר, על ספרייה שכבר נקראה. ראו `preflightSource`. */
+async function partText(
+  entries: readonly ZipEntry[] | null,
+  name: string,
+): Promise<string | null> {
+  const entry = entries?.find((candidate) => candidate.name === name);
   return entry ? readEntryText(entry) : null;
 }
 
@@ -642,7 +664,11 @@ export interface DocxRepair {
  * את השני שבור.
  */
 export async function preflightDocx(bytes: Bytes): Promise<DocxRepair | null> {
-  const entries = readZip(bytes);
+  return repairEntries(readZip(bytes));
+}
+
+/** התיקונים עצמם, על ספרייה שכבר נקראה. ראו `preflightSource`. */
+async function repairEntries(entries: readonly ZipEntry[] | null): Promise<DocxRepair | null> {
   if (!entries) return null;
 
   const notes: string[] = [];
