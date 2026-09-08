@@ -14,7 +14,7 @@
         variant="large"
         tooltip="הוספת תוכן עניינים למסמך"
         :disabled="!tocCmd.enabled.value"
-        @click="tocCmd.run()"
+        @click="onInsertToc"
       />
       <!--
         „סמן ערך” הוא האייקון של הסימנייה: שני הפקדים מסמנים מקום במסמך בשדה
@@ -490,6 +490,7 @@ import {
   type CrossRefsState,
 } from '../../../engine/cross-refs';
 import {
+  layOutTocRows,
   configureTableOfContents,
   emptyTocState,
   markTocEntry,
@@ -808,8 +809,33 @@ async function refreshToc(): Promise<void> {
   if (mine === generation) toc.value = next;
 }
 
+/**
+ * „תוכן עניינים” — פקודת ההכנסה של המנוע, ומיד אחריה מיקום מספרי העמודים.
+ *
+ * שני צעדים ולא אחד מפני שהמנוע אינו נותן את השני: השורות שהוא כותב נושאות
+ * תו טאב בלי שום עצירה, ולכן מספר העמוד יוצא צמוד לכותרת ובלי נקודות
+ * מפרידות. ההנמקה והמדידות ב-engine/toc.ts.
+ *
+ * הכשלים מדווחים בנפרד: `tocCmd.run` מדווח על עצמו (ראו useCommand), והיישור
+ * מדווח רק אם ההכנסה הצליחה — הודעה על מוביל נקודות במסמך שלא קיבל טבלה היא
+ * ההודעה הלא נכונה.
+ */
+async function onInsertToc(): Promise<void> {
+  const inserted = await tocCmd.run();
+  if (inserted.ok) report(await layOutTocRows(superdoc.value), 'toc-align');
+  await refreshToc();
+}
+
+/**
+ * „עדכן טבלה”, ואחריו היישור.
+ *
+ * היישור נדרש שוב **דווקא** אחרי עדכון: עצירת הטאב שנכתבה בהכנסה שורדת את
+ * הבנייה מחדש (נמדד), אבל שורה של כותרת שנוספה למסמך מאז נולדת בלעדיה.
+ */
 async function onUpdateToc(): Promise<void> {
-  report(await updateTableOfContents(superdoc.value), 'toc-update');
+  const updated = await updateTableOfContents(superdoc.value);
+  report(updated, 'toc-update');
+  if (updated.ok) report(await layOutTocRows(superdoc.value), 'toc-align');
   await refreshToc();
 }
 
@@ -840,7 +866,12 @@ async function onConfigureToc(settings: TocSettings): Promise<void> {
   tocDialogOpen.value = false;
   const configured = await configureTableOfContents(superdoc.value, settings);
   report(configured, 'toc-configure');
-  if (configured.ok) report(await updateTableOfContents(superdoc.value), 'toc-update');
+  if (configured.ok) {
+    const updated = await updateTableOfContents(superdoc.value);
+    report(updated, 'toc-update');
+    // טווח רמות רחב יותר מוסיף שורות, וגם הן צריכות מוביל. ראו `onUpdateToc`.
+    if (updated.ok) report(await layOutTocRows(superdoc.value), 'toc-align');
+  }
   await refreshToc();
 }
 

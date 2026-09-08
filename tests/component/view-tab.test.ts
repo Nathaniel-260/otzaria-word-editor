@@ -130,11 +130,13 @@ describe('כפתורי לשונית „תצוגה”', () => {
   });
 
   it('„רוחב עמוד” שמידות הדף שלו אינן קריאות מדווח, ולא מנחש אחוז', async () => {
-    // ברירת המחדל של הכפיל היא twips גולמיים (11906) — יחידות שנשכחו בדרך,
-    // והקורא מסנן אותן במקום לחשב מהן אחוזי הזוי.
+    // 11906 הוא רוחב A4 ב-twips: יחידות שנשכחו בדרך, והקורא מסנן אותן במקום
+    // לחשב מהן אחוזי הזוי (`isSaneInches` ב-engine/print.ts). המידה נמסרת כאן
+    // מפורשות ואינה ברירת המחדל של הכפיל — ברירת המחדל היא A4 תקין, מפני
+    // ש-`layOutTocRows` גוזר ממנה את רוחב אזור הטקסט.
     const removeStack = installEditorStack(740);
     try {
-      const harness = mountWithPageWidth(undefined);
+      const harness = mountWithPageWidth(11906);
       await settle();
 
       await buttonByTip(harness.wrapper, FIT_TITLE).trigger('click');

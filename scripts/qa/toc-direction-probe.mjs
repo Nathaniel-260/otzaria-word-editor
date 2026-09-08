@@ -21,6 +21,11 @@
  * ב-`TocConfigurePatch` מתקבלים עם `success: true` ואינם עושים דבר — ראו
  * src/engine/toc.ts. לכן הכיוון, ולא ה-patch, הוא המסלול שנבדק כאן.
  *
+ * **עדכון:** סעיף 2ב כאן דיווח „אין עצירת טאב עם leader בשום שכבה”, וזה מה
+ * שהמשתמש ראה כמספר עמוד צמוד לכותרת. מאז `layOutTocRows` כותבת אותה
+ * לכל שורה (src/engine/toc.ts), והסעיף מודד עכשיו את מה **שאנחנו** כותבים.
+ * השער שמקבע את זה הוא scripts/qa/toc-layout-qa.mjs; זה נשאר סקר.
+ *
  *   npm run build && node scripts/qa/toc-direction-probe.mjs
  */
 import { openApp, createReport } from './harness.mjs';
