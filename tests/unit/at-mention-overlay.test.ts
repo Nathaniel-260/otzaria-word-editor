@@ -496,3 +496,150 @@ describe('installAtMention', () => {
     handle.dispose();
   });
 });
+
+/**
+ * החימוש — מה שמוציא את הפיצ'ר ממסלול ההקלדה.
+ *
+ * `evaluate` הוא שתי קריאות RPC למנוע, והוא רץ 180ms אחרי כל תו. מה שנמדד
+ * כאן הוא שהוא **אינו** רץ על טקסט רגיל, וכן רץ בכל אחד מהמסלולים שבהם
+ * הסמן עשוי להיות בתוך אזכור: „@” שהוקלד, הדבקה, תנועת סמן, לחיצה.
+ */
+describe('חימוש — מי בכלל שואל את המנוע', () => {
+  /** כפיל שסופר את שתי קריאות ה-RPC של `evaluate`. */
+  function countingDoc(text: string) {
+    const { host } = fakeDoc(text);
+    const doc = (host as { activeEditor: { doc: { selection: { current: () => unknown } } } })
+      .activeEditor.doc;
+    const current = doc.selection.current;
+    let asked = 0;
+    doc.selection.current = () => {
+      asked += 1;
+      return current();
+    };
+    return { host, asked: () => asked };
+  }
+
+  function typed(data: string): InputEvent {
+    return new InputEvent('input', { data, inputType: 'insertText' });
+  }
+
+  function keyed(key: string): KeyboardEvent {
+    return new KeyboardEvent('keyup', { key, bubbles: true });
+  }
+
+  it('תו רגיל אינו שואל את המנוע כלל', async () => {
+    const { host, asked } = countingDoc('ראה פסחים לד');
+    const handle = installAtMention(container, host as never);
+
+    for (const letter of 'פסחים') container.dispatchEvent(typed(letter));
+    await settle();
+
+    expect(asked()).toBe(0);
+    handle.dispose();
+  });
+
+  it('`keyup` הוא המסלול היחיד במנוע האמיתי — „@” בו מחמש', async () => {
+    // נמדד על ה-dist הארוז: המנוע מטפל בהקלדה ב-`keydown` ומכניס בעצמו,
+    // ולכן אין `input` ואין `beforeinput` בכלל — שלוש הקשות, שלושה `keyup`,
+    // אפס `input`. חימוש שנשען על `InputEvent.data` לבדו היה כיבוי מוחלט.
+    const { host, asked } = countingDoc('ראה @פסחים לד');
+    const handle = installAtMention(container, host as never);
+
+    container.dispatchEvent(keyed('א'));
+    await settle();
+    expect(asked(), 'תו רגיל ב-keyup אינו שואל').toBe(0);
+
+    container.dispatchEvent(keyed('@'));
+    await settle();
+    expect(asked()).toBe(1);
+
+    container.dispatchEvent(keyed('פ'));
+    await settle();
+    expect(asked()).toBe(2);
+    expect(popup()).not.toBeNull();
+    handle.dispose();
+  });
+
+  it('הדבקה מחמשת גם בלי `input` — אין לה מקש', async () => {
+    const { host, asked } = countingDoc('ראה @פסחים לד');
+    const handle = installAtMention(container, host as never);
+
+    container.dispatchEvent(new Event('paste', { bubbles: true }));
+    await settle();
+
+    expect(asked()).toBe(1);
+    handle.dispose();
+  });
+
+  it('„@” מחמש, ומכאן והלאה כל תו נבדק', async () => {
+    const { host, asked } = countingDoc('ראה @פסחים לד');
+    const handle = installAtMention(container, host as never);
+
+    container.dispatchEvent(typed('@'));
+    await settle();
+    expect(asked()).toBe(1);
+
+    container.dispatchEvent(typed('פ'));
+    await settle();
+    expect(asked()).toBe(2);
+    expect(popup()).not.toBeNull();
+    handle.dispose();
+  });
+
+  it('הדבקה מחמשת — אין ב-`data` מה לקרוא', async () => {
+    const { host, asked } = countingDoc('ראה @פסחים לד');
+    const handle = installAtMention(container, host as never);
+
+    container.dispatchEvent(new InputEvent('input', { inputType: 'insertFromPaste' }));
+    await settle();
+
+    expect(asked()).toBe(1);
+    handle.dispose();
+  });
+
+  it('תנועת סמן ולחיצה מחמשות — כך נכנסים לאזכור שכבר בטקסט', async () => {
+    const { host, asked } = countingDoc('ראה @פסחים לד');
+    const handle = installAtMention(container, host as never);
+
+    container.dispatchEvent(keyed('ArrowLeft'));
+    await settle();
+    expect(asked()).toBe(1);
+
+    container.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+    await settle();
+    expect(asked()).toBe(2);
+    handle.dispose();
+  });
+
+  it('אזכור שנסגר מפרק את החימוש — התו שאחריו אינו שואל', async () => {
+    // „ראה מקור” — אין „@” בכלל, ולכן הבדיקה הראשונה מפרקת.
+    const { host, asked } = countingDoc('ראה מקור');
+    const handle = installAtMention(container, host as never);
+
+    container.dispatchEvent(typed('@'));
+    await settle();
+    expect(asked(), 'הבדיקה שמפרקת').toBe(1);
+
+    container.dispatchEvent(typed('ר'));
+    container.dispatchEvent(typed('ק'));
+    await settle();
+
+    expect(asked()).toBe(1);
+    handle.dispose();
+  });
+
+  it('מקש רגיל ב-keyup אינו מכפיל את הבדיקה של `input`', async () => {
+    const { host, asked } = countingDoc('ראה @פסחים לד');
+    const handle = installAtMention(container, host as never);
+    container.dispatchEvent(typed('@'));
+    await settle();
+    const armed = asked();
+
+    container.dispatchEvent(typed('פ'));
+    container.dispatchEvent(keyed('פ'));
+    await settle();
+
+    expect(asked()).toBe(armed + 1);
+    handle.dispose();
+  });
+});

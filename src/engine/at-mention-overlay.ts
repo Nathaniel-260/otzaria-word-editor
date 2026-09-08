@@ -110,6 +110,12 @@ export interface AtMentionOptions {
 /** אותו debounce כמו בהשלמה מהספר; כאן הוא גם חוסך קריאות RPC. */
 const INPUT_DEBOUNCE_MS = 180;
 
+/**
+ * התו שפותח אזכור. קבוע מפני שהוא נקרא בשני מסלולים שונים — `event.key`
+ * של המקש, ו-`InputEvent.data` של הטקסט — ומחרוזת אחת בשניהם.
+ */
+const AT_SIGN = '@';
+
 /** כמה הצעות להציג. מעבר לזה הרשימה מכסה את הטקסט שמעליה. */
 const MAX_SUGGESTIONS = 8;
 
@@ -217,6 +223,21 @@ export function installAtMention(
    * רשימה מחדש, וה-Escape היה נראה כאילו לא עשה דבר.
    */
   let dismissedAt: number | null = null;
+  /**
+   * האם יש בכלל סיכוי שהסמן יושב בתוך אזכור — **וזה מה שמוציא את הפיצ'ר
+   * ממסלול ההקלדה.**
+   *
+   * `evaluate` הוא שתי קריאות RPC למנוע (`selection.current` ואז
+   * `ranges.resolve`), והוא רץ 180ms אחרי כל תו שנקלד — גם באמצע טקסט רגיל
+   * שאין בו „@” בשום מקום, כלומר כמעט תמיד. הבדיקה עצמה זולה רק בדיעבד:
+   * התשובה היא „אין טריגר”, אבל היא הגיעה אחרי שהמנוע פתר טווח.
+   *
+   * מה שמחמש: הקלדת „@” (נקראת מ-`InputEvent.data`), הדבקה או כל
+   * `inputType` שאין בו מה לקרוא, ותנועת סמן/לחיצה — מסלולים נדירים ביחס
+   * לתו. מה שמפרק: `evaluate` שמצא שאין טריגר. כלומר מרגע „@” והלאה
+   * המסלול המלא רץ על כל תו, עד שהאזכור נסגר — בדיוק החלון שבו הוא נחוץ.
+   */
+  let armed = false;
   let session: Session = { kind: 'idle' };
   /**
    * כתיבת קישור היא שתי פעולות של המנוע (מחיקה ואז insert). בזמן הקצר הזה
@@ -379,6 +400,10 @@ export function installAtMention(
     const trigger = parseAtTrigger(caret.beforeCaret);
     if (!trigger || !isQueryable(trigger)) {
       dismissedAt = null;
+      // אין „@” פתוח לפני הסמן — ואין טעם להמשיך לשאול על כל תו. ראו `armed`.
+      // `isQueryable` הוא היוצא מן הכלל: „@” שהוקלד הרגע ועוד אין אחריו
+      // שאילתה נשאר מחומש בכוונה — התו הבא הוא בדיוק מה שממתינים לו.
+      if (!trigger) armed = false;
       return closeSession();
     }
 
@@ -541,8 +566,32 @@ export function installAtMention(
     }
   }
 
-  const onInput = (): void => {
-    if (!writing) scheduleEvaluate();
+  /**
+   * מה שנקלד, כשה-DOM מספר. `null` לכל מה שאינו הכנסת טקסט מוכרת — הדבקה,
+   * גרירה, IME — ואז מחמשים בלי לשאול שאלות: זה מסלול שאינו לכל תו.
+   */
+  function insertedText(event: Event): string | null {
+    if (!(event instanceof InputEvent)) return null;
+    if (typeof event.data === 'string') return event.data;
+    // מחיקה היא הכנסה של כלום, ולא „לא ידוע”: היא אינה יכולה לייצר „@”
+    // חדש, ומה שהיא כן עושה — מחיקת האזכור — מטופל כשהמסלול מחומש ממילא.
+    return event.inputType.startsWith('delete') ? '' : null;
+  }
+
+  /**
+   * `input` — **המסלול המשני, וזה נמדד.**
+   *
+   * המנוע מטפל בהקלדה ב-`keydown` ומכניס את הטקסט בעצמו, ולכן במנוע האמיתי
+   * **אין `input` ואין `beforeinput` בכלל**: probe על ה-dist הארוז הקליט
+   * שלוש הקשות והחזיר שלושה `keyup` ואפס `input`. המאזין נשאר בשביל סביבה
+   * שכן מדווחת (jsdom בבדיקות, ומסלול IME אפשרי), ולא כמקור היחיד.
+   */
+  const onInput = (event: Event): void => {
+    if (writing) return;
+    const inserted = insertedText(event);
+    if (inserted === null || inserted.includes(AT_SIGN)) armed = true;
+    if (!armed) return;
+    scheduleEvaluate();
   };
 
   /**
@@ -552,9 +601,43 @@ export function installAtMention(
    */
   const HANDLED_KEYS = new Set(['ArrowDown', 'ArrowUp', 'Enter', 'Tab', 'Escape']);
 
+  /**
+   * המקשים שמזיזים סמן בלי לערוך טקסט. הם מחמשים בעצמם: תנועת סמן היא הדרך
+   * להיכנס לאזכור שכבר בטקסט (ולצאת ממנו), והיא אינה מגיעה בשום מסלול אחר.
+   */
+  const CARET_KEYS = new Set([
+    'ArrowLeft',
+    'ArrowRight',
+    'Home',
+    'End',
+    'PageUp',
+    'PageDown',
+    'Backspace',
+    'Delete',
+  ]);
+
+  /**
+   * `keyup` — **המסלול העיקרי.** ראו `onInput` למה הוא ולא `input`.
+   *
+   * שלושה מחמשים כאן: „@” עצמו (המקש, ולא הטקסט שנכנס — זה מה שקיים),
+   * מקשי הסמן, ומצב מחומש קיים. תו רגיל שאינו אחד מאלה יוצא בשורה אחת בלי
+   * לגעת במנוע — וזה כל הפיצ'ר במסלול ההקלדה.
+   */
   const onKeyUp = (event: KeyboardEvent): void => {
     if (writing) return;
     if (HANDLED_KEYS.has(event.key)) return;
+    if (event.key === AT_SIGN || CARET_KEYS.has(event.key)) armed = true;
+    if (!armed) return;
+    scheduleEvaluate();
+  };
+
+  /**
+   * לחיצה מציבה סמן, ואפשר שבתוך „@…” שכבר בטקסט; הדבקה מכניסה טקסט שאין
+   * לו מקש. פעם אחת לכל אחד מהם — לא מסלול חם — וזה מה שמשלים את הצמצום.
+   */
+  const onArm = (): void => {
+    if (writing) return;
+    armed = true;
     scheduleEvaluate();
   };
 
@@ -588,10 +671,17 @@ export function installAtMention(
   };
 
   const onScroll = (): void => closeSession();
-  const onBlur = (): void => closeSession();
+  const onBlur = (): void => {
+    // המיקוד עזב את המסמך — אין סמן לעקוב אחריו. חזרה אליו מגיעה דרך
+    // `mouseup` או תו חדש, ושניהם מחמשים מחדש.
+    armed = false;
+    closeSession();
+  };
 
   container.addEventListener('input', onInput);
   container.addEventListener('keyup', onKeyUp);
+  container.addEventListener('mouseup', onArm);
+  container.addEventListener('paste', onArm);
   container.addEventListener('keydown', onKeyDown, true);
   container.addEventListener('scroll', onScroll, true);
   container.addEventListener('focusout', onBlur);
@@ -604,6 +694,8 @@ export function installAtMention(
       closeSession();
       container.removeEventListener('input', onInput);
       container.removeEventListener('keyup', onKeyUp);
+      container.removeEventListener('mouseup', onArm);
+      container.removeEventListener('paste', onArm);
       container.removeEventListener('keydown', onKeyDown, true);
       container.removeEventListener('scroll', onScroll, true);
       container.removeEventListener('focusout', onBlur);
