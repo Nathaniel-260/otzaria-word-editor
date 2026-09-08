@@ -659,7 +659,7 @@ const installedFonts = shallowRef<InstalledFontsSnapshot>(emptyInstalledFonts())
  * שנדרש כאן הוא לומר „הרכב שוב”.
  */
 const drawableFontEpoch = shallowRef(0);
-onPickerFontsChanged(() => {
+const stopPickerFontsChanged = onPickerFontsChanged(() => {
   drawableFontEpoch.value += 1;
 });
 watchEffect(() => {
@@ -4926,6 +4926,7 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+  stopPickerFontsChanged();
   // מי שממתין לתשובה מקבל „ביטול” ואינו נשאר תלוי — ראו use-unsaved-prompt.ts.
   unsavedPrompt.dispose();
   bookCompletion?.dispose();
