@@ -1,7 +1,10 @@
 <template>
   <div class="ribbon-tab-pane view-tab">
     <!-- תצוגות -->
-    <RibbonGroup title="תצוגות">
+    <RibbonGroup
+      title="תצוגות"
+      icon="focusMode"
+    >
       <RibbonButton
         icon="focusMode"
         label="מצב מיקוד"
@@ -13,7 +16,10 @@
     </RibbonGroup>
 
     <!-- הצג -->
-    <RibbonGroup title="הצג">
+    <RibbonGroup
+      title="הצג"
+      icon="ruler"
+    >
       <RibbonStack>
         <RibbonButton
           icon="ruler"
@@ -38,7 +44,10 @@
     </RibbonGroup>
 
     <!-- זום -->
-    <RibbonGroup title="שינוי גודל תצוגה">
+    <RibbonGroup
+      title="שינוי גודל תצוגה"
+      icon="zoom"
+    >
       <!--
         שני פקדים עם שני תפקידים נבדלים, שניהם דרך פקודת `zoom`:
         • „גודל אמיתי” — `setZoom(100)`: אחוז קבוע, פיקסל מול פיקסל (96dpi),

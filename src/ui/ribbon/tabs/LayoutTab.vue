@@ -1,7 +1,10 @@
 <template>
   <div class="ribbon-tab-pane layout-tab">
     <!-- קבוצה 1: הגדרת עמוד -->
-    <RibbonGroup title="הגדרת עמוד">
+    <RibbonGroup
+      title="הגדרת עמוד"
+      icon="margins"
+    >
       <RibbonMenuButton
         icon="margins"
         label="שוליים"
@@ -70,7 +73,10 @@
 
          „יישור אנכי” הוא הראשי, ושלושת האחרים במחסנית לצידו: הוא היחיד שנוגע
          בזרימת הטקסט בעמוד; השאר הם הגדרות של המסמך. -->
-    <RibbonGroup title="מקטע">
+    <RibbonGroup
+      title="מקטע"
+      icon="columns"
+    >
       <RibbonMenuButton
         icon="lineSpacing"
         label="יישור אנכי"

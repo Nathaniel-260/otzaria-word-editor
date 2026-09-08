@@ -4,7 +4,10 @@
       „תוכן עניינים”. הכפתור הראשון הוא הפקד שכבר היה כאן, ללא שינוי; ארבעת
       הנוספים הם מה שהופך אותו לקבוצה כמו ב-Word. ראו הערת הפתיחה.
     -->
-    <RibbonGroup title="תוכן עניינים">
+    <RibbonGroup
+      title="תוכן עניינים"
+      icon="toc"
+    >
       <RibbonButton
         icon="toc"
         label="תוכן עניינים"
@@ -61,7 +64,10 @@
       </RibbonStack>
     </RibbonGroup>
 
-    <RibbonGroup title="הערות שוליים">
+    <RibbonGroup
+      title="הערות שוליים"
+      icon="footnote"
+    >
       <RibbonButton
         icon="footnote"
         label="הערת שוליים"
@@ -106,7 +112,10 @@
       „סמן ערך למפתח” ולא „סמן ערך”, כדי שלא יהיו בלשונית אחת שני כפתורים
       באותו שם — ב-Word הקבוצה השכנה קוראת לפקד שלה „הוסף טקסט”.
     -->
-    <RibbonGroup title="מפתח">
+    <RibbonGroup
+      title="מפתח"
+      icon="bookmark"
+    >
       <RibbonButton
         icon="bookmark"
         label="סמן ערך למפתח"
@@ -156,7 +165,10 @@
       „נהל מקורות” ו„ביבליוגרפיה” הם שלושת הראשונים שם, „עדכן” ו„הסר” הם
       פיצול של אותו „ביבליוגרפיה”, ו„סגנון” אינו כאן — ראו הערת הפתיחה.
     -->
-    <RibbonGroup title="ציטוטים וביבליוגרפיה">
+    <RibbonGroup
+      title="ציטוטים וביבליוגרפיה"
+      icon="book"
+    >
       <RibbonButton
         icon="comment"
         label="הוסף ציטוט"
@@ -212,7 +224,10 @@
       מה שהיה קודם — שתי קבוצות סמוכות, כל אחת עם כפתור בודד וכותרת משלה —
       נראה כמו שני פקדים שאיש לא מצא להם בית, וזה גם מה שהוא היה.
     -->
-    <RibbonGroup title="כיתובים">
+    <RibbonGroup
+      title="כיתובים"
+      icon="image"
+    >
       <RibbonButton
         icon="image"
         label="הוסף כיתוב"

@@ -1,7 +1,10 @@
 <template>
   <div class="ribbon-tab-pane developer-tab">
     <!-- מאקרו: הקלטה, ניגון וניהול. הפעולות עצמן ב-engine/macros.ts, דרך App.vue. -->
-    <RibbonGroup title="מאקרו">
+    <RibbonGroup
+      title="מאקרו"
+      icon="macro"
+    >
       <RibbonButton
         icon="macro"
         label="ניהול מאקרו"

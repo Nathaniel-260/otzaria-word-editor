@@ -1,7 +1,10 @@
 <template>
   <div class="ribbon-tab-pane insert-tab">
     <!-- קבוצה 1: עמודים -->
-    <RibbonGroup title="עמודים">
+    <RibbonGroup
+      title="עמודים"
+      icon="pageBreak"
+    >
       <!--
         התווית אינה „מעבר עמוד”: המימוש הוא `w:pageBreakBefore`, שמזיז את כל
         הפסקה לעמוד הבא ואינו מפצל אותה בסמן כמו Word. ההסבר המלא, כולל
@@ -20,7 +23,10 @@
     </RibbonGroup>
 
     <!-- קבוצה 2: טבלאות -->
-    <RibbonGroup title="טבלאות">
+    <RibbonGroup
+      title="טבלאות"
+      icon="table"
+    >
       <TablePicker
         :disabled="!tableCmd.enabled.value"
         @select="onInsertTable"
@@ -28,7 +34,10 @@
     </RibbonGroup>
 
     <!-- קבוצה 3: איורים ומדיה -->
-    <RibbonGroup title="איורים">
+    <RibbonGroup
+      title="איורים"
+      icon="image"
+    >
       <RibbonButton
         icon="image"
         label="תמונות"
@@ -40,7 +49,10 @@
     </RibbonGroup>
 
     <!-- קבוצה 4: קישורים -->
-    <RibbonGroup title="קישורים">
+    <RibbonGroup
+      title="קישורים"
+      icon="link"
+    >
       <RibbonButton
         icon="link"
         label="קישור"
@@ -84,7 +96,10 @@
     </RibbonGroup>
 
     <!-- קבוצה 5: כותרת עליונה ותחתונה -->
-    <RibbonGroup title="כותרת עליונה ותחתונה">
+    <RibbonGroup
+      title="כותרת עליונה ותחתונה"
+      icon="header"
+    >
       <RibbonMenuButton
         icon="header"
         label="כותרת עליונה"
@@ -167,7 +182,10 @@
       ממנה, וכי „עדכן” לצד „הוסף” הוא הצמד שהמשתמש צריך — במחסנית שלצד הפקד
       הראשי, כי הוא מתחזק ואינו מוסיף.
     -->
-    <RibbonGroup title="טקסט">
+    <RibbonGroup
+      title="טקסט"
+      icon="dateTime"
+    >
       <RibbonButton
         icon="dateTime"
         label="תאריך ושעה"
@@ -189,7 +207,10 @@
     </RibbonGroup>
 
     <!-- קבוצה 7: תוכן עניינים -->
-    <RibbonGroup title="תוכן עניינים">
+    <RibbonGroup
+      title="תוכן עניינים"
+      icon="toc"
+    >
       <RibbonButton
         icon="toc"
         label="תוכן עניינים"

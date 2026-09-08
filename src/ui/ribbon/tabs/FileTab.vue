@@ -1,6 +1,9 @@
 <template>
   <div class="ribbon-tab-pane file-tab">
-    <RibbonGroup title="קובץ ומסמך">
+    <RibbonGroup
+      title="קובץ ומסמך"
+      icon="newDoc"
+    >
       <RibbonButton
         icon="newDoc"
         label="מסמך חדש"
@@ -28,7 +31,10 @@
       דיאלוג „שמור בשם”; ראו sessions/save-coordinator.ts). קבוצה של שני
       גדולים היא גם מה ש„קובץ ומסמך” ו„מידע” כבר עושות בלשונית הזאת.
     -->
-    <RibbonGroup title="שמירה">
+    <RibbonGroup
+      title="שמירה"
+      icon="save"
+    >
       <RibbonButton
         icon="save"
         label="שמור"
@@ -56,7 +62,10 @@
       שמירה ולא היה שמירה, ומי שחיפש „להוציא את הקובץ ל-Word” כבר מקבל בדיוק
       את זה מ„שמור בשם”, שכותב `.docx` דרך מסלול הכתיבה של אוצריא.
     -->
-    <RibbonGroup title="ייצוא והדפסה">
+    <RibbonGroup
+      title="ייצוא והדפסה"
+      icon="print"
+    >
       <RibbonStack>
         <RibbonButton
           icon="exportPdf"
@@ -78,7 +87,10 @@
       </RibbonStack>
     </RibbonGroup>
 
-    <RibbonGroup title="יציאה">
+    <RibbonGroup
+      title="יציאה"
+      icon="exit"
+    >
       <RibbonButton
         icon="exit"
         label="יציאה"
@@ -100,6 +112,7 @@
     -->
     <RibbonGroup
       title="מידע"
+      icon="info"
       end
     >
       <!-- הפקד היחיד בלשונית בלי `:disabled`, ובכוונה: הדיאלוג הוא של התוסף,

@@ -766,7 +766,11 @@ describe('אתרי הקריאה לאייקונים', () => {
       const quoted = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       expect(fileTab, label).toMatch(new RegExp(`icon="${icon}"\\s+label="${quoted}"`));
     }
-    const icons = [...fileTab.matchAll(/icon="([A-Za-z]+)"/g)].map((m) => m[1]!);
+    // הטענה היא על אייקוני ה**פעולות**, ולכן פתיחות `<RibbonGroup>` יורדות
+    // קודם: האייקון של קבוצה מכווצת הוא בכוונה זה של הפעולה הראשית שבה
+    // („שמירה” = `save`), וזו אינה כפילות אלא הדפוס של Word.
+    const actions = fileTab.replace(/<RibbonGroup[^>]*>/g, '');
+    const icons = [...actions.matchAll(/icon="([A-Za-z]+)"/g)].map((m) => m[1]!);
     expect(new Set(icons).size, 'אין אייקון כפול בלשונית קובץ').toBe(icons.length);
   });
 

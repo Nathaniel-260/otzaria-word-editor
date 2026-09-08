@@ -1,7 +1,10 @@
 <template>
   <div class="ribbon-tab-pane review-tab">
     <!-- הגהה -->
-    <RibbonGroup title="הגהה">
+    <RibbonGroup
+      title="הגהה"
+      icon="proofing"
+    >
       <RibbonButton
         icon="proofing"
         label="בדיקת איות"
@@ -15,7 +18,10 @@
     </RibbonGroup>
 
     <!-- תגובות -->
-    <RibbonGroup title="תגובות">
+    <RibbonGroup
+      title="תגובות"
+      icon="comment"
+    >
       <RibbonButton
         icon="comment"
         label="תגובה חדשה"
@@ -26,7 +32,10 @@
     </RibbonGroup>
 
     <!-- הגנת מסמך (גל 19) -->
-    <RibbonGroup title="הגנה">
+    <RibbonGroup
+      title="הגנה"
+      icon="select"
+    >
       <RibbonButton
         icon="proofing"
         label="הגבל עריכה"
@@ -40,7 +49,10 @@
 
 
     <!-- מעקב -->
-    <RibbonGroup title="מעקב אחר שינויים">
+    <RibbonGroup
+      title="מעקב אחר שינויים"
+      icon="trackChanges"
+    >
       <RibbonButton
         icon="trackChanges"
         label="עקוב אחר שינויים"
@@ -63,7 +75,10 @@
       והמסמך זז 30px בכל כניסה ויציאה מהלשונית. ארבעה בעמודה אחת גם לא היה
       קריא: „קבל/דחה/קבל הכל/דחה הכל” הוא סולם, ולא שני צמדים.
     -->
-    <RibbonGroup title="שינויים">
+    <RibbonGroup
+      title="שינויים"
+      icon="accept"
+    >
       <RibbonButton
         icon="accept"
         label="קבל שינוי"

@@ -1,7 +1,10 @@
 <template>
   <div class="ribbon-tab-pane home-tab">
     <!-- קבוצה 1: לוח -->
-    <RibbonGroup title="לוח">
+    <RibbonGroup
+      title="לוח"
+      icon="paste"
+    >
       <RibbonButton
         icon="paste"
         label="הדבק"
@@ -46,6 +49,7 @@
     <!-- קבוצה 2: גופן -->
     <RibbonGroup
       title="גופן"
+      icon="bold"
       :column-flow="true"
     >
       <!-- שורה עליונה: גופן, גודל, הגדל/הקטן, נקה -->
@@ -215,6 +219,7 @@
     <!-- קבוצה 3: פיסקה -->
     <RibbonGroup
       title="פיסקה"
+      icon="alignRight"
       :column-flow="true"
     >
       <!-- שורה עליונה: תבליטים, מספור, הזחה, כיווניות, סימני עיצוב -->
@@ -386,6 +391,7 @@
     <!-- קבוצה 4: סגנונות -->
     <RibbonGroup
       title="סגנונות"
+      icon="shading"
       class="styles-group"
     >
       <!-- `disabled` ולא רק `current-style`: בלי בחירה במסמך הפקודה
@@ -399,7 +405,10 @@
     </RibbonGroup>
 
     <!-- קבוצה 5: עריכה -->
-    <RibbonGroup title="עריכה">
+    <RibbonGroup
+      title="עריכה"
+      icon="search"
+    >
       <RibbonStack>
         <RibbonButton
           icon="search"

@@ -1,7 +1,10 @@
 <template>
   <div class="ribbon-tab-pane otzaria-tab">
     <!-- שילוב עם אוצריא -->
-    <RibbonGroup title="אוצריא">
+    <RibbonGroup
+      title="אוצריא"
+      icon="otzaria"
+    >
       <RibbonButton
         icon="book"
         label="ציטוט מהקורא"

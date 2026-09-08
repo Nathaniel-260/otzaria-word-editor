@@ -1,7 +1,10 @@
 <template>
   <div class="ribbon-tab-pane shulchan-tab">
     <!-- הגהה -->
-    <RibbonGroup title="הגהה">
+    <RibbonGroup
+      title="הגהה"
+      icon="proofing"
+    >
       <RibbonButton
         icon="proofing"
         label="שגיאות מצויות"
@@ -37,7 +40,10 @@
     </RibbonGroup>
 
     <!-- הערות שוליים -->
-    <RibbonGroup title="הערות שוליים">
+    <RibbonGroup
+      title="הערות שוליים"
+      icon="footnote"
+    >
       <RibbonStack>
         <RibbonButton
           label="סוגריים ⟵ הערות"
@@ -65,7 +71,10 @@
     </RibbonGroup>
 
     <!-- עיצוב פסקה -->
-    <RibbonGroup title="עיצוב פסקה">
+    <RibbonGroup
+      title="עיצוב פסקה"
+      icon="lineSpacing"
+    >
       <RibbonButton
         icon="growFont"
         label="מילה ראשונה"
@@ -93,7 +102,10 @@
     </RibbonGroup>
 
     <!-- אחידות מסמך -->
-    <RibbonGroup title="אחידות מסמך">
+    <RibbonGroup
+      title="אחידות מסמך"
+      icon="formatPainter"
+    >
       <RibbonStack>
         <RibbonButton
           label="גודל עמוד ושוליים"
@@ -113,7 +125,10 @@
     </RibbonGroup>
 
     <!-- עמודים ודפוס -->
-    <RibbonGroup title="עמודים ודפוס">
+    <RibbonGroup
+      title="עמודים ודפוס"
+      icon="print"
+    >
       <RibbonButton
         icon="shrinkFont"
         label="צמצום מסמך"
