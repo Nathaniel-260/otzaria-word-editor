@@ -107,12 +107,24 @@ function stopWatching(): void {
   watcher = null;
 }
 
+/**
+ * האם יש בכלל גבול. **התלוי הזה הוא מה שהופך את הכיבוי לחינמי:** בלעדיו
+ * המעקב מדד את המלבן של **כל** עמוד על כל גלילה, כל שינוי גודל וכל
+ * `viewport.observe` — גם במסמך שאין בו `<w:pgBorders>` כלל, כלומר ברוב
+ * המסמכים. הציור ממילא היה ריק (`buildPageBorderBoxes` מחזיר `[]` על
+ * `reading` שהוא `null`).
+ *
+ * `computed` על „האם קיים” ולא `() => props.reading`: שינוי בתוך הגבול עצמו
+ * (צבע, עובי) אינו מפרק ובונה את המעקב מחדש — זו אותה גיאומטריה בדיוק.
+ */
+const bordered = computed(() => props.reading !== null);
+
 watch(
-  [() => props.host, rootRef],
-  ([host, root]) => {
+  [() => props.host, rootRef, bordered],
+  ([host, root, on]) => {
     stopWatching();
     pageRects.value = [];
-    if (!host || !root) return;
+    if (!host || !root || !on) return;
     watcher = watchAllPageRects({
       host,
       reference: root,
@@ -121,15 +133,18 @@ watch(
         pageRects.value = rects;
       },
     });
+    // מדידות ההתיישבות מיד עם ההתקנה: זו הרשת שהייתה קודם ב-`watch` על
+    // `reading` למקרה שהגבול הראשון שנקרא הגיע בדיוק כשעימוד המסמך עדיין
+    // באוויר (מסמך שנפתח עם `<w:pgBorders>` מ-Word, לפני שהעמוד הראשון סיים
+    // להיצייר) — ומאז שההתקנה מותנית ב-`reading`, זה הרגע שבו זה מגיע לכאן.
+    watcher.measure();
   },
   { immediate: true, flush: 'post' },
 );
 
-// אין ל-`reading` השפעה על מיקום/גודל העמודים עצמם (גבול אינו זז טקסט) —
-// `boxes` למטה כבר מגיב לשינוי בו לבד. המדידה החוזרת כאן היא רשת ביטחון
-// למקרה שהגבול הראשון שנקרא הגיע בדיוק כשעימוד המסמך עדיין באוויר (מסמך
-// שנפתח עם `<w:pgBorders>` מ-Word, לפני שהעמוד הראשון סיים להיצייר): מדידה
-// חינמית, ומותנית באמת בשינוי — `watchAllPageRects` כבר מסנן מדידות שלא זזו.
+// שינוי **בתוך** גבול קיים (צבע, עובי, אילו צדדים) אינו מזיז את העמודים —
+// `boxes` למטה כבר מגיב לו לבד — והמדידה כאן היא אותה רשת ביטחון לעימוד
+// שעוד באוויר. הדלקה/כיבוי אינם עוברים כאן: הם ב-`watch` שמעל.
 watch(() => props.reading, () => watcher?.measure());
 
 const boxes = computed(() => buildPageBorderBoxes(pageRects.value, props.reading));

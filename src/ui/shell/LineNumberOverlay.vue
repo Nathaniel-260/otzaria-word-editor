@@ -121,13 +121,30 @@ function stopWatching(): void {
   contentWatcher = null;
 }
 
+/**
+ * האם יש בכלל מספור. **התלוי הזה הוא מה שהופך את הכיבוי לחינמי**, וזה נמדד:
+ * המדידה של `watchAllPageContentRects` היא `Range.getClientRects()` על תוכן
+ * כל עמוד, והיא רצה על כל גלילה, כל שינוי גודל וכל `viewport.observe` — גם
+ * כשלמסמך אין `<w:lnNumType>` בכלל, כלומר ברוב המסמכים ורוב הזמן. בפרופיל
+ * הקלדה נמדדו 275 קריאות `Range.getClientRects` ב-40 תווים על מסמך **בלי**
+ * מספור שורות. הציור עצמו ממילא היה ריק (`buildLineNumberBoxes` מחזיר `[]`
+ * על `reading` שהוא `null`), ולכן כל אותה גיאומטריה נמדדה בשביל כלום.
+ *
+ * `computed` על „האם קיים” ולא `() => props.reading`: שינוי בתוך המצב עצמו
+ * (countBy, start) אינו מפרק ובונה את המעקב מחדש — זו אותה גיאומטריה בדיוק.
+ *
+ * אותו שיקול בדיוק כמו `visible` ב-PilcrowOverlay.vue, שכבר עוצר שם את
+ * המדידה ולא רק את הציור.
+ */
+const numbering = computed(() => props.reading !== null);
+
 watch(
-  [() => props.host, rootRef],
-  ([host, root]) => {
+  [() => props.host, rootRef, numbering],
+  ([host, root, on]) => {
     stopWatching();
     pageRects.value = [];
     contentRects.value = [];
-    if (!host || !root) return;
+    if (!host || !root || !on) return;
     pageWatcher = watchAllPageRects({
       host,
       reference: root,
@@ -144,12 +161,18 @@ watch(
         contentRects.value = rects;
       },
     });
+    // מדידות ההתיישבות מיד עם ההתקנה, ולא רק המדידה היחידה שבבנייה: זו
+    // הרשת שהייתה קודם ב-`watch` על `reading` — ומאז שההתקנה עצמה מותנית
+    // ב-`reading`, זה הרגע שבו „המספור נדלק” מגיע לכאן. ראו SETTLE_DELAYS_MS.
+    pageWatcher.measure();
+    contentWatcher.measure();
   },
   { immediate: true, flush: 'post' },
 );
 
-// כמו ב-PageBorderOverlay.vue: רשת ביטחון למקרה שה-`reading` הראשון הגיע
-// בדיוק כשעימוד המסמך עדיין באוויר.
+// שינוי **בתוך** מצב קיים (countBy, start, restart) אינו מזיז עמודים, אבל כן
+// עשוי להגיע בדיוק כשעימוד המסמך עוד באוויר — אותה רשת ביטחון כמו
+// ב-PageBorderOverlay.vue. הדלקה/כיבוי אינם עוברים כאן: הם ב-`watch` שמעל.
 watch(() => props.reading, () => {
   pageWatcher?.measure();
   contentWatcher?.measure();
