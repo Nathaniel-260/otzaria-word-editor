@@ -382,7 +382,8 @@ import {
 import { onPickerFontsChanged } from './engine/picker-fonts';
 import {
   emptyInstalledFonts,
-  loadInstalledFonts,
+  loadReportedFonts,
+  verifyInstalledFonts,
   type InstalledFontsSnapshot,
 } from './engine/system-fonts';
 import {
@@ -608,6 +609,29 @@ import { createCaretKeeper } from './ui/shell/caret-keeper';
 
 const editorStackRef = ref<HTMLElement | null>(null);
 const shellRef = ref<HTMLElement | null>(null);
+
+/**
+ * תקרה ל-`whenIdle`. אחרי הזמן הזה העבודה רצה בין אם החוט התפנה ובין אם לא.
+ *
+ * „idle” בלי תקרה עלול לא להגיע לעולם במסמך שמקלידים בו בלי הפסקה, והעבודה
+ * שנדחית כאן אינה קוסמטית לגמרי — היא מה שמסמן בבורר שם שהדפדפן אינו פותר.
+ * שתי שניות הן זמן שבו כל פתיחת מסמך סבירה כבר הסתיימה.
+ */
+const IDLE_TIMEOUT_MS = 2000;
+
+/**
+ * מריצה כשהחוט פנוי — או בתקרה, המוקדם מביניהם.
+ *
+ * `requestIdleCallback` אינו קיים בכל דפדפן (ולא ב-jsdom), ולכן `setTimeout`
+ * הוא הגיבוי: לא ה„פנוי” האמיתי, אבל כן דחייה מחוץ למסלול העלייה.
+ */
+function whenIdle(work: () => void): void {
+  if (typeof requestIdleCallback === 'function') {
+    requestIdleCallback(() => work(), { timeout: IDLE_TIMEOUT_MS });
+    return;
+  }
+  setTimeout(work, IDLE_TIMEOUT_MS);
+}
 
 /**
  * לחיצה על רקע של פס מעטפת אינה לוקחת את הסמן מהמסמך — ראו
@@ -4766,14 +4790,28 @@ function registerSendToDocument(): void {
 
 onMounted(async () => {
   /**
-   * המנייה של גופני המכונה — ראשונה, ובלי `await`.
+   * המנייה של גופני המכונה — ראשונה, ובלי `await`, ובשני שלבים.
    *
    * בלי `await` מפני שהיא אינה תנאי לשום דבר: עד שהיא נוחתת הבורר מציג את
    * הרשימה הקבועה, וברגע שהיא נוחתת `watchEffect` מרכיב מחדש והבורר מתמלא.
    * פתיחת המסמך הראשון אינה אמורה להמתין למנייה של מאות משפחות.
+   *
+   * **ובשני שלבים, וזה תוקן אחרי מדידה:** „בלי `await`” אינו „בחינם”.
+   * המדידה של שלב ב' נמדדה 6.46 שניות ל-287 משפחות, ומקטע של עד 68ms גם
+   * אחרי הוויתור על החוט — כלומר היא מתחרה עם ההקלדה על ה-main thread בדיוק
+   * בשניות הראשונות שאחרי פתיחת המסמך. שלב א' (`loadReportedFonts`) הוא
+   * קריאת RPC אחת, והוא מה שממלא את הבורר; האימות נדחה ל-`whenIdle`.
+   *
+   * מה שחסר בין השניים הוא הסימון של שמות שהדפדפן אינו פותר — שורה שתיראה
+   * זמינה עד שהמדידה תנחת, לא שורה חסרה. ראו engine/system-fonts.ts.
    */
-  void loadInstalledFonts().then((snapshot) => {
-    installedFonts.value = snapshot;
+  void loadReportedFonts().then((reported) => {
+    installedFonts.value = reported;
+    whenIdle(() => {
+      void verifyInstalledFonts(reported).then((verified) => {
+        installedFonts.value = verified;
+      });
+    });
   });
 
   /*

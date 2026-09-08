@@ -203,11 +203,52 @@ function waitForWebFonts(): Promise<unknown> {
 }
 
 /**
- * המנייה כולה. אינה זורקת לעולם — כל כשל מחזיר פחות ידיעה, לא חריגה.
+ * מה שהמארח אומר, ובלי למדוד דבר — **שלב א' מתוך שניים.**
  *
- * אינה חוסמת דבר: הקוראת מפעילה אותה בלי `await` והבורר מתעדכן כשהיא נוחתת.
+ * ## למה זה נפרד
+ *
+ * המדידה יקרה, ונמדדה: 6.46 שניות ל-287 משפחות, במקטעים שהארוך בהם 68ms גם
+ * אחרי הוויתור על החוט (ראו `YIELD_BUDGET_MS`). היא אינה חוסמת את פתיחת
+ * המסמך — הקוראת מפעילה בלי `await` — אבל היא כן מתחרה עם ההקלדה על ה-main
+ * thread בדיוק בשניות הראשונות שאחרי הפתיחה, וזו התלונה שהובילה לכאן.
+ *
+ * שלב א' הוא קריאת RPC אחת ומיון. הבורר מתמלא ממנו מיד, וכל מה שחסר בו הוא
+ * הסימון של השמות שהדפדפן אינו פותר (`unresolved`) — כלומר שורה שתיראה
+ * זמינה עד שהמדידה תנחת, לא שורה חסרה. `verifyInstalledFonts` הוא שלב ב',
+ * ומי שקורא לו קובע מתי: זמן idle, או פתיחת הבורר.
+ *
+ * מארח שאינו מכיר את המתודה אינו מקבל כאן כלום — שכבה 2 היא **כולה** מדידה,
+ * ולכן היא שייכת לשלב ב'. ראו `loadInstalledFonts` להסבר על השכבות.
+ *
+ * אינה זורקת לעולם — כל כשל מחזיר פחות ידיעה, לא חריגה.
  */
-export async function loadInstalledFonts(
+export async function loadReportedFonts(
+  deps: InstalledFontsDeps = {},
+): Promise<InstalledFontsSnapshot> {
+  const { call = tryCall } = deps;
+
+  const hosted = await call<ListInstalledFontsResult>('fonts.listInstalled').catch(() => null);
+  const reported: readonly InstalledFont[] =
+    hosted && Array.isArray(hosted.families) ? hosted.families : [];
+
+  return reported.length > 0 ? toSnapshot(reported, 'host') : emptyInstalledFonts();
+}
+
+/**
+ * המדידה — **שלב ב'.** מקבלת את מה ש-`loadReportedFonts` החזירה ומחזירה את
+ * אותה ידיעה, מאומתת.
+ *
+ * שני מסלולים, לפי מה שהשלב הראשון מצא:
+ *
+ * - **`source: 'host'`** — הרשימה נשארת שלמה, והמדידה רק **מסמנת** את מי
+ *   שהדפדפן אינו פותר. ראו `measureUnresolved` לכל ההנמקה.
+ * - **`source: 'none'`** — המארח לא ענה, וכאן נופלים לרשימת המועמדים. זו
+ *   שכבה 2, והיא כולה מדידה: בלי canvas אין לה מה לומר.
+ *
+ * אינה זורקת לעולם, ומחזירה את מה שנכנס כשאין מה לאמת.
+ */
+export async function verifyInstalledFonts(
+  snapshot: InstalledFontsSnapshot,
   deps: InstalledFontsDeps = {},
 ): Promise<InstalledFontsSnapshot> {
   const {
@@ -217,15 +258,12 @@ export async function loadInstalledFonts(
     fontsReady = waitForWebFonts,
   } = deps;
 
-  const hosted = await call<ListInstalledFontsResult>('fonts.listInstalled').catch(() => null);
-  const reported: readonly InstalledFont[] =
-    hosted && Array.isArray(hosted.families) ? hosted.families : [];
-
-  if (reported.length > 0) {
+  if (snapshot.source === 'host') {
     // בלי canvas סומכים על המארח כמות שהוא: הוא ספר את המכונה, ואנחנו לא.
-    if (!canMeasure()) return toSnapshot(reported, 'host');
+    if (!canMeasure()) return snapshot;
     await fontsReady().catch(() => {});
-    return toSnapshot(reported, 'host', await measureUnresolved(reported, available));
+    const reported = snapshot.families.map((family) => ({ name: family.value }));
+    return { ...snapshot, unresolved: await measureUnresolved(reported, available) };
   }
 
   // הנפילה לשכבה 2 שקטה לחלוטין מבחינת המשתמש — הרשימה פשוט מתכווצת. שורה
@@ -233,9 +271,21 @@ export async function loadInstalledFonts(
   void explainHostGap(call);
 
   // ניחוש בלי מדידה אינו שווה כלום — עשרות שמות שאיש אינו יודע אם קיימים.
-  if (!canMeasure()) return emptyInstalledFonts();
+  if (!canMeasure()) return snapshot;
   await fontsReady().catch(() => {});
   return toSnapshot(await keepAvailable(MEASURED_CANDIDATES, available), 'measured');
+}
+
+/**
+ * שני השלבים יחד. אינה זורקת לעולם — כל כשל מחזיר פחות ידיעה, לא חריגה.
+ *
+ * מי שרוצה את הרשימה מיד ואת המדידה בזמן שנוח לו קורא לשני השלבים בנפרד —
+ * וזה מה ש-App.vue עושה. כאן הם יחד, למי שרק רוצה את התשובה המלאה.
+ */
+export async function loadInstalledFonts(
+  deps: InstalledFontsDeps = {},
+): Promise<InstalledFontsSnapshot> {
+  return verifyInstalledFonts(await loadReportedFonts(deps), deps);
 }
 
 /**

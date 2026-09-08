@@ -13,6 +13,8 @@ import {
   MEASURED_CANDIDATES,
   emptyInstalledFonts,
   loadInstalledFonts,
+  loadReportedFonts,
+  verifyInstalledFonts,
   type InstalledFont,
 } from '../../src/engine/system-fonts';
 
@@ -488,5 +490,77 @@ describe('אבחון: למה המארח לא ענה', () => {
     });
     expect(values(snapshot.families)).toEqual(['Tahoma']);
     warn.mockRestore();
+  });
+});
+
+/**
+ * שני השלבים בנפרד — זה מה ש-App.vue קורא, ולא `loadInstalledFonts`.
+ *
+ * מה שנמדד כאן הוא בדיוק ההפרדה: שלב א' אינו מודד **כלום** (הבורר מתמלא
+ * מיד, בלי להתחרות עם ההקלדה), ושלב ב' מגיע לאותה תוצאה שהשניים יחד מגיעים
+ * אליה — גם במסלול המארח וגם בנפילה לרשימת המועמדים.
+ */
+describe('שני השלבים בנפרד', () => {
+  const HOSTED = {
+    platform: 'windows',
+    families: [{ name: 'David', scripts: ['hebrew'] }, { name: 'Segoe UI Semilight' }],
+  };
+
+  it('שלב א\' אינו מודד דבר — ולא ממתין לגופנים המוזרקים', async () => {
+    const available = vi.fn(() => true);
+    const canMeasure = vi.fn(() => true);
+    const fontsReady = vi.fn(() => Promise.resolve());
+
+    const snapshot = await loadReportedFonts({
+      call: hostReturning(HOSTED),
+      available,
+      canMeasure,
+      fontsReady,
+    });
+
+    expect(values(snapshot.families)).toEqual(['David', 'Segoe UI Semilight']);
+    expect(snapshot.source).toBe('host');
+    expect(snapshot.unresolved.size).toBe(0);
+    expect(available).not.toHaveBeenCalled();
+    expect(canMeasure).not.toHaveBeenCalled();
+    expect(fontsReady).not.toHaveBeenCalled();
+  });
+
+  it('שלב ב\' מסמן את מי שהדפדפן אינו פותר, ואינו מוחק אותו', async () => {
+    const deps = {
+      call: hostReturning(HOSTED),
+      available: machineWith(['David']),
+      canMeasure: () => true,
+    };
+
+    const verified = await verifyInstalledFonts(await loadReportedFonts(deps), deps);
+
+    expect(values(verified.families)).toEqual(['David', 'Segoe UI Semilight']);
+    expect([...verified.unresolved]).toEqual(['segoe ui semilight']);
+    expect(verified).toEqual(await loadInstalledFonts(deps));
+  });
+
+  it('בלי מארח שלב א\' ריק, ורשימת המועמדים כולה בשלב ב\'', async () => {
+    const deps = {
+      call: hostReturning(null),
+      available: machineWith(['David']),
+      canMeasure: () => true,
+    };
+
+    const reported = await loadReportedFonts(deps);
+    expect(reported).toEqual(emptyInstalledFonts());
+
+    const verified = await verifyInstalledFonts(reported, deps);
+    expect(verified.source).toBe('measured');
+    expect(values(verified.families)).toEqual(['David']);
+  });
+
+  it('שלב ב\' בלי canvas מחזיר את מה שנכנס — ולא רשימה ריקה', async () => {
+    const deps = { call: hostReturning(HOSTED), canMeasure: () => false };
+
+    const reported = await loadReportedFonts(deps);
+    const verified = await verifyInstalledFonts(reported, deps);
+
+    expect(verified).toEqual(reported);
   });
 });
