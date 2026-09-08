@@ -11,7 +11,7 @@
     <div
       v-if="split"
       class="word-split"
-      :class="{ 'word-split--open': isOpen }"
+      :class="{ 'word-split--open': isOpen, 'word-split--large': variant === 'large' }"
     >
       <RibbonButton
         :icon="icon"
