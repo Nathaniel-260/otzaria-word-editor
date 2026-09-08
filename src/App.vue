@@ -2529,7 +2529,10 @@ async function openDocumentInto(
       // הזוכר **של הטאב הזה**, בדיוק כמו ב-`observeZoom` שמתחת: הסינגלטון
       // מתאפס למשך מעבר טאב (`stashActiveInto`), ובטאב שברקע הוא כבר של
       // מסמך אחר — כלומר תזוזת הסמן הייתה נרשמת אצל השכן, או נבלעת.
-      (session?.keeper ?? keeper)?.noteChange();
+      //
+      // `noteCaretMoved` ולא `noteChange`: הבחירה מדווחת בכל תו שנקלד,
+      // **בנוסף** ל-`onUpdate` של המסמך. ראו session-keeper.ts.
+      (session?.keeper ?? keeper)?.noteCaretMoved();
     })
   );
 

@@ -584,6 +584,33 @@ describe('מצב', () => {
     expect(stages).toEqual(['idle', 'exporting', 'uploading', 'committing', 'idle']);
   });
 
+  it('עריכה שאינה משנה את התמונה אינה מדווחת שוב', () => {
+    // `markDirty` נקרא מ-`onUpdate` של המנוע, כלומר בכל תו. מהתו השני והלאה
+    // שום שדה בתמונה אינו משתנה — ו-App.vue מרענן את רצועת הטאבים על כל
+    // דיווח. הפעם הראשונה כן: היא הופכת את `isDirty`.
+    const h = harness();
+
+    h.coordinator.markDirty();
+    const afterFirst = h.states.length;
+    h.coordinator.markDirty();
+    h.coordinator.markDirty();
+    h.coordinator.markDirty();
+
+    expect(afterFirst).toBe(1);
+    expect(h.states.length).toBe(afterFirst);
+    expect(h.coordinator.snapshot.isDirty).toBe(true);
+  });
+
+  it('שינוי אמיתי כן מדווח — ההשוואה על השדות, לא על מספר הקריאות', () => {
+    const h = harness();
+    h.coordinator.markDirty();
+
+    h.coordinator.adoptTarget({ token: 'tok', name: 'a.docx' });
+
+    expect(h.states[h.states.length - 1]).toMatchObject({ isDirty: true, targetToken: 'tok', name: 'a.docx' });
+    expect(h.states.length).toBe(2);
+  });
+
   it('reset מנקה dirty, שגיאה ויעד', async () => {
     const h = harness();
     h.coordinator.markDirty();

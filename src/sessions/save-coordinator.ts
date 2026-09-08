@@ -183,6 +183,21 @@ export interface SaveCoordinator {
   dispose(): void;
 }
 
+/**
+ * האם שתי תמונות מצב אומרות בדיוק אותו דבר. כל השדות, ולא תת-קבוצה: מי
+ * שיוסיף שדה ל-`SaveSnapshot` ולא לכאן יקבל שדה שאינו מגיע לממשק.
+ */
+function sameSnapshot(a: SaveSnapshot, b: SaveSnapshot): boolean {
+  return (
+    a.state === b.state &&
+    a.isDirty === b.isDirty &&
+    a.targetToken === b.targetToken &&
+    a.name === b.name &&
+    a.lastError === b.lastError &&
+    a.isSaving === b.isSaving
+  );
+}
+
 export function createSaveCoordinator(deps: SaveCoordinatorDeps): SaveCoordinator {
   let dirtyRevision = 0;
   let savedRevision = 0;
@@ -219,10 +234,24 @@ export function createSaveCoordinator(deps: SaveCoordinatorDeps): SaveCoordinato
     };
   }
 
+  /**
+   * מה שכבר דווח, כדי לא לדווח את אותו דבר שוב. ראו `publish`.
+   */
+  let published: SaveSnapshot | null = null;
+
   function publish(): void {
     // אחרי dispose אין למי לדווח, וסבב שנשאר באוויר לא יעדכן ממשק שכבר פורק.
     if (disposed) return;
-    deps.onStateChange?.(snapshot());
+    const next = snapshot();
+    // **השוואה, ולא דיווח על כל קריאה.** `markDirty` נקרא מ-`onUpdate` של
+    // המנוע, כלומר בכל תו — ומהתו השני והלאה שום שדה בתמונה אינו משתנה:
+    // `dirtyRevision` עולה, אבל `isDirty` כבר `true`. כל דיווח כזה גם מרענן
+    // את רצועת הטאבים (`notifyTabStrip` ב-App.vue), ולכן זו לא הייתה רק
+    // השמה מיותרת. התמונה עצמה היא כל מה שמישהו רואה, ומה שאינו בה אינו
+    // עניינו של אף צרכן.
+    if (published !== null && sameSnapshot(published, next)) return;
+    published = next;
+    deps.onStateChange?.(next);
   }
 
   function setState(next: SaveState): void {

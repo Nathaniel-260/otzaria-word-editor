@@ -234,6 +234,33 @@ describe('הרשומה', () => {
     expect(activeEntry(h.persisted[1])?.caret).toEqual(anchor);
   });
 
+  it('תזוזת סמן כותבת את הרשומה — שם הסמן יושב', async () => {
+    const h = harness();
+    h.caret = anchor;
+
+    h.keeper.noteCaretMoved();
+    await h.tick(PERSIST_DELAY_MS);
+
+    expect(activeEntry(h.persisted[0])?.caret).toEqual(anchor);
+  });
+
+  it('תזוזת סמן אינה כותבת טיוטה — הטיוטה היא בייטים של מסמך', async () => {
+    // הבחירה מדווחת בכל תו **בנוסף** ל-`onUpdate` של המסמך, וקודם שניהם
+    // קראו ל-`noteChange`: מונה השינויים זז גם על תזוזת סמן, ולכן טיוטה
+    // נכתבה שוב על מסמך שלא השתנה מאז הקודמת.
+    const h = harness();
+    h.dirty = true;
+    h.keeper.noteChange();
+    await h.tick(DRAFT_DELAY_MS);
+    expect(h.drafts).toHaveLength(1);
+
+    h.keeper.noteCaretMoved();
+    expect(h.keeper.hasUnwrittenWork, 'הסמן זז — אין עבודה חדשה').toBe(false);
+    await h.tick(DRAFT_DELAY_MS);
+
+    expect(h.drafts, 'הסמן זז ולא המסמך — אין מה לייצא שוב').toHaveLength(1);
+  });
+
   it('מצב תצוגה שלא השתנה אינו מייצר כתיבה', async () => {
     const h = harness();
     h.keeper.updateView({ zoom: 120 });

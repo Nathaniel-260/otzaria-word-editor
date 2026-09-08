@@ -184,8 +184,21 @@ export interface SessionKeeper {
   setDocument(document: SessionDocument | null, options?: SetDocumentOptions): void;
   /** שינוי במצב התצוגה. */
   updateView(patch: Partial<SessionView>): void;
-  /** משהו זז — הסמן, המסמך. מתזמן כתיבה. */
+  /** **המסמך** השתנה. מתזמן גם את רשומת ההפעלה וגם את הטיוטה. */
   noteChange(): void;
+  /**
+   * **הסמן** זז, והמסמך לא. מתזמן את רשומת ההפעלה בלבד.
+   *
+   * ההפרדה תוקנה אחרי מדידה: הבחירה מדווחת בכל תו שנקלד **ובנוסף** לעדכון
+   * המסמך, ו-`noteChange` לשניהם פירושו שני איפוסים של שני הטיימרים לכל תו.
+   * גרוע מזה, הוא קידם את מונה השינויים גם על תזוזת סמן — כלומר
+   * `hasUnwrittenWork` הפך אמת, והטיוטה נכתבה שוב על מסמך שלא השתנה מאז
+   * הטיוטה הקודמת. הטיוטה היא בייטים של מסמך; הסמן אינו שם.
+   *
+   * מה שכן שם הוא ברשומה (`caret`, נקרא ב-`persistNow`), ולכן ההשהיה של
+   * הרשומה נשארת.
+   */
+  noteCaretMoved(): void;
   /** המסמך נשמר לדיסק: הטיוטה אינה נדרשת יותר. */
   noteSaved(sourceSize?: number | null): Promise<void>;
   /**
@@ -539,6 +552,10 @@ export function createSessionKeeper(deps: SessionKeeperDeps): SessionKeeper {
       revision += 1;
       schedulePersist();
       scheduleDraft();
+    },
+
+    noteCaretMoved() {
+      schedulePersist();
     },
 
     async noteSaved(size = null) {
