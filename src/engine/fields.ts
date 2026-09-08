@@ -8,7 +8,7 @@
  * „למה אין תאריך קבוע” למטה). אין בו `fieldType` ואין קטלוג של שדות מוכרים —
  * מה שנשלח הוא **קוד השדה של Word** כמחרוזת, בדיוק כפי שהוא נכתב בין הסוגריים
  * המסולסלים במסמך. לכן כל מחרוזת כאן היא קוד שדה תקני של Word ותו לא:
- * `PAGE`, `NUMPAGES`, `DATE \\@ "dd/MM/yyyy"`.
+ * `PAGE`, `NUMPAGES`, `DATE \\@ "dd/MM/yyyy HH:mm"`.
  *
  * ## למה `DATE` נושא מתג `\@`, ומה בדיוק נמדד
  *
@@ -22,12 +22,12 @@
  * 25.8.2026:
  *
  * - `DATE` עירום            → `2026-08-24`      (ISO, ובאזור זמן UTC — יום אחורה)
- * - `DATE \@ "dd/MM/yyyy"`  → `25/08/2026`      המתג מפורש, והתאריך מקומי
+ * - `DATE \@ "dd/MM/yyyy HH:mm"`  → `08/09/2026 12:54`      המתג מפורש, והתאריך מקומי
  * - `DATE \@ "d בMMMM yyyy"`→ `25 בAugust 2026` המתג מפורש, שמות החודשים לועזיים
  * - `DATE \* HEBREW`        → `2026-08-24`      המתג נבלע בשקט, בלי שגיאה
  *
  * כלומר: מתג תמונת-הפורמט `\@` מפורש כהלכה, ומתג לוח השנה אינו קיים. לכן
- * הפורמט המספרי הישראלי `dd/MM/yyyy` נשלח — הוא נכון בעברית, אינו נשען על
+ * הפורמט המספרי הישראלי `dd/MM/yyyy HH:mm` נשלח — הוא נכון בעברית, אינו נשען על
  * שמות חודשים שהמנוע אינו מתרגם, והוא גם מה שמתקן את ה-ISO וההיסט של יום
  * שהתוצאה העירומה נותנת. לוח שנה עברי אינו אפשרי כאן, ואין להוסיף `\*` —
  * הוא נמדד כמתג שנבלע.
@@ -98,7 +98,9 @@ import { readDocSelection, type SelectionDocumentApi, type SelectionTarget } fro
 export const FIELD_INSTRUCTIONS = {
   pageNumber: 'PAGE',
   pageCount: 'NUMPAGES',
-  date: 'DATE \\@ "dd/MM/yyyy"',
+  date: 'DATE \\@ "dd/MM/yyyy HH:mm"',
+  dateOnly: 'DATE \\@ "dd/MM/yyyy"',
+  timeOnly: 'DATE \\@ "HH:mm"',
 } as const;
 
 export type FieldKind = keyof typeof FIELD_INSTRUCTIONS;
@@ -157,6 +159,8 @@ const INSERT_FAILED: Record<FieldKind, string> = {
   pageNumber: 'הוספת מספר העמוד נכשלה',
   pageCount: 'הוספת מספר העמודים נכשלה',
   date: 'הוספת התאריך נכשלה',
+  dateOnly: 'הוספת התאריך נכשלה',
+  timeOnly: 'הוספת השעה נכשלה',
 };
 
 const REBUILD_FAILED = 'עדכון השדות נכשל';
@@ -410,9 +414,19 @@ export function insertPageCount(host: FieldsTarget): Promise<CommandOutcome> {
   return insertField(host, 'pageCount');
 }
 
-/** „תאריך ושעה” — `{ DATE \\@ "dd/MM/yyyy" }`. המתג נמדד, ראו הערת הפתיחה. */
+/** „תאריך ושעה” — `{ DATE \\@ "dd/MM/yyyy HH:mm" }`. המתג נמדד, ראו הערת הפתיחה. */
 export function insertDate(host: FieldsTarget): Promise<CommandOutcome> {
   return insertField(host, 'date');
+}
+
+/** תאריך בלבד ללא שעה — `{ DATE \\@ "dd/MM/yyyy" }`. המתג נמדד, ראו הערת הפתיחה. */
+export function insertDateOnly(host: FieldsTarget): Promise<CommandOutcome> {
+  return insertField(host, 'dateOnly');
+}
+
+/** שעה בלבד ללא תאריך — `{ DATE \\@ "HH:mm" }`. המתג נמדד, ראו הערת הפתיחה. */
+export function insertTimeOnly(host: FieldsTarget): Promise<CommandOutcome> {
+  return insertField(host, 'timeOnly');
 }
 
 /* ------------------------------------------------------------------ */
