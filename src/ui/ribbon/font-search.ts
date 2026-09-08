@@ -44,6 +44,11 @@ export interface ComboOption {
   unavailable?: boolean;
   /** `unavailable` נמדד ולא הוכרז. ראו `PickerOption` ב-composables/picker-value.ts. */
   measured?: boolean;
+  /**
+   * הגופן מותקן במכונה והדפדפן בכל זאת אינו מצייר אותו — ואז ההסבר על השורה
+   * הוא אחר. ראו `PickerOption` ב-composables/picker-value.ts.
+   */
+  installedNotDrawable?: boolean;
 }
 
 /** שורה ברשימה הנפתחת: כותרת קבוצה, או אפשרות עם המספר שלה לניווט מקלדת. */

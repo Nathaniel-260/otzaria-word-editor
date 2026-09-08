@@ -662,6 +662,8 @@ const EN: Readonly<Record<string, string>> = {
   'מתחיל…': 'Starting…',
   'הגופן אינו מותקן במכונה — אין דגימה להציג':
     'The font is not installed on this machine — no sample to show',
+  'הגופן מותקן אך הדפדפן אינו מצייר אותו — אין דגימה להציג':
+    'The font is installed but the browser cannot render it — no sample to show',
 };
 
 /**

@@ -57,22 +57,42 @@ describe('loadInstalledFonts — מסלול המארח', () => {
     expect(snapshot.hebrew.has('bahnschrift')).toBe(false);
   });
 
-  it('שם שהמארח מכיר והדפדפן אינו פותר נופל', async () => {
-    // GDI מונה, DirectWrite מרנדר, והשניים אינם זהים לגמרי. שם שאינו נפתר
-    // היה נבחר על ידי המשתמש ומותח כל שורה במסמך — ראו docx-fonts.ts.
+  it('שם שהמארח מכיר והדפדפן אינו פותר נשאר ברשימה, ומסומן', async () => {
+    // GDI מונה, DirectWrite מרנדר, והשניים אינם זהים לגמרי — וּווריאנט משקל
+    // שכרום אינו פותר הוא בדיוק הפער הזה. מחיקתו הסתירה 43 מ-287 גופנים
+    // **מותקנים** במכונה שנמדדה, חמישה מהם עבריים; ראו `measureUnresolved`.
     const snapshot = await loadInstalledFonts({
       call: hostReturning({
         platform: 'windows',
         families: [
           { name: 'David', scripts: ['hebrew'], monospace: false },
-          { name: 'גופן שאינו קיים', scripts: ['hebrew'], monospace: false },
+          { name: 'Guttman Kav-Light', scripts: ['hebrew'], monospace: false },
         ],
       }),
       available: machineWith(['David']),
       canMeasure: () => true,
     });
 
+    // שתיהן. המארח ספר את המכונה, ולכן אי-פתירה אינה היעדר.
+    expect(values(snapshot.families)).toEqual(['David', 'Guttman Kav-Light']);
+    expect(snapshot.unresolved.has('guttman kav-light')).toBe(true);
+    // ומי שכן נפתר אינו מסומן — אחרת הסימון לא היה אומר דבר.
+    expect(snapshot.unresolved.has('david')).toBe(false);
+  });
+
+  it('רשימת המועמדים כן מסוננת — שם שאינו נפתר שם הוא ניחוש שנפל', async () => {
+    // ההבדל אינו טעם אלא מה שכל מקור יודע: המארח ספר את המכונה, ורשימת
+    // המועמדים היא ניחוש. שם שאינו נפתר בה הוא התשובה היחידה שיש לשאלה „האם
+    // זה קיים כאן”, ולכן הוא נמחק ולא מסומן.
+    const snapshot = await loadInstalledFonts({
+      call: async () => null,
+      available: machineWith(['David']),
+      canMeasure: () => true,
+    });
+
+    expect(snapshot.source).toBe('measured');
     expect(values(snapshot.families)).toEqual(['David']);
+    expect(snapshot.unresolved.size).toBe(0);
   });
 
   it('בלי canvas סומכים על המארח כמות שהוא', async () => {

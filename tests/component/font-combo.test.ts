@@ -755,6 +755,67 @@ describe('גופן שאינו מותקן', () => {
     expect(row?.attributes('data-tip-title')).toBe('הגופן אינו מותקן במכונה — אין דגימה להציג');
   });
 
+  /**
+   * גופן ש**כן** מותקן ושהדפדפן אינו מצייר — הסבר אחר, ולא אותו אחד.
+   *
+   * זו התלונה שהגיעה מהשטח: המשתמש התקין את הגופנים שנעדרו מהבורר, ולכן
+   * „הגופן אינו מותקן במכונה” היה הופך את השורה ממחוסרת-תועלת למבלבלת. נמדד
+   * ש-43 מ-287 המשפחות שהמנייה מדווחת הן מהסוג הזה, חמש מהן עבריות.
+   */
+  describe('גופן מותקן שהדפדפן אינו מצייר', () => {
+    const WITH_UNDRAWABLE: readonly ComboOption[] = [
+      { value: 'Arial', label: 'Arial', group: '', preview: 'Arial, sans-serif' },
+      {
+        value: 'Guttman Kav-Light',
+        label: 'Guttman Kav-Light',
+        group: '',
+        preview: "'Guttman Kav-Light', serif",
+        unavailable: true,
+        installedNotDrawable: true,
+      },
+    ];
+
+    const openWith = async (options: readonly ComboOption[]) => {
+      const wrapper = mount(RibbonCombo, {
+        props: { modelValue: 'Arial', options, title: 'גופן', sample: '' },
+      });
+      await wrapper.find('input').trigger('focus');
+      await nextTick();
+      return wrapper;
+    };
+
+    it('ההסבר אומר „מותקן” ולא „אינו מותקן”', async () => {
+      const wrapper = await openWith(WITH_UNDRAWABLE);
+      const row = rowFor(wrapper, 'Guttman Kav-Light');
+
+      expect(row?.attributes('data-tip-title')).toBe(
+        'הגופן מותקן אך הדפדפן אינו מצייר אותו — אין דגימה להציג',
+      );
+      // ועדיין מסומנת: אין דגימה אמיתית להציג, וזה לא השתנה.
+      expect(row?.classes()).toContain('unavailable');
+    });
+
+    it('גם ה-aria-label אומר את זה — קורא מסך אינו רואה את הטולטיפ', async () => {
+      const wrapper = await openWith(WITH_UNDRAWABLE);
+      expect(rowFor(wrapper, 'Guttman Kav-Light')?.attributes('aria-label')).toBe(
+        'Guttman Kav-Light — הגופן מותקן אך הדפדפן אינו מצייר אותו — אין דגימה להציג',
+      );
+    });
+
+    it('ובלי הדגל חוזר ההסבר של „אינו מותקן” — שני מצבים ולא אחד', async () => {
+      const wrapper = await openWith(
+        WITH_UNDRAWABLE.map((option) =>
+          option.value === 'Guttman Kav-Light'
+            ? { ...option, installedNotDrawable: undefined }
+            : option,
+        ),
+      );
+      expect(rowFor(wrapper, 'Guttman Kav-Light')?.attributes('data-tip-title')).toBe(
+        'הגופן אינו מותקן במכונה — אין דגימה להציג',
+      );
+    });
+  });
+
   it('והיא אינה מצוירת בגופן שאינו קיים — זה השקר עצמו', async () => {
     const wrapper = mountMissing();
     await wrapper.find('input').trigger('focus');

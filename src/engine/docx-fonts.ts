@@ -329,6 +329,23 @@ function advanceAliasGeneration(): void {
 }
 
 /**
+ * שוכחת את תשובת הזמינות של **משפחה אחת**, אחרי שהוזרק לה `@font-face` חדש.
+ *
+ * למה לא `advanceAliasGeneration` — היא הפטיש של פתיחת מסמך, ומחיקה של
+ * `hebrewCoverage` כולו פירושה מאות מדידות כיסוי מחדש במיזוג הבא. הזרקה של
+ * משפחה בודדת (engine/picker-fonts.ts) משנה תשובה **אחת**, ורק אותה יש לשכוח.
+ *
+ * ומדוע `hebrewCoverage` אינו נוגע בזה בכלל: הכיסוי של המשפחה אכן משתנה עם
+ * ההזרקה — גופן שלא היה נפתר לא כיסה כלום — ולכן גם הוא נשכח כאן. שתי המפות
+ * חולקות את `familyProbeKey`, ולכן זו שורה אחת לכל אחת.
+ */
+export function forgetFamilyAvailability(name: string): void {
+  const key = familyProbeKey(name);
+  familyAvailability.delete(key);
+  hebrewCoverage.delete(key);
+}
+
+/**
  * האם הגופן מצייר עברית **בעצמו**.
  *
  * זו שאלה אחרת מ-`isFamilyAvailable`, והבחנה שהבורר חי ממנה: שם שהדפדפן פותר
