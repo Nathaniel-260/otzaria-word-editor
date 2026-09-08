@@ -98,8 +98,11 @@
  * מיקוד ראשוני, מלכודת Tab והחזרת מיקוד. `aria-modal="true"` הוא הצהרה שכל
  * מה שמאחור אינו קיים, ובלי מלכודת היא פשוט שקרית.
  */
-import { nextTick, ref, watch } from 'vue';
-import { shortcutsByGroup } from '../shortcuts/registry';
+import { computed, nextTick, ref, watch } from 'vue';
+import { SHORTCUT_GROUP_TITLES, shortcutsByGroup, type Shortcut } from '../shortcuts/registry';
+import { comboAsShortcut } from '../shortcuts/combo';
+import { presetSummary } from '../shortcuts/format-preset';
+import type { CustomShortcut } from '../shortcuts/custom-shortcuts';
 
 /** מקשר את החלון לכותרת שלו — השם הנגיש. */
 const TITLE_ID = 'shortcuts-dialog-title';
@@ -108,9 +111,52 @@ const TITLE_ID = 'shortcuts-dialog-title';
  * נקרא פעם אחת: הרג'יסטרי הוא `as const` ואינו משתנה בזמן ריצה, ולכן חישוב
  * מחדש בכל פתיחה היה עבודה בלי תוצאה.
  */
-const groups = shortcutsByGroup();
+const builtinGroups = shortcutsByGroup();
 
-const props = withDefaults(defineProps<{ isOpen?: boolean }>(), { isOpen: false });
+const props = withDefaults(
+  defineProps<{
+    isOpen?: boolean;
+    /**
+     * הקיצורים שהמשתמש הגדיר בעצמו.
+     *
+     * הם **חייבים** להיות כאן, ולא רק בדיאלוג הניהול: כל טעמו של החלון הזה
+     * הוא שאין בו רשימה כתובה ביד שמתיישנת, ורשימה שמראה את המובנים ומשמיטה
+     * את מה שהמשתמש הגדיר בעצמו היא בדיוק אותה תקלה בגרסה חדשה — הוא לחץ
+     * „קיצורים”, לא מצא את שלו, והסיק שהוא לא נשמר.
+     */
+    custom?: readonly CustomShortcut[];
+  }>(),
+  { isOpen: false, custom: () => [] },
+);
+
+/**
+ * המובנים ואחריהם האישיים. `computed` ולא קריאה אחת: הרשימה האישית משתנה
+ * בזמן ריצה, וקיצור שנוסף בדיאלוג הניהול צריך להופיע כאן מיד.
+ *
+ * הקבוצה האישית נוספת רק כשיש בה משהו — כותרת ריקה על מסמך של מי שלא הגדיר
+ * דבר היא הזמנה לחשוב שמשהו חסר.
+ */
+const groups = computed<{ group: string; title: string; items: Shortcut[] }[]>(() => {
+  if (props.custom.length === 0) return builtinGroups;
+  return [
+    ...builtinGroups,
+    {
+      group: 'custom',
+      title: SHORTCUT_GROUP_TITLES.custom,
+      // `comboAsShortcut` ולא ליטרל: אותה המרה שההתאמה בזמן ריצה משתמשת
+      // בה, ולכן התווית שמוצגת כאן היא בהכרח התווית של הצירוף שיירה.
+      items: props.custom.map((entry) =>
+        comboAsShortcut(entry.combo, {
+          id: entry.id,
+          // השם שהמשתמש נתן, ואחריו מה שהקיצור מחיל: השם לבדו („כותרת”)
+          // אינו אומר מה יקרה, וסיכום לבדו אינו מזהה את הרשומה בדיאלוג
+          // הניהול.
+          description: `${entry.name} — ${presetSummary(entry.preset)}`,
+        }),
+      ),
+    },
+  ];
+});
 
 defineEmits<{
   (e: 'close'): void;

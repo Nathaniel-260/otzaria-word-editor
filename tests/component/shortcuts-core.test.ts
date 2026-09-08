@@ -37,6 +37,9 @@ const stub = vi.hoisted(() => ({
   confirmAnswer: false,
   /** כמה פעמים מצב השמירה אופס — כלומר מסמך חדש נפתח. */
   resets: 0,
+  /** הקיצורים האישיים שהאחסון מחזיר, ומה שנכתב אליו. */
+  storedCustomShortcuts: null as unknown,
+  persistedCustomShortcuts: [] as unknown[],
 }));
 
 vi.mock('../../src/engine/create-editor', () => ({
@@ -157,6 +160,10 @@ vi.mock('../../src/host/settings', () => ({
   saveRecentDocuments: async () => {},
   loadDiscardBackups: async () => null,
   saveDiscardBackups: async () => {},
+  loadCustomShortcuts: async () => stub.storedCustomShortcuts,
+  saveCustomShortcuts: async (list: unknown) => {
+    stub.persistedCustomShortcuts.push(list);
+  },
 }));
 
 vi.mock('../../src/host/otzaria-client', async (importOriginal) => ({
@@ -227,6 +234,8 @@ beforeEach(() => {
   stub.resets = 0;
   stub.isDirty = false;
   stub.confirmAnswer = false;
+  stub.storedCustomShortcuts = null;
+  stub.persistedCustomShortcuts.length = 0;
   adapter = createCommandDouble();
   superdoc = createSuperdocDouble();
   stub.adapter = adapter;
@@ -1113,5 +1122,103 @@ describe('הפוקוס בתוך המסמך', () => {
 
     expect(adapter.calls).toEqual([]);
     expect(event.defaultPrevented).toBe(false);
+  });
+});
+
+describe('קיצורים אישיים', () => {
+  /**
+   * המסלול המלא של המערכת האישית, על המעטפת האמיתית: רשומה באחסון, הקשה,
+   * ופקודות שמגיעות ל-controller.
+   *
+   * מה שרק כאן אפשר להוכיח: שהרשימה נטענת בעלייה, שהיא מגיעה למנתב, ושהמתג
+   * קורא את מצב **המנוע** ולא דגל מקומי. שלושת הדברים האלה הם חיווט, וחיווט
+   * שנשכח נראה בדיוק כמו פיצ׳ר שלא קיים.
+   */
+  const RECORD = {
+    id: 'cs-1',
+    name: 'כותרת קטע',
+    kind: 'format-preset',
+    combo: { code: 'KeyK', ctrl: true, shift: false, alt: true },
+    preset: { fontFamily: 'David', fontSizePt: 14 },
+  };
+
+  it('הצירוף מחיל את הערכה, ולחיצה נוספת מחזירה את מה שהיה', async () => {
+    stub.storedCustomShortcuts = [RECORD];
+    adapter = createCommandDouble({
+      states: { 'font-family': { value: 'Arial' }, 'font-size': { value: 10 } },
+    });
+    stub.adapter = adapter;
+
+    await mountShell();
+
+    const first = press({ code: 'KeyK', ctrlKey: true, altKey: true });
+    await settle();
+
+    expect(first.defaultPrevented).toBe(true);
+    expect(adapter.applied).toEqual([
+      { id: 'font-family', payload: 'David' },
+      { id: 'font-size', payload: 14 },
+    ]);
+
+    // המנוע מדווח עכשיו את מה שהוחל — בדיוק כמו אחרי החלה אמיתית.
+    adapter.setState('font-family', { value: 'David' });
+    adapter.setState('font-size', { value: 14 });
+
+    const second = press({ code: 'KeyK', ctrlKey: true, altKey: true });
+    await settle();
+
+    expect(second.defaultPrevented).toBe(true);
+    expect(adapter.applied.slice(2)).toEqual([
+      { id: 'font-family', payload: 'Arial' },
+      { id: 'font-size', payload: 10 },
+    ]);
+  });
+
+  it('**לחיצה נוספת אחרי שהמשתמש שינה ביד מחילה מחדש, ולא מחזירה**', async () => {
+    // הבאג שהמתג נבנה למנוע: „העיצוב הקודם” שנשמר אינו קודם לטקסט שהסמן
+    // עומד בו כרגע, והחזרתו הייתה משכתבת אותו.
+    stub.storedCustomShortcuts = [RECORD];
+    adapter = createCommandDouble({
+      states: { 'font-family': { value: 'Arial' }, 'font-size': { value: 10 } },
+    });
+    stub.adapter = adapter;
+
+    await mountShell();
+    press({ code: 'KeyK', ctrlKey: true, altKey: true });
+    await settle();
+
+    // הסמן עבר לטקסט אחר: הגופן „דוד” אבל הגודל 20, כלומר הערכה אינה בתוקף.
+    adapter.setState('font-family', { value: 'David' });
+    adapter.setState('font-size', { value: 20 });
+
+    press({ code: 'KeyK', ctrlKey: true, altKey: true });
+    await settle();
+
+    expect(adapter.applied.slice(2)).toEqual([
+      { id: 'font-family', payload: 'David' },
+      { id: 'font-size', payload: 14 },
+    ]);
+  });
+
+  it('רשומה שצירופה תפוס ברג׳יסטרי אינה נטענת — Ctrl+B נשאר „מודגש”', async () => {
+    stub.storedCustomShortcuts = [
+      { ...RECORD, combo: { code: 'KeyB', ctrl: true, shift: false, alt: false } },
+    ];
+
+    await mountShell();
+    press({ code: 'KeyB', ctrlKey: true });
+    await settle();
+
+    expect(adapter.calls.map((call) => call.id)).toEqual(['bold']);
+  });
+
+  it('צירוף שאין לו רשומה אינו נבלע', async () => {
+    await mountShell();
+
+    const event = press({ code: 'KeyK', ctrlKey: true, altKey: true });
+    await settle();
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(adapter.calls).toEqual([]);
   });
 });

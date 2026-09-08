@@ -76,6 +76,7 @@
         @export-pdf="$emit('export-pdf')"
         @about="$emit('about')"
         @shortcuts-help="$emit('shortcuts-help')"
+        @shortcuts-manage="$emit('shortcuts-manage')"
         @exit-app="$emit('exit-app')"
       />
       <HomeTab
@@ -216,6 +217,7 @@ defineEmits<{
   (e: 'export-otzaria'): void;
   (e: 'about'): void;
   (e: 'shortcuts-help'): void;
+  (e: 'shortcuts-manage'): void;
   (e: 'exit-app'): void;
   (e: 'open-find'): void;
   (e: 'open-replace'): void;

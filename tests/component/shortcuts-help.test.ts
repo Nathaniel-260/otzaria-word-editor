@@ -159,6 +159,8 @@ vi.mock('../../src/host/settings', () => ({
   saveRecentDocuments: async () => {},
   loadDiscardBackups: async () => null,
   saveDiscardBackups: async () => {},
+  loadCustomShortcuts: async () => null,
+  saveCustomShortcuts: async () => {},
 }));
 
 vi.mock('../../src/host/otzaria-client', async (importOriginal) => ({
