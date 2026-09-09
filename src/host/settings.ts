@@ -161,6 +161,29 @@ export async function saveSpellcheckWords(words: readonly string[]): Promise<voi
   await tryCall('storage.set', { key: SPELLCHECK_WORDS_KEY, value: [...words] });
 }
 
+const CUSTOM_SHORTCUTS_KEY = 'custom-shortcuts';
+
+/**
+ * הקיצורים שהמשתמש הגדיר בעצמו, גולמיים.
+ *
+ * הפירוש — השמטת רשומות פגומות, השמטת צירוף שתפוס ברג'יסטרי והתקרה — יושב
+ * ב-ui/shortcuts/custom-shortcuts.ts (`normalizeCustomShortcuts`), כמו ההפרדה
+ * בין `loadSessionRecord` ל-`normalizeSession`: ההחלטות נבדקות בלי לזייף את
+ * הגשר.
+ *
+ * ב-`storage` של אוצריא ולא ב-localStorage, בשונה ממערכת המאקרו: קיצור אישי
+ * הוא העדפה של המשתמש כמו הסרגל ומילון האיות, והוא אמור לשרוד ניקוי של אחסון
+ * הדפדפן שהתוסף יושב בו.
+ */
+export async function loadCustomShortcuts(): Promise<unknown> {
+  return tryCall<unknown>('storage.get', { key: CUSTOM_SHORTCUTS_KEY });
+}
+
+/** כשל כתיבה נבלע כמו בכל שאר ההעדפות כאן — ומדווח למשתמש באתר הקריאה. */
+export async function saveCustomShortcuts(list: readonly unknown[]): Promise<void> {
+  await tryCall('storage.set', { key: CUSTOM_SHORTCUTS_KEY, value: [...list] });
+}
+
 const RECENT_DOCUMENTS_KEY = 'recent-documents';
 
 /**

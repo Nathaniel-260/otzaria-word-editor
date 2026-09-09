@@ -46,6 +46,18 @@ export interface ShortcutDispatcherDeps {
   isDocumentSurface?: (target: EventTarget | null) => boolean;
   /** הרשומות. ברירת המחדל היא הרג'יסטרי; הבדיקות מזריקות רשימה משלהן. */
   shortcuts?: readonly Shortcut[];
+  /**
+   * הקיצורים שהמשתמש הגדיר בעצמו, בצורת `Shortcut` (`customMatchers`).
+   *
+   * פונקציה ולא רשימה: הרשימה משתנה בזמן ריצה — הדיאלוג מוסיף ומוחק — ומאזין
+   * שנרשם על העתק היה קופא על מה שהיה בפתיחת המסמך.
+   */
+  customShortcuts?: () => readonly Shortcut[];
+  /**
+   * מריצה קיצור אישי לפי מזהה. מחזירה האם טופל, כמו פעולת מעטפת: בלי מסמך
+   * פתוח אין מה לעצב, ובליעת הצירוף הייתה לוקחת אותו מהדפדפן בלי לתת דבר.
+   */
+  runCustom?: (id: string) => boolean;
   /** היעד שאליו נרשם המאזין. ברירת מחדל `window`. */
   target?: Pick<EventTarget, 'addEventListener' | 'removeEventListener'>;
 }
@@ -70,6 +82,33 @@ export function createShortcutDispatcher(deps: ShortcutDispatcherDeps): Shortcut
   const inUiTextEntry = (target: EventTarget | null): boolean =>
     isTextEntryTarget(target) && !isDocumentSurface(target);
 
+  /**
+   * הקיצורים האישיים — **רק** אחרי שלא נמצאה רשומה מובנית.
+   *
+   * הסדר הזה הוא כל ההבטחה של המערכת האישית: היא נוספת ואינה דורסת. די בכך
+   * שצירוף **הותאם** לרשומה מובנית כדי שהמסלול האישי לא ייבחן — גם אם הרשומה
+   * ההיא סירבה לרוץ (`native`, `onKeyUp`, דיאלוג פתוח). אחרת קיצור אישי על
+   * `Ctrl+V` היה נורה בדיוק במצב שבו ההדבקה של הדפדפן חייבת לעבור.
+   *
+   * שאר ההכרעות זהות לאלה של הרשומות המובנות ואינן משוכפלות: דיאלוג פתוח חוסם
+   * (לקיצור אישי אין „מותר במודאל”), ושדה טקסט של הממשק חוסם — הצמדת עיצוב
+   * אינה שייכת לשדה שם המסמך.
+   */
+  function handleCustom(event: KeyboardEvent): boolean {
+    const runCustom = deps.runCustom;
+    if (!runCustom || !deps.customShortcuts) return false;
+
+    const match = matchAny(event, deps.customShortcuts());
+    if (!match) return false;
+
+    if (isModalOpen()) return false;
+    if (inUiTextEntry(event.target)) return false;
+
+    const handled = runCustom(match.id);
+    if (handled) event.preventDefault();
+    return handled;
+  }
+
   function handle(event: KeyboardEvent): boolean {
     // מישהו כבר טיפל. המאזין שלנו יושב על `window` בשלב ה-bubble, כלומר
     // **אחרי** ה-keymap של מנוע העריכה שיושב על אזור המסמך; בלי הבדיקה הזאת
@@ -78,7 +117,7 @@ export function createShortcutDispatcher(deps: ShortcutDispatcherDeps): Shortcut
     if (event.defaultPrevented) return false;
 
     const shortcut = matchAny(event, shortcuts);
-    if (!shortcut) return false;
+    if (!shortcut) return handleCustom(event);
 
     // כיווניות פסקה מזוהה בשחרור ה-Shift, ב-`direction.ts`. כאן היא הייתה
     // נורית ברגע שהמשתמש לוחץ Shift — כלומר גם באמצע `Ctrl+Shift+X`.

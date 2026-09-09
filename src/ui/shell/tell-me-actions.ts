@@ -40,7 +40,8 @@ export type TellMeCustomAction =
   | 'toggle-book-completion'
   | 'clipboard-copy'
   | 'clipboard-cut'
-  | 'clipboard-paste';
+  | 'clipboard-paste'
+  | 'shortcuts-manage';
 
 export interface TellMeAction {
   /** מזהה ייחודי לפעולה */
@@ -162,6 +163,26 @@ export const TELL_ME_ACTIONS: readonly TellMeAction[] = [
     shortcut: 'Ctrl+/',
     icon: 'info',
     shellAction: 'shortcuts-help',
+  },
+  {
+    id: 'help-shortcuts-manage',
+    title: 'ניהול קיצורים',
+    category: 'עזרה',
+    description: 'הצמדת צירוף מקשים לערכת עיצוב',
+    keywords: [
+      'ניהול',
+      'קיצורים',
+      'קיצור',
+      'הצמדה',
+      'התאמה',
+      'ערכה',
+      'עיצוב',
+      'customize',
+      'shortcuts',
+      'keyboard',
+    ],
+    icon: 'keyboard',
+    customAction: 'shortcuts-manage',
   },
   {
     id: 'help-about',

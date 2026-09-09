@@ -69,6 +69,7 @@
         @export-otzaria="onExportOtzaria"
         @about="isAboutOpen = true"
         @shortcuts-help="isShortcutsHelpOpen = true"
+        @shortcuts-manage="isShortcutsManagerOpen = true"
         @exit-app="onExit"
         @open-find="openFindDialog('find')"
         @open-replace="openFindDialog('replace')"
@@ -225,7 +226,22 @@
 
     <ShortcutsDialog
       :is-open="isShortcutsHelpOpen"
+      :custom="customShortcuts"
       @close="isShortcutsHelpOpen = false"
+    />
+
+    <!--
+      „ניהול קיצורים”. הרשימה נכנסת כ-prop והדיאלוג פולט כוונה בלבד:
+      האוסף, האימות והכתיבה לאחסון הם של המעטפת — ראו
+      ui/shortcuts/custom-shortcuts.ts.
+    -->
+    <ShortcutManagerDialog
+      :is-open="isShortcutsManagerOpen"
+      :list="customShortcuts"
+      :taken="currentMacroHeldCombos()"
+      @close="isShortcutsManagerOpen = false"
+      @save="onSaveCustomShortcut"
+      @remove="onRemoveCustomShortcut"
     />
 
     <!--
@@ -323,6 +339,7 @@ import FindReplaceDialog from './ui/panels/FindReplaceDialog.vue';
 import AboutDialog from './ui/panels/AboutDialog.vue';
 import LinkDialog from './ui/panels/LinkDialog.vue';
 import ShortcutsDialog from './ui/panels/ShortcutsDialog.vue';
+import ShortcutManagerDialog from './ui/panels/ShortcutManagerDialog.vue';
 import OpenDocumentDialog from './ui/panels/OpenDocumentDialog.vue';
 import UnsavedChangesDialog from './ui/panels/UnsavedChangesDialog.vue';
 import DiscardedDocumentsDialog from './ui/panels/DiscardedDocumentsDialog.vue';
@@ -539,6 +556,8 @@ import {
   saveRecentDocuments,
   loadDiscardBackups,
   saveDiscardBackups,
+  loadCustomShortcuts,
+  saveCustomShortcuts,
 } from './host/settings';
 import {
   activeEntry,
@@ -593,6 +612,19 @@ import { startParagraphOnNewPage, pageBreakTracker } from './engine/page-break';
 import { createFontMemory } from './composables/use-font-controls';
 import { createLinkDialog } from './composables/use-link-dialog';
 import { createShellActionRunner } from './ui/shortcuts/actions';
+import { comboLabel, reservationText, shortcutTextOwners } from './ui/shortcuts/combo';
+import {
+  customMatchers,
+  dropMessage,
+  normalizeCustomShortcuts,
+  removeShortcut,
+  upsertShortcut,
+  type CustomShortcut,
+  type CustomShortcutDraft,
+} from './ui/shortcuts/custom-shortcuts';
+import { createPresetToggles } from './ui/shortcuts/preset-toggle';
+import { readFormat } from './engine/format-reading';
+import { applyPreset } from './engine/apply-preset';
 import type { ShellAction } from './ui/shortcuts/registry';
 import { useContextMenu } from './composables/use-context-menu';
 import ContextMenu from './ui/menu/ContextMenu.vue';
@@ -838,6 +870,140 @@ const findInitialQuery = ref('');
 const titleBarRef = ref<InstanceType<typeof TitleBar> | null>(null);
 const isAboutOpen = ref(false);
 const isShortcutsHelpOpen = ref(false);
+/**
+ * ## הקיצורים שהמשתמש הגדיר בעצמו
+ *
+ * מערכת **נוספת** על הרג'יסטרי, ולא שכבה מעליו: אף קיצור מובנה אינו נגרע
+ * ואינו ניתן לדריסה, וצירוף שיש לו רשומה ברג'יסטרי פשוט אינו זמין להצמדה
+ * (ui/shortcuts/custom-shortcuts.ts). המנתב בודק את הרשימה הזאת רק אחרי שלא
+ * מצא רשומה מובנית — ראו `handleCustom` ב-dispatch.ts.
+ *
+ * מה שקיצור כזה מריץ הוא „ערכת עיצוב” דו-מצבית: לחיצה מחילה, לחיצה נוספת
+ * מחזירה את מה שהיה. ההכרעה מתי „נוספת” היא חזרה ומתי היא החלה מחדש היא של
+ * `preset-toggle.ts`, והיא נשענת על מה שהמנוע מדווח **עכשיו** ולא על דגל —
+ * ההנמקה המלאה בראש הקובץ ההוא.
+ */
+const isShortcutsManagerOpen = ref(false);
+const customShortcuts = ref<CustomShortcut[]>([]);
+
+/**
+ * הרשומות בצורת `Shortcut`, להתאמה. `computed` כדי שהוספה בדיאלוג תיתפס בלי
+ * לרשום מחדש את המאזין.
+ */
+const customShortcutMatchers = computed(() => customMatchers(customShortcuts.value));
+
+/**
+ * הצירופים שמערכת המאקרו מחזיקה — חתימה → שם הפריט.
+ *
+ * המקור השני לקיצורים אישיים בעורך, וזה שקל לשכוח: הקלטה, קטע טקסט, סקריפט
+ * או כלי יכולים לשאת קיצור, והוא נקשר על מכל המסמך בשלב הלכידה. כלומר הוא
+ * **מקדים** את המנתב שלנו, והצמדה על אותו צירוף אינה מייצרת שגיאה אלא קיצור
+ * אישי ששותק. ההנמקה המלאה ב-`signaturesOfShortcutText`.
+ *
+ * זו **פונקציה**, ולא `computed`: ה-kit שומר את הרשימות שלו מחוץ לריאקטיביות
+ * של Vue. `computed` על `activeMacros` היה מצלם את הרשימה כשהמסמך נפתח, ואז
+ * מאקרו שנשמר אחר כך לא היה נראה כמחזיק בצירוף — ודיאלוג הקיצורים היה מאשר
+ * התנגשות שהמאקרו לוכד לפנינו. הקריאה מתבצעת בכל רינדור של פתיחת הדיאלוג,
+ * וגם בשער השמירה למטה, כך שהתמונה אינה יכולה להתיישן בין התצוגה ללחיצה.
+ */
+function currentMacroHeldCombos(): Map<string, string> {
+  const kit = activeMacros.value?.kit;
+  if (!kit) return new Map<string, string>();
+  return shortcutTextOwners([
+    ...kit.listRecordings(),
+    ...kit.listSnippets(),
+    ...kit.listScripts(),
+    ...kit.listTools(),
+  ]);
+}
+
+/**
+ * הזיכרון של „מה היה לפני ההחלה”. בזיכרון ולא באחסון, ונשכח בכל החלפת מסמך:
+ * „העיצוב הקודם” תקף לרצף עבודה אחד, והחזרה למצב של מסמך שנסגר אינה החזרה.
+ */
+const presetToggles = createPresetToggles();
+
+/** קורא את הרשימה מהאחסון. כשל או ערך פגום = רשימה ריקה, כמו כל העדפה אחרת. */
+async function loadCustomShortcutList(options: { announce?: boolean } = {}): Promise<string> {
+  const { list, dropped } = normalizeCustomShortcuts(await loadCustomShortcuts());
+  customShortcuts.value = list;
+  // רשומה שנשרה אינה שקטה: המסלול שההודעה נועדה לו הוא קיצור שהמשתמש הגדיר
+  // וש**צירופו נכנס לרג'יסטרי** בגרסה הזאת — הוא צריך לדעת שהוא נעלם, ולא
+  // לגלות זאת בלחיצה שלא עשתה כלום.
+  //
+  // הנוסח נגזר מהספירה לפי סיבה (`dropMessage`), ואינו נכתב כאן: הודעה
+  // שנוקבת בהתנגשות על רשומה **פגומה** שולחת את המשתמש לחפש משהו שאינו קיים,
+  // וזה בדיוק מה שנמדד לפני התיקון.
+  const message = dropMessage(dropped);
+  if (options.announce !== false && message !== '') setStatus(message);
+  return message;
+}
+
+/** כותבת לאחסון. כשל מדווח למשתמש — קיצור שלא נשמר ייעלם בהפעלה הבאה. */
+function persistCustomShortcuts(): void {
+  void saveCustomShortcuts(customShortcuts.value).catch(() => {
+    setStatus('שמירת הקיצורים נכשלה — הם יפעלו עד סוף ההפעלה', true);
+  });
+}
+
+function onSaveCustomShortcut(draft: CustomShortcutDraft): void {
+  // בין תצוגת הטופס ללחיצה מאקרו יכול להיעצר (Ctrl+Alt+R) או להתעדכן.
+  // הוא נקשר בשלב capture, לכן תמונת המצב נקראת שוב ברגע ה-commit ולא
+  // מסתמכים על ה-prop שהדיאלוג קיבל ברינדור הקודם.
+  const result = upsertShortcut(customShortcuts.value, draft, currentMacroHeldCombos());
+  if (!result.ok) {
+    setStatus(result.message, true);
+    return;
+  }
+  customShortcuts.value = result.list;
+  // עריכה משנה את הערכה, ולכן „העיצוב הקודם” שנזכר עבורה מתאר ערכה אחרת.
+  presetToggles.forget(result.id);
+  persistCustomShortcuts();
+  setStatus(`הקיצור נשמר: ${draft.name.trim()}`);
+}
+
+function onRemoveCustomShortcut(id: string): void {
+  customShortcuts.value = removeShortcut(customShortcuts.value, id);
+  presetToggles.forget(id);
+  persistCustomShortcuts();
+  setStatus('הקיצור נמחק');
+}
+
+/**
+ * מריצה קיצור אישי. מחזירה האם **טופל** — אותו חוזה של פעולת מעטפת: המנתב
+ * בולע את ההתנהגות של הדפדפן רק כשטיפלנו.
+ *
+ * בלי מסמך פתוח התשובה היא `true` ולא `false`, ובכוונה: הצירוף הוא שלנו,
+ * ההודעה בעברית מסבירה, ובליעתו מונעת מה-WebView לעשות איתו משהו אחר. זו
+ * אותה הכרעה בדיוק של `Ctrl+S` בזמן שמירה.
+ */
+function runCustomShortcut(id: string): boolean {
+  const entry = customShortcuts.value.find((item) => item.id === id);
+  // הרשימה שהמנתב התאים מולה היא אותה רשימה, ולכן זה אינו מצב שקורה. `false`
+  // ולא בליעה: צירוף שאין לו רשומה אינו שלנו.
+  if (!entry) return false;
+
+  const adapter = commandAdapter.value;
+  if (!adapter) {
+    setStatus('המסמך עדיין נטען', true);
+    return true;
+  }
+
+  const decision = presetToggles.decide({
+    id: entry.id,
+    name: entry.name,
+    label: comboLabel(entry.combo),
+    preset: entry.preset,
+    reading: readFormat(adapter, readoutSelection.value),
+  });
+
+  // ההודעה לפני ההרצה: כשל של פקודה בודדת מגיע דרך `reportCommand` **אחריה**,
+  // ולכן הוא דורס אותה — וזו הקדימות הנכונה.
+  setStatus(decision.status);
+  void applyPreset(adapter, decision.apply, reportCommand);
+  return true;
+}
+
 
 /**
  * „פתח מסמך” — הדיאלוג שהחליף את הקפיצה הישירה לבורר הקבצים.
@@ -1909,6 +2075,11 @@ function activateTab(session: DocumentSession): void {
   const opened = activeSuperdoc.value;
   if (isFocusMode.value && opened) focusOpenedDocument(opened);
   noteTabUsed(session);
+  // „העיצוב שהיה לפני הלחיצה” שייך לטקסט של הטאב שיוצא. בלי השכחה הזאת
+  // התרחיש הבא שובר: ערכה „דוד 12” הוחלה בטאב א' על טקסט „אריאל 10”,
+  // ובטאב ב' הטקסט הוא ממילא „דוד 12” — הקריאה מתאימה לערכה, הלחיצה
+  // נקראת כ„חזרה”, והיא מחילה על טאב ב' את „אריאל 10” של טאב א'.
+  presetToggles.forgetAll();
   void trimLiveDocuments();
 
   // „מי היה פעיל” הוא חלק מהרשומה, והוא משתנה בדיוק כאן. בלי הכתיבה הזאת
@@ -2214,7 +2385,13 @@ async function openDocumentInto(
     // „ריבוי מסמכים” ליד `sessions`), ואיפוס גורף היה מוחק את הקריאה של
     // המסמך שהמשתמש מסתכל עליו דווקא.
     if (session) session.ui.readoutSelection = UNSETTLED_SELECTION;
-    if (!session || session === activeSession.value) readoutSelection.value = UNSETTLED_SELECTION;
+    if (!session || session === activeSession.value) {
+      readoutSelection.value = UNSETTLED_SELECTION;
+      // ומאותו טעם בדיוק גם „העיצוב שהיה לפני”: פתיחת מסמך **לתוך אותו
+      // טאב** אינה עוברת ב-`activateTab`, ולכן זו הנקודה היחידה שתופסת
+      // אותה. ההנמקה המלאה שם.
+      presetToggles.forgetAll();
+    }
   });
 
   // החיפוש שייך ל-session: ה-handle הוא של ה-controller של המופע, ומסמך חדש
@@ -2264,6 +2441,10 @@ async function openDocumentInto(
         // הכנסת תמונה). הדיאלוג של אוצריא; מחוץ לאוצריא הוא מחזיר false,
         // וההקלטה מבוטלת — שמירה חלקית לא קורית בלי הסכמה.
         confirmIncomplete: (title, content) => confirm({ title, content }),
+        // הכיוון ההפוך של מנגנון ההתנגשות: הקיצורים האישיים מוצהרים כשמורים
+        // גם כלפי מערכת המאקרו, אחרת מאקרו היה נקשר עליהם ומקדים אותם. ראו
+        // `reservedCombos` ב-engine/macros.ts, כולל המגבלה שנשארה.
+        reservedCombos: customShortcuts.value.map((entry) => reservationText(entry.combo)),
       });
       // כלי „שולחן העורך” נרשמים על ה-kit של המסמך הזה: מופיעים בדיאלוג
       // ניהול המאקרו וניתנים לקיצור מקלדת. הרישום פר-התקנה — ה-kit נבנה
@@ -4056,6 +4237,9 @@ function onCustomActionFromTellMe(action: TellMeCustomAction): void {
     case 'about':
       isAboutOpen.value = true;
       break;
+    case 'shortcuts-manage':
+      isShortcutsManagerOpen.value = true;
+      break;
     case 'clipboard-copy':
       void copySelection(activeSuperdoc.value).then((outcome) => reportCommand(outcome, 'clipboard-copy'));
       break;
@@ -4855,6 +5039,10 @@ onMounted(async () => {
     // כך; דיאלוג החיפוש אינו מודאלי בכוונה, ומעליו עדיין מותר לערוך ולשמור.
     isModalOpen: () => isModalDialogOpen(),
     isDocumentSurface,
+    // הרשימה האישית, ואחריה בלבד: המנתב מגיע אליה רק כשלא נמצאה רשומה
+    // מובנית, וזו כל ההבטחה של המערכת הזאת — היא נוספת ואינה דורסת.
+    customShortcuts: () => customShortcutMatchers.value,
+    runCustom: runCustomShortcut,
   });
 
   directionShortcut = createDirectionShortcut({
@@ -4889,7 +5077,15 @@ onMounted(async () => {
     // כל הקריאות במקביל ולא בזו אחר זו: כל אחת היא סבב IPC מלא מול אוצריא,
     // הן קוראות מפתחות שונים ואינן תלויות זו בזו — והן עומדות בין המשתמש לבין
     // פתיחת המסמך הראשון.
-    const [storedAutosave, storedRuler, stored, storedRecents, storedDiscarded, storedSpellcheck] =
+    const [
+      storedAutosave,
+      storedRuler,
+      stored,
+      storedRecents,
+      storedDiscarded,
+      storedSpellcheck,
+      customShortcutsNotice,
+    ] =
       await Promise.all([
         loadAutosaveEnabled(),
         loadRulerVisible(),
@@ -4897,6 +5093,12 @@ onMounted(async () => {
         loadRecentDocuments(),
         loadDiscardBackups(),
         loadSpellcheckEnabled(),
+        // לפני פתיחת המסמך הראשון: MacroKit קוראת `reservedShortcuts` פעם
+        // אחת בלבד. אם הקיצורים האישיים ייטענו אחר כך, מאקרו קיים יכול
+        // להיקשר אליהם לפני שהם מוכרזים כשמורים ולהשתיק אותם.
+        // ההודעה נדחית לסיום הפתיחה: בזמן טעינת המסמך שורת המצב מוחלפת,
+        // ואזהרה שנכתבה כבר כאן הייתה נעלמת לפני שהמשתמש יכול לקרוא אותה.
+        loadCustomShortcutList({ announce: false }),
       ]);
     autosaveEnabled.value = storedAutosave;
     rulerPreference = storedRuler;
@@ -4960,6 +5162,7 @@ onMounted(async () => {
       // הכשל יושבת בשורת המצב שמתחת, ומסך טעינה שנשאר פרוש מסתיר בדיוק את
       // מה שצריך להיקרא.
       splashDone();
+      if (customShortcutsNotice !== '') setStatus(customShortcutsNotice);
     }
   } else {
     splashDone();

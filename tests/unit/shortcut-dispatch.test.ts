@@ -303,3 +303,121 @@ describe('המנתב', () => {
     expect(() => dispatcher.dispose()).not.toThrow();
   });
 });
+
+describe('קיצורים אישיים', () => {
+  /**
+   * הרשומה האישית. `Ctrl+Alt+K` פנוי, ו-`Ctrl+B` **תפוס** — הרשומה השנייה
+   * קיימת בדיוק כדי לוודא שגם כשהיא נכנסת לרשימה האישית היא אינה יורה.
+   */
+  const CUSTOM: Shortcut = {
+    id: 'cs-1',
+    label: 'Ctrl+Alt+K',
+    description: 'כותרת קטע',
+    group: 'custom',
+    code: 'KeyK',
+    ctrl: true,
+    alt: true,
+  };
+
+  const SHADOWING_BOLD: Shortcut = {
+    id: 'cs-2',
+    label: 'Ctrl+B',
+    description: 'ניסיון לדרוס מודגש',
+    group: 'custom',
+    code: 'KeyB',
+    ctrl: true,
+  };
+
+  /**
+   * `handled` הוא מה ש-`runCustom` יחזיר. פרמטר ולא override על ה-deps:
+   * מסירת מרגל אחר דרך `over` הייתה משאירה את המרגל שמוחזר כאן בלי
+   * חיווט — כלומר בדיקה שמאשרת „לא נקרא” על מרגל שממילא לא היה מחובר.
+   */
+  function withCustom(
+    over: Partial<ShortcutDispatcherDeps> = {},
+    handled = true,
+    shortcuts: readonly Shortcut[] = [CUSTOM, SHADOWING_BOLD],
+  ) {
+    const runCustom = vi.fn(() => handled);
+    const harness = setup({ customShortcuts: () => shortcuts, runCustom, ...over });
+    return { ...harness, runCustom };
+  }
+
+  it('צירוף פנוי מגיע לקיצור האישי ונבלע', () => {
+    const { dispatcher, runCustom } = withCustom();
+    const keydown = event({ code: 'KeyK', ctrlKey: true, altKey: true });
+
+    expect(dispatcher.handle(keydown)).toBe(true);
+    expect(runCustom).toHaveBeenCalledWith('cs-1');
+    expect(keydown.preventDefault).toHaveBeenCalled();
+  });
+
+  it('**קיצור מובנה זוכה** — רשומה אישית על אותו צירוף אינה נבחנת', () => {
+    // זו ההבטחה של כל המערכת: היא נוספת ואינה דורסת. `Ctrl+B` מריץ את
+    // פקודת המנוע, ולא את מה שהמשתמש הצמיד לו בטעות.
+    const { dispatcher, runCommand, runCustom } = withCustom();
+
+    expect(dispatcher.handle(event({ code: 'KeyB', ctrlKey: true }))).toBe(true);
+    expect(runCommand).toHaveBeenCalledWith('bold', undefined);
+    expect(runCustom).not.toHaveBeenCalled();
+  });
+
+  it('צירוף שהדפדפן מטפל בו אינו נגזל בידי קיצור אישי', () => {
+    // `Ctrl+V` מותאם לרשומה מובנית שמסומנת `native` ולכן היא **אינה רצה**.
+    // די בכך שהיא הותאמה: אילו המסלול האישי היה נבחן אחרי סירוב, קיצור אישי
+    // על Ctrl+V היה בולע את ההדבקה עצמה — הפעולה היחידה שאסור לגעת בה.
+    const { dispatcher, runCustom } = withCustom({}, true, [
+      { ...CUSTOM, id: 'cs-3', code: 'KeyV', ctrl: true, alt: false },
+    ]);
+
+    expect(dispatcher.handle(event({ code: 'KeyV', ctrlKey: true }))).toBe(false);
+    expect(runCustom).not.toHaveBeenCalled();
+  });
+
+  it('דיאלוג מודאלי פתוח חוסם — לקיצור אישי אין „מותר במודאל”', () => {
+    const { dispatcher, runCustom } = withCustom({ isModalOpen: () => true });
+
+    expect(dispatcher.handle(event({ code: 'KeyK', ctrlKey: true, altKey: true }))).toBe(false);
+    expect(runCustom).not.toHaveBeenCalled();
+  });
+
+  it('שדה טקסט של הממשק חוסם, ואזור המסמך אינו חוסם', () => {
+    const field = element('input');
+    const surface = element('textarea');
+
+    const blocked = withCustom();
+    expect(
+      blocked.dispatcher.handle(event({ code: 'KeyK', ctrlKey: true, altKey: true, target: field })),
+    ).toBe(false);
+    expect(blocked.runCustom).not.toHaveBeenCalled();
+
+    // משטח ההקלדה של המנוע הוא `<textarea>` בתוך אזור המסמך — ושם הקיצור
+    // חייב לעבוד, אחרת הוא מת בדיוק כשמקלידים.
+    const allowed = withCustom({ isDocumentSurface: (node) => node === surface });
+    expect(
+      allowed.dispatcher.handle(event({ code: 'KeyK', ctrlKey: true, altKey: true, target: surface })),
+    ).toBe(true);
+  });
+
+  it('„לא טופל” אינו נבלע — בלי מסמך הצירוף ממשיך הלאה', () => {
+    const { dispatcher, runCustom } = withCustom({}, false);
+    const keydown = event({ code: 'KeyK', ctrlKey: true, altKey: true });
+
+    expect(dispatcher.handle(keydown)).toBe(false);
+    expect(runCustom).toHaveBeenCalledWith('cs-1');
+    expect(keydown.preventDefault).not.toHaveBeenCalled();
+  });
+
+  it('בלי רשימה אישית המנתב מתנהג כמו קודם', () => {
+    const { dispatcher } = setup();
+    expect(dispatcher.handle(event({ code: 'KeyK', ctrlKey: true, altKey: true }))).toBe(false);
+  });
+
+  it('אירוע שכבר טופל אינו מגיע לרשימה האישית', () => {
+    const { dispatcher, runCustom } = withCustom();
+    expect(
+      dispatcher.handle(event({ code: 'KeyK', ctrlKey: true, altKey: true, defaultPrevented: true })),
+    ).toBe(false);
+    expect(runCustom).not.toHaveBeenCalled();
+  });
+});

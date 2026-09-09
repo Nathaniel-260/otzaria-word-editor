@@ -207,6 +207,7 @@
 | `chevronUp` | כיווץ הרצועה | `chevron_up` |
 | `chevronLeft` | גלילת גלריית הסגנונות | `chevron_left` |
 | `chevronRight` | גלילת גלריית הסגנונות | `chevron_right` |
+| `keyboard` | ניהול קיצורים | `keyboard` |
 
 - מקור: <https://github.com/microsoft/fluentui-system-icons>
 - חבילה: `@fluentui/svg-icons@1.1.338` ב־npm, וריאנט `*_20_regular`

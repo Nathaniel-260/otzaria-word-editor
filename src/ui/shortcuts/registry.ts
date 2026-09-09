@@ -28,7 +28,14 @@ export type ShortcutGroup =
   | 'view'
   | 'otzaria'
   | 'macros'
-  | 'app';
+  | 'app'
+  /**
+   * הקיצורים שהמשתמש הגדיר בעצמו. **אין לו אף רשומה ב-`SHORTCUTS`**, ובכוונה:
+   * הם נתונים ולא רשומות סטטיות (ui/shortcuts/custom-shortcuts.ts), בדיוק כמו
+   * הקיצורים שמוצמדים לפריטי מאקרו. הקבוצה קיימת כאן כדי שהם יוצגו בדיאלוג
+   * „קיצורי מקלדת” תחת כותרת משלהם — ולא כדי שיוגדרו כאן.
+   */
+  | 'custom';
 
 export const SHORTCUT_GROUP_TITLES: Record<ShortcutGroup, string> = {
   file: 'קבצים',
@@ -44,6 +51,7 @@ export const SHORTCUT_GROUP_TITLES: Record<ShortcutGroup, string> = {
   otzaria: 'אוצריא',
   macros: 'מאקרו',
   app: 'ניווט בממשק',
+  custom: 'קיצורים שהגדרתם',
 };
 
 /**

@@ -163,6 +163,21 @@ export interface InstallMacrosOptions {
    * ההקלטה מבוטלת; שמירה חלקית דורשת הסכמה מפורשת, לא ברירת מחדל.
    */
   confirmIncomplete?: (title: string, content: string) => Promise<boolean>;
+  /**
+   * הצירופים של הקיצורים האישיים (ui/shortcuts/custom-shortcuts.ts), כמחרוזות
+   * שהפרסר של החבילה מבין — `reservationText`.
+   *
+   * הם נוספים ל-`reservedShortcuts` יחד עם תוויות הרג'יסטרי, ומאותו טעם
+   * בדיוק: קשירת מאקרו יושבת על שלב הלכידה של מכל המסמך, כלומר היא
+   * **מקדימה** את המנתב שלנו. בלי ההצהרה הזאת אפשר היה להצמיד מאקרו לצירוף
+   * שקיצור אישי כבר מחזיק, והתוצאה אינה שגיאה אלא שהקיצור האישי שותק.
+   *
+   * **מגבלה, ומדודה:** `reservedShortcuts` נקרא פעם אחת בבניית ה-kit, ואין
+   * לחבילה API לרשימה חיה. לכן מוגנים הקיצורים שהיו מוגדרים כשהמסמך נפתח.
+   * קיצור אישי שנוסף **אחרי** פתיחת המסמך אינו מוגן עד הפתיחה הבאה; הכיוון
+   * ההפוך — דיאלוג „ניהול קיצורים” — כן קורא את רשימת המאקרו בזמן אמת.
+   */
+  reservedCombos?: readonly string[];
 }
 
 export function installMacros(
@@ -191,7 +206,10 @@ export function installMacros(
       // הלכידה, ולכן התנגשות הייתה מאפילה בשקט על קיצור של העורך. התוויות
       // נמסרות כמו שהן — מה שאינו ניתן לפירוק ("Ctrl + Shift ימני") פשוט
       // אינו ניתן גם להתנגשות, והחבילה מתעלמת ממנו.
-      reservedShortcuts: SHORTCUTS.map((shortcut) => shortcut.label),
+      reservedShortcuts: [
+        ...SHORTCUTS.map((shortcut) => shortcut.label),
+        ...(options.reservedCombos ?? []),
+      ],
       // ה-gate האמיתי יושב ב-kit ולא בדיאלוג: כשהדגל כבוי runScript/runSource
       // מסרבים וקיצורי סקריפטים אינם נקשרים — סקריפט קיים או מיובא לא ירוץ
       // בשום מסלול. הסתרת הלשונית היא רק הצד הקוסמטי של אותו מתג.

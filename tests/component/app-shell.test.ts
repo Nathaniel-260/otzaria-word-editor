@@ -425,6 +425,8 @@ vi.mock('../../src/host/settings', () => ({
   saveDiscardBackups: async (list: unknown) => {
     stub.persistedDiscardBackups.push(list);
   },
+  loadCustomShortcuts: async () => null,
+  saveCustomShortcuts: async () => {},
 }));
 
 // הייבוא **אחרי** ה-mocks במכוון (הם מורמים בכל מקרה, וזה הסדר שקורא נכון).

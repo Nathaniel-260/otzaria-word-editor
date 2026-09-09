@@ -115,6 +115,8 @@ const EN: Readonly<Record<string, string>> = {
   'אודות עורך Word לאוצריא': 'About the Word Editor for Otzaria',
   'קיצורים': 'Shortcuts',
   'רשימת קיצורי המקלדת': 'List of keyboard shortcuts',
+  'ניהול קיצורים': 'Manage shortcuts',
+  'הצמדת צירוף מקשים לערכת עיצוב': 'Bind a key combination to a formatting preset',
 
   // ── לשונית „בית” ───────────────────────────────────────────────────
   'לוח': 'Clipboard',
