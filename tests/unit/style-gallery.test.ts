@@ -468,7 +468,7 @@ describe('סולם הכותרות', () => {
     expect(level2?.previewStyle.fontWeight).toBe('700');
   });
 
-  it('מסמך שמציע רמות עמוקות שומר עליהן, ולא נחתך לשלוש', () => {
+  it('מסמך שמציע רמה עמוקה שומר אותה בלי להמציא את הרמות שבאמצע', () => {
     const items = toGalleryItems([
       catalogItem({ id: 'Normal' }),
       catalogItem({ id: 'Heading1' }),
@@ -479,22 +479,16 @@ describe('סולם הכותרות', () => {
       'Heading1',
       'Heading2',
       'Heading3',
-      'Heading4',
       'Heading5',
     ]);
   });
 
-  it('התקרה היא 9 — `Heading10` אינו סגנון של Word', () => {
+  it('רמה 9 קיימת נשארת, אך אינה פותחת כרטיסים חסרים 4–8', () => {
     const items = toGalleryItems([catalogItem({ id: 'Heading9' })]);
     expect(items.map((item) => item.id)).toEqual([
       'Heading1',
       'Heading2',
       'Heading3',
-      'Heading4',
-      'Heading5',
-      'Heading6',
-      'Heading7',
-      'Heading8',
       'Heading9',
     ]);
   });

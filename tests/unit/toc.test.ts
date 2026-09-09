@@ -19,7 +19,6 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
-  TOC_LEVEL_INDENT_TWIPS,
   TOC_PAGE_NUMBER_RESERVE_TWIPS,
   layOutTocRows,
   configureTableOfContents,
@@ -647,8 +646,8 @@ describe('מוביל הנקודות ומספר העמוד', () => {
 
     expect(await layOutTocRows(engine.host)).toEqual({ ok: true });
 
-    // `row-1` הוא `TOC2` (ראו `documentWithToc`), ולכן העצירה שלו נסוגה
-    // בשיעור ההזחה — אחרת מספר העמוד שלו היה זז שמאלה מהעמודה.
+    // המיקום אחיד בכל רמה: `w:pos` נמדד משולי העמוד ב-Word, ולכן פיצוי לפי
+    // הזחה היה יוצר מסמך שמספרי העמוד שלו אינם בעמודה אחת מחוץ ל-SuperDoc.
     expect(engine.inputs('setTabStop')).toEqual([
       {
         target: { kind: 'block', nodeType: 'paragraph', nodeId: 'toc-1' },
@@ -658,7 +657,7 @@ describe('מוביל הנקודות ומספר העמוד', () => {
       },
       {
         target: { kind: 'block', nodeType: 'paragraph', nodeId: 'row-1' },
-        position: A4_TAB_POSITION - TOC_LEVEL_INDENT_TWIPS,
+        position: A4_TAB_POSITION,
         alignment: 'right',
         leader: 'dot',
       },
@@ -671,22 +670,7 @@ describe('מוביל הנקודות ומספר העמוד', () => {
     ]);
   });
 
-  it('כל שורה מוזחת לפי הרמה שלה, ורמה 1 מקבלת אפס במפורש', async () => {
-    const engine = fakeEngine({ tocs: ['toc-1'], blocks: documentWithToc() });
-
-    await layOutTocRows(engine.host);
-
-    expect(engine.inputs('setIndentation')).toEqual([
-      { target: { kind: 'block', nodeType: 'paragraph', nodeId: 'toc-1' }, left: 0 },
-      {
-        target: { kind: 'block', nodeType: 'paragraph', nodeId: 'row-1' },
-        left: TOC_LEVEL_INDENT_TWIPS,
-      },
-      { target: { kind: 'block', nodeType: 'paragraph', nodeId: 'row-2' }, left: 0 },
-    ]);
-  });
-
-  it('הרמה נגזרת מסגנון השורה, גם בעומק', async () => {
+  it('רמות עמוקות נשארות באותה עמודה', async () => {
     const engine = fakeEngine({
       tocs: ['toc-1'],
       blocks: [
@@ -699,31 +683,14 @@ describe('מוביל הנקודות ומספר העמוד', () => {
     await layOutTocRows(engine.host);
 
     expect(
-      engine.inputs('setIndentation').map((input) => (input as { left: number }).left),
-    ).toEqual([0, 2 * TOC_LEVEL_INDENT_TWIPS, 8 * TOC_LEVEL_INDENT_TWIPS]);
+      engine.inputs('setTabStop').map((input) => (input as { position: number }).position),
+    ).toEqual([A4_TAB_POSITION, A4_TAB_POSITION, A4_TAB_POSITION]);
   });
 
-  it('סגנון של מסמך Word מוזח לפי הרמה שהמנוע מצהיר עליה, ולא לפי שמו', async () => {
+  it('עמוד צר — העצירה נשארת בערך חיובי', async () => {
     const engine = fakeEngine({
       tocs: ['toc-1'],
-      preserved: { customStyles: [{ styleName: 'MyToc2', level: 2 }] },
-      blocks: [
-        { ordinal: 0, nodeId: 'toc-1', nodeType: 'tableOfContents', styleId: 'TOC1' },
-        { ordinal: 1, nodeId: 'row-1', nodeType: 'paragraph', styleId: 'MyToc2' },
-      ],
-    });
-
-    await layOutTocRows(engine.host);
-
-    expect(
-      engine.inputs('setIndentation').map((input) => (input as { left: number }).left),
-    ).toEqual([0, TOC_LEVEL_INDENT_TWIPS]);
-  });
-
-  it('עמוד צר ורמה עמוקה — העצירה נעצרת בערך חיובי ואינה יורדת מתחת לאפס', async () => {
-    const engine = fakeEngine({
-      tocs: ['toc-1'],
-      // אזור טקסט 1440 twips: אחרי ההסתייגות והזחה של רמה 9 החישוב שלילי.
+      // אזור טקסט 1440 twips, גדול מההסתייגות.
       page: { widthInches: 2, leftInches: 0.25, rightInches: 0.25 },
       blocks: [{ ordinal: 0, nodeId: 'row-1', nodeType: 'paragraph', styleId: 'TOC9' }],
     });
@@ -749,7 +716,7 @@ describe('מוביל הנקודות ומספר העמוד', () => {
       .map((input) => (input as { position: number }).position);
     expect(positions).toEqual([
       10800 - TOC_PAGE_NUMBER_RESERVE_TWIPS,
-      10800 - TOC_PAGE_NUMBER_RESERVE_TWIPS - TOC_LEVEL_INDENT_TWIPS,
+      10800 - TOC_PAGE_NUMBER_RESERVE_TWIPS,
       10800 - TOC_PAGE_NUMBER_RESERVE_TWIPS,
     ]);
   });
@@ -767,11 +734,23 @@ describe('מוביל הנקודות ומספר העמוד', () => {
 
     const order = engine
       .ops()
-      .filter((op) => op === 'setIndentation' || op === 'clearAllTabStops' || op === 'setTabStop');
-    expect(order).toEqual(['setIndentation', 'clearAllTabStops', 'setTabStop']);
+      .filter((op) => op === 'clearAllTabStops' || op === 'setTabStop');
+    expect(order).toEqual(['clearAllTabStops', 'setTabStop']);
     expect(engine.inputs('clearAllTabStops')).toEqual([
       { target: { kind: 'block', nodeType: 'paragraph', nodeId: 'toc-1' } },
     ]);
+  });
+
+  it('עדכון חוזר של אותן שורות אינו כותב להן עצירות מחדש', async () => {
+    const engine = fakeEngine({ tocs: ['toc-1'], blocks: documentWithToc() });
+
+    await layOutTocRows(engine.host);
+    expect(engine.inputs('setTabStop')).toHaveLength(3);
+    expect(engine.inputs('clearAllTabStops')).toHaveLength(3);
+
+    await layOutTocRows(engine.host);
+    expect(engine.inputs('setTabStop')).toHaveLength(3);
+    expect(engine.inputs('clearAllTabStops')).toHaveLength(3);
   });
 
   it('שורה שסווגה `listItem` נשלחת בסוג שלה, ולא כפסקה', async () => {

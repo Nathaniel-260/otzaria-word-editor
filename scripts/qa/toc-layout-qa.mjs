@@ -14,9 +14,8 @@
  *     עם תו טאב בלי שום עצירה, בשום שכבה. השער דורש עצירה עם `w:leader="dot"`
  *     ב-OOXML, מוביל **מצויר** על המסך, ומספר עמוד בתוך אזור הטקסט ולא חורג
  *     ממנו אל השוליים.
- *  3. ההזחה לפי רמה, שנוספה אחריהם: `w:ind` שגדל עם הרמה, כותרות שנכנסות
- *     פנימה מדרגה-מדרגה, ומספרי עמודים שנשארים **בעמודה אחת** למרות ההזחה —
- *     המנוע גורר איתה את עצירת הטאב, ולכן היא מפוצה. ראו src/engine/toc.ts.
+ *  3. התאימות ל-Word: אותו `w:pos` לכל רמה, ולכן עמודת מספרי העמוד נשארת
+ *     אחידה גם כאשר פותחים את ה-DOCX מחוץ לעורך.
  *
  * ההנמקה המלאה, כולל המדידות שקדמו: src/engine/toc.ts, src/engine/style-gallery.ts
  * ו-docs/engine-gaps.md.
@@ -49,7 +48,6 @@ function describe(p) {
   return {
     text: textOf(p).slice(0, 24),
     style: p.match(/<w:pStyle w:val="([^"]+)"/)?.[1] ?? '(אין)',
-    indent: Number(p.match(/<w:ind\b[^>]*w:left="(-?\d+)"/)?.[1] ?? 0),
     tabs: [...p.matchAll(/<w:tab\b([^>]*)\/>/g)]
       .map((m) => m[1])
       .filter((a) => /w:pos=/.test(a))
@@ -97,9 +95,8 @@ async function geometry(app, title) {
 }
 
 /**
- * הקצה **הימני** של הכותרת ו-x של מספר העמוד, לכל שורות הטבלה. בעברית
- * ההזחה דוחפת את הכותרת מימין פנימה, ולכן הקצה הימני הוא מה שאמור לרדת
- * מדרגה-מדרגה — ומספרי העמודים אמורים לא לזוז בכלל.
+ * x של מספר העמוד, לכל שורות הטבלה. עמודת המספרים חייבת להיות אחת בכל
+ * הרמות, גם בעורך וגם בקובץ שנפתח ב-Word.
  */
 async function rowColumns(app) {
   const raw = await app.js(
@@ -224,27 +221,20 @@ try {
       : report.fail('מספר העמוד חורג אל השוליים', `x=${g.number.x}, אזור הטקסט מ-${g.line.x}`);
   }
 
-  /* 3ב — ההזחה לפי רמה */
-  const indents = rows.map((r) => `${r.style}:${r.indent}`);
-  log('הזחות:', JSON.stringify(indents));
-  const wanted = ['TOC1:0', 'TOC2:220', 'TOC3:440', 'TOC1:0'];
-  JSON.stringify(indents) === JSON.stringify(wanted)
-    ? report.pass('כל רמה מוזחת בצעד של Word', JSON.stringify(indents))
-    : report.fail('ההזחה אינה לפי הרמה', `${JSON.stringify(indents)} במקום ${JSON.stringify(wanted)}`);
+  /* 3ב — `w:pos` קנוני, זהה בכל הרמות ותקין גם ב-Word */
+  const positions = rows.flatMap((r) => r.tabs.map((tab) => tab.match(/w:pos="(\d+)"/)?.[1]));
+  log('מיקומי עצירות:', JSON.stringify(positions));
+  new Set(positions).size === 1
+    ? report.pass('מספרי העמודים נשמרים באותה עמודה גם ב-DOCX', JSON.stringify(positions))
+    : report.fail('מיקום עצירת הטאב משתנה לפי הרמה', JSON.stringify(positions));
 
   const columns = await rowColumns(app);
   log('עמודות:', JSON.stringify(columns));
-  const ends = columns.map((r) => r.titleEnd);
-  const steps = ends.length === 4 && ends[0] > ends[1] && ends[1] > ends[2] && ends[3] === ends[0];
-  steps
-    ? report.pass('הכותרות נכנסות פנימה מדרגה-מדרגה', `קצה ימני: ${JSON.stringify(ends)}`)
-    : report.fail('הכותרות אינן מדורגות', `קצה ימני: ${JSON.stringify(ends)}`);
-
   const pageNumbers = columns.map((r) => r.number);
   const spread = Math.max(...pageNumbers) - Math.min(...pageNumbers);
   spread <= 1
-    ? report.pass('מספרי העמודים בעמודה אחת למרות ההזחה', `x=${JSON.stringify(pageNumbers)}`)
-    : report.fail('ההזחה גררה את מספרי העמודים', `x=${JSON.stringify(pageNumbers)} (פיזור ${spread}px)`);
+    ? report.pass('מספרי העמודים בעמודה אחת', `x=${JSON.stringify(pageNumbers)}`)
+    : report.fail('מספרי העמודים אינם בעמודה אחת', `x=${JSON.stringify(pageNumbers)} (פיזור ${spread}px)`);
 
   /* 4 — „עדכן טבלה” אינו מבטל את מה שנעשה */
   const before = JSON.stringify(rows.map((r) => r.tabs));
@@ -257,12 +247,11 @@ try {
   log('עצירות אחרי „עדכן טבלה”:', afterTabs);
   const stillDotted =
     after.length === rows.length && after.every((r) => r.tabs.some((t) => t.includes('w:leader="dot"')));
-  const stillIndented = JSON.stringify(after.map((r) => r.indent)) === JSON.stringify(rows.map((r) => r.indent));
-  stillDotted && stillIndented
-    ? report.pass('„עדכן טבלה” משאיר את השורות מעוצבות', `${afterTabs} | הזחות ${JSON.stringify(after.map((r) => r.indent))}`)
+  stillDotted
+    ? report.pass('„עדכן טבלה” משאיר את השורות מעוצבות', afterTabs)
     : report.fail(
         '„עדכן טבלה” מוחק את העיצוב',
-        `עצירות: לפני ${before} אחרי ${afterTabs}; הזחות: לפני ${JSON.stringify(rows.map((r) => r.indent))} אחרי ${JSON.stringify(after.map((r) => r.indent))}`
+        `עצירות: לפני ${before} אחרי ${afterTabs}`
       );
 } finally {
   app.close();

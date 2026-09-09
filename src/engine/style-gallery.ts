@@ -316,9 +316,6 @@ export function toGalleryItems(
  */
 export const HEADING_LADDER_FLOOR = 3;
 
-/** התקרה של Word לרמות כותרת. `Heading10` אינו סגנון. */
-const HEADING_LADDER_CEILING = 9;
-
 /** `Heading1`…`Heading9` בלבד. `Title` הוא תפקיד כותרת אבל אינו רמה. */
 const HEADING_LEVEL_ID = /^heading([1-9])$/;
 
@@ -358,9 +355,9 @@ function headingLevelOf(id: string): number | null {
  *
  * ## מה נוסף, ומה לא
  *
- * הרמות עד `HEADING_LADDER_FLOOR`, ומעליה מה שהמסמך עצמו כבר מציע (מסמך
- * Word שסגנונותיו העמוקים גלויים ממשיך להציג אותן — עד 9). רמה שהמסמך אינו
- * מציע ואינה בטווח נשארת בחוץ: הגלריה של Word אינה תשע כותרות, והפקודה
+ * הרמות עד `HEADING_LADDER_FLOOR`, ומעליהן רק מה שהמסמך עצמו כבר מציע (מסמך
+ * Word שסגנונותיו העמוקים גלויים ממשיך להציג אותן). רמה עמוקה שהמסמך אינו
+ * מציע נשארת בחוץ: הגלריה של Word אינה תשע כותרות, והפקודה
  * `linked-style` מקבלת כל מזהה — נמדד שהיא מחילה `Heading2` בהצלחה **גם
  * כשהסגנון semiHidden**, ולכן הכרטיס אינו מבטיח משהו שלא יעבוד.
  *
@@ -385,11 +382,8 @@ export function withHeadingLadder(
     if (level !== null && !levels.has(level)) levels.set(level, index);
   });
 
-  const deepest = levels.size === 0 ? 0 : Math.max(...levels.keys());
-  const wanted = Math.min(Math.max(HEADING_LADDER_FLOOR, deepest), HEADING_LADDER_CEILING);
-
   const out = [...items];
-  for (let level = 1; level <= wanted; level++) {
+  for (let level = 1; level <= HEADING_LADDER_FLOOR; level++) {
     if (levels.has(level)) continue;
 
     const id = `Heading${level}`;

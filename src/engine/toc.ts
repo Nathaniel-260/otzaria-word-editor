@@ -7,7 +7,7 @@
  * לקבוצה: עדכון, הסרה, התאמה אישית וסימון ערך ידני. הפקד הקיים לא נגע.
  *
  * ומה שנוסף אחרי דיווח משתמש: `layOutTocRows` — מוביל הנקודות, מספר העמוד
- * בקצה השורה וההזחה לפי רמה, שלושה דברים שהמנוע אינו נותן בשום שכבה מפני
+ * בקצה השורה, שני דברים שהמנוע אינו נותן בשום שכבה מפני
  * שהסגנונות `TOC1`…`TOC9` פשוט אינם קיימים. ההנמקה המלאה שם.
  *
  * ## הכול כאן נמדד בדפדפן. אלה התוצאות
@@ -195,12 +195,6 @@ export interface TocDocumentApi extends SelectionDocumentApi {
         position: number;
         alignment: 'right';
         leader: 'dot';
-      }) => MaybePromise<DocReceipt>;
-      // `left` הוא הצד הלוגי ולא הפיזי: נמדד שהוא נכתב כ-`w:start`, ולכן
-      // בפסקה עברית הוא מזיח מימין — ראו engine/paragraph-format.ts.
-      setIndentation?: (input: {
-        target: { kind: 'block'; nodeType: 'paragraph' | 'listItem'; nodeId: string };
-        left: number;
       }) => MaybePromise<DocReceipt>;
       clearAllTabStops?: (input: {
         target: { kind: 'block'; nodeType: 'paragraph' | 'listItem'; nodeId: string };
@@ -752,11 +746,11 @@ export async function removeTableOfContents(host: TocTarget): Promise<CommandOut
 }
 
 /* ------------------------------------------------------------------ */
-/* עיצוב שורות הטבלה — מוביל, מספר עמוד והזחה לפי רמה                   */
+/* עיצוב שורות הטבלה — מוביל ומספר עמוד                                 */
 /* ------------------------------------------------------------------ */
 
 /**
- * „כותרת……5”, והזחה לפי רמה — מה שהופך רשימת שורות לתוכן עניינים.
+ * „כותרת……5” — מה שהופך רשימת שורות לתוכן עניינים.
  *
  * ## מה שהיה על המסך, ולמה
  *
@@ -816,37 +810,29 @@ export async function removeTableOfContents(host: TocTarget): Promise<CommandOut
  * שגודל העמוד שלו שונה אחרי שהוכנס תוכן עניינים היה מקבל עצירה שנייה במיקום
  * חדש, ותו הטאב היה נדחף אל **הראשונה** שהוא פוגש — כלומר אל המיקום הישן.
  *
- * ## ההזחה לפי רמה, והפיצוי שהיא גוררת
+ * ## למה אין הזחה ישירה לפי רמה
  *
- * ב-Word שורת „כותרת 2” מוזחת פנימה מ„כותרת 1”, וכך רואים מה בתוך מה. ההזחה
- * יושבת באותם סגנונות `TOC1`…`TOC9` שאינם קיימים כאן (`w:ind w:left="220"`
- * ב-`TOC2`, ‏`440` ב-`TOC3` — צעד של 220 twips לרמה), ולכן גם היא נכתבת לכל
- * שורה: `format.paragraph.setIndentation({left})`.
- *
- * `left` הוא הצד **הלוגי**: נמדד שהוא נכתב כ-`w:start`, ובפסקה עברית הכותרת
- * אכן נדחפת מימין פנימה — 698 → 683 → 668 פיקסלים לשלוש הרמות.
- *
- * ומה שההזחה שברה: **מספרי העמודים זזו איתה.** נמדד — עמודת המספרים הפכה
- * מ-`123,123,123` ל-`123,108,94`, כלומר בדיוק ההזחה. הסיבה היא שהמנוע מודד
- * את עצירת הטאב מקצה ההתחלה של הפסקה **אחרי** ההזחה, בעוד ECMA-376 מגדיר את
- * `w:pos` ביחס לשולי העמוד. לכן העצירה של שורה מוזחת נסוגה באותו שיעור
- * (`position - indent`), ואז נמדד `123,123,123,123` — עמודה אחת, והמובילים
- * ממשיכים להיות מצוירים.
- *
- * **המחיר, במפורש:** ב-Word עצם ההזחה אינה מזיזה את העצירה, ולכן הקובץ שנפתח
- * שם יראה את המספרים של רמות 2 ו-3 מוסטים ב-220 ו-440 twips (‏4 ו-8 מ"מ)
- * מעמודת רמה 1. זו אותה בחירה כמו ב-`TOC_PAGE_NUMBER_RESERVE_TWIPS`: מה
- * שהמשתמש רואה בעורך שלו נכון, והסטייה — בגודל הזה — נשארת בצד השני. שני
- * הפיצויים ייעלמו יחד ביום שהמנוע ימדוד כמו Word; שניהם רשומים ב-
- * docs/engine-gaps.md.
+ * המנוע מודד עצירת טאב אחרי ההזחה, בעוד Word מודד `w:pos` משולי העמוד.
+ * פיצוי שמחזיר את העמודה למקומה בעורך שומר בקובץ מיקום אחר לכל רמה, ולכן
+ * פותח את ה-DOCX ב-Word עם עמודת מספרים שבורה. עד שיהיה תיקון במנוע או API
+ * לסגנון `TOC*`, העדיפות היא למסמך תקני: אותה עצירה לכל רמה, בלי הזחה ישירה.
+ * כך המוביל ומספר העמוד נכונים בשני העורכים.
  */
 export const TOC_PAGE_NUMBER_RESERVE_TWIPS = 540;
 
-/** הצעד של Word בין רמה לרמה בסגנונות `TOC*`: `w:ind w:left="220"` ב-`TOC2`. */
-export const TOC_LEVEL_INDENT_TWIPS = 220;
-
 /** מה שמוצג כשעיצוב השורות נכשל. הטבלה עצמה כבר במסמך — ראו `layOutTocRows`. */
 const LAYOUT_FAILED = 'עיצוב שורות תוכן העניינים נכשל';
+
+/**
+ * שורות שכבר עוצבו במופע המנוע הנוכחי. `toc.update` משאיר את העצירות של
+ * השורות הקיימות; לכן כתיבה חוזרת היא עבודה מיותרת ומצטברת במיוחד בספרים.
+ * המפתח כולל סוג בלוק כי אותו `nodeId` אינו בהכרח כתובת זהה תחת שני סוגים.
+ */
+const tocLayoutCache = new WeakMap<TocDocumentApi, Map<string, number>>();
+
+function tocLayoutKey(row: { nodeId: string; nodeType: 'paragraph' | 'listItem' }): string {
+  return `${row.nodeType}:${row.nodeId}`;
+}
 
 /**
  * האם הבלוק הוא שורה של תוכן עניינים **קיים**.
@@ -862,7 +848,7 @@ function isTocLine(block: BlockEntry | undefined, levels: ReadonlyMap<string, nu
 }
 
 /**
- * מעצבת את שורות תוכן העניינים: מוביל נקודות, מספר עמוד בקצה, והזחה לפי רמה.
+ * מעצבת את שורות תוכן העניינים: מוביל נקודות ומספר עמוד בקצה.
  *
  * רצה על **כל** שורות תוכן העניינים שבמסמך ולא על טבלה אחת: אין כאן שאלה של
  * „על איזו טבלה המשתמש התכוון” — עצירת טאב זהה בכל שורה של כל טבלה היא בדיוק
@@ -912,7 +898,7 @@ export async function layOutTocRows(host: TocTarget): Promise<CommandOutcome> {
     }
   }
 
-  const rows: { nodeId: string; nodeType: 'paragraph' | 'listItem'; level: number }[] = [];
+  const rows: { nodeId: string; nodeType: 'paragraph' | 'listItem' }[] = [];
   let offset = 0;
   let guard = 0;
   for (;;) {
@@ -926,7 +912,6 @@ export async function layOutTocRows(host: TocTarget): Promise<CommandOutcome> {
         nodeId: block.nodeId,
         // הבלוק הראשון מסווג `tableOfContents`, שאינו סוג חוקי ליעד פסקה.
         nodeType: block.nodeType === 'listItem' ? 'listItem' : 'paragraph',
-        level: levels.get(block.styleId ?? '') ?? TOC_LEVEL_MIN,
       });
     }
     if (page.length === 0) break;
@@ -937,22 +922,25 @@ export async function layOutTocRows(host: TocTarget): Promise<CommandOutcome> {
     if (++guard > PAGE_GUARD) break;
   }
 
-  if (rows.length === 0) return { ok: true };
+  if (rows.length === 0) {
+    // אחרי בנייה שמחקה את כל השורות, מזהים ישנים אינם הוכחה שהעצירות
+    // שרדו; אם הן ייווצרו מחדש הן יעוצבו מחדש.
+    tocLayoutCache.delete(doc);
+    return { ok: true };
+  }
 
   const clearAll = doc.format?.paragraph?.clearAllTabStops;
-  const setIndentation = doc.format?.paragraph?.setIndentation;
+  const cached = tocLayoutCache.get(doc) ?? new Map<string, number>();
+  tocLayoutCache.set(doc, cached);
+  const seen = new Set<string>();
   for (const row of rows) {
     const target = { kind: 'block' as const, nodeType: row.nodeType, nodeId: row.nodeId };
-    // רמה 1 מקבלת `left: 0` ואינה מדולגת: שורה שהייתה רמה 2 ונעשתה רמה 1
-    // הייתה נשארת מוזחת, וההזחה שורדת בנייה מחדש בדיוק כמו עצירת הטאב.
-    const indent = (row.level - 1) * TOC_LEVEL_INDENT_TWIPS;
+    const key = tocLayoutKey(row);
+    seen.add(key);
 
-    if (typeof setIndentation === 'function') {
-      const indented = await attempt(LAYOUT_FAILED, () => setIndentation({ target, left: indent }));
-      if (!indented.ok) return indented.outcome;
-      const failure = failureOf(LAYOUT_FAILED, indented.value);
-      if (failure) return failure;
-    }
+    // עצירות טאב הן חלק מה-DOCX ומחזיקות מעמד ב-`toc.update`; אותה שורה
+    // ובאותו רוחב אינה זקוקה לשתי פקודות מנוע נוספות בכל עדכון.
+    if (cached.get(key) === position) continue;
 
     if (typeof clearAll === 'function') {
       const cleared = await attempt(LAYOUT_FAILED, () => clearAll({ target }));
@@ -961,12 +949,12 @@ export async function layOutTocRows(host: TocTarget): Promise<CommandOutcome> {
       if (failure) return failure;
     }
 
-    // ההזחה גוררת איתה את העצירה (ראו הערת הפתיחה), ולכן היא נסוגה באותו
-    // שיעור. `Math.max` הוא בלם ל-`w:pos` שאינו חיובי בעמוד צר עם רמה עמוקה.
     const applied = await attempt(LAYOUT_FAILED, () =>
       setTabStop({
         target,
-        position: Math.max(TOC_LEVEL_INDENT_TWIPS, position - indent),
+        // `w:pos` נמדד משולי העמוד. אותו מיקום לכל רמה שומר על עמודת
+        // מספרים אחת גם ב-SuperDoc וגם כאשר פותחים את ה-DOCX ב-Word.
+        position,
         alignment: 'right',
         leader: 'dot',
       }),
@@ -975,7 +963,11 @@ export async function layOutTocRows(host: TocTarget): Promise<CommandOutcome> {
     // עצירה שכבר קיימת חוזרת `NO_OP`, ו-`failureOf` מכריע אותה כהצלחה.
     const failure = failureOf(LAYOUT_FAILED, applied.value);
     if (failure) return failure;
+    cached.set(key, position);
   }
+
+  // שורה שנעלמה בבנייה מחדש לא תופיע שוב עם מזהה ישן במפת המטמון.
+  for (const key of cached.keys()) if (!seen.has(key)) cached.delete(key);
 
   return { ok: true };
 }
