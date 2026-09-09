@@ -446,6 +446,28 @@
   cursor: pointer;
 }
 
+/* מצב מפוצל בגודל „ענק” (כמו „הדבק” ב-Word): החץ לצד האייקון והתווית דוחס
+   הכול לשורה אחת וחותך את האייקון — ב-Word הוא יושב ברצועה נפרדת במלוא
+   הרוחב, מתחת לאייקון ולתווית, לא לצידם. `flex-direction: column` הופך את
+   המעטפת לעמודה: כפתור הפעולה למעלה (תופס את שארית הגובה), רצועת החץ למטה.
+   ה-icon-only (תבליטים/מספור) לא נוגע כאן — הוא נשאר שורה, כמו ב-Word. */
+.word-split--large {
+  flex-direction: column;
+  align-items: stretch;
+  height: var(--ribbon-content-h);
+}
+
+.word-split--large .word-btn.btn-large {
+  height: auto;
+  flex: 1 1 auto;
+}
+
+.word-split--large .word-split__arrow {
+  width: 100%;
+  height: var(--ribbon-row-h);
+  border-top: 1px solid var(--color-outline-variant);
+}
+
 .word-split__arrow:disabled {
   opacity: 0.4;
   cursor: default;

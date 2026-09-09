@@ -186,13 +186,16 @@
       title="טקסט"
       icon="dateTime"
     >
-      <RibbonButton
+      <RibbonMenuButton
+        split
         icon="dateTime"
         label="תאריך ושעה"
         variant="large"
         :tooltip="dateTooltip"
         :disabled="!can('canInsertField')"
-        @click="onInsertDate"
+        :items="dateItems"
+        @action="onInsertDate"
+        @select="onDateAction"
       />
       <RibbonStack>
         <RibbonButton
@@ -277,7 +280,7 @@
  * ## השדות, ולמה אין „עמוד X מתוך Y”
  *
  * „מספר עמוד” ו„תאריך ושעה” מכניסים שדה Word אמיתי (`{ PAGE }`,
- * `{ DATE \@ "dd/MM/yyyy" }`)
+ * `{ DATE \@ "dd/MM/yyyy HH:mm" }`)
  * ולא טקסט, ולכן הם מתעדכנים בהדפסה ובפתיחה מחדש. „עמוד X מתוך Y” אינו שדה
  * אלא רצף של טקסט ושני שדות, ואין דרך ציבורית לחשב את ההיסט שבין החלקים —
  * ולכן התפריט מציע את שני השדות בנפרד. ההנמקה המלאה, כולל מדידת מתגי הפורמט
@@ -343,8 +346,10 @@ import {
 import {
   emptyFieldsState,
   insertDate,
+  insertDateOnly,
   insertPageCount,
   insertPageNumber,
+  insertTimeOnly,
   readFieldsState,
   rebuildAllFields,
   type FieldsState,
@@ -790,12 +795,19 @@ const pageNumberItems = [
 
 /**
  * ה-tooltip אומר שהשדה מתעדכן, כי זה כל ההבדל בינו לבין הקלדת התאריך, ואומר
- * את הפורמט במפורש — הוא `dd/MM/yyyy` ולא „הפורמט של המסמך”, כי המתג נשלח
+ * את הפורמט במפורש — הוא `dd/MM/yyyy HH:mm` ולא „הפורמט של המסמך”, כי המתג נשלח
  * בקוד השדה ונמדד כמפורש במנוע. ראו engine/fields.ts.
  */
 const dateTooltip = computed(() =>
-  tip('canInsertField', 'הכנסת שדה תאריך שמתעדכן, בפורמט יום/חודש/שנה')
+  tip('canInsertField', 'הכנסת שדה תאריך ושעה שמתעדכן, בפורמט יום/חודש/שנה שעה:דקות')
 );
+
+/** תפריט החץ של „תאריך ושעה”: אותו שדה, בשלוש ברירות מתג. */
+const dateItems = [
+  { id: 'date-time', label: 'תאריך ושעה', hint: 'יום/חודש/שנה ושעה' },
+  { id: 'date-only', label: 'תאריך בלבד', hint: 'יום/חודש/שנה, בלי שעה' },
+  { id: 'time-only', label: 'שעה בלבד', hint: 'שעה בלבד, בלי תאריך' },
+];
 
 const rebuildTooltip = computed(() =>
   tip(
@@ -829,6 +841,16 @@ function onPageNumberAction(action: string): void {
 
 function onInsertDate(): void {
   void runFields('field-date', insertDate(superdoc.value));
+}
+
+/** בחירה בתפריט החץ. „תאריך ושעה” מזוהה עם לחיצת הגוף — אותה פעולה בדיוק. */
+function onDateAction(action: string): void {
+  if (action === 'date-time') return onInsertDate();
+  const host = superdoc.value;
+  void runFields(
+    action === 'date-only' ? 'field-date-only' : 'field-time-only',
+    action === 'date-only' ? insertDateOnly(host) : insertTimeOnly(host)
+  );
 }
 
 function onRebuildFields(): void {

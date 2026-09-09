@@ -274,8 +274,13 @@ const EN: Readonly<Record<string, string>> = {
   'לצירוף „עמוד X מתוך Y” יש להקליד את המילים ולהוסיף את שני השדות':
     'For “Page X of Y”, type the words and insert both fields',
   'תאריך ושעה': 'Date & Time',
-  'הכנסת שדה תאריך שמתעדכן, בפורמט יום/חודש/שנה':
-    'Insert an auto-updating date field, in day/month/year format',
+  'הכנסת שדה תאריך ושעה שמתעדכן, בפורמט יום/חודש/שנה שעה:דקות':
+    'Insert an auto-updating date and time field, in day/month/year hours:minutes format',
+  'יום/חודש/שנה ושעה': 'Day/Month/Year and time',
+  'תאריך בלבד': 'Date Only',
+  'יום/חודש/שנה, בלי שעה': 'Day/Month/Year, without time',
+  'שעה בלבד': 'Time Only',
+  'שעה בלבד, בלי תאריך': 'Time only, without date',
   'עדכן שדות': 'Update Fields',
   'חישוב מחדש של כל השדות במסמך, כמו F9 ב-Word':
     'Recalculate all fields in the document, like F9 in Word',

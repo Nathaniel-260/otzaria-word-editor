@@ -16,6 +16,8 @@ import { describe, expect, it } from 'vitest';
 import {
   emptyFieldsState,
   insertDate,
+  insertDateOnly,
+  insertTimeOnly,
   insertPageCount,
   insertPageNumber,
   readFieldsState,
@@ -169,7 +171,7 @@ describe('הכנסת שדה', () => {
 
   it('„מספר העמודים” שולח `NUMPAGES`, ו„תאריך” שולח `DATE` עם מתג הפורמט', async () => {
     // המתג הוא העיקר כאן. `DATE` עירום נמדד במנוע האמיתי ומחזיר `2026-08-24` —
-    // ISO לועזי, ואפילו יום אחורה (UTC). `DATE \\@ "dd/MM/yyyy"` נמדד באותה
+    // ISO לועזי, ואפילו יום אחורה (UTC). `DATE \\@ "dd/MM/yyyy HH:mm"` נמדד באותה
     // הרצה ומחזיר `25/08/2026`. הפירוט המלא בהערת הפתיחה של engine/fields.ts.
     const count = fakeEngine();
     expect(await insertPageCount(count.host)).toEqual({ ok: true });
@@ -180,7 +182,7 @@ describe('הכנסת שדה', () => {
     const date = fakeEngine();
     expect(await insertDate(date.host)).toEqual({ ok: true });
     expect((date.inputs('fields.insert')[0] as { instruction: string }).instruction).toBe(
-      'DATE \\@ "dd/MM/yyyy"',
+      'DATE \\@ "dd/MM/yyyy HH:mm"',
     );
   });
 
@@ -190,7 +192,9 @@ describe('הכנסת שדה', () => {
     expect(FIELD_INSTRUCTIONS).toEqual({
       pageNumber: 'PAGE',
       pageCount: 'NUMPAGES',
-      date: 'DATE \\@ "dd/MM/yyyy"',
+      dateOnly: 'DATE \\@ "dd/MM/yyyy"',
+      timeOnly: 'DATE \\@ "HH:mm"',
+      date: 'DATE \\@ "dd/MM/yyyy HH:mm"',
     });
   });
 
@@ -311,13 +315,13 @@ describe('מניעת קינון — הכנסה על סמן שכבר בתוך ש�
     const engine = fakeEngine({
       fieldsSequence: [
         [
-          { address: sibling, instruction: 'DATE \\@ "dd/MM/yyyy"', resolvedText: '28/08/2026' },
+          { address: sibling, instruction: 'DATE \\@ "dd/MM/yyyy HH:mm"', resolvedText: '28/08/2026 14:03' },
           { address: elsewhere, instruction: 'PAGE', resolvedText: '3' },
         ],
         [
           // ה-sibling נשאר בדיוק כפי שהיה — ההכנסה לא נגעה בו. `elsewhere`
           // דווקא כן השתנה, אבל הוא בבלוק אחר, ולכן אינו אמור להיספר.
-          { address: sibling, instruction: 'DATE \\@ "dd/MM/yyyy"', resolvedText: '28/08/2026' },
+          { address: sibling, instruction: 'DATE \\@ "dd/MM/yyyy HH:mm"', resolvedText: '28/08/2026 14:03' },
           { address: inserted, instruction: 'NUMPAGES', resolvedText: '' },
           { address: elsewhere, instruction: 'PAGE', resolvedText: '4' },
         ],
@@ -505,5 +509,35 @@ describe('readFieldsState', () => {
       count: 0,
     });
     expect(await readFieldsState(null)).toEqual({ count: 0 });
+  });
+});
+
+describe('insertDateOnly / insertTimeOnly — מחרוזת ההוראה המדויקת', () => {
+  it('„תאריך בלבד” שולח `DATE \\@ "dd/MM/yyyy"` בסמן', async () => {
+    const engine = fakeEngine();
+
+    expect(await insertDateOnly(engine.host)).toEqual({ ok: true });
+
+    expect(engine.inputs('fields.insert')).toEqual([
+      {
+        at: { kind: 'text', segments: [{ blockId: 'block-1', range: { start: 3, end: 3 } }] },
+        instruction: 'DATE \\@ "dd/MM/yyyy"',
+        mode: 'raw',
+      },
+    ]);
+  });
+
+  it('„שעה בלבד” שולחת `DATE \\@ "HH:mm"` בסמן', async () => {
+    const engine = fakeEngine();
+
+    expect(await insertTimeOnly(engine.host)).toEqual({ ok: true });
+
+    expect(engine.inputs('fields.insert')).toEqual([
+      {
+        at: { kind: 'text', segments: [{ blockId: 'block-1', range: { start: 3, end: 3 } }] },
+        instruction: 'DATE \\@ "HH:mm"',
+        mode: 'raw',
+      },
+    ]);
   });
 });

@@ -57,3 +57,62 @@ describe('תפריט „מספר עמוד”', () => {
     );
   });
 });
+
+/**
+ * „תאריך ושעה” הוא כפתור מפוצל (`RibbonMenuButton` עם `split`): הגוף עדיין
+ * מכניס תאריך+שעה כמו קודם, והחץ פותח תפריט עם שתי ברירות נוספות — תאריך
+ * בלבד ושעה בלבד. אותה סכנה כמו ב„מספר עמוד” למעלה: לחיצה על הגוף רק פותחת
+ * תפריט בכפתור לא-מפוצל, ולכן כאן נבדק גם שהגוף עדיין מפעיל בלי לפתוח פופאובר.
+ */
+const DATE_MENU_ITEMS = [
+  { label: 'תאריך ושעה', instruction: 'DATE \\@ "dd/MM/yyyy HH:mm"' },
+  { label: 'תאריך בלבד', instruction: 'DATE \\@ "dd/MM/yyyy"' },
+  { label: 'שעה בלבד', instruction: 'DATE \\@ "HH:mm"' },
+] as const;
+
+describe('כפתור „תאריך ושעה” המפוצל', () => {
+  it('לחיצה על גוף הכפתור מכניסה תאריך ושעה, בלי לפתוח את התפריט', async () => {
+    const harness = mountUi(InsertTab);
+    await settle();
+
+    await harness.wrapper.find('.word-split .word-btn').trigger('click');
+    await settle();
+
+    const inputs = harness.superdoc.inputs('fields.insert') as { instruction: string }[];
+    expect(inputs.map((input) => input.instruction)).toEqual(['DATE \\@ "dd/MM/yyyy HH:mm"']);
+    expect(harness.wrapper.find('.ribbon-menu__popover').exists()).toBe(false);
+  });
+
+  it('החץ פותח את התפריט ואינו מכניס שדה', async () => {
+    const harness = mountUi(InsertTab);
+    await settle();
+
+    await harness.wrapper.find('.word-split__arrow').trigger('click');
+    await settle();
+
+    expect(harness.wrapper.find('.ribbon-menu__popover').exists()).toBe(true);
+    expect(harness.superdoc.inputs('fields.insert')).toEqual([]);
+    expect(harness.wrapper.findAll('.ribbon-menu__item-label').map((node) => node.text())).toEqual(
+      DATE_MENU_ITEMS.map((item) => item.label),
+    );
+  });
+
+  it.each(DATE_MENU_ITEMS.map((item, index) => ({ index, ...item })))(
+    'הפריט „$label” שולח `$instruction`',
+    async ({ index, instruction }) => {
+      const harness = mountUi(InsertTab);
+      await settle();
+
+      await harness.wrapper.find('.word-split__arrow').trigger('click');
+      await settle();
+
+      const items = harness.wrapper.findAll('.ribbon-menu__item');
+      expect(items).toHaveLength(DATE_MENU_ITEMS.length);
+      await items[index].trigger('click');
+      await settle();
+
+      const inputs = harness.superdoc.inputs('fields.insert') as { instruction: string }[];
+      expect(inputs.map((input) => input.instruction)).toEqual([instruction]);
+    },
+  );
+});
