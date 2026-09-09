@@ -384,7 +384,7 @@
         <RibbonSelect
           :model-value="selectedLineSpacing"
           :options="spacingSelectOptions"
-          :disabled="!lineSpacingCmd.enabled.value"
+          :disabled="!lineSpacingCmd.enabled.value || lineSpacingInFlight"
           width="48px"
           title="מרווח בין שורות"
           @update:model-value="onLineSpacingChange"
@@ -402,7 +402,7 @@
           variant="icon-only"
           tooltip="הגדל מרווח שורות"
           :description="growSpacingHint"
-          :disabled="!lineSpacingCmd.enabled.value || !canGrowSpacing"
+          :disabled="!lineSpacingCmd.enabled.value || !canGrowSpacing || lineSpacingInFlight"
           @click="onLineSpacingStep(grownLineHeight)"
         />
         <RibbonButton
@@ -410,7 +410,7 @@
           variant="icon-only"
           tooltip="הקטן מרווח שורות"
           :description="shrinkSpacingHint"
-          :disabled="!lineSpacingCmd.enabled.value || !canShrinkSpacing"
+          :disabled="!lineSpacingCmd.enabled.value || !canShrinkSpacing || lineSpacingInFlight"
           @click="onLineSpacingStep(shrunkLineHeight)"
         />
       </div>
@@ -654,6 +654,13 @@ const lastLineHeight = ref(DEFAULT_LINE_HEIGHT);
  */
 const pendingLineHeight = ref<number | null>(null);
 
+/**
+ * הפקודה אינה מדווחת ערך, ולכן בקשות חופפות אינן רק עניין של ציור: הצלחה של
+ * 1.6 וכשל של 1.7 שאחריה היו מחזירים את הבורר ל-1.5, אף שהמסמך נשאר ב-1.6.
+ * נעילה קצרה עד הקבלה משאירה לכל בקשה נקודת חזרה אחת נכונה.
+ */
+const lineSpacingInFlight = ref(false);
+
 watch(engineLineHeight, (value) => {
   if (value) lastLineHeight.value = value;
 });
@@ -725,14 +732,24 @@ function onHighlightChange(color: string | null): void {
   void highlightCmd.run(colorPayload(color));
 }
 
+async function applyLineSpacing(multiplier: number): Promise<void> {
+  if (lineSpacingInFlight.value) return;
+  const payload = lineHeightPayload(multiplier);
+  if (payload === null) return;
+  lineSpacingInFlight.value = true;
+  try {
+    await applyOptimistically(pendingLineHeight, lastLineHeight, multiplier, () =>
+      lineSpacingCmd.run(payload),
+    );
+  } finally {
+    lineSpacingInFlight.value = false;
+  }
+}
+
 function onLineSpacingChange(val: string): void {
   const multiplier = parseLineHeight(val);
   if (multiplier === null) return;
-  const payload = lineHeightPayload(multiplier);
-  if (payload === null) return;
-  void applyOptimistically(pendingLineHeight, lastLineHeight, multiplier, () =>
-    lineSpacingCmd.run(payload),
-  );
+  void applyLineSpacing(multiplier);
 }
 
 /**
@@ -741,11 +758,7 @@ function onLineSpacingChange(val: string): void {
  */
 function onLineSpacingStep(step: (current: number) => number): void {
   const multiplier = step(currentLineHeight.value);
-  const payload = lineHeightPayload(multiplier);
-  if (payload === null) return;
-  void applyOptimistically(pendingLineHeight, lastLineHeight, multiplier, () =>
-    lineSpacingCmd.run(payload),
-  );
+  void applyLineSpacing(multiplier);
 }
 
 function onAlign(alignment: ParagraphAlignment): void {

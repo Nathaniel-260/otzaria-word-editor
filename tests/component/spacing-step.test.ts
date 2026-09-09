@@ -119,6 +119,32 @@ describe('צעד במרווח השורות', () => {
     expect(buttonByTip(harness.wrapper, SHRINK).attributes('disabled')).toBeDefined();
   });
 
+  it('בזמן שהקבלה באוויר, הבורר והצעד השני נעולים', async () => {
+    const adapter = createCommandDouble({ held: ['line-height'] });
+    const harness = mountUi(HomeTab, { adapter });
+    await settle();
+
+    await buttonByTip(harness.wrapper, GROW).trigger('click');
+    await settle();
+
+    expect(adapter.payloads('line-height')).toEqual([{ lineHeight: 1.6 }]);
+    expect(buttonByTip(harness.wrapper, GROW).attributes('disabled')).toBeDefined();
+    expect(buttonByTip(harness.wrapper, SHRINK).attributes('disabled')).toBeDefined();
+    expect(harness.wrapper.find(`select[data-tip-title="${PICKER}"]`).attributes('disabled')).toBeDefined();
+
+    // גם dispatch מלאכותי של אירוע אינו פותח בקשה שנייה.
+    await buttonByTip(harness.wrapper, SHRINK).trigger('click');
+    expect(adapter.payloads('line-height')).toEqual([{ lineHeight: 1.6 }]);
+
+    adapter.release('line-height');
+    await settle();
+    expect(buttonByTip(harness.wrapper, SHRINK).attributes('disabled')).toBeUndefined();
+
+    await buttonByTip(harness.wrapper, SHRINK).trigger('click');
+    await settle();
+    expect(adapter.payloads('line-height')).toEqual([{ lineHeight: 1.6 }, { lineHeight: 1.5 }]);
+  });
+
   it('אין שני פקדים בקבוצת „פיסקה” שמצוירים אותו דבר', async () => {
     /*
      * זה הבאג שהיה כאן: „תפריט פסקה” ו„הצג/הסתר סימני עיצוב” חלקו את
