@@ -95,8 +95,15 @@ https://github.com/superdoc/docx-editor/issues/3994 — הגודל והגופן,
 
 ‏`TextRunStyleAttrs` מחזיק `fontFamily` אחד ו-`fontSize` אחד, ולכן בחירת המחסנית
 חייבת לקרות במנרמל עצמו — בדיוק היכן ש-PR #3958 עושה אותה להדגשה ולנטייה, דרך
-`usesComplexScriptToggles`. ה-issue נבנה מהקוד הפתוח בלבד, עם מסמך שחזור סינתטי
-(gist) ובקרה לטינית שתיקון אינו רשאי לגעת בה.
+`usesComplexScriptToggles`.
+
+**וגם התוצאה נמדדה ב-Chrome, לא רק הוסקה מהמקור:** השער
+`scripts/qa/font-advanced-qa.mjs` פותח את ה-`dist` ב-Chrome אמיתי, מחיל
+`fontSizeCs: 28` על ריצה עברית, ומאמת גם את `<w:szCs w:val="56"/>` ב-docx
+המיוצא וגם שאין שינוי במסך. זו שורת `fontSizeCs` בטבלת המדידה למטה; קריאת הקוד
+כאן מסבירה *למה* המדידה הזאת נכשלת, ולא מחליפה אותה. ה-issue מוסיף מסמך שחזור
+סינתטי ובקרה לטינית שתיקון אינו רשאי לגעת בה; ההסבר המנגנוני שבו נבנה מהקוד
+הפתוח בלבד.
 
 **מה השלב המקדים אינו מכסה, ובמפורש:** הוא רץ **בפתיחה** בלבד. „מודגש (מורכב)”
 בדיאלוג הגופן המתקדם כותב `bCs` על ריצה חיה (ראו `engine/font-advanced.ts`,
@@ -329,7 +336,9 @@ w:leader="dot"/>` קנוני, והצייר **כן** מצייר את המוביל
 למשתמש בדיאלוג.
 
 דווח למעלה (9.9.2026): https://github.com/superdoc/docx-editor/issues/3995 —
-ושלושת האתרים בקוד הפתוח מספרים את כל הסיפור בלי מדידה. `RunProperties.kern`
+והמדידה ב-Chrome בטבלה למעלה מאמתת את התוצאה: `kerning: 12` נכתב כ-
+`<w:kern w:val="24"/>` ואין שינוי במסך. שלושת האתרים בקוד הפתוח מסבירים את
+הסיבה: `RunProperties.kern`
 מוצהר (`style-engine/src/ooxml/types.ts:334`) ואינו מנורמל; `TextRunStyleAttrs`
 אינו מכיר קרנינג כלל; והשניים שקובעים בפועל מתעדים את עצמם —
 `measuring/dom/src/index.ts:699` כותב „The current projection does not surface
