@@ -135,7 +135,10 @@
 | `dirRtl` | כיוון פסקה מימין לשמאל | `text_paragraph_direction_left` |
 | `dirLtr` | כיוון פסקה משמאל לימין | `text_paragraph_direction_right` |
 | `pilcrow` | הצג/הסתר סימני עיצוב | `text_paragraph` |
+| `paragraphOptions` | תפריט פסקה | `options` |
 | `lineSpacing` | מרווח שורות | `text_line_spacing` |
+| `lineSpacingIncrease` | הגדל מרווח שורות | `text_expand` |
+| `lineSpacingDecrease` | הקטן מרווח שורות | `text_collapse` |
 | `borders` | גבולות | `border_all` |
 | `shading` | צביעה | `paint_bucket` |
 
