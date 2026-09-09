@@ -12,7 +12,8 @@
     app: { version: '9.9.9', platform: 'qa', language: 'he' },
     theme: { mode: 'light', colorScheme: {}, typography: {} },
     connectivity: { isOnline: false },
-    permissions: ['storage', 'clipboard.read', 'fs.read', 'fs.write'],
+    // כמו במארח, app.info.read היא הרשאת בסיס ולכן גם מופיעה בצילום ההרשאות.
+    permissions: ['app.info.read', 'storage', 'clipboard.read', 'fs.read', 'fs.write'],
   };
 
   var H = (window.__qaHost = {
@@ -63,8 +64,23 @@
           return ok(BOOT.theme);
         case 'app.getGrantedPermissions':
           return ok({ permissions: BOOT.permissions });
+        /*
+         * הערך **עצמו**, לא `{ value }`: `call()` מוסר את `res.data` כמו שהוא
+         * (host/otzaria-client.ts), וכל הצרכנים קוראים ישירות —
+         * `loadAutosaveEnabled` בודק `raw !== false`, `loadRulerVisible` בודק
+         * `=== true`, `loadSpellcheckWords` בודק `Array.isArray`. עטיפה כאן
+         * אינה נכשלת אלא **שותקת**: כל העדפה שנזרעה נדחית בנרמול ונופלת
+         * לברירת המחדל, ולכן שער שזורע העדפה ומצפה לראות אותה מודד בפועל
+         * את המסלול הריק — ועובר בירוק. `host/dev-stub.ts` ו-
+         * `scripts/session-probe.mjs` מחזירים לא עטוף, וכך גם המאחז האמיתי.
+         *
+         * מפתח שאינו קיים חוזר כ-`null` (דרך `ok`, שממיר `undefined`) ולא
+         * כאובייקט ריק — אחרת השומר של „אין ערך” ב-`loadSetting` אינו נורה.
+         *
+         * `settings-restore-qa.mjs` הוא מה שמחזיק את זה במקום.
+         */
         case 'storage.get':
-          return ok({ value: H.storage[payload && payload.key] });
+          return ok(H.storage[payload && payload.key]);
         case 'storage.set':
           H.storage[payload.key] = payload.value;
           return ok({});

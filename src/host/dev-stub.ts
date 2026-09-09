@@ -50,7 +50,9 @@ const BOOT: BootPayload = {
     },
   },
   connectivity: { isOfflineMode: false, hasNetwork: false, isOnline: false },
-  permissions: ['fs.user_files.read', 'fs.user_files.write'],
+  // `app.info.read` היא הרשאת בסיס שאוצריא מעניקה לכל תוסף. בלעדיה
+  // explainHostGap מאבחן בטעות שהמארח חסם את fonts.listInstalled.
+  permissions: ['app.info.read', 'fs.user_files.read', 'fs.user_files.write'],
 };
 
 /** קבצים שה„משתמש” בחר בריצה הזאת. נעלמים ברענון — כמו grant אמיתי שאבד. */
@@ -163,8 +165,15 @@ async function handle(method: string, payload: Record<string, unknown> = {}): Pr
       return BOOT.app;
     case 'app.getTheme':
       return BOOT.theme;
+    /*
+     * `PermissionSnapshot` — כלומר `{ permissions }` ולא המערך עצמו
+     * (types/otzaria_plugin.d.ts). הדמה החזיר כאן מערך חשוף, והצרכן היחיד
+     * (`explainHostGap` ב-engine/system-fonts.ts) קורא `info.permissions`,
+     * ולכן בפיתוח הוא דיווח „לא ניתן לקרוא את ההרשאות שאושרו” על דמה שכן
+     * ענה. `scripts/qa/host-stub.js` כבר החזיר את הצורה הנכונה.
+     */
     case 'app.getGrantedPermissions':
-      return BOOT.permissions;
+      return { permissions: BOOT.permissions };
 
     case 'storage.get': {
       const raw = window.localStorage.getItem(storagePrefix + String(payload.key));
