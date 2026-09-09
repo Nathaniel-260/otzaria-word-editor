@@ -587,6 +587,7 @@ import {
   type CaretAnchor,
 } from './engine/caret-anchor';
 import { createTextCursorWatch } from './engine/text-cursor';
+import { installRtlLineEnd } from './engine/rtl-line-end';
 import {
   deleteWorkspaceEntry,
   readWorkspaceBytes,
@@ -2542,6 +2543,17 @@ async function openDocumentInto(
     sessionTextCursor.dispose();
     if (session && session.textCursor === sessionTextCursor) session.textCursor = null;
   });
+
+  /**
+   * `End` בשורה עברית — ראו engine/rtl-line-end.ts. פר-session מאותה סיבה
+   * כמו סמן-הטקסט: המאזין יושב על ה-host של **המסמך הזה**, ולכן הוא נפרק
+   * איתו. אין לו מצב שהממשק קורא, ולכן גם אין שדה ב-session.
+   */
+  const sessionLineEnd = installRtlLineEnd({
+    host: paintedHost(editor.ui),
+    superdoc: editor.superdoc,
+  });
+  editor.onDispose(() => sessionLineEnd.dispose());
 
   /**
    * „גבולות עמוד” של ה-session: אותה תבנית בדיוק כמו הסרגל, ומאותה סיבה —
