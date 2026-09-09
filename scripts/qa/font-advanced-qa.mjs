@@ -74,6 +74,9 @@ const runStyle = (needle) =>
     var cs = getComputedStyle(hit);
     return JSON.stringify({
       found: true,
+      fontFamily: cs.fontFamily,
+      fontSize: cs.fontSize,
+      fontKerning: cs.fontKerning,
       letterSpacing: cs.letterSpacing,
       transform: cs.transform,
       decoLine: cs.textDecorationLine,
@@ -158,7 +161,9 @@ const EFFECT_PROBES = [
   { label: 'שקוע', tag: 'imprint', word: 'impr', drawn: (s) => s.shadow !== 'none' && s.shadow !== '' },
 ];
 
-const LINES = ['numx spac', 'outl shdw embs impr', 'kern dstx sizz'];
+// `fontSizeCs` חייב להימדד על כתב מורכב אמיתי. באנגלית מותר למנוע להתעלם
+// מ-`w:szCs`; עברית מבדילה בין „לא צויר” בפועל לבין מסלול שלא הופעל כלל.
+const LINES = ['numx spac', 'outl shdw embs impr', 'kern dstx אבגד'];
 
 try {
   /* חלון רחב — ברירת המחדל ב-headless צרה, והרצועה גולשת ממנה. */
@@ -332,7 +337,7 @@ try {
    */
   const FIELD_PROBES = [
     { label: 'קרנינג', id: 'fa-kerning', value: '12', xml: /<w:kern w:val="24"/, word: 'kern', at: 0 },
-    { label: 'גודל הגופן המורכב', id: 'fa-sizecs', value: '28', xml: /<w:szCs w:val="56"/, word: 'sizz', at: 10 },
+    { label: 'גודל הגופן המורכב', id: 'fa-sizecs', value: '28', xml: /<w:szCs w:val="56"/, word: 'אבגד', at: 10 },
   ];
   const fieldMismatch = [];
   for (const probe of FIELD_PROBES) {
