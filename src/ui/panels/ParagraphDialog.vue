@@ -30,252 +30,327 @@
       </div>
 
       <div class="pd-body">
-        <!-- כניסות -->
-        <fieldset class="pd-group">
-          <legend>כניסה</legend>
-          <div class="pd-row">
-            <label
-              for="pd-ind-left"
-              class="pd-label"
-            >לפני טקסט:</label>
-            <input
-              id="pd-ind-left"
-              v-model="leftCm"
-              class="pd-number"
-              type="number"
-              min="0"
-              max="55.87"
-              step="0.1"
-              aria-label="כניסה לפני הטקסט, בסנטימטרים"
-            >
-            <span class="pd-unit">ס"מ</span>
-          </div>
-          <div class="pd-row">
-            <label
-              for="pd-ind-right"
-              class="pd-label"
-            >אחרי טקסט:</label>
-            <input
-              id="pd-ind-right"
-              v-model="rightCm"
-              class="pd-number"
-              type="number"
-              min="0"
-              max="55.87"
-              step="0.1"
-              aria-label="כניסה אחרי הטקסט, בסנטימטרים"
-            >
-            <span class="pd-unit">ס"מ</span>
-          </div>
-          <div class="pd-row">
-            <label
-              for="pd-special"
-              class="pd-label"
-            >מיוחד:</label>
-            <select
-              id="pd-special"
-              v-model="special"
-              class="pd-select"
-            >
-              <option value="none">ללא</option>
-              <option value="firstLine">שורה ראשונה</option>
-              <option value="hanging">תלויה</option>
-            </select>
-            <input
-              v-model="amountCm"
-              class="pd-number"
-              type="number"
-              min="0"
-              step="0.1"
-              :disabled="special === 'none'"
-              aria-label="מידת הכניסה המיוחדת, בסנטימטרים"
-            >
-            <span class="pd-unit">ס"מ</span>
-          </div>
-        </fieldset>
+        <div class="pd-columns">
+          <!-- עמודה א׳: המידות — כניסות וריווח -->
+          <div class="pd-column">
+            <!-- כניסות -->
+            <fieldset class="pd-group">
+              <legend>כניסה</legend>
+              <div class="pd-row">
+                <label
+                  for="pd-ind-left"
+                  class="pd-label"
+                >לפני טקסט:</label>
+                <input
+                  id="pd-ind-left"
+                  v-model="leftCm"
+                  class="pd-number"
+                  type="number"
+                  min="0"
+                  max="55.87"
+                  step="0.1"
+                  aria-label="כניסה לפני הטקסט, בסנטימטרים"
+                >
+                <span class="pd-unit">ס"מ</span>
+              </div>
+              <div class="pd-row">
+                <label
+                  for="pd-ind-right"
+                  class="pd-label"
+                >אחרי טקסט:</label>
+                <input
+                  id="pd-ind-right"
+                  v-model="rightCm"
+                  class="pd-number"
+                  type="number"
+                  min="0"
+                  max="55.87"
+                  step="0.1"
+                  aria-label="כניסה אחרי הטקסט, בסנטימטרים"
+                >
+                <span class="pd-unit">ס"מ</span>
+              </div>
+              <div class="pd-row">
+                <label
+                  for="pd-special"
+                  class="pd-label"
+                >מיוחד:</label>
+                <select
+                  id="pd-special"
+                  v-model="special"
+                  class="pd-select"
+                >
+                  <option value="none">ללא</option>
+                  <option value="firstLine">שורה ראשונה</option>
+                  <option value="hanging">תלויה</option>
+                </select>
+                <input
+                  v-model="amountCm"
+                  class="pd-number"
+                  type="number"
+                  min="0"
+                  step="0.1"
+                  :disabled="special === 'none'"
+                  aria-label="מידת הכניסה המיוחדת, בסנטימטרים"
+                >
+                <span class="pd-unit">ס"מ</span>
+              </div>
+            </fieldset>
 
-        <!-- ריווח -->
-        <fieldset class="pd-group">
-          <legend>ריווח</legend>
-          <div class="pd-row">
-            <label
-              for="pd-sp-before"
-              class="pd-label"
-            >לפני:</label>
-            <input
-              id="pd-sp-before"
-              v-model="beforePt"
-              class="pd-number"
-              type="number"
-              min="0"
-              step="1"
-              aria-label="ריווח לפני הפסקה, בנקודות"
-            >
-            <span class="pd-unit">נק'</span>
-            <label
-              for="pd-sp-after"
-              class="pd-label pd-label-after"
-            >אחרי:</label>
-            <input
-              id="pd-sp-after"
-              v-model="afterPt"
-              class="pd-number"
-              type="number"
-              min="0"
-              step="1"
-              aria-label="ריווח אחרי הפסקה, בנקודות"
-            >
-            <span class="pd-unit">נק'</span>
+            <!-- ריווח -->
+            <fieldset class="pd-group">
+              <legend>ריווח</legend>
+              <div class="pd-row">
+                <label
+                  for="pd-sp-before"
+                  class="pd-label"
+                >לפני:</label>
+                <input
+                  id="pd-sp-before"
+                  v-model="beforePt"
+                  class="pd-number"
+                  type="number"
+                  min="0"
+                  step="1"
+                  aria-label="ריווח לפני הפסקה, בנקודות"
+                >
+                <span class="pd-unit">נק'</span>
+                <label
+                  for="pd-sp-after"
+                  class="pd-label pd-label-after"
+                >אחרי:</label>
+                <input
+                  id="pd-sp-after"
+                  v-model="afterPt"
+                  class="pd-number"
+                  type="number"
+                  min="0"
+                  step="1"
+                  aria-label="ריווח אחרי הפסקה, בנקודות"
+                >
+                <span class="pd-unit">נק'</span>
+              </div>
+              <div class="pd-row">
+                <label
+                  for="pd-line"
+                  class="pd-label"
+                >מרווח שורות:</label>
+                <select
+                  id="pd-line"
+                  v-model="lineMode"
+                  class="pd-select"
+                >
+                  <option value="240">בודדת</option>
+                  <option value="360">1.5 שורות</option>
+                  <option value="480">כפולה</option>
+                  <option value="exact">מדויקת</option>
+                  <option value="atLeast">לפחות</option>
+                </select>
+                <template v-if="lineMode === 'exact' || lineMode === 'atLeast'">
+                  <input
+                    v-model="linePt"
+                    class="pd-number"
+                    type="number"
+                    min="0"
+                    step="1"
+                    aria-label="גובה השורה, בנקודות"
+                  >
+                  <span class="pd-unit">נק'</span>
+                </template>
+              </div>
+            </fieldset>
           </div>
-          <div class="pd-row">
-            <label
-              for="pd-line"
-              class="pd-label"
-            >מרווח שורות:</label>
-            <select
-              id="pd-line"
-              v-model="lineMode"
-              class="pd-select"
-            >
-              <option value="240">בודדת</option>
-              <option value="360">1.5 שורות</option>
-              <option value="480">כפולה</option>
-              <option value="exact">מדויקת</option>
-              <option value="atLeast">לפחות</option>
-            </select>
-            <template v-if="lineMode === 'exact' || lineMode === 'atLeast'">
-              <input
-                v-model="linePt"
-                class="pd-number"
-                type="number"
-                min="0"
-                step="1"
-                aria-label="גובה השורה, בנקודות"
-              >
-              <span class="pd-unit">נק'</span>
-            </template>
-          </div>
-        </fieldset>
 
-        <!-- אפשרויות שמירה -->
-        <fieldset class="pd-group">
-          <legend>אפשרויות שמירה</legend>
-          <div class="pd-checks">
-            <label class="pd-check">
-              <input
-                v-model="keepNext"
-                type="checkbox"
-              >
-              השאר עם הבא
-            </label>
-            <label class="pd-check">
-              <input
-                v-model="keepLines"
-                type="checkbox"
-              >
-              השאר שורות יחד
-            </label>
-            <label class="pd-check">
-              <input
-                v-model="widowControl"
-                type="checkbox"
-              >
-              בקרת אלמנות ויתומים
-            </label>
-          </div>
-        </fieldset>
+          <!-- עמודה ב׳: מה שאינו מידה — שמירה וטאבים -->
+          <div class="pd-column">
+            <!-- אפשרויות שמירה -->
+            <fieldset class="pd-group">
+              <legend>אפשרויות שמירה</legend>
+              <div class="pd-checks">
+                <label class="pd-check">
+                  <input
+                    v-model="keepNext"
+                    type="checkbox"
+                  >
+                  השאר עם הבא
+                </label>
+                <label class="pd-check">
+                  <input
+                    v-model="keepLines"
+                    type="checkbox"
+                  >
+                  השאר שורות יחד
+                </label>
+                <label class="pd-check">
+                  <input
+                    v-model="widowControl"
+                    type="checkbox"
+                  >
+                  בקרת אלמנות ויתומים
+                </label>
+              </div>
+            </fieldset>
 
-        <!-- טאבים -->
-        <fieldset
-          v-if="tabsEnabled"
-          class="pd-group"
-        >
-          <legend>עצירות טאב</legend>
-          <p
-            class="pd-note"
-            role="note"
-          >
-            הוספה והסרה מוחלות מיד על הפסקה שבה הסמן.
-          </p>
-          <ul
-            v-if="tabs.length > 0"
-            class="pd-tabs"
-          >
-            <li
-              v-for="(tab, index) in tabs"
-              :key="`${tab.positionTwips}-${index}`"
-              class="pd-tab-row"
+            <!-- טאבים -->
+            <fieldset
+              v-if="tabsEnabled"
+              class="pd-group"
             >
-              <span>{{ formatTab(tab) }}</span>
+              <legend>עצירות טאב</legend>
+              <p
+                class="pd-note"
+                role="note"
+              >
+                הוספה והסרה מוחלות מיד על הפסקה שבה הסמן.
+              </p>
+              <ul
+                v-if="tabs.length > 0"
+                class="pd-tabs"
+              >
+                <li
+                  v-for="(tab, index) in tabs"
+                  :key="`${tab.positionTwips}-${index}`"
+                  class="pd-tab-row"
+                >
+                  <span>{{ formatTab(tab) }}</span>
+                  <button
+                    type="button"
+                    class="pd-btn pd-btn-small"
+                    :disabled="busy"
+                    aria-label="הסר עצירת טאב"
+                    @pointerdown.prevent
+                    @click="$emit('tab-remove', { positionTwips: tab.positionTwips })"
+                  >
+                    הסר
+                  </button>
+                </li>
+              </ul>
+              <p
+                v-else
+                class="pd-note"
+              >
+                אין עצירות טאב בפסקה זו.
+              </p>
+              <div class="pd-row pd-row-wrap">
+                <input
+                  v-model="newTabCm"
+                  class="pd-number"
+                  type="number"
+                  min="0.1"
+                  step="0.1"
+                  placeholder="מיקום"
+                  aria-label="מיקום עצירת טאב חדשה, בסנטימטרים"
+                >
+                <select
+                  v-model="newTabAlignment"
+                  class="pd-select"
+                  aria-label="יישור עצירת הטאב"
+                >
+                  <option value="left">שמאל</option>
+                  <option value="center">מרכז</option>
+                  <option value="right">ימין</option>
+                  <option value="decimal">עשרוני</option>
+                </select>
+                <select
+                  v-model="newTabLeader"
+                  class="pd-select"
+                  aria-label="מוביל עצירת הטאב"
+                >
+                  <option value="">ללא</option>
+                  <option value="dot">........</option>
+                  <option value="hyphen">--------</option>
+                  <option value="underscore">________</option>
+                </select>
+                <button
+                  type="button"
+                  class="pd-btn"
+                  :disabled="busy || !canAddTab"
+                  @pointerdown.prevent
+                  @click="onAddTab"
+                >
+                  הוסף
+                </button>
+              </div>
               <button
+                v-if="tabs.length > 0"
                 type="button"
-                class="pd-btn pd-btn-small"
+                class="pd-btn"
                 :disabled="busy"
-                aria-label="הסר עצירת טאב"
                 @pointerdown.prevent
-                @click="$emit('tab-remove', { positionTwips: tab.positionTwips })"
+                @click="$emit('tabs-clear')"
               >
-                הסר
+                נקה את כל העצירות
               </button>
-            </li>
-          </ul>
+            </fieldset>
+          </div>
+        </div>
+
+        <!--
+          פס התצוגה המקדימה — מיניאטורה של עמודת הטקסט, בקנה מידה אחד לשני
+          הצירים. ההנמקה כולה — למה אחוזים ו-`cqw` ולא פיקסלים, ולמה פסי שורה
+          ולא אותיות — ב-engine/paragraph-preview.ts.
+
+          `aria-hidden` כמו פס הדגימה של בורר הגופן: כל שש ההגדרות שהוא מצייר
+          יושבות בשדות שמעליו, והפסים עצמם אינם מוסיפים דבר למי שקורא מסך.
+        -->
+        <div class="pd-preview">
+          <span class="pd-preview-caption">
+            {{ PREVIEW_CAPTION }}<template v-if="scaleText !== ''"> · {{ scaleText }}</template>
+          </span>
+          <div
+            v-if="preview"
+            class="pd-preview-page"
+            :dir="previewDir"
+            aria-hidden="true"
+          >
+            <div
+              class="pd-pv-para pd-pv-context"
+              :style="contextStyle"
+            >
+              <span
+                v-for="line in PREVIEW_NEIGHBOUR_LINES"
+                :key="`before-${line}`"
+                class="pd-pv-line"
+              />
+            </div>
+            <div
+              class="pd-pv-para pd-pv-target"
+              :style="targetStyle"
+            >
+              <span
+                v-for="line in PREVIEW_TARGET_LINES"
+                :key="`target-${line}`"
+                class="pd-pv-line"
+                :class="{ 'pd-pv-line-last': line === PREVIEW_TARGET_LINES }"
+                :style="line === 1 ? firstLineStyle : lineStyle"
+              />
+            </div>
+            <div
+              class="pd-pv-para pd-pv-context"
+              :style="contextStyle"
+            >
+              <span
+                v-for="line in PREVIEW_NEIGHBOUR_LINES"
+                :key="`after-${line}`"
+                class="pd-pv-line"
+              />
+            </div>
+          </div>
           <p
             v-else
-            class="pd-note"
+            class="pd-note pd-preview-note"
+            role="note"
           >
-            אין עצירות טאב בפסקה זו.
+            {{ NO_GEOMETRY_HINT }}
           </p>
-          <div class="pd-row">
-            <input
-              v-model="newTabCm"
-              class="pd-number"
-              type="number"
-              min="0.1"
-              step="0.1"
-              placeholder="מיקום"
-              aria-label="מיקום עצירת טאב חדשה, בסנטימטרים"
-            >
-            <select
-              v-model="newTabAlignment"
-              class="pd-select"
-              aria-label="יישור עצירת הטאב"
-            >
-              <option value="left">שמאל</option>
-              <option value="center">מרכז</option>
-              <option value="right">ימין</option>
-              <option value="decimal">עשרוני</option>
-            </select>
-            <select
-              v-model="newTabLeader"
-              class="pd-select"
-              aria-label="מוביל עצירת הטאב"
-            >
-              <option value="">ללא</option>
-              <option value="dot">........</option>
-              <option value="hyphen">--------</option>
-              <option value="underscore">________</option>
-            </select>
-            <button
-              type="button"
-              class="pd-btn"
-              :disabled="busy || !canAddTab"
-              @pointerdown.prevent
-              @click="onAddTab"
-            >
-              הוסף
-            </button>
-          </div>
-          <button
-            v-if="tabs.length > 0"
-            type="button"
-            class="pd-btn"
-            :disabled="busy"
-            @pointerdown.prevent
-            @click="$emit('tabs-clear')"
+          <p
+            v-if="preview && !preview.leavesRoom"
+            class="pd-note pd-preview-note pd-note-warn"
+            role="note"
           >
-            נקה את כל העצירות
-          </button>
-        </fieldset>
+            {{ NO_ROOM_HINT }}
+          </p>
+        </div>
 
         <p
           v-if="showError"
@@ -325,11 +400,24 @@
  *    באחרות (נמדד), כך שהוספה והסרה הן פעולות עצמאיות בטוחות; הכניסות
  *    והריווח הן replace ודורשות אישור אחד ששולח את המצב כולו.
  *
+ * ## הפריסה: שתי עמודות ופס מתחתן
+ *
+ * שתי עמודות מ„מתקדם” של הגופן (FontAdvancedDialog), ומאותו טעם בדיוק:
+ * הרוחב גדל, והגובה — שאליו נוסף עכשיו פס התצוגה המקדימה — יורד מתחת
+ * לתקרה `calc(100vh - 200px)` במקום לגלול. החלוקה היא לפי סוג ההגדרה ולא
+ * לפי גודל הסעיף: **המידות** (כניסות, ריווח) בעמודה אחת — הן מה שהפס
+ * מצייר — ומה שאינו מידה (אפשרויות שמירה, עצירות טאב) בשנייה.
+ *
+ * וסדר ה-DOM של השדות נשמר בדיוק כשהיה — `left, right, amount, before,
+ * after, linePt, newTabCm` — מפני ש-`scripts/qa/home-paragraph-qa.mjs` פונה
+ * לשלושה מהם לפי מקומם ברשימה (`input[type=number]` באינדקסים 2 ו-5, והטאב
+ * ב„אחרון”) ולא לפי מזהה, ואין להם מזהה לפנות אליו.
+ *
  * רשימת הדיאלוג (checklist): tabindex="-1" + focus() ב-nextTick, Enter על
  * שדות קלט, prop `busy` שמנטרל את פעולות המסמך ומשאיר את „ביטול”/Esc חיים,
  * RTL לוגי בלבד, ו-@pointerdown.prevent על כל כפתור.
  */
-import { computed, nextTick, ref, watch } from 'vue';
+import { computed, nextTick, ref, watch, type CSSProperties } from 'vue';
 import {
   TWIPS_PER_CM,
   TWIPS_PER_PT,
@@ -337,6 +425,11 @@ import {
   type TabAlignment,
   type TabLeader,
 } from '../../engine/paragraph-format';
+import {
+  PREVIEW_NEIGHBOUR_LINES,
+  PREVIEW_TARGET_LINES,
+  paragraphPreviewGeometry,
+} from '../../engine/paragraph-preview';
 import { useDialogDrag } from '../../composables/dialog-drag';
 import { useDialogDefaultAction } from '../../composables/dialog-default-action';
 
@@ -347,6 +440,18 @@ const { onDialogEnter } = useDialogDefaultAction();
 
 const DIALOG_TITLE = 'פסקה';
 const INVALID_HINT = 'הערכים חייבים להיות מספרים חוקיים ולא-שליליים.';
+const PREVIEW_CAPTION = 'תצוגה מקדימה';
+/**
+ * מה שנאמר במקום הפס כשאין ממה לגזור קנה מידה. „עדיין לא דיווח” ולא
+ * „שגיאה”: `readPageMargins` מחזיר `null` בדיוק במצב הזה, וכך גם הסרגל
+ * מתנהג — הוא פשוט אינו מצייר.
+ *
+ * ובלי להבטיח שהפס יופיע מעצמו: המידות נקראות **בפתיחה** (ראו
+ * `pageTextWidthTwips`), ולכן דיאלוג שנפתח בלעדיהן לא יקבל אותן עד הפתיחה
+ * הבאה. מה שנאמר הוא הסיבה ומה שכן עובד, ולא הבטחה.
+ */
+const NO_GEOMETRY_HINT = 'המסמך עדיין לא דיווח מידות עמוד, ואין ממה לגזור את הפס. שאר ההגדרות עובדות כרגיל.';
+const NO_ROOM_HINT = 'שתי הכניסות יחד אינן משאירות רוחב שאפשר לכתוב בו.';
 
 const props = defineProps<{
   isOpen: boolean;
@@ -359,7 +464,23 @@ const props = defineProps<{
     keepLines: boolean;
     widowControl: boolean;
     tabs: readonly { positionTwips: number; alignment: string; leader?: string }[];
+    /**
+     * `<w:bidi>` של הפסקה — הצד שבו „לפני טקסט” יושב בפס. `null` = הפסקה
+     * אינה מצהירה, ואז הכיוון יורש מ-`sectionRtl`.
+     */
+    bidi: boolean | null;
   };
+  /**
+   * רוחב עמודת הטקסט של המקטע — רוחב הדף פחות שני השוליים, מ-`readPageMargins`.
+   * `0` = אין גיאומטריה, ואז אין פס. זהו המכנה של כל האחוזים בפס.
+   */
+  pageTextWidthTwips: number;
+  /** גודל הגופן שבסמן, בנקודות — הסרגל של הציר האנכי בפס. */
+  fontSizePt: number;
+  /**
+   * כיוון המקטע — מה שפסקה **שאינה מצהירה** יורשת. ראו `previewDir`.
+   */
+  sectionRtl: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -472,6 +593,113 @@ const showError = computed(() => {
 
 const canSubmit = computed(() => !showError.value);
 
+/** הכלל שנשלח למנוע, גם לפס וגם ב„אישור” — שני נתיבים לאותה הכרעה היו נפרדים. */
+const lineRule = computed<LineSpacingRule>(() =>
+  lineMode.value === 'exact' || lineMode.value === 'atLeast' ? lineMode.value : 'auto',
+);
+
+/** ה-`w:line` שנשלח: כפולה×240 ב-`auto`, ומרחק בנקודות בשני האחרים. */
+const lineTwips = computed(() =>
+  lineRule.value === 'auto'
+    ? Number(lineMode.value)
+    : ptToTwips(parseNonNegative(linePt.value) ?? 0),
+);
+
+/**
+ * הפס מצויר מהערכים ש**בשדות** ולא מה-snapshot: הוא נועד להראות מה יקרה
+ * ב„אישור”, וזה בדיוק ההבדל בין תצוגה מקדימה לבין חזרה על מה שכבר במסמך.
+ *
+ * ערך פסול בשדה (מינוס, טקסט) נקרא כאפס ולא מפיל את הפס: `showError` ממילא
+ * נועל את „אישור” ואומר את הסיבה, ופס שנעלם באמצע הקלדה היה תזוזה שנייה
+ * באותו דיאלוג על אותה שגיאה אחת.
+ */
+const preview = computed(() =>
+  paragraphPreviewGeometry({
+    textWidthTwips: props.pageTextWidthTwips,
+    fontSizePt: props.fontSizePt,
+    startTwips: cmToTwips(parseNonNegative(leftCm.value) ?? 0),
+    endTwips: cmToTwips(parseNonNegative(rightCm.value) ?? 0),
+    special: special.value,
+    amountTwips: cmToTwips(parseNonNegative(amountCm.value) ?? 0),
+    beforeTwips: ptToTwips(parseNonNegative(beforePt.value) ?? 0),
+    afterTwips: ptToTwips(parseNonNegative(afterPt.value) ?? 0),
+    lineTwips: lineTwips.value,
+    lineRule: lineRule.value,
+  }),
+);
+
+/**
+ * הכיוון של הפס: של הפסקה כשהיא מצהירה, ושל המקטע כשהיא שותקת.
+ *
+ * `w:start`/`w:end`, שהכניסות נכתבות בהם, לוגיים **לפסקה** — פסקה LTR בתוך
+ * מקטע RTL מקבלת „לפני טקסט” בצד השמאלי — ולכן ההצהרה של הפסקה גוברת.
+ *
+ * אבל היעדר הצהרה אינו LTR: מסמך עברי שנוצר ב-Word אינו מצהיר `<w:bidi>` על
+ * כל פסקה אלא יורש, ופס שהיה קורא היעדר כ-LTR היה מצייר את הכניסה בצד ההפוך
+ * על מסמכים רגילים לגמרי. שלושת המצבים אפשריים מפני שהמודל מבדיל ביניהם —
+ * נמדד; ראו `bidi` ב-`ParagraphFormatSnapshot`.
+ */
+const previewDir = computed(() => ((props.snapshot.bidi ?? props.sectionRtl) ? 'rtl' : 'ltr'));
+
+/** „עמודה 16.00 ס״מ · גופן 11 נק׳” — קנה המידה שהפס מצייר לפיו, במפורש. */
+const scaleText = computed(() => {
+  if (!preview.value) return '';
+  const cm = (props.pageTextWidthTwips / TWIPS_PER_CM).toFixed(2);
+  return `עמודה ${cm} ס"מ · גופן ${props.fontSizePt} נק'`;
+});
+
+/**
+ * הפסקה שנערכת: הריווח לפניה ואחריה, ומרווח השורות כמשתנה שהפסים נמדדים בו.
+ *
+ * הכניסות **אינן** כאן אלא על הפסים עצמם, וזו הכרעה ולא סידור: אחוז ב-CSS
+ * נמדד מול הרוחב הפנימי של האב, ולכן `margin-inline-start` על הפסקה היה
+ * מקטין את האב של הפסים ומשנה את המכנה של כל אחוז שבתוכה. עם הכניסות על
+ * הפסים כל שש ההגדרות נמדדות מול אותו מכנה אחד — רוחב עמודת הטקסט.
+ */
+const targetStyle = computed<CSSProperties>(() => {
+  const geometry = preview.value;
+  if (!geometry) return {};
+  return {
+    '--pv-font': `${geometry.fontCqw}cqw`,
+    marginBlockStart: `${geometry.beforePct}%`,
+    marginBlockEnd: `${geometry.afterPct}%`,
+    '--pv-lh': String(geometry.lineHeight),
+  };
+});
+
+/**
+ * השכנות: קיימות רק כדי שיהיה למרחק „לפני”/„אחרי” גוף להיפרד ממנו.
+ *
+ * ברוחב מלא ובמרווח בודד, ובכוונה: לשכנות יש כניסות ומרווח **משל עצמן**,
+ * שאינם נקראים כאן ואינם משתנים ב„אישור”. פס שהיה מצייר עליהן את ההגדרות
+ * של הפסקה שנערכת היה אומר שהאישור נוגע גם בהן.
+ */
+const contextStyle = computed<CSSProperties>(() => {
+  const geometry = preview.value;
+  if (!geometry) return {};
+  return { '--pv-font': `${geometry.fontCqw}cqw`, '--pv-lh': '1' };
+});
+
+/** שורות 2 ואילך: שני צדי הכניסה. */
+const lineStyle = computed<CSSProperties>(() => {
+  const geometry = preview.value;
+  if (!geometry) return {};
+  return {
+    marginInlineStart: `${geometry.startPct}%`,
+    marginInlineEnd: `${geometry.endPct}%`,
+  };
+});
+
+/** השורה הראשונה: אותם צדדים, ועליהם „מיוחד” — חיובי לראשונה, שלילי לתלויה. */
+const firstLineStyle = computed<CSSProperties>(() => {
+  const geometry = preview.value;
+  if (!geometry) return {};
+  return {
+    marginInlineStart: `${geometry.startPct + geometry.firstLinePct}%`,
+    marginInlineEnd: `${geometry.endPct}%`,
+  };
+});
+
 function onAddTab(): void {
   const cm = parsePositive(newTabCm.value);
   if (cm === null) return;
@@ -505,10 +733,6 @@ function formatTab(tab: { positionTwips: number; alignment: string; leader?: str
 function onSubmit(): void {
   if (props.busy || !canSubmit.value) return;
   const amount = parseNonNegative(amountCm.value) ?? 0;
-  const rule: LineSpacingRule = lineMode.value === 'exact' || lineMode.value === 'atLeast'
-    ? lineMode.value
-    : 'auto';
-  const lineTwips = rule === 'auto' ? Number(lineMode.value) : ptToTwips(parseNonNegative(linePt.value) ?? 0);
   emit('submit', {
     leftCm: parseNonNegative(leftCm.value) ?? 0,
     rightCm: parseNonNegative(rightCm.value) ?? 0,
@@ -516,8 +740,8 @@ function onSubmit(): void {
     amountCm: amount,
     beforePt: parseNonNegative(beforePt.value) ?? 0,
     afterPt: parseNonNegative(afterPt.value) ?? 0,
-    lineTwips,
-    lineRule: rule,
+    lineTwips: lineTwips.value,
+    lineRule: lineRule.value,
     keepNext: keepNext.value,
     keepLines: keepLines.value,
     widowControl: widowControl.value,
@@ -535,7 +759,10 @@ function onSubmit(): void {
   border: 1px solid var(--color-outline);
   border-radius: var(--radius-sm);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
-  width: 360px;
+  /* שתי עמודות ופס תצוגה — אותו רוחב של „מתקדם” של הגופן, ומאותו טעם: ראו
+     „הפריסה” בהערת הפתיחה. */
+  width: 560px;
+  max-width: calc(100vw - 32px);
   max-height: calc(100vh - 200px);
   /* הגוף גולל, לא הדיאלוג — אותה הכרעה, ומאותה סיבה, כמו ב-FontAdvancedDialog:
      `overflow-block: auto` על השורש דחק את הפוטר („אישור” / „ביטול”) אל מתחת
@@ -589,6 +816,22 @@ function onSubmit(): void {
   gap: 10px;
 }
 
+.pd-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  align-items: start;
+}
+
+.pd-column {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  /* בלעדיו עמודת גריד אינה מתכווצת מתחת לרוחב תוכנה, ושורת הטאב הארוכה
+     הייתה מרחיבה את הדיאלוג מעבר ל-560. */
+  min-width: 0;
+}
+
 .pd-group {
   border: 1px solid var(--color-outline-variant);
   border-radius: var(--radius-xs);
@@ -610,6 +853,11 @@ function onSubmit(): void {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+/* שורת הטאב היא ארבעה פקדים בעמודה של חצי דיאלוג — היא נשברת ולא גולשת. */
+.pd-row-wrap {
+  flex-wrap: wrap;
 }
 
 .pd-label {
@@ -691,6 +939,100 @@ function onSubmit(): void {
   font-size: 10.5px;
   line-height: 1.4;
   color: var(--color-on-surface-variant);
+}
+
+.pd-note-warn {
+  color: var(--color-error);
+}
+
+/* ---- פס התצוגה המקדימה ---- */
+
+.pd-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.pd-preview-caption {
+  font-size: 10px;
+  color: var(--color-on-surface-variant);
+}
+
+.pd-preview-page {
+  /*
+   * `container-type: inline-size` הוא מה שהופך את הרוחב הזה למכנה של `cqw`,
+   * וכך גודל הגופן בפס נשמר בקנה מידה אחד עם האחוזים — בלי מדידה של ה-DOM
+   * ובלי `ResizeObserver`. ההנמקה המלאה ב-engine/paragraph-preview.ts.
+   *
+   * גובה קבוע ותוכן ממורכז, כמו בפס של „מתקדם”: הפס משנה מרווח שורות וריווח
+   * תוך כדי הקלדה, וגובה שנגזר מהתוכן היה מזיז את הפוטר בכל הקשה — כלומר
+   * „אישור” שבורח מתחת לעכבר. מה שאינו נכנס נחתך בקצוות, והפסקה שנערכת
+   * נשארת במרכז.
+   */
+  container-type: inline-size;
+  block-size: 116px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding-inline: 10px;
+  overflow: hidden;
+  border: 1px solid var(--color-outline-variant);
+  border-radius: var(--radius-xs);
+  background: var(--color-surface-container-high);
+}
+
+.pd-pv-para {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  /*
+   * גודל הגופן דרך משתנה, ולא ישירות מה-`:style`, ובכוונה: `cqw` היא יחידה
+   * ש-jsdom אינו מכיר, ו-`style.setProperty('font-size', '2.44cqw')` **נבלע
+   * שם בשקט** — נמדד. כלומר בדיקת רכיב שהייתה נוקבת בגודל הגופן הייתה עוברת
+   * ירוק גם על מספר שגוי לגמרי. משתנה מותאם כן נשמר ב-jsdom, ולכן המספר
+   * נבדק שם, וההסבה שלו ל-`font-size` היא השורה הסטטית הזאת — שנמדדת בשער
+   * הדפדפן. ראו tests/component/paragraph-dialog.test.ts.
+   */
+  font-size: var(--pv-font);
+}
+
+.pd-pv-target {
+  color: var(--color-on-surface);
+}
+
+/* השכנות אינן מתחרות על תשומת הלב עם הפסקה שנערכת — הן רק ההקשר שלה. */
+.pd-pv-context {
+  color: var(--color-on-surface-variant);
+  opacity: 0.45;
+}
+
+.pd-pv-line {
+  /*
+   * תיבת השורה, ובתוכה הפס. הגובה הוא `1em × --pv-lh`: ‏`1em` הוא גודל
+   * הגופן שהפס צויר בו (ב-`cqw`), ו-`--pv-lh` הוא בדיוק ה-`line-height`
+   * שהמסמך יקבל — כלומר מרווח השורות נראה כמרחק בין הפסים, ולא כעיבוי שלהם.
+   */
+  block-size: calc(1em * var(--pv-lh, 1));
+  display: flex;
+  align-items: center;
+}
+
+.pd-pv-line::before {
+  content: '';
+  display: block;
+  inline-size: 100%;
+  block-size: 0.42em;
+  background: currentcolor;
+  border-radius: 1px;
+}
+
+/* השורה האחרונה של פסקה אינה מגיעה לקצה — בלעדיה הפסים נראים כטבלה. */
+.pd-pv-line-last::before {
+  inline-size: 62%;
+}
+
+.pd-pv-context .pd-pv-line:last-child::before {
+  inline-size: 74%;
 }
 
 .pd-error {

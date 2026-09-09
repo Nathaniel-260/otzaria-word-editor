@@ -477,6 +477,9 @@
       :busy="paraInFlight"
       :tabs-enabled="tabsEnabled"
       :snapshot="paraSnapshot"
+      :page-text-width-twips="paraTextWidthTwips"
+      :font-size-pt="paraFontSizePt"
+      :section-rtl="paraSectionRtl"
       @close="paragraphOpen = false"
       @submit="onParagraphSubmit"
       @tab-add="onParagraphTabAdd"
@@ -543,6 +546,7 @@ import {
   applyFontAdvanced,
   type FontAdvancedPatch,
 } from '../../../engine/font-advanced';
+import { readPageMargins } from '../../../engine/page-setup';
 import {
   NUMBER_STYLE_LABELS,
   continuePreviousList,
@@ -1034,6 +1038,24 @@ const paraInFlight = shallowRef(false);
 /** יעד הפסקה שהתצלום נלקח ממנו; כל פעולת „אישור” חוזרת אליו. */
 let paraTarget: unknown = null;
 const paraSnapshot = shallowRef(emptyParagraphFormat());
+/**
+ * רוחב עמודת הטקסט של המקטע, למכנה של פס התצוגה המקדימה בדיאלוג.
+ *
+ * `0` = אין גיאומטריה, ואז הדיאלוג אינו מצייר פס. נקרא בפתיחה יחד עם התצלום
+ * ולא נשמר מעבר לה, מאותו טעם שהתצלום עצמו נקרא בפתיחה: המשתמש יכול לשנות
+ * שוליים בלשונית „פריסה” בין פתיחה לפתיחה.
+ */
+const paraTextWidthTwips = shallowRef(0);
+/**
+ * כיוון המקטע — מה שפסקה שאינה מצהירה `<w:bidi>` יורשת, ולכן הצד שבו הפס
+ * מצייר את „לפני טקסט”. נקרא מאותה קריאה של `readPageMargins`.
+ */
+const paraSectionRtl = shallowRef(false);
+/**
+ * גודל הגופן שבסמן — הסרגל של הציר האנכי בפס. אותו מספר שבבורר הגודל
+ * שברצועה, כלומר בלי קריאה נוספת למנוע.
+ */
+const paraFontSizePt = computed(() => Number(fonts.size.value) || 0);
 
 const tabsEnabled = computed(() => capabilities.value?.can('canManageParagraphTabs') ?? false);
 
@@ -1063,6 +1085,13 @@ async function onOpenParagraph(): Promise<void> {
     }
     paraTarget = result.target;
     paraSnapshot.value = result.snapshot;
+    // קריאה בלבד של `sections.list()`, אותה קריאה שהסרגל מצייר לפיה. כשל שלה
+    // אינו מונע את הדיאלוג — הוא מוריד ממנו את הפס בלבד.
+    const page = await readPageMargins(superdoc.value);
+    paraTextWidthTwips.value = page
+      ? Math.max(0, page.pageWidthTwips - page.leftTwips - page.rightTwips)
+      : 0;
+    paraSectionRtl.value = page?.direction === 'rtl';
     paragraphOpen.value = true;
   } finally {
     paraInFlight.value = false;

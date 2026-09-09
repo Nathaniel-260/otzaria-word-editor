@@ -794,6 +794,219 @@ await phase('שלב א — קבוצת „פיסקה"', async (app, ctx) => {
     await closeDialogs();
   });
 
+  /* -------- פס התצוגה המקדימה -------- */
+  await step('תפריט פסקה — פס התצוגה המקדימה (מדידה בפיקסלים)', async () => {
+    /*
+     * מה שנמדד כאן, ולמה דווקא בדפדפן:
+     *
+     * 1. **`cqw` ו-`container-type`** הן תלות הפלטפורמה היחידה שהפס מוסיף,
+     *    ואין להן מקבילה ב-jsdom — `setProperty('font-size','2.44cqw')`
+     *    נבלע שם בשקט (נמדד). אם היחידה אינה נתמכת,
+     *    `font-size: var(--pv-font)` פסול והפסקה יורשת את גודל הגופן של
+     *    הדיאלוג; המדידה למטה תופסת את זה, מפני שהיא משווה את הגודל בפועל
+     *    ל-`fontTwips/columnTwips` של עמודת הטקסט האמיתית.
+     * 2. **שהאחוזים באמת נמדדים מול אותו מכנה** — כולל `margin-block`, שהוא
+     *    המקום שבו CSS מפתיע: אחוז בו נמדד מול ה**רוחב** של האב ולא הגובה.
+     *
+     * הפסקה נמדדת מול פסי ה**שכנות**, שאין להם שוליים בציר האופקי ולכן הם
+     * בדיוק תחום הטקסט של המכל. כך אין צורך לחשב מסגרת וריפוד, ואין דרך
+     * לטעות בהם.
+     *
+     * גודל הגופן נלקח מהכיתוב שמעל הפס ולא מבורר הגודל שברצועה, ובכוונה:
+     * ההגעה של המספר מהרצועה אל הכיתוב נבדקת ממילא בבדיקת הרכיב, ומה שאין
+     * לה דרך לבדוק הוא בדיוק מה שנמדד כאן — שהמספר הזה הופך לפיקסלים דרך
+     * `cqw`. בורר הגודל נקרא בנוסף ומדווח בלוג, כהצלבה.
+     *
+     * הפסקה 2 נושאת כאן את מה שהאישור כתב לה: כניסה 1.00/0.50 ס״מ, שורה
+     * ראשונה 0.50 ס״מ, ריווח 6/12 נק׳ ומרווח שורות „מדויקת” 18 נק׳.
+     */
+    await caretAt(2);
+    await app.click('תפריט פסקה');
+    await app.sleep(1600);
+    if (!(await app.dialog())) { report.skip('תפריט פסקה — פס התצוגה המקדימה', 'הדיאלוג לא נפתח'); return; }
+    // ‏`finally` ולא סגירה בסוף: `step()` בולע זריקות, וכשל כאן היה משאיר את
+    // הדיאלוג פתוח — נמדד, ואז שני הצעדים הבאים נפלו על „הסמן לא הגיע
+    // לפסקה 3”, מפני שהדיאלוג חוסם את הלחיצה במסמך.
+    try {
+
+    const probe = JSON.parse(await js(`JSON.stringify((() => {
+      const page = document.querySelector('.para-dialog .pd-preview-page');
+      const caption = document.querySelector('.para-dialog .pd-preview-caption');
+      if (!page) return { drawn: false, caption: caption ? caption.textContent.trim() : null,
+        note: (document.querySelector('.para-dialog .pd-preview-note') || {}).textContent || null };
+
+      const rect = (el) => { const r = el.getBoundingClientRect(); return { top: r.top, bottom: r.bottom, left: r.left, right: r.right, width: r.width }; };
+      const ctxParas = Array.from(page.querySelectorAll('.pd-pv-context'));
+      const ctxLines = Array.from(page.querySelectorAll('.pd-pv-context .pd-pv-line'));
+      const target = page.querySelector('.pd-pv-target');
+      const targetLines = Array.from(target.querySelectorAll('.pd-pv-line'));
+      const rtl = getComputedStyle(page).direction === 'rtl';
+      const band = rect(ctxLines[0]);
+      const startOf = (el) => { const r = rect(el); return rtl ? band.right - r.right : r.left - band.left; };
+      const endOf = (el) => { const r = rect(el); return rtl ? r.left - band.left : band.right - r.right; };
+
+      return {
+        drawn: true,
+        caption: caption ? caption.textContent.trim() : null,
+        rtl,
+        innerWidth: band.width,
+        pageOffsetHeight: page.offsetHeight,
+        containerType: getComputedStyle(page).containerType,
+        fontPx: parseFloat(getComputedStyle(target).fontSize),
+        dialogFontPx: parseFloat(getComputedStyle(document.querySelector('.para-dialog')).fontSize),
+        cqwSupported: CSS.supports('font-size', '1cqw'),
+        /*
+         * הדחיפה שמכריעה. גופן הדיאלוג כאן הוא 13.6px וגודל הפס הצפוי
+         * 13.614px — נמדד — ולכן השוואה לערך הצפוי לבדה אינה מבחינה בין
+         * „cqw עובד” לבין „ההצהרה פסולה והפסקה ירשה”. דחיפת המשתנה לערך
+         * רחוק מכריעה: אם הפיקסלים עוקבים אחריו, ההצהרה חיה והיחידה נמדדת
+         * מול המכל הנכון. המשתנה מוחזר מיד.
+         */
+        fontPxAtProbe: (() => {
+          const original = target.style.getPropertyValue('--pv-font');
+          target.style.setProperty('--pv-font', '8cqw');
+          const measured = parseFloat(getComputedStyle(target).fontSize);
+          target.style.setProperty('--pv-font', original);
+          return measured;
+        })(),
+        dialogWidth: rect(document.querySelector('.para-dialog')).width,
+        dialogBottom: rect(document.querySelector('.para-dialog')).bottom,
+        footerBottom: rect(document.querySelector('.para-dialog .pd-footer')).bottom,
+        columnCount: page.closest('.pd-body').querySelectorAll('.pd-columns > .pd-column').length,
+        firstLineStart: startOf(targetLines[0]),
+        bodyLineStart: startOf(targetLines[1]),
+        bodyLineEnd: endOf(targetLines[1]),
+        lineBoxHeight: targetLines[1].offsetHeight,
+        gapBefore: rect(target).top - rect(ctxParas[0]).bottom,
+        gapAfter: rect(ctxParas[1]).top - rect(target).bottom,
+        contextLineStart: startOf(ctxLines[0]),
+        targetLineCount: targetLines.length,
+        viewportHeight: window.innerHeight,
+      };
+    })())`));
+
+    if (!probe.drawn) {
+      report.fail('תפריט פסקה — פס התצוגה המקדימה',
+        `הפס לא צויר על מסמך פתוח. כיתוב=${short(probe.caption)} | הערה=${short(probe.note)}`);
+      return;
+    }
+
+    /*
+     * מדידה נלווית: האם המודל מבדיל בין „פסקה שהצהירה LTR” (`w:bidi w:val="0"`)
+     * לבין „פסקה שלא הצהירה כלום”. בלי ההבחנה הזאת אין דרך ליפול לכיוון
+     * המקטע כשהפסקה שותקת — וזה המצב הרגיל במסמך עברי שנוצר ב-Word.
+     */
+    const bidiShape = JSON.parse(await js(`(async () => { try {
+      const d = window.__otzariaEditor.superdoc.activeEditor.doc;
+      const doc = await Promise.race([d.get(), new Promise(r => setTimeout(() => r(null), 5000))]);
+      const sections = await Promise.race([d.sections.list(), new Promise(r => setTimeout(() => r(null), 5000))]);
+      if (!doc) return JSON.stringify({ timeout: true });
+      const rows = (doc.body || []).map((n) => {
+        const inner = n.paragraph || n.heading || n.list || {};
+        const props = inner.props || {};
+        const text = (inner.inlines || []).map(x => (x && (x.text || (x.run && x.run.text))) || '').join('').slice(0, 8);
+        return { text, hasBidi: Object.prototype.hasOwnProperty.call(props, 'bidi'), bidi: props.bidi,
+          keys: Object.keys(props) };
+      });
+      return JSON.stringify({ rows, sectionDirection: sections && sections.items && sections.items[0] && sections.items[0].sectionDirection });
+    } catch (e) { return JSON.stringify({ error: String(e && e.message) }); } })()`));
+    console.log('מדידת bidi במודל:', JSON.stringify(bidiShape));
+
+    /* רוחב עמודת הטקסט האמיתי, מאותה קריאה שהתוסף עצמו קורא (עם שעון בדף). */
+    const column = JSON.parse(await js(`(async () => { try {
+      const d = window.__otzariaEditor.superdoc.activeEditor.doc;
+      const listed = await Promise.race([d.sections.list(), new Promise(r => setTimeout(() => r(null), 5000))]);
+      const s = listed && listed.items && listed.items[0];
+      if (!s) return JSON.stringify({ timeout: true });
+      return JSON.stringify({ width: s.pageSetup.width, left: s.margins.left, right: s.margins.right });
+    } catch (e) { return JSON.stringify({ error: String(e && e.message) }); } })()`));
+
+    if (column.width === undefined) {
+      report.fail('תפריט פסקה — פס התצוגה המקדימה',
+        `לא הצלחתי לקרוא את מידות המקטע להשוואה: ${JSON.stringify(column)}`);
+      return;
+    }
+
+    const twips = (inches) => Math.round(inches * 1440);
+    const columnTwips = twips(column.width) - twips(column.left) - twips(column.right);
+    const TWIPS_PER_CM = 1440 / 2.54;
+    const pctPx = (t) => (t / columnTwips) * probe.innerWidth;
+
+    const captionCm = (probe.caption || '').match(/([\d.]+)\s*ס"מ/)?.[1] ?? null;
+    const fontPt = Number((probe.caption || '').match(/גופן\s+([\d.]+)/)?.[1] ?? '0') || null;
+    const comboPt = await js(`(() => { const el = Array.from(document.querySelectorAll('.ribbon-combo-input'))
+      .find(x => /גודל|size/i.test(x.getAttribute('aria-label') || '')); return el ? el.value : null; })()`);
+
+    /* מה שהאישור כתב לפסקה 2, בטוויפס — ראו ההערה למעלה. */
+    const startTwips = Math.round(1.0 * TWIPS_PER_CM);
+    const endTwips = Math.round(0.5 * TWIPS_PER_CM);
+    const expected = {
+      startPx: pctPx(startTwips),
+      endPx: pctPx(endTwips),
+      firstLinePx: pctPx(startTwips + endTwips),
+      gapBeforePx: pctPx(6 * 20),
+      gapAfterPx: pctPx(12 * 20),
+      fontPx: fontPt ? pctPx(fontPt * 20) : null,
+    };
+    /* „מדויקת” 18 נק׳ על גופן fontPt — היחס הוא גובה תיבת השורה. */
+    const expectedLineBox = fontPt ? ((18 * 20) / (fontPt * 20)) * probe.fontPx : null;
+
+    const near = (actual, want, tol = 1.5) =>
+      want !== null && want !== undefined && Math.abs(actual - want) <= tol;
+
+    console.log('פס: מדוד=', JSON.stringify(probe));
+    console.log('פס: עמודה(twips)=', columnTwips, '| גופן מהכיתוב=', fontPt, '| מבורר הרצועה=', comboPt,
+      '| צפוי=', JSON.stringify(expected), '| תיבת שורה צפויה=', expectedLineBox);
+
+    const checks = {
+      'כניסה בהתחלה': near(probe.bodyLineStart, expected.startPx),
+      'כניסה בסוף': near(probe.bodyLineEnd, expected.endPx),
+      'שורה ראשונה = כניסה + מיוחד': near(probe.firstLineStart, expected.firstLinePx),
+      'ריווח לפני (margin-block באחוז נמדד מול הרוחב)': near(probe.gapBefore, expected.gapBeforePx),
+      'ריווח אחרי': near(probe.gapAfter, expected.gapAfterPx),
+      'גופן ב-cqw מגיע לפיקסלים': near(probe.fontPx, expected.fontPx),
+      'היחידה cqw נתמכת': probe.cqwSupported === true,
+      'ההצהרה חיה: 8cqw נמדד מול המכל': near(probe.fontPxAtProbe, 0.08 * probe.innerWidth),
+      'container-type: inline-size בתוקף': probe.containerType === 'inline-size',
+      'מרווח „מדויקת” = גובה תיבת השורה': near(probe.lineBoxHeight, expectedLineBox),
+      'לשכנות אין כניסה': Math.abs(probe.contextLineStart) <= 0.5,
+      'ארבעה פסים לפסקה שנערכת': probe.targetLineCount === 4,
+      'הכיוון של הפסקה': probe.rtl === true,
+      'הכיתוב נוקב בעמודה שנמדדה': captionCm !== null
+        && Math.abs(Number(captionCm) - columnTwips / TWIPS_PER_CM) <= 0.02,
+      'גובה הפס קבוע ואינו נגזר מהתוכן': probe.pageOffsetHeight === 116,
+      'שתי עמודות': probe.columnCount === 2,
+      'הדיאלוג ברוחב 560': Math.abs(probe.dialogWidth - 560) <= 1,
+      'הפוטר בתוך המסך': probe.footerBottom <= probe.viewportHeight,
+    };
+    const failed = Object.entries(checks).filter(([, v]) => !v).map(([k]) => k);
+    console.log('בדיקות הפס:', JSON.stringify(checks));
+
+    if (failed.length === 0) {
+      report.pass('תפריט פסקה — פס התצוגה המקדימה',
+        `כל ${Object.keys(checks).length} המדידות מתאימות: עמודה ${columnTwips} twips → ${probe.innerWidth.toFixed(1)}px, `
+        + `גופן ${fontPt} נק׳ → ${probe.fontPx.toFixed(2)}px (צפוי ${expected.fontPx.toFixed(2)}; גופן הדיאלוג ${probe.dialogFontPx}px, `
+        + `ולכן ההכרעה היא הדחיפה: 8cqw → ${probe.fontPxAtProbe.toFixed(2)}px מול ${(0.08 * probe.innerWidth).toFixed(2)}px צפוי), `
+        + `כניסה ${probe.bodyLineStart.toFixed(2)}px (צפוי ${expected.startPx.toFixed(2)}), `
+        + `שורה ראשונה ${probe.firstLineStart.toFixed(2)}px (צפוי ${expected.firstLinePx.toFixed(2)}), `
+        + `ריווח לפני ${probe.gapBefore.toFixed(2)}px (צפוי ${expected.gapBeforePx.toFixed(2)}), `
+        + `תיבת שורה ${probe.lineBoxHeight}px (צפוי ${expectedLineBox.toFixed(2)})`);
+    } else if (!checks['גופן ב-cqw מגיע לפיקסלים'] || !checks['היחידה cqw נתמכת']
+      || !checks['ההצהרה חיה: 8cqw נמדד מול המכל'] || !checks['container-type: inline-size בתוקף']) {
+      report.fail('תפריט פסקה — פס התצוגה המקדימה',
+        `קנה המידה של הגופן אינו בתוקף: נמדד ${probe.fontPx}px מול ${expected.fontPx}px צפוי, `
+        + `‏8cqw בדחיפה נמדד ${probe.fontPxAtProbe}px מול ${(0.08 * probe.innerWidth).toFixed(2)}px צפוי, `
+        + `CSS.supports('font-size','1cqw')=${probe.cqwSupported}, container-type=${probe.containerType}, `
+        + `גופן הדיאלוג ${probe.dialogFontPx}px. זה מה שקורה כש-\`cqw\` אינה נתמכת — `
+        + `\`font-size: var(--pv-font)\` פסול והפסקה יורשת. נכשלו: ${failed.join(' / ')}`);
+    } else {
+      report.partial('תפריט פסקה — פס התצוגה המקדימה', `נכשלו: ${failed.join(' / ')}`);
+    }
+    } finally {
+      await closeDialogs();
+    }
+  });
+
   await step('תפריט פסקה — על כותרת (nodeType:heading, לא paragraph מקובע)', async () => {
     // באג 1: היעד שנשלח למנוע חייב לשאת את ה-nodeType האמיתי של הבלוק.
     // כתובת עם nodeType:'paragraph' מקובע על כותרת היא כתובת פסולה, וכל
