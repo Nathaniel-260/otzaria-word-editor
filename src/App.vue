@@ -369,6 +369,7 @@ import {
 } from './composables/keys';
 import { ACTIVE_SUPERDOC } from './engine/document-api';
 import { readDocSelection } from './engine/doc-selection';
+import { layOutTocRows } from './engine/toc';
 import type { Dictionary } from './engine/spellcheck';
 import { loadTorahDictionary, rememberUserWord } from './engine/spellcheck-dictionary';
 import {
@@ -4231,6 +4232,17 @@ async function onRunCommandFromTellMe(id: string, payload?: unknown): Promise<vo
   }
   const outcome = await commandAdapter.value.run(id, payload);
   reportCommand(outcome, id);
+
+  /*
+    „תוכן עניינים” הוא הפקודה היחידה כאן שאינה שלמה בעצמה: המנוע כותב את
+    שורות הטבלה עם תו טאב בלי שום עצירה, ולכן מספר העמוד יוצא צמוד לכותרת
+    ובלי נקודות מפרידות — ושתי לשוניות הרצועה מריצות בגללו צעד שני
+    (`layOutTocRows`, ההנמקה ב-engine/toc.ts). בלי השורה הזאת אותה
+    פעולה עצמה הייתה נותנת מסמך אחר לפי המקום שממנו הופעלה.
+  */
+  if (outcome.ok && id === 'table-of-contents-insert') {
+    reportCommand(await layOutTocRows(activeSuperdoc.value), 'toc-align');
+  }
 }
 
 function onRunActionFromTellMe(action: ShellAction): void {

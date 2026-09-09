@@ -69,6 +69,8 @@ describe('StyleGallery', () => {
       'ללא מרווח',
       'כותרת 1',
       'כותרת 2',
+      // „כותרת 3” מסונתזת: ראו `withHeadingLadder` ב-engine/style-gallery.ts.
+      'כותרת 3',
       'כותרת משנה',
       'ציטוט',
     ]);

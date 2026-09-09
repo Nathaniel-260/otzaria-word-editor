@@ -20,6 +20,7 @@ import {
   builtInStyleLabel,
   styleDisplayLabel,
   GALLERY_SCROLL_STEP_PX,
+  HEADING_LADDER_FLOOR,
   clampPreviewFontSize,
   fallbackStyleGallery,
   galleryScrollAvailability,
@@ -31,6 +32,7 @@ import {
   styleRole,
   toGalleryItems,
   toGalleryState,
+  withHeadingLadder,
   type StyleGalleryHost,
   type StyleGalleryState,
   type StylesSlice,
@@ -93,7 +95,12 @@ const HEBREW_GALLERY: readonly StyleCatalogItem[] = [
   catalogItem({ id: 'MyStyle', name: 'סגנון שלי', custom: true, builtin: false }),
 ];
 
-const fallbackIds = [...FALLBACK_STYLE_IDS];
+/**
+ * מזהי רשת הביטחון כפי שהגלריה מציגה אותם: `FALLBACK_STYLE_IDS` **אחרי**
+ * השלמת סולם הכותרות. הרשימה כתובה במלואה ולא נגזרת מ-`withHeadingLadder`,
+ * כדי שהבדיקה לא תאשר את עצמה; `סולם הכותרות` למטה מקבע את הקשר בין השתיים.
+ */
+const fallbackIds = ['Normal', 'NoSpacing', 'Heading1', 'Heading2', 'Heading3', 'Subtitle', 'Quote'];
 const ids = (state: StyleGalleryState) => state.items.map((item) => item.id);
 
 /* ------------------------------------------------------------------ */
@@ -139,7 +146,7 @@ describe('נפילה לרשת הביטחון', () => {
     const state = readStyleGallery(host);
     warn.mockRestore();
 
-    expect(ids(state)).toEqual(['Normal', 'Heading1', 'Heading2', 'MyStyle']);
+    expect(ids(state)).toEqual(['Normal', 'Heading1', 'Heading2', 'Heading3', 'MyStyle']);
     expect(state.activeId).toBe('Heading1');
   });
 
@@ -180,11 +187,13 @@ describe('נפילה לרשת הביטחון', () => {
 describe('הגלריה מהמסמך', () => {
   it('הפריטים והשמות מהמנוע — כולל סגנון מותאם ושמות עבריים', () => {
     const state = toGalleryState(slice({ quickGallery: HEBREW_GALLERY }));
-    expect(ids(state)).toEqual(['Normal', 'Heading1', 'Heading2', 'MyStyle']);
+    // „כותרת 3” אינה במנוע והיא בגלריה: ראו `withHeadingLadder`.
+    expect(ids(state)).toEqual(['Normal', 'Heading1', 'Heading2', 'Heading3', 'MyStyle']);
     expect(state.items.map((item) => item.label)).toEqual([
       'רגיל',
       'כותרת 1',
       'כותרת 2',
+      'כותרת 3',
       'סגנון שלי',
     ]);
     expect(state.fromDocument).toBe(true);
@@ -202,7 +211,7 @@ describe('הגלריה מהמסמך', () => {
       catalogItem({ id: 'Normal' }),
       catalogItem({ id: 'Normal', name: 'שוב' }),
     ]);
-    expect(items.map((item) => item.id)).toEqual(['Normal']);
+    expect(items.map((item) => item.id)).toEqual(['Normal', 'Heading1', 'Heading2', 'Heading3']);
   });
 
   it('סגנון מוסתר אינו מוצג', () => {
@@ -213,7 +222,8 @@ describe('הגלריה מהמסמך', () => {
       }),
       catalogItem({ id: 'Normal' }),
     ]);
-    expect(items.map((item) => item.id)).toEqual(['Normal']);
+    // `Hidden` נשמט; מה שנשאר הוא „רגיל” וסולם הכותרות שמושלם אחריו.
+    expect(items.map((item) => item.id)).toEqual(['Normal', 'Heading1', 'Heading2', 'Heading3']);
   });
 
   it('`activeParagraphStyleId` הוא הכרטיס הפעיל', () => {
@@ -300,7 +310,7 @@ describe('הרשמה לקטלוג', () => {
     settle(slice({ quickGallery: HEBREW_GALLERY, activeParagraphStyleId: 'Normal' }));
 
     expect(seen).toHaveLength(2);
-    expect(ids(seen[1])).toEqual(['Normal', 'Heading1', 'Heading2', 'MyStyle']);
+    expect(ids(seen[1])).toEqual(['Normal', 'Heading1', 'Heading2', 'Heading3', 'MyStyle']);
     expect(seen[1].fromDocument).toBe(true);
     expect(seen[1].activeId).toBe('Normal');
   });
@@ -424,6 +434,84 @@ describe('תצוגה מקדימה', () => {
 });
 
 /* ------------------------------------------------------------------ */
+/* סולם הכותרות                                                        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * הבאג שנסגר כאן: המנוע הציע „כותרת 1” בלבד — ב-`word/styles.xml` של התבנית
+ * `Heading2`…`Heading9` נושאים `w:semiHidden`, ו-`quickGallery` מסנן אותם —
+ * ולכן לא הייתה דרך במסך להחיל רמה 2, ותוכן העניינים נבנה מרמה אחת גם אחרי
+ * „התאמה אישית” שמבקשת 1–3. ההנמקה המלאה ב-engine/style-gallery.ts.
+ */
+describe('סולם הכותרות', () => {
+  it('גלריה שמציעה „כותרת 1” בלבד מקבלת את 2 ו-3, מיד אחריה', () => {
+    const items = toGalleryItems([
+      catalogItem({ id: 'Normal' }),
+      catalogItem({ id: 'Heading1' }),
+      catalogItem({ id: 'Title' }),
+    ]);
+    expect(items.map((item) => item.id)).toEqual([
+      'Normal',
+      'Heading1',
+      'Heading2',
+      'Heading3',
+      'Title',
+    ]);
+  });
+
+  it('רמה שהמסמך מסתיר מסונתזת עם התווית העברית ובטוקני התפקיד', () => {
+    const items = toGalleryItems([catalogItem({ id: 'Heading1' })]);
+    const level2 = items.find((item) => item.id === 'Heading2');
+    expect(level2?.label).toBe('כותרת 2');
+    // הכרטיס של כותרת מציג את שמה, בשונה מ„AaBbCc” של סגנון גוף.
+    expect(level2?.previewText).toBe('כותרת 2');
+    expect(level2?.previewStyle.fontWeight).toBe('700');
+  });
+
+  it('מסמך שמציע רמה עמוקה שומר אותה בלי להמציא את הרמות שבאמצע', () => {
+    const items = toGalleryItems([
+      catalogItem({ id: 'Normal' }),
+      catalogItem({ id: 'Heading1' }),
+      catalogItem({ id: 'Heading5' }),
+    ]);
+    expect(items.map((item) => item.id)).toEqual([
+      'Normal',
+      'Heading1',
+      'Heading2',
+      'Heading3',
+      'Heading5',
+    ]);
+  });
+
+  it('רמה 9 קיימת נשארת, אך אינה פותחת כרטיסים חסרים 4–8', () => {
+    const items = toGalleryItems([catalogItem({ id: 'Heading9' })]);
+    expect(items.map((item) => item.id)).toEqual([
+      'Heading1',
+      'Heading2',
+      'Heading3',
+      'Heading9',
+    ]);
+  });
+
+  it('`Title` הוא תפקיד כותרת ואינו רמה — הסולם נבנה בלעדיו', () => {
+    const items = toGalleryItems([catalogItem({ id: 'Title' })]);
+    expect(items.map((item) => item.id)).toEqual(['Title', 'Heading1', 'Heading2', 'Heading3']);
+  });
+
+  it('רשימה ריקה נשארת ריקה — היא מה שמפעיל את רשת הביטחון', () => {
+    expect(withHeadingLadder([])).toEqual([]);
+    expect(toGalleryItems([])).toEqual([]);
+    expect(toGalleryItems(undefined)).toEqual([]);
+  });
+
+  it('כל מזהה שברשת הביטחון נשאר בגלריה שלה', () => {
+    const shown = fallbackStyleGallery().items.map((item) => item.id);
+    for (const id of FALLBACK_STYLE_IDS) expect(shown).toContain(id);
+    expect(HEADING_LADDER_FLOOR).toBe(3);
+  });
+});
+
+/* ------------------------------------------------------------------ */
 /* תוויות עבריות                                                       */
 /* ------------------------------------------------------------------ */
 
@@ -477,6 +565,9 @@ describe('תוויות הסגנונות המובנים', () => {
     expect(toGalleryItems(english).map((item) => item.label)).toEqual([
       'רגיל',
       'כותרת 1',
+      // שתי אלה מסונתזות: התבנית מסתירה אותן, וראו `withHeadingLadder`.
+      'כותרת 2',
+      'כותרת 3',
       'כותרת',
       'כותרת משנה',
       'ציטוט',
@@ -522,6 +613,7 @@ describe('תוויות הסגנונות המובנים', () => {
       'ללא מרווח',
       'כותרת 1',
       'כותרת 2',
+      'כותרת 3',
       'כותרת משנה',
       'ציטוט',
     ]);

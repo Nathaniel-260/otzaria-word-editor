@@ -220,7 +220,7 @@
         variant="large"
         tooltip="יצירת תוכן עניינים אוטומטי"
         :disabled="!tocCmd.enabled.value"
-        @click="tocCmd.run()"
+        @click="onInsertToc"
       />
     </RibbonGroup>
 
@@ -320,6 +320,7 @@ import { removeHyperlink } from '../../../engine/hyperlinks-manage';
 import type { CommandOutcome } from '../../../engine/command-adapter';
 import { ACTIVE_SUPERDOC } from '../../../engine/document-api';
 import { collectTableNodeIds, placeCursorAfterInsertedTable } from '../../../engine/table-insert';
+import { layOutTocRows } from '../../../engine/toc';
 import {
   readPageBreakSupport,
   readPageBreakNodeId,
@@ -410,6 +411,19 @@ async function onInsertTable(dimensions: { rows: number; cols: number }): Promis
   const before = await collectTableNodeIds(superdoc.value);
   const outcome = await tableCmd.run({ rows: dimensions.rows, cols: dimensions.cols });
   if (outcome.ok) void placeCursorAfterInsertedTable(superdoc.value, before);
+}
+
+/**
+ * אותם שני צעדים כמו בלשונית „הפניות”: פקודת ההכנסה של המנוע, ואחריה מיקום
+ * מספרי העמודים — השורות שהמנוע כותב נושאות תו טאב בלי עצירה, ולכן מספר
+ * העמוד יוצא צמוד לכותרת ובלי נקודות. ההנמקה ב-engine/toc.ts.
+ *
+ * הפקד הזה הוא אותה פקודת registry שבלשונית „הפניות”, ולכן הוא חייב להשאיר
+ * את אותו מסמך: תוכן עניינים שנראה אחרת לפי הכפתור שנלחץ הוא באג.
+ */
+async function onInsertToc(): Promise<void> {
+  const inserted = await tocCmd.run();
+  if (inserted.ok) report(await layOutTocRows(superdoc.value), 'toc-align');
 }
 
 async function onInsertImage(): Promise<void> {

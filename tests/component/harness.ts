@@ -322,9 +322,10 @@ export interface SuperdocDoubleOptions {
     pageNumbering?: { start?: number; format?: string };
     /**
      * מידות נייר ב**אינצ'ים**, בצורה שהמנוע האמיתי מפרויקט (ראו engine/print.ts:
-     * הפרויקציה הציבורית היא twips/1440). ברירת המחדל כאן היא צורת ה-twips
-     * הגולמית שאף צרן של `width` אינו קורא; מי שצריך מידה שמישה — A4 למשל —
-     * מציין אותה מפורשות.
+     * הפרויקציה הציבורית היא twips/1440). ברירת המחדל היא A4 — והיא **הייתה**
+     * צורת ה-twips הגולמית, בהערה שאף צרן אינו קורא את `width`. מאז יש אחד:
+     * `layOutTocRows` גוזר את מיקום עצירת הטאב מרוחב אזור הטקסט, וכפיל
+     * שמחזיר 11906 „אינצ'ים” היה נותן לו עמוד ברוחב שמונה מטרים.
      */
     pageSize?: { width?: number; height?: number };
   };
@@ -618,10 +619,14 @@ export function createSuperdocDouble(options: SuperdocDoubleOptions = {}): Super
           {
             address: { sectionIndex: 0 },
             pageSetup: {
-              width: options.sections?.pageSize?.width ?? 11906,
-              height: options.sections?.pageSize?.height ?? 16838,
+              width: options.sections?.pageSize?.width ?? 11906 / 1440,
+              height: options.sections?.pageSize?.height ?? 16838 / 1440,
               orientation: 'portrait',
             },
+            // A4 עם שוליים של אינץ' — מה שתבנית „מסמך חדש” נותנת, ומה
+            // ש-`readPageMargins` צריך כדי לחשב רוחב אזור טקסט.
+            margins: { left: 1, right: 1, top: 1, bottom: 1 },
+            sectionDirection: 'rtl',
             headerFooterMargins: { header: 0.5, footer: 0.5 },
             lineNumbering: options.sections?.lineNumbering,
             pageNumbering: options.sections?.pageNumbering,

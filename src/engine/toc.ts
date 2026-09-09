@@ -6,6 +6,10 @@
  * (שרצה על `create.tableOfContents`). המודול הזה מוסיף את מה שהופך אותו
  * לקבוצה: עדכון, הסרה, התאמה אישית וסימון ערך ידני. הפקד הקיים לא נגע.
  *
+ * ומה שנוסף אחרי דיווח משתמש: `layOutTocRows` — מוביל הנקודות, מספר העמוד
+ * בקצה השורה, שני דברים שהמנוע אינו נותן בשום שכבה מפני
+ * שהסגנונות `TOC1`…`TOC9` פשוט אינם קיימים. ההנמקה המלאה שם.
+ *
  * ## הכול כאן נמדד בדפדפן. אלה התוצאות
  *
  * Chrome headless, `file://`, ה-dist האמיתי, מסמך שנוקה ב-`clearContent`
@@ -33,7 +37,9 @@
  *
  * - `tabLeader` (מנהיג הנקודות) — נשלח `'dot'` ואחריו `'none'`; אף אחד מהם
  *   לא הופיע ב-`displayConfig` שחזר, וה-`instruction` לא השתנה כלל. גם ערך
- *   שאינו בחוזה בכלל (`'zigzag'`) חזר `success: true`.
+ *   שאינו בחוזה בכלל (`'zigzag'`) חזר `success: true`. **המוביל עצמו כן
+ *   מושג** — לא דרך המתג הזה אלא בעצירת טאב על השורות, ראו
+ *   `layOutTocRows`.
  * - `rightAlignPageNumbers` — אותה תוצאה בדיוק.
  * - `includePageNumbers` — זו „הקרנה” של המתג `\n` לקריאה בלבד, ולא מתג
  *   בפני עצמו: שליחתה נבלעת בשני הכיוונים.
@@ -94,6 +100,7 @@ import type { SuperDoc } from 'superdoc';
 import type { CommandOutcome } from './command-adapter';
 import { receiptFailureText, thrownText, type DocReceipt, type MaybePromise } from './document-api';
 import { readDocSelection, type SelectionDocumentApi, type SelectionTarget } from './doc-selection';
+import { readPageMargins, type PageSetupTarget } from './page-setup';
 
 /** `TocAddress` — מה ש-`get`/`configure`/`update`/`remove` מקבלים כ-`target`. */
 interface TocAddress {
@@ -177,6 +184,22 @@ export interface TocDocumentApi extends SelectionDocumentApi {
       limit?: number;
       offset?: number;
     }) => MaybePromise<{ items?: readonly MarkedEntry[]; total?: number } | undefined>;
+  };
+  format?: {
+    paragraph?: {
+      // `nodeType` הוא `'paragraph'` גם לבלוק ה-`tableOfContents` עצמו: נמדד
+      // שהוא מתקבל תחתיו ומקבל את העצירה, בעוד `'tableOfContents'` אינו סוג
+      // חוקי בחוזה של `format.paragraph.*`.
+      setTabStop?: (input: {
+        target: { kind: 'block'; nodeType: 'paragraph' | 'listItem'; nodeId: string };
+        position: number;
+        alignment: 'right';
+        leader: 'dot';
+      }) => MaybePromise<DocReceipt>;
+      clearAllTabStops?: (input: {
+        target: { kind: 'block'; nodeType: 'paragraph' | 'listItem'; nodeId: string };
+      }) => MaybePromise<DocReceipt>;
+    };
   };
   blocks?: {
     list?: (input?: {
@@ -720,6 +743,233 @@ export async function removeTableOfContents(host: TocTarget): Promise<CommandOut
   if (at === null) return rowsRemain();
 
   return sweepTocRows(host, at, sole.rows);
+}
+
+/* ------------------------------------------------------------------ */
+/* עיצוב שורות הטבלה — מוביל ומספר עמוד                                 */
+/* ------------------------------------------------------------------ */
+
+/**
+ * „כותרת……5” — מה שהופך רשימת שורות לתוכן עניינים.
+ *
+ * ## מה שהיה על המסך, ולמה
+ *
+ * המנוע כותב את השורה עם תו טאב יחיד בין הכותרת למספר:
+ * `<w:r><w:tab/></w:r>` ואחריו `PAGEREF`. תו הטאב זקוק ל**עצירה** שתגיד לאן
+ * הוא נדחף ואם מציירים משהו בדרך, ונמדד (scripts/qa/toc-direction-probe.mjs)
+ * שאין אף אחת בשום שכבה:
+ *
+ * - ב-pPr של שורות ה-TOC אין `w:tabs` כלל;
+ * - הסגנונות `TOC1`…`TOC9` — שם Word מחזיק את העצירה הזאת — **אינם מוגדרים
+ *   ב-`word/styles.xml`** של התבנית (33 סגנונות, ואף אחד מהם אינו `TOC*`),
+ *   ולמנוע אין API לחבר סגנון חדש;
+ * - ולכן התו נופל על `w:defaultTabStop` — קפיצה אחת של חצי אינץ' ובלי מוביל.
+ *
+ * זה מה שנראה: הכותרת מימין (הכיוון נורש מ-`w:bidi` של המקטע), ומספר העמוד
+ * 38 פיקסלים ממנה, בלי נקודות ובלי קשר לרוחב העמוד. בשורה ברוחב 602 פיקסלים
+ * מספר העמוד יושב ב-x=593 — כלומר צמוד לכותרת ולא בקצה השורה.
+ *
+ * ## מה שנעשה, ולמה **בכל שורה** ולא במקום אחד
+ *
+ * `format.paragraph.setTabStop` עם `alignment: 'right'` ו-`leader: 'dot'`.
+ * זו העצירה שהסגנון היה נותן, ומכיוון שאין דרך לכתוב סגנון היא נכתבת לכל
+ * שורה בנפרד. נמדד על ה-dist הארוז: העצירה נכתבת קנונית
+ * (`<w:tab w:val="right" w:pos="…" w:leader="dot"/>`), הצייר מצייר את המוביל
+ * כ-`div.superdoc-leader` ברוחב 513 פיקסלים, ומספר העמוד עובר לקצה השורה.
+ * העלות נמדדה גם היא: 26ms לשורה בממוצע (10 שורות ב-261ms).
+ *
+ * העצירה **שורדת `toc.update`**: אחרי בנייה מחדש ה-`w:tabs` נשאר על כל
+ * השורות, וגם המוביל נשאר מצויר. כלומר זו אינה עבודה שמתאדה בלחיצה הבאה —
+ * והיא כן נדרשת שוב אחרי עדכון שהוסיף כותרת, מפני שהשורה **החדשה** נולדת
+ * בלי עצירה.
+ *
+ * ## למה המיקום אינו רוחב אזור הטקסט, אלא פחות ממנו
+ *
+ * כאן יש באג של המנוע, והמספר הזה הוא הקיזוז שלו. בפסקה עברית עצירה
+ * ב„סוף” אמורה להצמיד את הטקסט שאחרי הטאב אל **הקצה השמאלי מבפנים**;
+ * המנוע מציב את הקצה **הימני** של המספר על העצירה, כלומר הוא חורג משמאל
+ * ברוחב עצמו. נמדד, A4 עם שוליים של אינץ' (אזור טקסט 9026 twips = 602px
+ * שמתחיל ב-x=96 בעמוד):
+ *
+ *     עצירה            מספר העמוד על המסך
+ *     right@9026        x=87  — 9 פיקסלים **מחוץ** לאזור הטקסט
+ *     left@9026         x=87  — אותו מקום בדיוק
+ *     right@8826        x=100 — בתוך אזור הטקסט
+ *
+ * (הדבר מדווח ב-docs/engine-gaps.md.) לכן העצירה נסוגה פנימה בשיעור שמכסה
+ * את המספר הרחב ביותר: `TOC_PAGE_NUMBER_RESERVE_TWIPS`. הבחירה בקיזוז ולא
+ * בהצמדה לרוחב המלא היא בחירה בין שני מצבים גלויים — מספר שיוצא אל השוליים,
+ * או עמודת מספרים מיושרת שמתחילה סנטימטר מהשוליים — והשני הוא מה ש-Word
+ * נראה כמו.
+ *
+ * ## מה שמנוקה לפני הכתיבה, ולמה
+ *
+ * `setTabStop` **מוסיף** עצירה ואינו מחליף אותה (נמדד: שתי קריאות השאירו
+ * שתיים), ואי אפשר לקרוא את העצירות הקיימות — `doc.get()` אינו מחזיר `tabs`
+ * בתכונות הפסקה (ראו page-ruler.ts). לכן `clearAllTabStops` לפני: מסמך
+ * שגודל העמוד שלו שונה אחרי שהוכנס תוכן עניינים היה מקבל עצירה שנייה במיקום
+ * חדש, ותו הטאב היה נדחף אל **הראשונה** שהוא פוגש — כלומר אל המיקום הישן.
+ *
+ * ## למה אין הזחה ישירה לפי רמה
+ *
+ * המנוע מודד עצירת טאב אחרי ההזחה, בעוד Word מודד `w:pos` משולי העמוד.
+ * פיצוי שמחזיר את העמודה למקומה בעורך שומר בקובץ מיקום אחר לכל רמה, ולכן
+ * פותח את ה-DOCX ב-Word עם עמודת מספרים שבורה. עד שיהיה תיקון במנוע או API
+ * לסגנון `TOC*`, העדיפות היא למסמך תקני: אותה עצירה לכל רמה, בלי הזחה ישירה.
+ * כך המוביל ומספר העמוד נכונים בשני העורכים.
+ */
+export const TOC_PAGE_NUMBER_RESERVE_TWIPS = 540;
+
+/** מה שמוצג כשעיצוב השורות נכשל. הטבלה עצמה כבר במסמך — ראו `layOutTocRows`. */
+const LAYOUT_FAILED = 'עיצוב שורות תוכן העניינים נכשל';
+
+/**
+ * שורות שכבר עוצבו במופע המנוע הנוכחי. `toc.update` משאיר את העצירות של
+ * השורות הקיימות; לכן כתיבה חוזרת היא עבודה מיותרת ומצטברת במיוחד בספרים.
+ * המפתח כולל סוג בלוק כי אותו `nodeId` אינו בהכרח כתובת זהה תחת שני סוגים.
+ */
+const tocLayoutCache = new WeakMap<TocDocumentApi, Map<string, number>>();
+
+function tocLayoutKey(row: { nodeId: string; nodeType: 'paragraph' | 'listItem' }): string {
+  return `${row.nodeType}:${row.nodeId}`;
+}
+
+/**
+ * האם הבלוק הוא שורה של תוכן עניינים **קיים**.
+ *
+ * בשונה מ-`isTocRow`, שרץ אחרי `toc.remove` על מה שנשאר, כאן הבלוק הראשון
+ * של הטבלה עדיין במקומו — והוא השורה הראשונה שעל המסך. הוצאתו הייתה משאירה
+ * את הכותרת הראשונה בלי מוביל, וזה בדיוק הפער הגלוי ביותר.
+ */
+function isTocLine(block: BlockEntry | undefined, levels: ReadonlyMap<string, number>): boolean {
+  const styleId = block?.styleId ?? '';
+  if (!levels.has(styleId)) return false;
+  return ROW_NODE_TYPES.has(block?.nodeType ?? '') || block?.nodeType === 'tableOfContents';
+}
+
+/**
+ * מעצבת את שורות תוכן העניינים: מוביל נקודות ומספר עמוד בקצה.
+ *
+ * רצה על **כל** שורות תוכן העניינים שבמסמך ולא על טבלה אחת: אין כאן שאלה של
+ * „על איזו טבלה המשתמש התכוון” — עצירת טאב זהה בכל שורה של כל טבלה היא בדיוק
+ * מה שסגנון היה עושה, ולכן גם מסמך עם שתי טבלאות שאינן ניתנות להבחנה
+ * (ראו הערת הפתיחה) מקבל את שתיהן מיושרות.
+ *
+ * מסמך בלי שורות תוכן עניינים מחזיר `{ok:true}` ולא כשל: הפונקציה נקראת
+ * **אחרי** פעולות אחרות, ו„אין מה ליישר” אינו דבר שיש לדווח עליו למשתמש.
+ */
+export async function layOutTocRows(host: TocTarget): Promise<CommandOutcome> {
+  const doc = docOf(host);
+  if (!doc) return unavailable(LAYOUT_FAILED, 'המסמך עדיין נטען', 'document-api-unavailable');
+
+  const setTabStop = doc.format?.paragraph?.setTabStop;
+  const list = doc.blocks?.list;
+  if (typeof setTabStop !== 'function' || typeof list !== 'function') return unsupported(LAYOUT_FAILED);
+
+  // מידות העמוד מהמסמך ולא קבוע: אזור הטקסט של A4 עם שוליים של אינץ' הוא
+  // 9026 twips, ושל Letter עם שוליים צרים הוא אחר לגמרי. עצירה במיקום שאינו
+  // של העמוד הזה דוחפת את המספר אל מחוץ לדף או אל אמצע השורה.
+  const margins = await readPageMargins(host as PageSetupTarget);
+  if (!margins) {
+    return unavailable(LAYOUT_FAILED, 'מידות העמוד אינן זמינות', 'no-page-metrics');
+  }
+  const textWidth = margins.pageWidthTwips - margins.leftTwips - margins.rightTwips;
+  const position = textWidth - TOC_PAGE_NUMBER_RESERVE_TWIPS;
+  if (position <= 0) {
+    // עמוד שרוחב הטקסט שלו קטן מהמקום שמספר עמוד תופס. `w:pos` שאינו חיובי
+    // אינו חוקי ב-ECMA-376, והמנוע דווקא מקבל אותו (ראו paragraph-format.ts).
+    return unavailable(LAYOUT_FAILED, 'אזור הטקסט בעמוד צר מדי', 'page-too-narrow');
+  }
+
+  // סגנון השורה → הרמה שלה. `TOC1`…`TOC9` הם המקרה הרגיל, ולצידם סגנונות
+  // המתג `\t` של מסמך שהגיע מ-Word — שם הרמה מגיעה מהמנוע ואינה בשם הסגנון.
+  // כשל בקריאה אינו עוצר: רשימה חלקית עדיפה על שום עיצוב.
+  const levels = new Map<string, number>();
+  for (let level = TOC_LEVEL_MIN; level <= TOC_LEVEL_MAX; level++) levels.set(`TOC${level}`, level);
+  const tocList = doc.toc?.list;
+  if (typeof tocList === 'function') {
+    const listed = await collectAll<TocEntry>(LAYOUT_FAILED, (query) => tocList(query));
+    for (const item of listed.items) {
+      for (const style of item.preserved?.customStyles ?? []) {
+        const name = style?.styleName;
+        if (typeof name !== 'string' || name === '') continue;
+        levels.set(name, isValidTocLevel(style?.level ?? NaN) ? (style.level as number) : TOC_LEVEL_MIN);
+      }
+    }
+  }
+
+  const rows: { nodeId: string; nodeType: 'paragraph' | 'listItem' }[] = [];
+  let offset = 0;
+  let guard = 0;
+  for (;;) {
+    const listed = await attempt(LAYOUT_FAILED, () => list({ limit: PAGE_SIZE, offset }));
+    if (!listed.ok) return listed.outcome;
+
+    const page = listed.value?.blocks ?? [];
+    for (const block of page) {
+      if (!isTocLine(block, levels) || typeof block.nodeId !== 'string') continue;
+      rows.push({
+        nodeId: block.nodeId,
+        // הבלוק הראשון מסווג `tableOfContents`, שאינו סוג חוקי ליעד פסקה.
+        nodeType: block.nodeType === 'listItem' ? 'listItem' : 'paragraph',
+      });
+    }
+    if (page.length === 0) break;
+
+    offset += page.length;
+    const total = listed.value?.total;
+    if (!Number.isFinite(total) || offset >= (total as number)) break;
+    if (++guard > PAGE_GUARD) break;
+  }
+
+  if (rows.length === 0) {
+    // אחרי בנייה שמחקה את כל השורות, מזהים ישנים אינם הוכחה שהעצירות
+    // שרדו; אם הן ייווצרו מחדש הן יעוצבו מחדש.
+    tocLayoutCache.delete(doc);
+    return { ok: true };
+  }
+
+  const clearAll = doc.format?.paragraph?.clearAllTabStops;
+  const cached = tocLayoutCache.get(doc) ?? new Map<string, number>();
+  tocLayoutCache.set(doc, cached);
+  const seen = new Set<string>();
+  for (const row of rows) {
+    const target = { kind: 'block' as const, nodeType: row.nodeType, nodeId: row.nodeId };
+    const key = tocLayoutKey(row);
+    seen.add(key);
+
+    // עצירות טאב הן חלק מה-DOCX ומחזיקות מעמד ב-`toc.update`; אותה שורה
+    // ובאותו רוחב אינה זקוקה לשתי פקודות מנוע נוספות בכל עדכון.
+    if (cached.get(key) === position) continue;
+
+    if (typeof clearAll === 'function') {
+      const cleared = await attempt(LAYOUT_FAILED, () => clearAll({ target }));
+      if (!cleared.ok) return cleared.outcome;
+      const failure = failureOf(LAYOUT_FAILED, cleared.value);
+      if (failure) return failure;
+    }
+
+    const applied = await attempt(LAYOUT_FAILED, () =>
+      setTabStop({
+        target,
+        // `w:pos` נמדד משולי העמוד. אותו מיקום לכל רמה שומר על עמודת
+        // מספרים אחת גם ב-SuperDoc וגם כאשר פותחים את ה-DOCX ב-Word.
+        position,
+        alignment: 'right',
+        leader: 'dot',
+      }),
+    );
+    if (!applied.ok) return applied.outcome;
+    // עצירה שכבר קיימת חוזרת `NO_OP`, ו-`failureOf` מכריע אותה כהצלחה.
+    const failure = failureOf(LAYOUT_FAILED, applied.value);
+    if (failure) return failure;
+    cached.set(key, position);
+  }
+
+  // שורה שנעלמה בבנייה מחדש לא תופיע שוב עם מזהה ישן במפת המטמון.
+  for (const key of cached.keys()) if (!seen.has(key)) cached.delete(key);
+
+  return { ok: true };
 }
 
 /* ------------------------------------------------------------------ */

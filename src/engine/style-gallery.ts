@@ -301,22 +301,139 @@ export function toGalleryItems(
     });
   }
 
+  return withHeadingLadder(out);
+}
+
+/* ------------------------------------------------------------------ */
+/* סולם הכותרות                                                        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * עד איזו רמת כותרת הגלריה מציעה גם כשהמסמך אינו מציע אותה.
+ *
+ * שלוש, מפני שזה טווח ברירת המחדל של תוכן עניינים ב-Word (`TOC \o "1-3"`) —
+ * וזה בדיוק מה שנשבר בלי זה. ראו `withHeadingLadder`.
+ */
+export const HEADING_LADDER_FLOOR = 3;
+
+/** `Heading1`…`Heading9` בלבד. `Title` הוא תפקיד כותרת אבל אינו רמה. */
+const HEADING_LEVEL_ID = /^heading([1-9])$/;
+
+/** הרמה שהמזהה מייצג, או `null` כשאינו רמת כותרת. */
+function headingLevelOf(id: string): number | null {
+  const match = HEADING_LEVEL_ID.exec(styleKey(id));
+  return match ? Number(match[1]) : null;
+}
+
+/**
+ * משלימה את רמות הכותרת החסרות בגלריה.
+ *
+ * ## הבאג שזה מתקן
+ *
+ * דווח שתוכן העניינים נבנה מרמה אחת בלבד, גם אחרי „התאמה אישית” שמבקשת
+ * רמות 1–3. נמדד על ה-dist הארוז, ומה שנמצא **אינו** בתוכן העניינים:
+ *
+ * 1. `toc.configure` דווקא כותב את המתג נכון — ה-`instruction` נעשה
+ *    `TOC \o "1-3" \h`.
+ * 2. וגם האיסוף עובד: פסקה שקיבלה `Heading2` נאספה אל הטבלה כשורת `TOC2`.
+ * 3. אבל **הגלריה הציעה „כותרת 1” בלבד**: `quickGallery` של המנוע החזיר
+ *    `["Normal","Heading1","Title","Subtitle","Quote","IntenseQuote","ListParagraph"]`.
+ *    ב-`word/styles.xml` של התבנית `Heading2`…`Heading9` נושאים
+ *    `<w:semiHidden/>` ו-`<w:unhideWhenUsed/>`, והמנוע מסנן אותם החוצה.
+ *
+ * כלומר לא הייתה שום דרך במסך להחיל „כותרת 2”, ולכן לא היו במסמך כותרות
+ * ברמה 2 שהטבלה תאסוף. „רק כותרת אחת” היה תיאור מדויק של המסמך.
+ *
+ * ## למה כאן, ולא בתבנית „מסמך חדש”
+ *
+ * הפיתוי הוא לנקות את `w:semiHidden` מהתבנית (engine/blank-document.ts) ולתת
+ * למנוע להציע אותם בעצמו. זה היה מתקן מסמך חדש ולא את השאר: נמדד ש-
+ * `unhideWhenUsed` **אינו ממומש** — אחרי שהוחל `Heading2` על פסקה
+ * (`success: true`, ה-pStyle נכתב) הגלריה של המנוע נשארה בת אותם שבעה
+ * פריטים בדיוק. כלומר גם מסמך שהגיע מ-Word או מאוצריא **ומשתמש** ברמה 2
+ * אינו מציע אותה. השכבה שלנו היא היחידה שרואה את כל המסמכים.
+ *
+ * ## מה נוסף, ומה לא
+ *
+ * הרמות עד `HEADING_LADDER_FLOOR`, ומעליהן רק מה שהמסמך עצמו כבר מציע (מסמך
+ * Word שסגנונותיו העמוקים גלויים ממשיך להציג אותן). רמה עמוקה שהמסמך אינו
+ * מציע נשארת בחוץ: הגלריה של Word אינה תשע כותרות, והפקודה
+ * `linked-style` מקבלת כל מזהה — נמדד שהיא מחילה `Heading2` בהצלחה **גם
+ * כשהסגנון semiHidden**, ולכן הכרטיס אינו מבטיח משהו שלא יעבוד.
+ *
+ * הכרטיס המסונתז נושא את התווית העברית מ-`BUILT_IN_LABELS` ואת טוקני התפקיד,
+ * בלי טיפוגרפיה מהמסמך: `preview` מגיע מהקטלוג, וסגנון שאינו בקטלוג אין ממה
+ * לגזור אותו. זו אותה הכרעה שרשת הביטחון כבר עושה.
+ *
+ * המקום: מיד אחרי הרמה שקדמה לה, כדי שהסדר יהיה 1,2,3 כמו ב-Word. כשהרמה
+ * שקדמה לה אינה בגלריה — **לפני** הרמה העמוקה ביותר הבאה שכן בה, ורק בהיעדר
+ * שתיהן אחרי הפריט הראשון, שהוא „רגיל”. הסעיף האמצעי אינו קוסמטי: גלריה
+ * שמציעה רמה עמוקה בלבד הייתה מקבלת אותה **לפני** הרמות הרדודות שהושלמו,
+ * כלומר „כותרת 9” ואחריה „כותרת 1” (נמדד בבדיקה).
+ */
+export function withHeadingLadder(
+  items: readonly StyleGalleryItem[],
+): readonly StyleGalleryItem[] {
+  if (items.length === 0) return items;
+
+  const levels = new Map<number, number>();
+  items.forEach((item, index) => {
+    const level = headingLevelOf(item.id);
+    if (level !== null && !levels.has(level)) levels.set(level, index);
+  });
+
+  const out = [...items];
+  for (let level = 1; level <= HEADING_LADDER_FLOOR; level++) {
+    if (levels.has(level)) continue;
+
+    const id = `Heading${level}`;
+    const label = builtInStyleLabel(id) ?? id;
+    const card: StyleGalleryItem = {
+      id,
+      label,
+      previewText: label,
+      previewStyle: { ...ROLE_STYLE.heading },
+    };
+
+    // `levels` מתעדכן כדי שהרמה הבאה תמצא את זו שהרגע נוספה, וההיסטים שאחרי
+    // נקודת ההוספה נדחפים.
+    const previous = levels.get(level - 1);
+    let at: number;
+    if (previous !== undefined) {
+      at = previous + 1;
+    } else {
+      const deeper = [...levels.entries()]
+        .filter(([existing]) => existing > level)
+        .sort((a, b) => a[0] - b[0])[0];
+      at = deeper === undefined ? 1 : deeper[1];
+    }
+    out.splice(at, 0, card);
+    levels.set(level, at);
+    for (const [existing, index] of levels) {
+      if (existing !== level && index >= at) levels.set(existing, index + 1);
+    }
+  }
+
   return out;
 }
 
 /** רשת הביטחון, בצורת מצב גלריה. */
 export function fallbackStyleGallery(): StyleGalleryState {
   return {
-    items: FALLBACK_STYLE_IDS.map((id) => {
-      const label = builtInStyleLabel(id) ?? id;
-      const role = styleRole(id);
-      return {
-        id,
-        label,
-        previewText: role === 'body' ? BODY_PREVIEW_TEXT : label,
-        previewStyle: { ...ROLE_STYLE[role] },
-      };
-    }),
+    // אותו סולם כותרות כמו בגלריה מהמסמך: רשת הביטחון נושאת „כותרת 1” ו-
+    // „כותרת 2”, ובלי ההשלמה היא הייתה מציעה טווח רמות אחר מזה שהמסמך מציע.
+    items: withHeadingLadder(
+      FALLBACK_STYLE_IDS.map((id) => {
+        const label = builtInStyleLabel(id) ?? id;
+        const role = styleRole(id);
+        return {
+          id,
+          label,
+          previewText: role === 'body' ? BODY_PREVIEW_TEXT : label,
+          previewStyle: { ...ROLE_STYLE[role] },
+        };
+      }),
+    ),
     activeId: null,
     fromDocument: false,
   };

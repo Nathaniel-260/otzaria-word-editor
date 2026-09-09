@@ -13,7 +13,16 @@
 import { describe, expect, it } from 'vitest';
 import { DOMWrapper } from '@vue/test-utils';
 import ReferencesTab from '../../src/ui/ribbon/tabs/ReferencesTab.vue';
-import { autoUnmount, createSuperdocDouble, mountUi, settle, tipMessage, type Harness } from './harness';
+import InsertTab from '../../src/ui/ribbon/tabs/InsertTab.vue';
+import {
+  autoUnmount,
+  createCommandDouble,
+  createSuperdocDouble,
+  mountUi,
+  settle,
+  tipMessage,
+  type Harness,
+} from './harness';
 
 autoUnmount();
 
@@ -186,6 +195,93 @@ describe('„התאמה אישית”', () => {
   });
 });
 
+/**
+ * הבאג שנסגר כאן: מספר העמוד יצא צמוד לכותרת ובלי נקודות מפרידות. המנוע
+ * כותב את שורות הטבלה עם תו טאב בלי שום עצירה — לא ב-pPr ולא בסגנונות
+ * `TOC1`…`TOC9`, שאינם מוגדרים ב-`styles.xml` של התבנית — ולכן התו נופל על
+ * `w:defaultTabStop`. שלושת הפקדים שמייצרים או מרעננים שורות חייבים להשאיר
+ * את **אותו** מסמך, ולכן הם נבדקים כאן אחד-אחד. ההנמקה ב-engine/toc.ts.
+ */
+describe('מוביל הנקודות ומספר העמוד', () => {
+  /** אזור הטקסט של A4 עם שוליים של אינץ', פחות המקום השמור למספר העמוד. */
+  const POSITION = 11906 - 1440 - 1440 - 540;
+
+  const stops = (superdoc: ReturnType<typeof withToc>): unknown[] =>
+    superdoc.inputs('format.paragraph.setTabStop');
+
+  it('„תוכן עניינים” מכניס ואז מיישר כל שורה', async () => {
+    const superdoc = withToc();
+    const adapter = createCommandDouble();
+    const harness = mountUi(ReferencesTab, { superdoc, adapter });
+    await settle();
+
+    superdoc.reset();
+    adapter.reset();
+    await button(harness, 'תוכן עניינים').trigger('click');
+    // היישור הוא שרשרת של קריאות מסמך — מידות העמוד, רשימת הבלוקים, ואז
+    // ניקוי וכתיבה לכל שורה. `settle()` בשש סבבים נגמר באמצע, ובגלל זה
+    // הבדיקה ראתה שתי עצירות מתוך שלוש.
+    await settle(24);
+
+    expect(adapter.applied).toContainEqual({ id: 'table-of-contents-insert', payload: undefined });
+    expect(stops(superdoc)).toEqual([
+      {
+        target: { kind: 'block', nodeType: 'paragraph', nodeId: 'toc-1' },
+        position: POSITION,
+        alignment: 'right',
+        leader: 'dot',
+      },
+      {
+        target: { kind: 'block', nodeType: 'paragraph', nodeId: 'toc-1-row-0' },
+        position: POSITION,
+        alignment: 'right',
+        leader: 'dot',
+      },
+      {
+        target: { kind: 'block', nodeType: 'paragraph', nodeId: 'toc-1-row-1' },
+        position: POSITION,
+        alignment: 'right',
+        leader: 'dot',
+      },
+    ]);
+    expect(harness.failures()).toEqual([]);
+  });
+
+  it('„עדכן טבלה” מיישר שוב — שורה של כותרת שנוספה נולדת בלי עצירה', async () => {
+    const superdoc = withToc();
+    const harness = mountUi(ReferencesTab, { superdoc });
+    await settle();
+
+    superdoc.reset();
+    await button(harness, 'עדכן טבלה').trigger('click');
+    await settle(24);
+
+    expect(superdoc.ops()).toContain('toc.update');
+    expect(stops(superdoc)).toHaveLength(3);
+    expect(harness.failures()).toEqual([]);
+  });
+
+  it('הכנסה שנכשלה אינה גוררת יישור', async () => {
+    // הודעה על מוביל נקודות במסמך שלא קיבל טבלה היא ההודעה הלא נכונה.
+    const superdoc = withToc();
+    const adapter = createCommandDouble({
+      failures: { 'table-of-contents-insert': 'PRECONDITION_FAILED' },
+    });
+    const harness = mountUi(ReferencesTab, { superdoc, adapter });
+    await settle();
+
+    superdoc.reset();
+    await button(harness, 'תוכן עניינים').trigger('click');
+    // היישור הוא שרשרת של קריאות מסמך — מידות העמוד, רשימת הבלוקים, ואז
+    // ניקוי וכתיבה לכל שורה. `settle()` בשש סבבים נגמר באמצע, ובגלל זה
+    // הבדיקה ראתה שתי עצירות מתוך שלוש.
+    await settle(24);
+
+    expect(adapter.calls).toContainEqual({ id: 'table-of-contents-insert', payload: undefined });
+    expect(superdoc.ops()).not.toContain('format.paragraph.setTabStop');
+  });
+});
+
 describe('„סמן ערך”', () => {
   it('נפתח עם הטקסט שסומן בעורך, ומציג את הערכים שכבר סומנו', async () => {
     const harness = mountUi(ReferencesTab, { superdoc: withToc() });
@@ -265,5 +361,34 @@ describe('„סמן ערך”', () => {
     await settle();
 
     expect(dialogButton('.toc-entry-dialog', 'סמן').attributes('disabled')).toBeDefined();
+  });
+});
+
+/**
+ * הפקד „תוכן עניינים” יושב בשתי לשוניות — „הפניות” ו„הוספה” — והוא אותה
+ * פקודת registry. מסמך שנראה אחרת לפי הכפתור שנלחץ הוא באג, ולכן היישור
+ * שאחרי ההכנסה נבדק גם כאן. ההנמקה ב-engine/toc.ts.
+ */
+describe('„תוכן עניינים” בלשונית „הוספה”', () => {
+  it('מכניס, ואז מיישר את שורות הטבלה כמו בלשונית „הפניות”', async () => {
+    const superdoc = createSuperdocDouble({ toc: { ids: ['toc-1'], rowsPerToc: 2 } });
+    const harness = mountUi(InsertTab, { superdoc });
+    await settle();
+
+    superdoc.reset();
+    const button = harness.wrapper
+      .findAll('button')
+      .find((node) => node.text().trim().startsWith('תוכן עניינים'));
+    if (!button) throw new Error('לא נמצא הכפתור „תוכן עניינים” בלשונית „הוספה”');
+    await button.trigger('click');
+    // שרשרת של קריאות מסמך — ראו ההסבר ב-toc-group.test.ts.
+    await settle(24);
+
+    expect(
+      superdoc
+        .inputs('format.paragraph.setTabStop')
+        .map((input) => (input as { target: { nodeId: string } }).target.nodeId),
+    ).toEqual(['toc-1', 'toc-1-row-0', 'toc-1-row-1']);
+    expect(harness.failures()).toEqual([]);
   });
 });

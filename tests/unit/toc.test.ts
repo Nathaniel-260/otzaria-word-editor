@@ -19,6 +19,8 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  TOC_PAGE_NUMBER_RESERVE_TWIPS,
+  layOutTocRows,
   configureTableOfContents,
   emptyTocState,
   isValidTocLevel,
@@ -61,6 +63,8 @@ interface FakeOptions {
   entriesTotal?: number;
   /** הבלוקים שבמסמך, כולל שורות הטבלה. */
   blocks?: readonly Block[];
+  /** מידות המקטע כפי ש-`sections.list` מחזיר אותן, באינצ'ים. `null` = אין מקטעים. */
+  page?: { widthInches: number; leftInches: number; rightInches: number } | null;
   /** מה `selection.current` מדווח. */
   blockId?: string | null;
   selectionText?: string;
@@ -148,6 +152,33 @@ function fakeEngine(options: FakeOptions = {}) {
         return receipt('blocks.deleteRange');
       }),
     },
+    format: {
+      paragraph: {
+        setTabStop: route('setTabStop', () => receipt('setTabStop')),
+        clearAllTabStops: route('clearAllTabStops', () => receipt('clearAllTabStops')),
+        setIndentation: route('setIndentation', () => receipt('setIndentation')),
+      },
+    },
+    sections: {
+      list: route('sections.list', () => {
+        const page = options.page === undefined ? A4_WITH_INCH_MARGINS : options.page;
+        if (page === null) return { items: [] };
+        return {
+          items: [
+            {
+              pageSetup: { width: page.widthInches, height: 11.6929 },
+              margins: {
+                left: page.leftInches,
+                right: page.rightInches,
+                top: 1,
+                bottom: 1,
+              },
+              sectionDirection: 'rtl',
+            },
+          ],
+        };
+      }),
+    },
     selection: {
       current: route('selection.current', () => ({
         empty: true,
@@ -172,6 +203,19 @@ function fakeEngine(options: FakeOptions = {}) {
 
   return { host, calls, ops, inputs, remaining: () => blocks.map((block) => block.nodeId) };
 }
+
+/**
+ * A4 עם שוליים של אינץ' — 11906 twips רוחב, 1440 מכל צד. באינצ'ים, מפני שזו
+ * היחידה ש-`sections.list` מחזיר בה (ראו page-setup.ts).
+ */
+const A4_WITH_INCH_MARGINS = {
+  widthInches: 11906 / 1440,
+  leftInches: 1,
+  rightInches: 1,
+};
+
+/** אזור הטקסט של A4 כזה, פחות המקום שנשמר למספר העמוד. */
+const A4_TAB_POSITION = 11906 - 1440 - 1440 - TOC_PAGE_NUMBER_RESERVE_TWIPS;
 
 /** כתובת טבלה, בצורה ש-`toc.list` מחזיר וש-`update`/`remove` מקבלים. */
 const tocAddress = (nodeId: string) => ({
@@ -582,6 +626,268 @@ describe('הסרת תוכן העניינים', () => {
     });
 
     expect((await removeTableOfContents(engine.host)).ok).toBe(false);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* מוביל הנקודות ומספר העמוד                                            */
+/* ------------------------------------------------------------------ */
+
+/**
+ * הבאג שנסגר כאן: בשורת תוכן עניינים היה מספר העמוד צמוד לכותרת ובלי נקודות
+ * מפרידות. נמדד שאין עצירת טאב בשום שכבה — לא ב-pPr, ולא בסגנונות
+ * `TOC1`…`TOC9` שאינם מוגדרים ב-`styles.xml` של התבנית כלל — ולכן תו הטאב
+ * שהמנוע כותב נופל על `w:defaultTabStop`. ההנמקה המלאה, כולל המדידות,
+ * ב-engine/toc.ts.
+ */
+describe('מוביל הנקודות ומספר העמוד', () => {
+  it('מיישרת כל שורה, כולל הבלוק הראשון של הטבלה, ולא את גוף המסמך', async () => {
+    const engine = fakeEngine({ tocs: ['toc-1'], blocks: documentWithToc() });
+
+    expect(await layOutTocRows(engine.host)).toEqual({ ok: true });
+
+    // המיקום אחיד בכל רמה: `w:pos` נמדד משולי העמוד ב-Word, ולכן פיצוי לפי
+    // הזחה היה יוצר מסמך שמספרי העמוד שלו אינם בעמודה אחת מחוץ ל-SuperDoc.
+    expect(engine.inputs('setTabStop')).toEqual([
+      {
+        target: { kind: 'block', nodeType: 'paragraph', nodeId: 'toc-1' },
+        position: A4_TAB_POSITION,
+        alignment: 'right',
+        leader: 'dot',
+      },
+      {
+        target: { kind: 'block', nodeType: 'paragraph', nodeId: 'row-1' },
+        position: A4_TAB_POSITION,
+        alignment: 'right',
+        leader: 'dot',
+      },
+      {
+        target: { kind: 'block', nodeType: 'paragraph', nodeId: 'row-2' },
+        position: A4_TAB_POSITION,
+        alignment: 'right',
+        leader: 'dot',
+      },
+    ]);
+  });
+
+  it('רמות עמוקות נשארות באותה עמודה', async () => {
+    const engine = fakeEngine({
+      tocs: ['toc-1'],
+      blocks: [
+        { ordinal: 0, nodeId: 'toc-1', nodeType: 'tableOfContents', styleId: 'TOC1' },
+        { ordinal: 1, nodeId: 'row-1', nodeType: 'paragraph', styleId: 'TOC3' },
+        { ordinal: 2, nodeId: 'row-2', nodeType: 'paragraph', styleId: 'TOC9' },
+      ],
+    });
+
+    await layOutTocRows(engine.host);
+
+    expect(
+      engine.inputs('setTabStop').map((input) => (input as { position: number }).position),
+    ).toEqual([A4_TAB_POSITION, A4_TAB_POSITION, A4_TAB_POSITION]);
+  });
+
+  it('עמוד צר — העצירה נשארת בערך חיובי', async () => {
+    const engine = fakeEngine({
+      tocs: ['toc-1'],
+      // אזור טקסט 1440 twips, גדול מההסתייגות.
+      page: { widthInches: 2, leftInches: 0.25, rightInches: 0.25 },
+      blocks: [{ ordinal: 0, nodeId: 'row-1', nodeType: 'paragraph', styleId: 'TOC9' }],
+    });
+
+    await layOutTocRows(engine.host);
+
+    const [input] = engine.inputs('setTabStop') as { position: number }[];
+    expect(input.position).toBeGreaterThan(0);
+  });
+
+  it('המיקום נגזר ממידות העמוד שבמסמך, ולא מקבוע', async () => {
+    // Letter (12240) עם שוליים צרים (720) — אזור טקסט 10800.
+    const engine = fakeEngine({
+      tocs: ['toc-1'],
+      blocks: documentWithToc(),
+      page: { widthInches: 12240 / 1440, leftInches: 0.5, rightInches: 0.5 },
+    });
+
+    expect(await layOutTocRows(engine.host)).toEqual({ ok: true });
+
+    const positions = engine
+      .inputs('setTabStop')
+      .map((input) => (input as { position: number }).position);
+    expect(positions).toEqual([
+      10800 - TOC_PAGE_NUMBER_RESERVE_TWIPS,
+      10800 - TOC_PAGE_NUMBER_RESERVE_TWIPS,
+      10800 - TOC_PAGE_NUMBER_RESERVE_TWIPS,
+    ]);
+  });
+
+  it('מנקה את העצירות של השורה לפני שהיא כותבת, ובסדר הזה', async () => {
+    // `setTabStop` מוסיף ואינו מחליף, ואי אפשר לקרוא עצירות קיימות: בלי
+    // הניקוי, מסמך שגודל העמוד שלו שונה היה נושא שתי עצירות — ותו הטאב היה
+    // נדחף אל הישנה שבהן.
+    const engine = fakeEngine({
+      tocs: ['toc-1'],
+      blocks: [{ ordinal: 0, nodeId: 'toc-1', nodeType: 'tableOfContents', styleId: 'TOC1' }],
+    });
+
+    await layOutTocRows(engine.host);
+
+    const order = engine
+      .ops()
+      .filter((op) => op === 'clearAllTabStops' || op === 'setTabStop');
+    expect(order).toEqual(['clearAllTabStops', 'setTabStop']);
+    expect(engine.inputs('clearAllTabStops')).toEqual([
+      { target: { kind: 'block', nodeType: 'paragraph', nodeId: 'toc-1' } },
+    ]);
+  });
+
+  it('עדכון חוזר של אותן שורות אינו כותב להן עצירות מחדש', async () => {
+    const engine = fakeEngine({ tocs: ['toc-1'], blocks: documentWithToc() });
+
+    await layOutTocRows(engine.host);
+    expect(engine.inputs('setTabStop')).toHaveLength(3);
+    expect(engine.inputs('clearAllTabStops')).toHaveLength(3);
+
+    await layOutTocRows(engine.host);
+    expect(engine.inputs('setTabStop')).toHaveLength(3);
+    expect(engine.inputs('clearAllTabStops')).toHaveLength(3);
+  });
+
+  it('שורה שסווגה `listItem` נשלחת בסוג שלה, ולא כפסקה', async () => {
+    const engine = fakeEngine({
+      tocs: ['toc-1'],
+      blocks: [{ ordinal: 0, nodeId: 'row-1', nodeType: 'listItem', styleId: 'TOC1' }],
+    });
+
+    await layOutTocRows(engine.host);
+
+    expect(engine.inputs('setTabStop')).toEqual([
+      {
+        target: { kind: 'block', nodeType: 'listItem', nodeId: 'row-1' },
+        position: A4_TAB_POSITION,
+        alignment: 'right',
+        leader: 'dot',
+      },
+    ]);
+  });
+
+  it('סגנון שורה של מסמך Word (מתג t) מיושר גם הוא', async () => {
+    const engine = fakeEngine({
+      tocs: ['toc-1'],
+      preserved: { customStyles: [{ styleName: 'MyToc1', level: 1 }] },
+      blocks: [
+        { ordinal: 0, nodeId: 'toc-1', nodeType: 'tableOfContents', styleId: 'MyToc1' },
+        { ordinal: 1, nodeId: 'row-1', nodeType: 'paragraph', styleId: 'MyToc1' },
+        { ordinal: 2, nodeId: 'body-1', nodeType: 'paragraph', styleId: 'Normal' },
+      ],
+    });
+
+    await layOutTocRows(engine.host);
+
+    expect(
+      engine
+        .inputs('setTabStop')
+        .map((input) => (input as { target: { nodeId: string } }).target.nodeId),
+    ).toEqual(['toc-1', 'row-1']);
+  });
+
+  it('מסמך בלי שורות תוכן עניינים — הצלחה שקטה ובלי מוטציה', async () => {
+    const engine = fakeEngine({
+      tocs: [],
+      blocks: [{ ordinal: 0, nodeId: 'body-1', nodeType: 'paragraph', styleId: 'Normal' }],
+    });
+
+    expect(await layOutTocRows(engine.host)).toEqual({ ok: true });
+    expect(engine.ops()).not.toContain('setTabStop');
+  });
+
+  it('מידות עמוד שאינן זמינות — כשל מנומק ולא ניחוש של רוחב', async () => {
+    const engine = fakeEngine({ tocs: ['toc-1'], blocks: documentWithToc(), page: null });
+
+    expect(await layOutTocRows(engine.host)).toEqual({
+      ok: false,
+      message: 'עיצוב שורות תוכן העניינים נכשל: מידות העמוד אינן זמינות',
+      reason: 'no-page-metrics',
+    });
+    expect(engine.ops()).not.toContain('setTabStop');
+  });
+
+  it('אזור טקסט צר מהמקום שנשמר למספר — כשל, ולא `w:pos` פסול', async () => {
+    const engine = fakeEngine({
+      tocs: ['toc-1'],
+      blocks: documentWithToc(),
+      // 720 twips רוחב, פחות 144 מכל צד — אזור טקסט 432, צר מהמקום השמור.
+      page: { widthInches: 0.5, leftInches: 0.1, rightInches: 0.1 },
+    });
+
+    expect(await layOutTocRows(engine.host)).toEqual({
+      ok: false,
+      message: 'עיצוב שורות תוכן העניינים נכשל: אזור הטקסט בעמוד צר מדי',
+      reason: 'page-too-narrow',
+    });
+  });
+
+  it('גרסת מנוע בלי `setTabStop` — „אינו זמין בגרסה זו”', async () => {
+    const engine = fakeEngine({
+      tocs: ['toc-1'],
+      blocks: documentWithToc(),
+      missing: ['setTabStop'],
+    });
+
+    expect(await layOutTocRows(engine.host)).toEqual({
+      ok: false,
+      message: 'עיצוב שורות תוכן העניינים נכשל: אינו זמין בגרסה זו',
+      reason: 'command-unsupported',
+    });
+  });
+
+  it('קבלה שנכשלה נעצרת ומדווחת, ואינה ממשיכה לשורה הבאה', async () => {
+    const engine = fakeEngine({
+      tocs: ['toc-1'],
+      blocks: documentWithToc(),
+      failures: { setTabStop: { code: 'INVALID_TARGET', message: 'no' } },
+    });
+
+    const outcome = await layOutTocRows(engine.host);
+    expect(outcome.ok === false && outcome.reason).toBe('INVALID_TARGET');
+    expect(engine.inputs('setTabStop')).toHaveLength(1);
+  });
+
+  it('חריגה מהמנוע מוחזרת כ-`CommandOutcome` ואינה מתפשטת', async () => {
+    const engine = fakeEngine({
+      tocs: ['toc-1'],
+      blocks: documentWithToc(),
+      throws: ['setTabStop'],
+    });
+
+    const outcome = await layOutTocRows(engine.host);
+    expect(outcome.ok === false && outcome.reason).toBe('threw');
+  });
+
+  it('`NO_OP` — עצירה שכבר קיימת — הוא הצלחה', async () => {
+    const engine = fakeEngine({
+      tocs: ['toc-1'],
+      blocks: documentWithToc(),
+      failures: { setTabStop: { code: 'NO_OP' }, clearAllTabStops: { code: 'NO_OP' } },
+    });
+
+    expect(await layOutTocRows(engine.host)).toEqual({ ok: true });
+    expect(engine.inputs('setTabStop')).toHaveLength(3);
+  });
+
+  it('שורות שמעבר לעמוד הראשון של `blocks.list` מיושרות גם הן', async () => {
+    // PAGE_SIZE הוא 200, ותוכן עניינים של ספר ארוך ממנו. קריאה יחידה הייתה
+    // משאירה את השורות שאחריה בלי מוביל.
+    const blocks = Array.from({ length: 250 }, (_, index) => ({
+      ordinal: index,
+      nodeId: `row-${index}`,
+      nodeType: index === 0 ? 'tableOfContents' : 'paragraph',
+      styleId: 'TOC1',
+    }));
+    const engine = fakeEngine({ tocs: ['toc-1'], blocks });
+
+    expect(await layOutTocRows(engine.host)).toEqual({ ok: true });
+    expect(engine.inputs('setTabStop')).toHaveLength(250);
   });
 });
 
