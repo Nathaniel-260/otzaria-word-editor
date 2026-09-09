@@ -15,6 +15,7 @@
  *   3. `End` פעמיים אינו מטייל לשורה הבאה.
  *   3א. המסלול שדווח מקצה לקצה על פסקה קצרה: `Home`, `End`, נקודה — והפסקה
  *      נגמרת בנקודה במקום להיפתח בה.
+ *   3ב. `Home` ואז `End` בתחילת שורה גולשת שנייה מגיעים לסופה.
  *   4. `Shift+End` בוחר קדימה, מהסמן ועד סוף השורה.
  *   5. באנגלית `End` ממשיך לעשות מה שהוא עשה — היירוט אינו נוגע בשורה שאינה
  *      עברית.
@@ -167,6 +168,23 @@ try {
         if (text.endsWith('.') && !text.startsWith('.'))
           report.pass('המסלול שדווח', `„${text}”`);
         else report.fail('המסלול שדווח', `הפסקה יצאה „${text}”`);
+      }
+
+      /* 4א. Home בתחילת שורה גולשת שנייה, ואז End, מגיע לסופה. */
+      const wrapped = fresh.filter((l) => l.blockId === first.blockId);
+      const second = wrapped[1];
+      if (!second) {
+        report.fail('Home ואז End בשורה שנייה', 'לא נמצאה שורה גולשת שנייה');
+      } else {
+        await caretAt(second);
+        await app.press('Home', 'Home', 36);
+        await app.sleep(300);
+        await app.press('End', 'End', 35);
+        await app.sleep(400);
+        const after = await selection();
+        if (after.start === second.endOffset)
+          report.pass('Home ואז End בשורה שנייה', `${after.start} (סוף השורה)`);
+        else report.fail('Home ואז End בשורה שנייה', `${after.start} במקום ${second.endOffset}`);
       }
 
       /* 5. Shift+End בוחר קדימה */

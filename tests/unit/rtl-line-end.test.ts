@@ -76,6 +76,10 @@ describe('lineEndOffset', () => {
     expect(lineEndOffset(HEBREW, 1, 98)).toBe(98);
   });
 
+  it('תפר אחרי Home שייך לתחילת השורה הבאה', () => {
+    expect(lineEndOffset(HEBREW, 1, 98, true)).toBe(191);
+  });
+
   it('בסוף הפסקה — מוחזר אותו היסט, כלומר ההקשה עדיין שלנו', () => {
     // חשוב: `null` כאן היה מחזיר את ההקשה למנוע, והוא היה מקפיץ לתחילת השורה.
     expect(lineEndOffset(HEBREW, 1, 191)).toBe(191);
@@ -156,10 +160,14 @@ function setup({
   return { host, line: first!, superdoc, setSelectionTarget, snapshot };
 }
 
-function pressEnd(target: HTMLElement, init: KeyboardEventInit = {}): KeyboardEvent {
-  const event = new KeyboardEvent('keydown', { key: 'End', bubbles: true, cancelable: true, ...init });
+function pressKey(target: HTMLElement, key: string, init: KeyboardEventInit = {}): KeyboardEvent {
+  const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init });
   target.dispatchEvent(event);
   return event;
+}
+
+function pressEnd(target: HTMLElement, init: KeyboardEventInit = {}): KeyboardEvent {
+  return pressKey(target, 'End', init);
 }
 
 describe('installRtlLineEnd', () => {
@@ -241,6 +249,37 @@ describe('installRtlLineEnd', () => {
 
     expect(second.defaultPrevented, 'עדיין שלנו — אחרת המנוע יקפיץ לתחילת השורה').toBe(true);
     expect(setSelectionTarget, 'ואין כתיבה שנייה').toHaveBeenCalledTimes(1);
+    handle.dispose();
+  });
+
+  it('Home ואז End בתפר מגיעים לסוף השורה השנייה', () => {
+    const { host, line, superdoc, setSelectionTarget, snapshot } = setup();
+    const handle = installRtlLineEnd({ host, superdoc });
+    snapshot.start = 98;
+    snapshot.end = 98;
+
+    pressKey(line, 'Home');
+    pressEnd(line);
+
+    const input = setSelectionTarget.mock.calls[0]![0] as {
+      target: { end: { offset: number } };
+    };
+    expect(input.target.end.offset).toBe(191);
+    handle.dispose();
+  });
+
+  it('לחיצת עכבר אחרי Home מבטלת את הרמז על התפר', () => {
+    const { host, line, superdoc, setSelectionTarget, snapshot } = setup();
+    const handle = installRtlLineEnd({ host, superdoc });
+    snapshot.start = 98;
+    snapshot.end = 98;
+
+    pressKey(line, 'Home');
+    line.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    const event = pressEnd(line);
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(setSelectionTarget).not.toHaveBeenCalled();
     handle.dispose();
   });
 

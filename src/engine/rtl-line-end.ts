@@ -70,14 +70,11 @@
  * ## גבול גלישה: היסט אחד לשתי שורות
  *
  * בשורה שגולשת, ההיסט שבתפר הוא גם סופה של השורה הראשונה וגם תחילתה של
- * השנייה, ואין דרך לדעת מהמנוע באיזו מהן הסמן **מצויר** — התצלום הסינכרוני
- * מחזיר היסט, לא שורה. התפר נקרא כאן כסופה של השורה הקודמת, ומכאן ש-`End`
- * יציב: הקשה נוספת באותו מקום אינה מזיזה (נמדד בשער, „End פעמיים”). הכלל
- * ההפוך — „התפר שייך לשורה הבאה” — היה מעביר כל הקשה נוספת לסוף השורה
- * שאחריה, כלומר `End` חוזר היה מטייל שורה-שורה עד סוף הפסקה.
- *
- * המחיר: `Home` ואז `End` בשורה גולשת שנייה נשאר בתפר במקום להגיע לסוף אותה
- * שורה. הקשה שאינה מזיזה גרועה פחות מהקשה שמזיזה למקום אחר.
+ * השנייה, והתצלום הסינכרוני מחזיר היסט, לא שורה. כברירת מחדל התפר נשאר שייך
+ * לשורה הקודמת, ולכן `End` חוזר יציב ואינו מטייל שורה-שורה. החריג המדויק הוא
+ * `Home` ואחריו `End`: מאזין ה-Home יודע שהמנוע העביר את הסמן לתחילת השורה
+ * השנייה, ולכן ההקשה הבאה בוחרת את השורה הבאה. כל הקשה אחרת או לחיצת עכבר
+ * מאפסות את הרמז הזה.
  *
  * ומה ש**כן** נמדד ואינו סתירה לזה: הקלדה בתפר מעבירה את הסמן לשורה הבאה
  * בפועל — התו נכנס לתיבת השורה השנייה והסמן מצויר שם (נמדד: פסקה שגלשה
@@ -151,25 +148,34 @@ export function isLineEndKey(event: Pick<KeyboardEvent, 'key' | 'ctrlKey' | 'met
   return event.key === 'End' && !event.ctrlKey && !event.metaKey && !event.altKey;
 }
 
+/** `Home` רגיל הוא הרמז היחיד שמסיר את העמימות של תפר שורות. */
+function isPlainHomeKey(event: Pick<KeyboardEvent, 'key' | 'ctrlKey' | 'metaKey' | 'altKey'>): boolean {
+  return event.key === 'Home' && !event.ctrlKey && !event.metaKey && !event.altKey;
+}
+
 /**
  * ההיסט שהסמן צריך להגיע אליו, או `null` כשהשורה אינה עברית (ואז המנוע
  * מטפל בעצמו, ונמדד שהוא עושה זאת נכון).
  *
- * היסט שיושב בתפר בין שתי שורות נקרא כסופה של הקודמת — ראו „גבול גלישה”
- * בהערת הפתיחה. מכאן שהפונקציה חסרת מצב: אותו קלט נותן תמיד אותה תשובה,
- * ו-`End` שחוזר על עצמו אינו מזיז.
+ * היסט שיושב בתפר בין שתי שורות נקרא כסופה של הקודמת, אלא אם הוא הגיע מיד
+ * אחרי `Home` — ראו „גבול גלישה” בהערת הפתיחה. כך `End` חוזר אינו מטייל,
+ * ואילו `Home` ואז `End` מגיעים לסוף השורה שה-Home בחר.
  */
 export function lineEndOffset(
   lines: readonly PaintedLine[],
   fragmentPmStart: number,
   caretOffset: number,
+  preferNextAtBoundary = false,
 ): number | null {
   const caretPm = fragmentPmStart + caretOffset;
   let chosen: PaintedLine | null = null;
 
-  for (const line of lines) {
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index]!;
     if (caretPm < line.pmStart) break;
     if (caretPm <= line.pmEnd) {
+      const next = lines[index + 1];
+      if (preferNextAtBoundary && caretPm === line.pmEnd && next?.pmStart === caretPm) continue;
       chosen = line;
       break;
     }
@@ -214,8 +220,19 @@ function readFragment(
 export function installRtlLineEnd({ host, superdoc }: RtlLineEndOptions): RtlLineEndHandle {
   if (!host) return { dispose() {} };
 
+  let preferNextAtBoundary = false;
+
   const onKeyDown = (event: KeyboardEvent): void => {
-    if (!isLineEndKey(event)) return;
+    if (isPlainHomeKey(event)) {
+      preferNextAtBoundary = true;
+      return;
+    }
+    if (!isLineEndKey(event)) {
+      preferNextAtBoundary = false;
+      return;
+    }
+    const homePrecededEnd = preferNextAtBoundary;
+    preferNextAtBoundary = false;
 
     const editor = superdoc?.activeEditor;
     const setSelectionTarget = editor?.authoring?.setSelectionTarget;
@@ -238,7 +255,7 @@ export function installRtlLineEnd({ host, superdoc }: RtlLineEndOptions): RtlLin
     const fragment = readFragment(host, head.blockId, head.offset);
     if (!fragment) return;
 
-    const target = lineEndOffset(fragment.lines, fragment.base, head.offset);
+    const target = lineEndOffset(fragment.lines, fragment.base, head.offset, homePrecededEnd);
     if (target === null) return;
 
     // מכאן ואילך זה שלנו: המנוע לא יראה את ההקשה.
@@ -274,11 +291,17 @@ export function installRtlLineEnd({ host, superdoc }: RtlLineEndOptions): RtlLin
     }
   };
 
+  const clearHomeHint = (): void => {
+    preferNextAtBoundary = false;
+  };
+
   host.addEventListener('keydown', onKeyDown, true);
+  host.addEventListener('pointerdown', clearHomeHint, true);
 
   return {
     dispose() {
       host.removeEventListener('keydown', onKeyDown, true);
+      host.removeEventListener('pointerdown', clearHomeHint, true);
     },
   };
 }
