@@ -238,7 +238,7 @@
     <ShortcutManagerDialog
       :is-open="isShortcutsManagerOpen"
       :list="customShortcuts"
-      :taken="macroHeldCombos"
+      :taken="currentMacroHeldCombos()"
       @close="isShortcutsManagerOpen = false"
       @save="onSaveCustomShortcut"
       @remove="onRemoveCustomShortcut"
@@ -900,10 +900,13 @@ const customShortcutMatchers = computed(() => customMatchers(customShortcuts.val
  * **מקדים** את המנתב שלנו, והצמדה על אותו צירוף אינה מייצרת שגיאה אלא קיצור
  * אישי ששותק. ההנמקה המלאה ב-`signaturesOfShortcutText`.
  *
- * `computed` על `activeMacros`: המערכת שייכת ל-session, ומסמך אחר מביא רשימה
- * אחרת. בלי מסמך פתוח אין מה לחסום.
+ * זו **פונקציה**, ולא `computed`: ה-kit שומר את הרשימות שלו מחוץ לריאקטיביות
+ * של Vue. `computed` על `activeMacros` היה מצלם את הרשימה כשהמסמך נפתח, ואז
+ * מאקרו שנשמר אחר כך לא היה נראה כמחזיק בצירוף — ודיאלוג הקיצורים היה מאשר
+ * התנגשות שהמאקרו לוכד לפנינו. הקריאה מתבצעת בכל רינדור של פתיחת הדיאלוג,
+ * וגם בשער השמירה למטה, כך שהתמונה אינה יכולה להתיישן בין התצוגה ללחיצה.
  */
-const macroHeldCombos = computed(() => {
+function currentMacroHeldCombos(): Map<string, string> {
   const kit = activeMacros.value?.kit;
   if (!kit) return new Map<string, string>();
   return shortcutTextOwners([
@@ -912,7 +915,7 @@ const macroHeldCombos = computed(() => {
     ...kit.listScripts(),
     ...kit.listTools(),
   ]);
-});
+}
 
 /**
  * הזיכרון של „מה היה לפני ההחלה”. בזיכרון ולא באחסון, ונשכח בכל החלפת מסמך:
@@ -921,7 +924,7 @@ const macroHeldCombos = computed(() => {
 const presetToggles = createPresetToggles();
 
 /** קורא את הרשימה מהאחסון. כשל או ערך פגום = רשימה ריקה, כמו כל העדפה אחרת. */
-async function loadCustomShortcutList(): Promise<void> {
+async function loadCustomShortcutList(options: { announce?: boolean } = {}): Promise<string> {
   const { list, dropped } = normalizeCustomShortcuts(await loadCustomShortcuts());
   customShortcuts.value = list;
   // רשומה שנשרה אינה שקטה: המסלול שההודעה נועדה לו הוא קיצור שהמשתמש הגדיר
@@ -932,7 +935,8 @@ async function loadCustomShortcutList(): Promise<void> {
   // שנוקבת בהתנגשות על רשומה **פגומה** שולחת את המשתמש לחפש משהו שאינו קיים,
   // וזה בדיוק מה שנמדד לפני התיקון.
   const message = dropMessage(dropped);
-  if (message !== '') setStatus(message);
+  if (options.announce !== false && message !== '') setStatus(message);
+  return message;
 }
 
 /** כותבת לאחסון. כשל מדווח למשתמש — קיצור שלא נשמר ייעלם בהפעלה הבאה. */
@@ -943,9 +947,10 @@ function persistCustomShortcuts(): void {
 }
 
 function onSaveCustomShortcut(draft: CustomShortcutDraft): void {
-  // אותו `taken` שהדיאלוג אימת מולו: שתי בדיקות על אותו נתון, כדי שלא ייווצר
-  // מצב שבו הכפתור פעיל והשמירה מסרבת.
-  const result = upsertShortcut(customShortcuts.value, draft, macroHeldCombos.value);
+  // בין תצוגת הטופס ללחיצה מאקרו יכול להיעצר (Ctrl+Alt+R) או להתעדכן.
+  // הוא נקשר בשלב capture, לכן תמונת המצב נקראת שוב ברגע ה-commit ולא
+  // מסתמכים על ה-prop שהדיאלוג קיבל ברינדור הקודם.
+  const result = upsertShortcut(customShortcuts.value, draft, currentMacroHeldCombos());
   if (!result.ok) {
     setStatus(result.message, true);
     return;
@@ -5072,7 +5077,15 @@ onMounted(async () => {
     // כל הקריאות במקביל ולא בזו אחר זו: כל אחת היא סבב IPC מלא מול אוצריא,
     // הן קוראות מפתחות שונים ואינן תלויות זו בזו — והן עומדות בין המשתמש לבין
     // פתיחת המסמך הראשון.
-    const [storedAutosave, storedRuler, stored, storedRecents, storedDiscarded, storedSpellcheck] =
+    const [
+      storedAutosave,
+      storedRuler,
+      stored,
+      storedRecents,
+      storedDiscarded,
+      storedSpellcheck,
+      customShortcutsNotice,
+    ] =
       await Promise.all([
         loadAutosaveEnabled(),
         loadRulerVisible(),
@@ -5080,6 +5093,12 @@ onMounted(async () => {
         loadRecentDocuments(),
         loadDiscardBackups(),
         loadSpellcheckEnabled(),
+        // לפני פתיחת המסמך הראשון: MacroKit קוראת `reservedShortcuts` פעם
+        // אחת בלבד. אם הקיצורים האישיים ייטענו אחר כך, מאקרו קיים יכול
+        // להיקשר אליהם לפני שהם מוכרזים כשמורים ולהשתיק אותם.
+        // ההודעה נדחית לסיום הפתיחה: בזמן טעינת המסמך שורת המצב מוחלפת,
+        // ואזהרה שנכתבה כבר כאן הייתה נעלמת לפני שהמשתמש יכול לקרוא אותה.
+        loadCustomShortcutList({ announce: false }),
       ]);
     autosaveEnabled.value = storedAutosave;
     rulerPreference = storedRuler;
@@ -5089,11 +5108,6 @@ onMounted(async () => {
     // אותה הכרעה בדיוק כמו של „אחרונים”: מה שמגיע מ-storage אין לו הבטחת
     // סדר, והמיון הוא של הרשימה שכל שאר הקוד רואה — לא של התצוגה בלבד.
     discardedBackups.value = normalizeBackups(storedDiscarded);
-
-    // הקיצורים האישיים — **לא** ב-await: הם נדרשים רק בהקשה, ולא לפני פתיחת
-    // המסמך הראשון. עלייה שממתינה להם הייתה משלמת סבב IPC על יכולת שאולי לא
-    // תיגע בה בכלל.
-    void loadCustomShortcutList();
 
     // בדיקת האיות — **לא** ב-await: משיכת המילון היא 1.3MB, והעלייה לא
     // תמתין לה. מי שהדליק בהפעלה הקודמת יקבל את הסימון כשהמילון יגיע.
@@ -5148,6 +5162,7 @@ onMounted(async () => {
       // הכשל יושבת בשורת המצב שמתחת, ומסך טעינה שנשאר פרוש מסתיר בדיוק את
       // מה שצריך להיקרא.
       splashDone();
+      if (customShortcutsNotice !== '') setStatus(customShortcutsNotice);
     }
   } else {
     splashDone();
