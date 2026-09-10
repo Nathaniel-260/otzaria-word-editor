@@ -328,12 +328,20 @@ function verdictOf(steps, key) {
   const rightward = moved.filter((dx) => dx > 0).length;
   const leftward = moved.filter((dx) => dx < 0).length;
 
-  const seen = new Set();
+  /*
+   * עצירה בקצה המסמך היא אותו (בלוק, היסט) שוב ושוב, אבל אינה מלכודת:
+   * אין פסקה שנייה שמחזירה את הסמן. מלכודת הגבול שנמדדה היא מחזור ממשי
+   * בין שני בלוקים, למשל list:0 → paragraph:16 → list:0. לכן סופרים רק
+   * חזרה של מצב אחרי מעבר לשני בלוק אחר, ולא כל מצב שכבר נראה.
+   */
   let loop = 0;
-  for (const s of steps) {
-    const key2 = `${s.block}:${s.off}`;
-    if (seen.has(key2)) loop += 1;
-    seen.add(key2);
+  for (let i = 2; i < steps.length; i++) {
+    const a = steps[i - 2];
+    const b = steps[i - 1];
+    const c = steps[i];
+    if (a.block !== b.block && b.block !== c.block && a.block === c.block && a.off === c.off) {
+      loop += 1;
+    }
   }
 
   const expectRight = key === 'ArrowRight';
