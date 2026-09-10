@@ -222,7 +222,7 @@
       icon="alignRight"
       :column-flow="true"
     >
-      <!-- שורה עליונה: תבליטים, מספור, הזחה, כיווניות, סימני עיצוב -->
+      <!-- שורה עליונה: תבליטים, מספור, הזחה, כיווניות, סימני עיצוב, תפריט פסקה -->
       <div class="word-group-row">
         <!--
           „תבליטים” ו„מספור” הם כפתורים מפוצלים: הגוף מחיל את הרשימה, והחץ
@@ -313,9 +313,30 @@
           :disabled="!marksCmd.enabled.value"
           @click="marksCmd.run()"
         />
+
+        <div class="word-separator" />
+
+        <!--
+          „תפריט פסקה” — פתח הדיאלוג, כמו פתח ה„פסקה” של Word בקצה הקבוצה.
+          האייקון אינו `pilcrow`, ובכוונה: הוא היה זהה לזה של „הצג/הסתר
+          סימני עיצוב” שלצדו באותה קבוצה, ושני כפתורים שכנים עם אותו ציור
+          אינם שני כפתורים אלא אחד שנראה שבור.
+
+          זמינותו אינה של פקודה: הדיאלוג עצמו נכשל סגור כשאין Document API,
+          ולכן הכפתור נשאר לחיץ והפתיחה מסבירה. `@pointerdown.prevent` מונע
+          גזילת המיקוד מהעורך — הבחירה חייבת לשרוד עד פתיחת הדיאלוג.
+        -->
+        <RibbonButton
+          icon="paragraphOptions"
+          variant="icon-only"
+          tooltip="תפריט פסקה"
+          description="כניסות, ריווח בין פסקאות, מרווח שורות ועצירות טאב"
+          :disabled="paraInFlight"
+          @click="onOpenParagraph"
+        />
       </div>
 
-      <!-- שורה תחתונה: יישור ימין, מרכז, שמאל, מלא, מרווח שורות -->
+      <!-- שורה תחתונה: יישור ימין, מרכז, שמאל, מלא, מרווח שורות וצעד בו -->
       <div class="word-group-row">
         <RibbonButton
           icon="alignRight"
@@ -363,27 +384,34 @@
         <RibbonSelect
           :model-value="selectedLineSpacing"
           :options="spacingSelectOptions"
-          :disabled="!lineSpacingCmd.enabled.value"
+          :disabled="!lineSpacingCmd.enabled.value || lineSpacingInFlight"
           width="48px"
           title="מרווח בין שורות"
           @update:model-value="onLineSpacingChange"
         />
 
-        <div class="word-separator" />
-
         <!--
-          „תפריט פסקה” — פתח הדיאלוג, כמו פתח ה„פסקה” של Word בקצה הקבוצה.
-          זמינותו אינה של פקודה: הדיאלוג עצמו נכשל סגור כשאין Document API,
-          ולכן הכפתור נשאר לחיץ והפתיחה מסבירה. `@pointerdown.prevent` מונע
-          גזילת המיקוד מהעורך — הבחירה חייבת לשרוד עד פתיחת הדיאלוג.
+          שני הכפתורים האלה הם הבורר שלצדם בצעד אחד: הרשימה מציעה שש
+          אפשרויות, והם מגיעים למה שאינו בהן (1.2, 1.35) בלי דיאלוג. הם
+          נכבים בקצות הסולם — ראו `MIN_LINE_HEIGHT` ב-engine/payloads.ts —
+          כי כפתור שנשאר דלוק על 10.0 הוא לחיצה שאינה משנה כלום ואינה
+          אומרת זאת.
         -->
         <RibbonButton
-          icon="pilcrow"
+          icon="lineSpacingIncrease"
           variant="icon-only"
-          tooltip="תפריט פסקה"
-          description="כניסות, ריווח בין פסקאות, מרווח שורות ועצירות טאב"
-          :disabled="paraInFlight"
-          @click="onOpenParagraph"
+          tooltip="הגדל מרווח שורות"
+          :description="growSpacingHint"
+          :disabled="!lineSpacingCmd.enabled.value || !canGrowSpacing || lineSpacingInFlight"
+          @click="onLineSpacingStep(grownLineHeight)"
+        />
+        <RibbonButton
+          icon="lineSpacingDecrease"
+          variant="icon-only"
+          tooltip="הקטן מרווח שורות"
+          :description="shrinkSpacingHint"
+          :disabled="!lineSpacingCmd.enabled.value || !canShrinkSpacing || lineSpacingInFlight"
+          @click="onLineSpacingStep(shrunkLineHeight)"
         />
       </div>
     </RibbonGroup>
@@ -449,6 +477,9 @@
       :busy="paraInFlight"
       :tabs-enabled="tabsEnabled"
       :snapshot="paraSnapshot"
+      :page-text-width-twips="paraTextWidthTwips"
+      :font-size-pt="paraFontSizePt"
+      :section-rtl="paraSectionRtl"
       @close="paragraphOpen = false"
       @submit="onParagraphSubmit"
       @tab-add="onParagraphTabAdd"
@@ -515,6 +546,7 @@ import {
   applyFontAdvanced,
   type FontAdvancedPatch,
 } from '../../../engine/font-advanced';
+import { readPageMargins } from '../../../engine/page-setup';
 import {
   NUMBER_STYLE_LABELS,
   continuePreviousList,
@@ -525,11 +557,15 @@ import {
 } from '../../../engine/lists';
 import {
   DEFAULT_LINE_HEIGHT,
+  MAX_LINE_HEIGHT,
+  MIN_LINE_HEIGHT,
   alignmentPayload,
   colorPayload,
+  grownLineHeight,
   lineHeightPayload,
   parseColor,
   parseLineHeight,
+  shrunkLineHeight,
   stylePayload,
   type ParagraphAlignment,
 } from '../../../engine/payloads';
@@ -618,6 +654,13 @@ const lastLineHeight = ref(DEFAULT_LINE_HEIGHT);
  */
 const pendingLineHeight = ref<number | null>(null);
 
+/**
+ * הפקודה אינה מדווחת ערך, ולכן בקשות חופפות אינן רק עניין של ציור: הצלחה של
+ * 1.6 וכשל של 1.7 שאחריה היו מחזירים את הבורר ל-1.5, אף שהמסמך נשאר ב-1.6.
+ * נעילה קצרה עד הקבלה משאירה לכל בקשה נקודת חזרה אחת נכונה.
+ */
+const lineSpacingInFlight = ref(false);
+
 watch(engineLineHeight, (value) => {
   if (value) lastLineHeight.value = value;
 });
@@ -640,8 +683,38 @@ const selectedLineSpacing = computed(() => currentLineHeight.value.toFixed(2).re
 const textColor = computed(() => engineTextColor.value ?? '');
 const highlightColor = computed(() => engineHighlight.value ?? '');
 
+/**
+ * `numeric` נדרש מרגע שיש כפתורי צעד: 1.2 שנוצר בלחיצה אינו באפשרויות,
+ * ובלי הדגל הוא נכנס **בראש** הרשימה — כלומר „1.2, 1.0, 1.15, 1.5…”, סולם
+ * שאי אפשר לאמוד בו מרחק. עם הדגל הוא נכנס בין 1.15 ל-1.5.
+ */
 const spacingSelectOptions = computed(() =>
-  withCurrent(SPACING_OPTIONS, selectedLineSpacing.value),
+  withCurrent(SPACING_OPTIONS, selectedLineSpacing.value, { numeric: true }),
+);
+
+/**
+ * שני כפתורי הצעד נכבים בקצות הסולם. `currentLineHeight` ולא מה שהמנוע
+ * מדווח: מה שהכפתור מזיז הוא מה שמוצג, כולל בחירה שטרם נענתה — אחרת שתי
+ * לחיצות רצופות היו שולחות את אותו ערך פעמיים.
+ */
+const canGrowSpacing = computed(() => currentLineHeight.value < MAX_LINE_HEIGHT);
+const canShrinkSpacing = computed(() => currentLineHeight.value > MIN_LINE_HEIGHT);
+
+/**
+ * ההסבר בכרטיס העזרה נוקב בערך שהלחיצה **תגיע** אליו ולא בצעד עצמו: „ל-1.2”
+ * אומר יותר מ„ב-0.1” כשהמרווח הוא 1.1. בקצה הסולם הוא אומר זאת במפורש, מפני
+ * ש**הכפתור כבוי שם** — והכרטיס הוא המקום היחיד שמסביר למה, ומפנה לדיאלוג
+ * שכן יודע לרדת מתחת לסולם הזה („בדיוק” ו„לפחות”, בנקודות).
+ */
+const growSpacingHint = computed(() =>
+  canGrowSpacing.value
+    ? `מרחיב את מרווח השורות ל-${grownLineHeight(currentLineHeight.value)}`
+    : `${MAX_LINE_HEIGHT} הוא המרווח הגדול ביותר כאן. מעליו — „תפריט פסקה”`,
+);
+const shrinkSpacingHint = computed(() =>
+  canShrinkSpacing.value
+    ? `מצמצם את מרווח השורות ל-${shrunkLineHeight(currentLineHeight.value)}`
+    : `${MIN_LINE_HEIGHT} הוא המרווח הקטן ביותר כאן. מתחתיו — „תפריט פסקה”`,
 );
 
 /* ------------------------------------------------------------------ */
@@ -659,14 +732,33 @@ function onHighlightChange(color: string | null): void {
   void highlightCmd.run(colorPayload(color));
 }
 
+async function applyLineSpacing(multiplier: number): Promise<void> {
+  if (lineSpacingInFlight.value) return;
+  const payload = lineHeightPayload(multiplier);
+  if (payload === null) return;
+  lineSpacingInFlight.value = true;
+  try {
+    await applyOptimistically(pendingLineHeight, lastLineHeight, multiplier, () =>
+      lineSpacingCmd.run(payload),
+    );
+  } finally {
+    lineSpacingInFlight.value = false;
+  }
+}
+
 function onLineSpacingChange(val: string): void {
   const multiplier = parseLineHeight(val);
   if (multiplier === null) return;
-  const payload = lineHeightPayload(multiplier);
-  if (payload === null) return;
-  void applyOptimistically(pendingLineHeight, lastLineHeight, multiplier, () =>
-    lineSpacingCmd.run(payload),
-  );
+  void applyLineSpacing(multiplier);
+}
+
+/**
+ * צעד אחד במרווח, מהערך שמוצג עכשיו. `step` הוא פונקציה ולא מספר כדי
+ * שהחישוב וההגבלה יישארו ב-engine/payloads.ts, במקום שבו הם נבדקים.
+ */
+function onLineSpacingStep(step: (current: number) => number): void {
+  const multiplier = step(currentLineHeight.value);
+  void applyLineSpacing(multiplier);
 }
 
 function onAlign(alignment: ParagraphAlignment): void {
@@ -959,6 +1051,24 @@ const paraInFlight = shallowRef(false);
 /** יעד הפסקה שהתצלום נלקח ממנו; כל פעולת „אישור” חוזרת אליו. */
 let paraTarget: unknown = null;
 const paraSnapshot = shallowRef(emptyParagraphFormat());
+/**
+ * רוחב עמודת הטקסט של המקטע, למכנה של פס התצוגה המקדימה בדיאלוג.
+ *
+ * `0` = אין גיאומטריה, ואז הדיאלוג אינו מצייר פס. נקרא בפתיחה יחד עם התצלום
+ * ולא נשמר מעבר לה, מאותו טעם שהתצלום עצמו נקרא בפתיחה: המשתמש יכול לשנות
+ * שוליים בלשונית „פריסה” בין פתיחה לפתיחה.
+ */
+const paraTextWidthTwips = shallowRef(0);
+/**
+ * כיוון המקטע — מה שפסקה שאינה מצהירה `<w:bidi>` יורשת, ולכן הצד שבו הפס
+ * מצייר את „לפני טקסט”. נקרא מאותה קריאה של `readPageMargins`.
+ */
+const paraSectionRtl = shallowRef(false);
+/**
+ * גודל הגופן שבסמן — הסרגל של הציר האנכי בפס. אותו מספר שבבורר הגודל
+ * שברצועה, כלומר בלי קריאה נוספת למנוע.
+ */
+const paraFontSizePt = computed(() => Number(fonts.size.value) || 0);
 
 const tabsEnabled = computed(() => capabilities.value?.can('canManageParagraphTabs') ?? false);
 
@@ -988,6 +1098,13 @@ async function onOpenParagraph(): Promise<void> {
     }
     paraTarget = result.target;
     paraSnapshot.value = result.snapshot;
+    // קריאה בלבד של `sections.list()`, אותה קריאה שהסרגל מצייר לפיה. כשל שלה
+    // אינו מונע את הדיאלוג — הוא מוריד ממנו את הפס בלבד.
+    const page = await readPageMargins(superdoc.value);
+    paraTextWidthTwips.value = page
+      ? Math.max(0, page.pageWidthTwips - page.leftTwips - page.rightTwips)
+      : 0;
+    paraSectionRtl.value = page?.direction === 'rtl';
     paragraphOpen.value = true;
   } finally {
     paraInFlight.value = false;

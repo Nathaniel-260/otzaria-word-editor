@@ -209,6 +209,8 @@ const EN: Readonly<Record<string, string>> = {
   'מותח את השורות עד שני השוליים, מלבד השורה האחרונה':
     'Stretches the lines to both margins, except the last line',
   'מרווח בין שורות': 'Line Spacing',
+  'הגדל מרווח שורות': 'Increase Line Spacing',
+  'הקטן מרווח שורות': 'Decrease Line Spacing',
   'תפריט פסקה': 'Paragraph dialog',
   'כניסות, ריווח בין פסקאות, מרווח שורות ועצירות טאב':
     'Indents, paragraph spacing, line spacing and tab stops',

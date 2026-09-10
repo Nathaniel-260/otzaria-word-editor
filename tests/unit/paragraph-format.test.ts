@@ -339,6 +339,72 @@ describe('readParagraphFormat', () => {
     }
   });
 
+  it('`bidi` של הפסקה נקרא לתצלום — הצד שבו „לפני טקסט” יושב', async () => {
+    /*
+     * זהו הצרן היחיד של השדה: פס התצוגה המקדימה בדיאלוג מצייר לפיו את
+     * `direction` שלו. הכניסות נכתבות ב-`w:start`/`w:end`, שהם לוגיים
+     * ל**פסקה** — פסקה LTR בתוך מקטע RTL מקבלת „לפני טקסט” בצד השמאלי —
+     * ולכן כיוון המקטע אינו התשובה כאן.
+     */
+    const rtl = await readParagraphFormat(
+      fakeDoc({
+        get: {
+          body: [
+            {
+              kind: 'paragraph',
+              paragraphIds: { paraId: 'p3' },
+              paragraph: { inlines: [], props: { bidi: true } },
+            },
+          ],
+        },
+      }).host,
+    );
+    expect(rtl.ok && rtl.snapshot.bidi).toBe(true);
+
+    // פסקה שהצהירה LTR חוזרת `false` — הערך, ולא היעדר. זו ההבחנה שמתירה
+    // ליפול לכיוון המקטע רק כשהפסקה שותקת, ונמדדה בכרום על המנוע האמיתי.
+    const declaredLtr = await readParagraphFormat(
+      fakeDoc({
+        get: {
+          body: [
+            {
+              kind: 'paragraph',
+              paragraphIds: { paraId: 'p3' },
+              paragraph: { inlines: [], props: { bidi: false } },
+            },
+          ],
+        },
+      }).host,
+    );
+    expect(declaredLtr.ok && declaredLtr.snapshot.bidi).toBe(false);
+
+    // ופסקה שאינה מצהירה כלל היא `null` ולא `false`: מסמך עברי שנוצר ב-Word
+    // יורש את הכיוון, והיעדר שנקרא כ-LTR היה מצייר את הפס בצד ההפוך.
+    const ltr = await readParagraphFormat(
+      fakeDoc({
+        get: {
+          body: [
+            {
+              kind: 'paragraph',
+              paragraphIds: { paraId: 'p3' },
+              paragraph: { inlines: [], props: { indent: { start: 36 } } },
+            },
+          ],
+        },
+      }).host,
+    );
+    expect(ltr.ok && ltr.snapshot.bidi).toBe(null);
+
+    // וגם פסקה שאין לה תכונות בכלל — כולל פסקה בתוך תא טבלה, שאינה נפתרת
+    // ב-`findParagraphProps` (ראו ההערה שם).
+    const noProps = await readParagraphFormat(
+      fakeDoc({
+        get: { body: [{ kind: 'paragraph', paragraphIds: { paraId: 'p3' }, paragraph: { inlines: [] } }] },
+      }).host,
+    );
+    expect(noProps.ok && noProps.snapshot.bidi).toBe(null);
+  });
+
   it('הבחירה יושבת בכותרת — היעד לכתיבה חזרה נושא nodeType:heading ולא paragraph מקובע', async () => {
     // באג 1: כתיבה חזרה עם nodeType:'paragraph' מקובע על כותרת היא כתובת
     // פסולה ונכשלת. nodeType כאן נגזר מ-blocks.list, בדיוק כמו resolveListItem.

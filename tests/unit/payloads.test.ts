@@ -9,11 +9,15 @@ import { describe, it, expect } from 'vitest';
 import {
   DEFAULT_FONT_SIZE_PT,
   EMBEDDABLE_IMAGE_EXTENSIONS,
+  MAX_LINE_HEIGHT,
+  MIN_LINE_HEIGHT,
   WORD_FONT_SIZES,
   grownFontSize,
+  grownLineHeight,
   imageMimeForFileName,
   imagePayload,
   isEmbeddableImageSrc,
+  lineHeightPayload,
   linkPayload,
   normalizeLinkHref,
   parseColor,
@@ -22,6 +26,7 @@ import {
   parseFontSizePt,
   parseLineHeight,
   shrunkFontSize,
+  shrunkLineHeight,
   LINK_SCHEMES,
 } from '../../src/engine/payloads';
 
@@ -364,5 +369,44 @@ describe('linkPayload', () => {
     expect(
       linkPayload({ href: 'not a url', text: 'אוצריא', target: { kind: 'text', segments: [] } }),
     ).toBeNull();
+  });
+});
+
+describe('צעד במרווח השורות', () => {
+  it('הצעד הוא 0.1, ולא הערך הבא בבורר', () => {
+    // 1.15 הוא האפשרות שאחרי 1.0 בבורר; מי שלוחץ „הגדל” מ-1.0 מבקש 1.1.
+    expect(grownLineHeight(1)).toBe(1.1);
+    expect(shrunkLineHeight(1.5)).toBe(1.4);
+  });
+
+  it('הערך מעוגל לשתי ספרות — אחרת המכפיל נכתב למסמך עם זנב של double', () => {
+    // 1.15 + 0.1 הוא 1.2500000000000002, וכפול 240 הוא
+    // `w:line="300.00000000000006"`. גם הבורר משווה מדויק, ולכן זנב כזה
+    // מוסיף לרשימה אפשרות שביעית שנראית זהה לאחת מהן.
+    expect(grownLineHeight(1.15)).toBe(1.25);
+    expect(shrunkLineHeight(1.15)).toBe(1.05);
+    expect(grownLineHeight(2.9)).toBe(3);
+  });
+
+  it('הקצוות אינם נחרגים, ושניהם נגזרים מקוד שכאן', () => {
+    // התקרה: מעל 10 `parseLineHeight` מפרש את המספר כ-240ths ומחלק אותו.
+    expect(grownLineHeight(MAX_LINE_HEIGHT)).toBe(MAX_LINE_HEIGHT);
+    expect(grownLineHeight(9.95)).toBe(MAX_LINE_HEIGHT);
+    // הרצפה: `lineHeightPayload` דוחה 0 ומטה, ולכן 0.1 הוא הצעד האחרון.
+    expect(shrunkLineHeight(MIN_LINE_HEIGHT)).toBe(MIN_LINE_HEIGHT);
+    expect(shrunkLineHeight(0.15)).toBe(MIN_LINE_HEIGHT);
+    expect(lineHeightPayload(shrunkLineHeight(MIN_LINE_HEIGHT))).toEqual({ lineHeight: 0.1 });
+  });
+
+  it('כל ערך שהצעד מגיע אליו חוזר כמותו מ-parseLineHeight', () => {
+    // זה מה שהתקרה שומרת עליו: מכפיל שהמנוע היה מחזיר כמספר אחר הוא בורר
+    // שמציג ערך שאינו במסמך.
+    const seen: number[] = [];
+    for (let value = MIN_LINE_HEIGHT; ; value = grownLineHeight(value)) {
+      seen.push(value);
+      expect(parseLineHeight(value)).toBe(value);
+      if (value === MAX_LINE_HEIGHT) break;
+    }
+    expect(seen).toHaveLength(100);
   });
 });

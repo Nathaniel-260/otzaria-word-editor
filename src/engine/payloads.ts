@@ -167,6 +167,54 @@ export function lineHeightPayload(multiplier: number): { lineHeight: number } | 
   return { lineHeight: multiplier };
 }
 
+/* ------------------------------------------------------------------ */
+/* צעד במרווח השורות                                                   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * הצעד שכפתורי „הגדל/הקטן מרווח שורות” מזיזים. 0.1 ולא סולם קבוע כמו
+ * `WORD_FONT_SIZES`: הבורר שלצדם מציע שש אפשרויות (1.0 עד 3.0), וכל תפקידם
+ * הוא להגיע לערך שאינו בהן — 1.2 או 1.35 — בלי לפתוח את דיאלוג הפסקה.
+ */
+export const LINE_HEIGHT_STEP = 0.1;
+
+/**
+ * שני קצות הסולם, וכל אחד מהם נגזר מקוד שקיים כאן ולא נבחר:
+ *
+ * - **התקרה 10** היא הגבול ש-`parseLineHeight` עצמו מפריד בו בין מכפיל לבין
+ *   240ths. מכפיל 10.1 שנכתב למסמך היה חוזר משם כ-0.04, כלומר הבורר היה
+ *   מציג ערך שאינו קרוב למה שבמסמך.
+ * - **הרצפה 0.1** היא הצעד האחרון שעוד חיובי. `lineHeightPayload` דוחה 0
+ *   ומטה, ולכן ירידה מ-0.1 אינה „מרווח קטן יותר” אלא לחיצה שלא עושה כלום.
+ *
+ * מי שצריך מחוץ לטווח — הדיאלוג („בדיוק” ו„לפחות” בנקודות) הוא המסלול.
+ */
+export const MIN_LINE_HEIGHT = 0.1;
+export const MAX_LINE_HEIGHT = 10;
+
+/**
+ * הערך שצעד מ-`current` מגיע אליו, מעוגל לשתי ספרות ומוגבל לטווח.
+ *
+ * העיגול אינו נוי: 1.15 + 0.1 הוא 1.2500000000000002 ב-double, והמנוע כותב
+ * את המכפיל למסמך ככפל ב-240 — כלומר `w:line="300.00000000000006"`. הוא גם
+ * מה שמחזיר את הערך לרשימה: הבורר משווה מדויק, ו-1.2500000000000002 היה
+ * מצטרף אליה כאפשרות שביעית לצד 1.25 שנבחרה בפעם הבאה.
+ */
+function steppedLineHeight(current: number, delta: number): number {
+  const next = Math.round((current + delta) * 100) / 100;
+  return Math.min(MAX_LINE_HEIGHT, Math.max(MIN_LINE_HEIGHT, next));
+}
+
+/** המרווח שמעל `current`, בצעד אחד. בתקרה — התקרה. */
+export function grownLineHeight(current: number): number {
+  return steppedLineHeight(current, LINE_HEIGHT_STEP);
+}
+
+/** המרווח שמתחת ל-`current`, בצעד אחד. ברצפה — הרצפה. */
+export function shrunkLineHeight(current: number): number {
+  return steppedLineHeight(current, -LINE_HEIGHT_STEP);
+}
+
 /** `text-align`. המפתח `alignment` מוכר ל-`unwrapScalar`. */
 export function alignmentPayload(alignment: ParagraphAlignment): { alignment: ParagraphAlignment } {
   return { alignment };

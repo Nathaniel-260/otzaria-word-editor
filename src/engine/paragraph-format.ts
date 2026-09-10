@@ -88,6 +88,31 @@ export interface ParagraphFormatSnapshot {
   keepLines: boolean;
   widowControl: boolean;
   tabs: readonly TabStop[];
+  /**
+   * `<w:bidi>` של הפסקה — כלומר איזה צד הוא „ההתחלה” שלה. **`null` = הפסקה
+   * אינה מצהירה, ואז הכיוון יורש מהמקטע.**
+   *
+   * של הפסקה ולא של המקטע, מפני ש-`w:start`/`w:end` שהכניסות נכתבות בהם הם
+   * לוגיים לפסקה: פסקה LTR בתוך מקטע RTL מקבלת „לפני טקסט” בצד השמאלי. פס
+   * התצוגה המקדימה הוא הצרן היחיד, והוא מצייר לפיו את `direction` שלו.
+   *
+   * ## ולמה שלושה מצבים ולא שניים
+   *
+   * `false` שמשמעו „לא הצהירה” הוא בדיוק התקלה ש„הכרזת bidi אינה כיוון”
+   * מתארת: מסמך עברי שנוצר ב-Word אינו מצהיר `<w:bidi>` על כל פסקה — הוא
+   * יורש — ופס שהיה קורא היעדר כ-LTR היה מצייר את הכניסה בצד ההפוך על
+   * מסמכים רגילים לגמרי.
+   *
+   * שלושת המצבים אפשריים מפני שהמודל **מבדיל** ביניהם, וזה נמדד בכרום על
+   * המנוע האמיתי: פסקה שנקבעה LTR מחזירה `props: { bidi: false }` — הערך
+   * `false` ולא היעדר — ולכן `'bidi' in props` הוא הבחנה אמיתית. זה גם
+   * עולה בקנה אחד עם מה שהערת `RawParagraphProps` מתעדת: המודל מוציא
+   * מפתחות שאין לו מה לומר עליהם (‏`tabs`, `keepNext` ואחרים אינם בו כלל).
+   *
+   * `null` גם כשאין תכונות פסקה בכלל — כולל הפער שהערת `findParagraphProps`
+   * מתעדת, פסקה בתוך תא טבלה שאינה נפתרת שם.
+   */
+  bidi: boolean | null;
 }
 
 function docOf(host: ParagraphFormatTarget): ParagraphFormatDocumentApi | null {
@@ -249,6 +274,7 @@ export function emptyParagraphFormat(): ParagraphFormatSnapshot {
     keepLines: false,
     widowControl: true,
     tabs: [],
+    bidi: null,
   };
 }
 
@@ -377,6 +403,19 @@ export function indentsFromProps(props: RawParagraphProps | undefined): Paragrap
   };
 }
 
+/**
+ * שלושת המצבים של `<w:bidi>`: הצהירה RTL, הצהירה LTR, או שתקה (`null`).
+ *
+ * `'bidi' in props` ולא `props.bidi === true`, וזו ההבחנה כולה — ראו `bidi`
+ * ב-`ParagraphFormatSnapshot`. `indentsFromProps` לידו **אינו** משתמש בזה
+ * בכוונה: הצרן שלו הוא חיווי הכיוון ברצועה, ושם „לא הצהירה” אינו מדליק
+ * כפתור, כלומר שני מצבים מספיקים.
+ */
+function declaredBidi(props: RawParagraphProps | undefined): boolean | null {
+  if (!props || !Object.prototype.hasOwnProperty.call(props, 'bidi')) return null;
+  return props.bidi === true;
+}
+
 const LINE_RULES: readonly LineSpacingRule[] = ['auto', 'exact', 'atLeast'];
 const TAB_ALIGNMENTS: readonly TabAlignment[] = ['left', 'center', 'right', 'decimal', 'bar'];
 const TAB_LEADERS: readonly TabLeader[] = ['none', 'dot', 'hyphen', 'underscore', 'heavy', 'middleDot'];
@@ -458,6 +497,7 @@ export async function readParagraphFormat(
       keepLines: raw?.keepLines === true,
       widowControl: raw?.widowControl !== false,
       tabs,
+      bidi: declaredBidi(raw),
     },
   };
 }

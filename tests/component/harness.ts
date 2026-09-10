@@ -328,6 +328,16 @@ export interface SuperdocDoubleOptions {
      * שמחזיר 11906 „אינצ'ים” היה נותן לו עמוד ברוחב שמונה מטרים.
      */
     pageSize?: { width?: number; height?: number };
+    /**
+     * שולי הדף ב**אינצ'ים**, כמו `pageSize` לידו. ברירת המחדל היא השוליים
+     * של מסמך חדש; `null` מחסיר אותם במפורש כדי לדמות מסמך שעדיין נטען.
+     */
+    margins?: { top?: number; right?: number; bottom?: number; left?: number } | null;
+    /**
+     * `sectionDirection` של המקטע — מה שפסקה שאינה מצהירה `<w:bidi>` יורשת.
+     * ברירת המחדל היא RTL של מסמך חדש; `null` מחסיר את ההצהרה.
+     */
+    direction?: 'rtl' | 'ltr' | null;
   };
   /**
    * תכונות הפסקה שבה הסמן, במודל SDM/1 — **נקודות**, לא twips. אלה מה ש-
@@ -623,10 +633,12 @@ export function createSuperdocDouble(options: SuperdocDoubleOptions = {}): Super
               height: options.sections?.pageSize?.height ?? 16838 / 1440,
               orientation: 'portrait',
             },
-            // A4 עם שוליים של אינץ' — מה שתבנית „מסמך חדש” נותנת, ומה
-            // ש-`readPageMargins` צריך כדי לחשב רוחב אזור טקסט.
-            margins: { left: 1, right: 1, top: 1, bottom: 1 },
-            sectionDirection: 'rtl',
+            ...(options.sections?.margins === null
+              ? {}
+              : { margins: options.sections?.margins ?? { left: 1, right: 1, top: 1, bottom: 1 } }),
+            ...(options.sections?.direction === null
+              ? {}
+              : { sectionDirection: options.sections?.direction ?? 'rtl' }),
             headerFooterMargins: { header: 0.5, footer: 0.5 },
             lineNumbering: options.sections?.lineNumbering,
             pageNumbering: options.sections?.pageNumbering,
