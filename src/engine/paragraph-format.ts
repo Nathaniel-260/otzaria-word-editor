@@ -153,6 +153,12 @@ export interface ParagraphFormatDocumentApi extends SelectionDocumentApi {
       setSpacing?: (input: Record<string, unknown>) => MaybePromise<DocReceipt>;
       clearSpacing?: (input: { target: unknown }) => MaybePromise<DocReceipt>;
       setKeepOptions?: (input: Record<string, unknown>) => MaybePromise<DocReceipt>;
+      /**
+       * אפשרויות הזרימה. נצרך כאן ל-`contextualSpacing` בלבד; `pageBreakBefore`
+       * עובר דרך engine/page-break.ts, ושתי הקריאות אינן מתנגשות — הפעולה היא
+       * patch (נמדד, ראו `applyParagraphContextualSpacing`).
+       */
+      setFlowOptions?: (input: Record<string, unknown>) => MaybePromise<DocReceipt>;
       setTabStop?: (input: Record<string, unknown>) => MaybePromise<DocReceipt>;
       clearTabStop?: (input: Record<string, unknown>) => MaybePromise<DocReceipt>;
       clearAllTabStops?: (input: { target: unknown }) => MaybePromise<DocReceipt>;
@@ -490,7 +496,7 @@ export async function readParagraphFormat(
       spacing: {
         beforeTwips: ptToTwips(sp.before),
         afterTwips: ptToTwips(sp.after),
-        lineTwips: nonNegativeInt(sp.line != null ? Math.round(sp.line * TWIPS_PER_PT) : NaN) ?? defaults.spacing.lineTwips,
+        lineTwips: lineTwipsFromModel(sp.line, rule) ?? defaults.spacing.lineTwips,
         rule,
       },
       keepNext: raw?.keepWithNext === true,
@@ -629,6 +635,289 @@ export function clearParagraphSpacing(host: ParagraphFormatTarget, target: unkno
   const clear = docOf(host)?.format?.paragraph?.clearSpacing;
   if (typeof clear !== 'function') return Promise.resolve(unsupported('ניקוי הריווח נכשל'));
   return call('ניקוי הריווח נכשל', () => clear({ target }));
+}
+
+/* ------------------------------------------------------------------ */
+/* ריווח על **כל** הבחירה — מה שתפריט „מרווח שורות וריווח” ברצועה מפעיל */
+/* ------------------------------------------------------------------ */
+
+/**
+ * סוג הבלוק של כמה מזהים, בקריאת `blocks.list` **אחת**.
+ *
+ * `resolveBlockType` שמעליו פותר מזהה יחיד וקורא ל-`blocks.list` בכל פעם.
+ * לפסקה אחת זה נכון; לבחירה של ארבעים פסקאות זה ארבעים סריקות של אותו סיפור
+ * בדיוק. כאן הרשימה נקראת פעם אחת ונשלפת ממנה מפה.
+ *
+ * הנפילה לאחור שונה מזו של היחיד בכוונה: שם, מזהה שאינו ב-`blocks.list`
+ * נבדק ב-`lists.getState` (פריט רשימה בתוך תא טבלה). כאן לא — זו קריאה לכל
+ * מזהה חסר, כלומר בדיוק העלות שהפונקציה הזאת קיימת כדי למנוע. מזהה שאינו
+ * ברשימה מקבל `'paragraph'`, וכתיבה אליו שתיכשל תדווח ככשל ככל כתיבה אחרת.
+ */
+async function resolveBlockTypes(
+  doc: ParagraphFormatDocumentApi,
+  blockIds: readonly string[],
+): Promise<Map<string, ParagraphBlockType>> {
+  const types = new Map<string, ParagraphBlockType>();
+  const list = doc.blocks?.list;
+  if (typeof list !== 'function') return types;
+  try {
+    const listed = await list();
+    for (const block of listed?.blocks ?? []) {
+      if (typeof block.nodeId !== 'string' || !blockIds.includes(block.nodeId)) continue;
+      types.set(
+        block.nodeId,
+        block.nodeType === 'heading' || block.nodeType === 'listItem' ? block.nodeType : 'paragraph',
+      );
+    }
+  } catch {
+    // רשימה שנכשלה אינה סיבה לוותר: הכל ייקרא כ„פסקה”, כמו ביחיד.
+  }
+  return types;
+}
+
+/**
+ * הריווח כפי שהוא **מוצהר בפסקה עצמה**. `null` = לא הוצהר, כלומר יורש
+ * מהסגנון — וזו הבחנה שאי אפשר לוותר עליה, ראו `applySelectionSpacing`.
+ */
+export interface DeclaredSpacing {
+  beforeTwips: number | null;
+  afterTwips: number | null;
+  lineTwips: number | null;
+  rule: LineSpacingRule | null;
+}
+
+/** פסקה אחת בבחירה: לאן לכתוב, ומה מוצהר בה עכשיו. */
+export interface ParagraphSpacingEntry {
+  target: ParagraphTarget;
+  spacing: DeclaredSpacing;
+}
+
+/**
+ * הריווח של **כל** הפסקאות שהבחירה נוגעת בהן.
+ *
+ * ## למה קריאה, ולא רק כתיבה
+ *
+ * `setSpacing` מחליף את `<w:spacing>` כולו (ראו הערת הפתיחה). „הוסף רווח לפני
+ * הפסקה” שהיה שולח `{before}` בלבד היה מוחק בשקט את מרווח השורות ואת הריווח
+ * שאחרי — כלומר פעולה שנראית תוספת ומתנהגת כמחיקה. לכן כל פריט ברשימה נושא
+ * את **המצב המלא**, והכותב מחליף בו שדה אחד.
+ *
+ * ## ולמה לא `readParagraphFormat` בלולאה
+ *
+ * `doc.get()` סורק את המסמך כולו. הוא נקרא כאן **פעם אחת** לכל הבחירה, ולא
+ * פעם לכל פסקה — שלושים פסקאות מסומנות היו שלושים סריקות מלאות.
+ *
+ * `null` בכל מסלול שאינו מצליח, ובלי הודעה: הצרכן הראשון הוא תפריט שנפתח,
+ * ותפריט אינו המקום להתלונן בו על „אין סמן במסמך”. מי שכותב בפועל כן מדווח.
+ */
+export async function readSelectionSpacing(
+  host: ParagraphFormatTarget,
+): Promise<readonly ParagraphSpacingEntry[] | null> {
+  const doc = docOf(host);
+  if (!doc || typeof doc.get !== 'function') return null;
+
+  const selection = await readDocSelection(host);
+  if (!selection.blockIds.length) return null;
+
+  let document: unknown;
+  try {
+    document = await doc.get();
+  } catch {
+    return null;
+  }
+
+  const types = await resolveBlockTypes(doc, selection.blockIds);
+  return selection.blockIds.map((blockId) => ({
+    target: {
+      kind: 'block' as const,
+      nodeType: types.get(blockId) ?? 'paragraph',
+      nodeId: blockId,
+      ...(selection.story ? { story: selection.story } : {}),
+    },
+    spacing: spacingFromProps(findParagraphProps(document, blockId)),
+  }));
+}
+
+/**
+ * מה **מוצהר** בפסקה, ולא מה שיוצא ממנה.
+ *
+ * `readParagraphFormat` שלידו ממלא כל שדה חסר בברירת מחדל, וזה נכון שם: הוא
+ * ממלא דיאלוג, ודיאלוג חייב להציג מספר בכל תיבה. כאן ההפך — שדה שלא הוצהר
+ * **חייב** להישאר `null`, אחרת הכתיבה חזרה תקבע אותו, והפסקה תפסיק לרשת
+ * אותו מהסגנון. ההסבר המלא ב-`applySelectionSpacing`.
+ *
+ * המודל אינו מחזיר מפתחות שאין לו מה לומר עליהם — ראו הערת `RawParagraphProps`
+ * — ולכן היעדר מפתח הוא תשובה, לא חוסר מידע.
+ */
+/**
+ * `spacing.line` שהמודל מחזיר → twips, לפי הכלל שלצדו.
+ *
+ * ## למה שתי יחידות ולא אחת
+ *
+ * ב-OOXML ל-`w:line` יש שתי משמעויות לפי `w:lineRule`: ב-`exact`/`atLeast`
+ * הוא מרחק, וב-`auto` הוא כפולה ב-240ths. המודל משקף בדיוק את ההבחנה הזאת,
+ * וזה **נמדד** (superdoc 2.14.0-next.5, Chrome, ה-dist הארוז —
+ * `scripts/line-unit-probe.mjs`):
+ *
+ * | נכתב | lineRule | המודל מחזיר |
+ * |---|---|---|
+ * | 480 | `auto` | **2** — כפולה |
+ * | 720 | `auto` | **3** — כפולה |
+ * | 360 | `exact` | **18** — נקודות |
+ * | 360 | `atLeast` | **18** — נקודות |
+ *
+ * ## ומה זה תיקן
+ *
+ * המרה אחידה של `× 20` הייתה כאן קודם, והיא שגויה ב-`auto` פי 12. שני
+ * כשלים אמיתיים נגזרו ממנה, ושניהם שקטים:
+ *
+ * 1. **הדיאלוג הציג „בודדת” לכל פסקה במרווח אוטומטי.** פסקה ב-1.5 שורות
+ *    חוזרת מהמודל כ-`1.5`, יצאה מכאן כ-30 twips, לא התאימה לאף אחד מ-
+ *    240/360/480, והבורר נפל לברירת המחדל. „אישור” על אותו דיאלוג **כתב**
+ *    240 — כלומר שינה את מרווח השורות של המשתמש בלי שביקש.
+ * 2. **„הוסף רווח לפני הפסקה” כיווץ את מרווח השורות בכל לחיצה.** הפעולה
+ *    משמרת את מה שמוצהר, ולכן היא קראה 3, שלחה 60, קראה 0.25, ושלחה 5 —
+ *    נתפס בשער `home-paragraph-qa` על `<w:spacing w:line="5"/>`.
+ */
+function lineTwipsFromModel(value: number | undefined, rule: LineSpacingRule): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+  return Math.max(0, Math.round(value * (rule === 'auto' ? 240 : TWIPS_PER_PT)));
+}
+
+function spacingFromProps(props: RawParagraphProps | undefined): DeclaredSpacing {
+  const sp = props?.spacing;
+  const declared = (value: number | undefined): number | null =>
+    typeof value === 'number' && Number.isFinite(value) ? Math.max(0, pointsToTwips(value)) : null;
+  const rule = LINE_RULES.includes(sp?.lineRule as LineSpacingRule) ? (sp?.lineRule as LineSpacingRule) : null;
+  return {
+    beforeTwips: declared(sp?.before),
+    afterTwips: declared(sp?.after),
+    // `rule ?? 'auto'` ולא `rule`: פסקה שמצהירה `line` בלי `lineRule` היא
+    // `auto` ב-OOXML, וזו גם ברירת המחדל שהכתיבה חזרה תשלח.
+    lineTwips: lineTwipsFromModel(sp?.line, rule ?? 'auto'),
+    rule,
+  };
+}
+
+/**
+ * קובעת ריווח על רשימת פסקאות — צד אחד (`before`/`after`), והשאר נשמר.
+ *
+ * ## מה נשלח, ולמה דווקא זה
+ *
+ * `setSpacing` **מחליף** את `<w:spacing>` כולו (הערת הפתיחה), ולכן יש כאן שתי
+ * דרכים ליפול, לא אחת:
+ *
+ * 1. לשלוח את הצד שהשתנה בלבד — ו**למחוק** מרווח שורות שהיה מוצהר בפסקה.
+ * 2. לשלוח מצב מלא תמיד — ו**לקבע** בפסקה מרווח שורות שהיא ירשה מהסגנון.
+ *    הפסקה תיראה זהה באותו רגע, ותפסיק להשתנות ביום שהסגנון ישתנה. זו בדיוק
+ *    התקלה ש-`FONT_PREVIEW_ENABLED` מתעדת בצד הריצות (`rFonts` מפורש שנשאר
+ *    בקובץ), והיא חמורה יותר בפסקה: בספר שכולו בנוי על סגנון אחד, „הוסף רווח”
+ *    על פרק שלם היה מנתק את כל הפסקאות שלו מהסגנון.
+ *
+ * לכן נשלח **בדיוק מה שהיה מוצהר**, ועליו הצד שהשתנה: `null` אינו נשלח כלל.
+ * זה מה ש-`DeclaredSpacing` קיים בשבילו.
+ *
+ * ## ושלוש הכרעות על הלולאה
+ *
+ * 1. **סדרתי ולא `Promise.all`.** כל כתיבה היא מוטציה על אותו מסמך; שליחת
+ *    ארבעים במקביל אינה מהירה יותר אלא בלתי-צפויה, ודיווח הכשל שלה אינו ניתן
+ *    לשיוך לפסקה.
+ * 2. **כשל אחד עוצר.** המשך אחרי כשל היה משאיר בחירה שחציה קיבלה את הריווח
+ *    וחציה לא — מצב שאין למשתמש דרך לראות ואין לו דרך לבטל בצעד אחד.
+ * 3. **`NO_OP` אינה כשל** — `call` כבר בולעת אותה. פסקה שכבר בערך המבוקש
+ *    (מצב רגיל בבחירה מרובה) אינה מפילה את השאר.
+ */
+export async function applySelectionSpacing(
+  host: ParagraphFormatTarget,
+  entries: readonly ParagraphSpacingEntry[],
+  patch: { beforeTwips?: number; afterTwips?: number },
+): Promise<CommandOutcome> {
+  const failedAction = 'שינוי הריווח נכשל';
+  if (!entries.length) {
+    return { ok: false, message: 'יש למקם את הסמן במסמך', reason: 'selection-required' };
+  }
+  const setSpacing = docOf(host)?.format?.paragraph?.setSpacing;
+  if (typeof setSpacing !== 'function') return unsupported(failedAction);
+
+  for (const entry of entries) {
+    const before = patch.beforeTwips ?? entry.spacing.beforeTwips;
+    const after = patch.afterTwips ?? entry.spacing.afterTwips;
+    if ((before !== null && nonNegativeInt(before) === null) || (after !== null && nonNegativeInt(after) === null)) {
+      return { ok: false, message: `${failedAction}: הערכים חייבים להיות מספרים לא-שליליים`, reason: 'invalid-input' };
+    }
+    const outcome = await call(failedAction, () =>
+      setSpacing({
+        target: entry.target,
+        ...(before === null ? {} : { before }),
+        ...(after === null ? {} : { after }),
+        ...(entry.spacing.lineTwips === null ? {} : { line: entry.spacing.lineTwips }),
+        ...(entry.spacing.rule === null ? {} : { lineRule: entry.spacing.rule }),
+      }),
+    );
+    if (!outcome.ok) return outcome;
+  }
+  return { ok: true };
+}
+
+/**
+ * מתג „הוסף/הסר רווח לפני/אחרי הפסקה”, על כל הבחירה.
+ *
+ * הכלל עצמו יושב כאן ולא בפקד, מפני שיש לו **שני** אתרי קריאה: פריט התפריט
+ * ברצועה והקיצור Ctrl+0. שני מימושים של „מתי זה מוסיף ומתי מסיר” היו מתפצלים
+ * ביום שאחד מהם יתוקן, והמשתמש היה מקבל תשובה אחרת מהמקלדת ומהעכבר.
+ *
+ * ההכרעה על הכיוון נופלת על **הפסקה הראשונה בבחירה**, וכל השאר מקבלות את
+ * אותה תוצאה — כמו ב-Word. החלופה, החלטה לכל פסקה בנפרד, הייתה הופכת בחירה
+ * מעורבת לפעולה שמשאירה אותה מעורבת בדיוק כפי שהייתה, רק הפוך.
+ */
+export async function toggleSelectionSpacing(
+  host: ParagraphFormatTarget,
+  side: 'before' | 'after',
+  stepTwips: number,
+): Promise<CommandOutcome> {
+  const entries = await readSelectionSpacing(host);
+  if (!entries?.length) {
+    return { ok: false, message: 'יש למקם את הסמן במסמך', reason: 'selection-required' };
+  }
+  const current = side === 'before' ? entries[0].spacing.beforeTwips : entries[0].spacing.afterTwips;
+  const next = (current ?? 0) > 0 ? 0 : stepTwips;
+  return applySelectionSpacing(host, entries, {
+    [side === 'before' ? 'beforeTwips' : 'afterTwips']: next,
+  });
+}
+
+/**
+ * „אל תוסיף רווח בין פסקאות מאותו סגנון” — `w:contextualSpacing`.
+ *
+ * ## שתי מדידות שקבעו את צורת הפקד, ולא את המימוש
+ *
+ * נמדד ב-superdoc 2.14.0-next.5 על ה-dist הארוז (`scripts/flow-options-probe.mjs`):
+ *
+ * 1. **`setFlowOptions` הוא patch, לא replace.** `pageBreakBefore: true`
+ *    ואחריו `contextualSpacing: true` על אותה פסקה השאירו את שתיהן:
+ *    `<w:pPr><w:pageBreakBefore/><w:bidi/><w:contextualSpacing/></w:pPr>`.
+ *    זה שונה מ-`setSpacing` שלידו, ולכן הכתיבה כאן **אינה** חייבת לשלוח מצב
+ *    מלא — ומפתח שאינו נשלח אינו נוגע במה שקיים. זו גם הסיבה שכתיבה מכאן
+ *    אינה מתנגשת ב„מעבר עמוד לפני” שנכתב מ-page-break.ts.
+ * 2. **`doc.get()` אינו מחזיר את הערך.** אחרי ששתי הכתיבות הצליחו ונחתו
+ *    ב-XML, ה-props של אותה פסקה במודל היו `{ bidi: true }` בלבד — בדיוק
+ *    כמו `pageBreakBefore` (ראו page-break.ts) ו-`keepNext` (ראו
+ *    `RawParagraphProps`).
+ *
+ * המסקנה של (2) היא על **הפקד**: תיבת סימון דו-מצבית הייתה נפתחת תמיד ריקה,
+ * ו„אישור” היה שולח `false` — כלומר מכבה הגדרה שהמשתמש קבע ב-Word בלי שביקש.
+ * לכן בדיאלוג יושב `TriToggle` ולא תיבה, ומצב „ללא שינוי” אינו קורא לכאן
+ * בכלל. ההנמקה המלאה של התבנית ב-`ui/panels/common/TriToggle.vue`.
+ */
+export async function applyParagraphContextualSpacing(
+  host: ParagraphFormatTarget,
+  target: unknown,
+  contextualSpacing: boolean,
+): Promise<CommandOutcome> {
+  const failedAction = 'שינוי הריווח בין פסקאות מאותו סגנון נכשל';
+  const setFlowOptions = docOf(host)?.format?.paragraph?.setFlowOptions;
+  if (typeof setFlowOptions !== 'function') return unsupported(failedAction);
+  return call(failedAction, () => setFlowOptions({ target, contextualSpacing }));
 }
 
 export async function applyParagraphKeepOptions(
