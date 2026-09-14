@@ -533,6 +533,7 @@ import {
   TWIPS_PER_PT,
   addParagraphTabStop,
   applyParagraphIndentation,
+  applyParagraphContextualSpacing,
   applyParagraphKeepOptions,
   applyParagraphSpacing,
   clearAllParagraphTabStops,
@@ -1123,6 +1124,8 @@ function onParagraphSubmit(payload: {
   keepNext: boolean;
   keepLines: boolean;
   widowControl: boolean;
+  /** `null` = „ללא שינוי” בפקד התלת-מצבי, ואז לא נשלחת קריאה כלל. */
+  contextualSpacing: boolean | null;
 }): void {
   paragraphOpen.value = false;
   const target = paraTarget;
@@ -1148,14 +1151,20 @@ function onParagraphSubmit(payload: {
   void runParagraph(async () => {
     // שלוש פעולות על אותו pPr; כשל אחד אינו מבטל את האחרים, וכל אחת מדווחת
     // בפני עצמה — NO_OP כבר מטופל בתוך המודול.
+    // „ללא שינוי” אינו קריאה: `setFlowOptions` הוא patch, ולכן דילוג עליו
+    // משאיר את `w:contextualSpacing` בדיוק כפי שהיה. ראו את המדידה ב-
+    // `applyParagraphContextualSpacing`.
     const outcomes = [
       await applyParagraphIndentation(superdoc.value, target, indentation),
       await applyParagraphSpacing(superdoc.value, target, spacing),
       await applyParagraphKeepOptions(superdoc.value, target, keep),
+      ...(payload.contextualSpacing === null
+        ? []
+        : [await applyParagraphContextualSpacing(superdoc.value, target, payload.contextualSpacing)]),
     ];
     for (const [index, outcome] of outcomes.entries()) {
       if (!outcome.ok) {
-        report(outcome, ['paragraph-indent', 'paragraph-spacing', 'paragraph-keep'][index]);
+        report(outcome, ['paragraph-indent', 'paragraph-spacing', 'paragraph-keep', 'paragraph-contextual'][index]);
         return;
       }
     }
