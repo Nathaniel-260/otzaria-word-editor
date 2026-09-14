@@ -1106,6 +1106,27 @@ export const TELL_ME_ACTIONS: readonly TellMeAction[] = [
     ribbonTab: 'view',
   },
   {
+    /*
+     * „רקע עמוד” הוא מה שרוב המשתמשים יחפשו, וזה **לא** מה שהפקד עושה: הצבע
+     * חל על הבד — המשטח שסביב הדף — והוא העדפת תצוגה שאינה נכתבת למסמך. לכן
+     * הוא מילת מפתח ולא הכותרת. `ribbonTab` ולא `command`: מה שנפתח הוא פלטה.
+     */
+    id: 'view-canvas-color',
+    title: 'צבע רקע',
+    category: 'תצוגה',
+    description: inTab('view', 'צבע רקע'),
+    keywords: [
+      'צבע רקע',
+      'רקע',
+      'רקע עמוד',
+      'צבע רקע העורך',
+      'background color',
+      'page color',
+    ],
+    icon: 'shading',
+    ribbonTab: 'view',
+  },
+  {
     id: 'font-advanced',
     title: 'גופן מתקדם',
     category: 'בית > גופן',

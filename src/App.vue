@@ -551,6 +551,7 @@ import {
   saveRulerVisible,
   loadSpellcheckEnabled,
   saveSpellcheckEnabled,
+  loadCanvasColor,
   loadSessionRecord,
   saveSessionRecord,
   loadRecentDocuments,
@@ -596,6 +597,7 @@ import {
 } from './host/workspace';
 import { onPluginHidden, onPluginShown } from './host/lifecycle';
 import { revealZone, type RevealBounds, type RevealZone } from './composables/focus-mode';
+import { applyCanvasColor, normalizeCanvasColor } from './composables/canvas-color';
 import { enterFullscreen, exitFullscreen, isFullscreen, watchFullscreen } from './composables/window-fullscreen';
 import SvgIcon from './ui/icons/SvgIcon.vue';
 import { copySelection, cutSelection, pasteFromClipboard, selectWholeDocument } from './engine/clipboard';
@@ -5121,6 +5123,7 @@ onMounted(async () => {
       storedRecents,
       storedDiscarded,
       storedSpellcheck,
+      storedCanvasColor,
       customShortcutsNotice,
     ] =
       await Promise.all([
@@ -5130,6 +5133,7 @@ onMounted(async () => {
         loadRecentDocuments(),
         loadDiscardBackups(),
         loadSpellcheckEnabled(),
+        loadCanvasColor(),
         // לפני פתיחת המסמך הראשון: MacroKit קוראת `reservedShortcuts` פעם
         // אחת בלבד. אם הקיצורים האישיים ייטענו אחר כך, מאקרו קיים יכול
         // להיקשר אליהם לפני שהם מוכרזים כשמורים ולהשתיק אותם.
@@ -5145,6 +5149,11 @@ onMounted(async () => {
     // אותה הכרעה בדיוק כמו של „אחרונים”: מה שמגיע מ-storage אין לו הבטחת
     // סדר, והמיון הוא של הרשימה שכל שאר הקוד רואה — לא של התצוגה בלבד.
     discardedBackups.value = normalizeBackups(storedDiscarded);
+    // צבע הבד מוחל כאן ולא בלשונית „תצוגה”: הפקד שמשנה אותו יושב בלשונית
+    // שמורכבת רק כשהיא הפעילה (`v-else-if` ב-Ribbon.vue), והבד נראה מהרגע
+    // הראשון. `applyCanvasColor` ולא `setCanvasColor` — זו קריאה, ואין טעם
+    // לכתוב חזרה ל-storage את מה שהרגע נקרא ממנו.
+    applyCanvasColor(normalizeCanvasColor(storedCanvasColor));
 
     // בדיקת האיות — **לא** ב-await: משיכת המילון היא 1.3MB, והעלייה לא
     // תמתין לה. מי שהדליק בהפעלה הקודמת יקבל את הסימון כשהמילון יגיע.
@@ -5697,12 +5706,15 @@ async function discardedBytes(session: DocumentSession): Promise<Uint8Array | nu
   inset: 0;
 }
 
+/* הרקע הוא `--word-canvas-bg` ולא טוקן ערכת הנושא ישירות: זהו הבד, והוא
+   האלמנט היחיד שהמשתמש יכול לצבוע (composables/canvas-color.ts). ברירת
+   המחדל של הטוקן היא אותו צבע ערכת נושא בדיוק — ראו styles/tokens.css. */
 .editor-stack {
   position: relative;
   flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
-  background: var(--color-surface-container-highest);
+  background: var(--word-canvas-bg);
   overflow: hidden;
 }
 

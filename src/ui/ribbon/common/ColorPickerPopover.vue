@@ -2,11 +2,9 @@
   <div
     ref="containerRef"
     class="color-picker-container"
+    :class="{ 'color-picker-container--large': isLarge }"
   >
-    <div
-      class="color-btn-wrapper"
-      :class="{ active: isOpen }"
-    >
+    <div :class="wrapperClass">
       <!--
         שם הצבע בתיאור ובשם הנגיש, ולא רק בפס: הפס הוא הסימן היחיד למה
         שהלחיצה תעשה, והוא ויזואלי בלבד. הכותרת נשארת „צבע גופן” כדי שהחיפוש
@@ -14,27 +12,37 @@
       -->
       <button
         type="button"
-        class="color-main-btn"
+        :class="mainClass"
         :data-tip-title="menuString(title)"
         :data-tip-desc="activeColorName"
         :aria-label="`${menuString(title)}, ${activeColorName}`"
         :disabled="disabled"
         @pointerdown.prevent
-        @click="applyCurrentColor"
+        @click="applyOnClick ? applyCurrentColor() : toggleDropdown()"
       >
+        <!--
+          16px ולא 18px: הכפתור גבוה `--ribbon-row-h` (22px), וב-22px נכנסים
+          גבול 1 + אייקון 16 + רווח 1 + פס 3 + גבול 1 — ראו ההערה ב-ribbon.css
+          שקובעת שאייקון גדול מ-16 בכפתור קטן גולש. עם 18px התוכן היה 24px
+          בתוך 20px, והפס — היחיד כאן שמתכווץ — נדחס ל-0 ונעלם מהמסך.
+        -->
         <SvgIcon
           :name="icon"
-          :size="18"
+          :size="isLarge ? LARGE_ICON_PX : 16"
         />
         <div
           class="color-indicator-bar"
           :class="{ 'is-none': activeColor === null }"
           :style="{ backgroundColor: activeColor ?? 'transparent' }"
         />
+        <span
+          v-if="isLarge && label"
+          class="btn-label"
+        >{{ menuString(label) }}</span>
       </button>
       <button
         type="button"
-        class="color-arrow-btn"
+        :class="arrowClass"
         :disabled="disabled"
         :data-tip-title="menuString('בחירת צבע')"
         :aria-label="menuString('בחירת צבע')"
@@ -76,7 +84,7 @@
           @click="selectColor(null)"
         >
           <span class="clear-icon" />
-          {{ menuString('ללא צבע') }}
+          {{ menuString(clearLabel) }}
         </button>
       </div>
 
@@ -239,15 +247,72 @@ const props = withDefaults(
     title: string;
     defaultColor?: string;
     allowClear?: boolean;
+    /**
+     * מה שהפריט המנקה אומר, ומה שקורא מסך מכריז כשלא נבחר צבע.
+     *
+     * „ללא צבע” נכון לטקסט — שם הניקוי באמת מסיר צבע — ואינו נכון לכל צרכן:
+     * בבד (רקע העורך, `ViewTab.vue`) הניקוי מחזיר את צבע ערכת הנושא, ומשטח
+     * חסר צבע אינו קיים שם כלל. תווית שמבטיחה „ללא צבע” ומחזירה אפור היא
+     * תיאור שגוי של מה שהלחיצה עושה, ולכן היא נתונה של הצרכן.
+     */
+    clearLabel?: string;
+    /**
+     * האם החצי הראשי **מחיל** את הצבע שהפס מראה, או פותח את הפלטה כמו החץ.
+     *
+     * הפיצול הוא הדפוס הנכון לצבע של **בחירה**: הפס מראה צבע שהטקסט המסומן
+     * עדיין אינו צבוע בו, ולכן ללחיצה יש מה לעשות. הוא אינו נכון לצבע של
+     * משטח יחיד — בבד (רקע העורך, `ViewTab.vue`) הפס מראה את הצבע שהבד כבר
+     * צבוע בו, ולחיצה עליו מחילה את מה שכבר קיים. נמדד: שער „אין כפתור מת”
+     * ב-tests/component/ribbon-tabs.test.ts דיווח על החצי הזה ככפתור שנלחץ
+     * ולא קרה דבר.
+     *
+     * כשהוא כבוי הפקד נשאר בדיוק אותו פקד — הפס עדיין מדווח מה הצבע הנוכחי,
+     * וזה המידע שהוא נועד לתת — ושתי חציו פותחים את הפלטה.
+     */
+    applyOnClick?: boolean;
+    /**
+     * `'large'` הוא הדפוס של „תאריך ושעה” (RibbonMenuButton עם `split` ו-
+     * `variant="large"`): אייקון ותווית בעמודה, ורצועת חץ במלוא הרוחב מתחתיהם.
+     * הוא נועד לפקד שיושב **לבדו** בקבוצה, שם פקד בן 22px נראה אבוד בקבוצה
+     * בת 70px.
+     *
+     * הגאומטריה כולה מגיעה מ-`.word-split--large` ב-styles/ribbon.css, ולא
+     * מכללים מקבילים כאן — שני דפוסים שנראים אותו דבר ומחושבים בשני מקומות
+     * הם בדיוק מה שמפריד ביניהם בשינוי הבא.
+     */
+    variant?: 'small' | 'large';
+    /** התווית שמתחת לאייקון. ב-`'small'` אין לה מקום, והיא אינה מוצגת. */
+    label?: string;
     disabled?: boolean;
   }>(),
   {
     modelValue: '',
     defaultColor: '#000000',
     allowClear: true,
+    clearLabel: 'ללא צבע',
+    applyOnClick: true,
+    variant: 'small',
+    label: '',
     disabled: false,
   }
 );
+
+const isLarge = computed(() => props.variant === 'large');
+
+/**
+ * 26 ולא 32 כמו ב-`RibbonButton` הגדול, וזה מספר **שנמדד** ולא הוקטן לזהירות.
+ *
+ * לכפתור מפוצל גדול אין שום מרווח: נמדד על „תאריך ושעה” בדפדפן — המעטפת היא
+ * 70px (‎`--ribbon-content-h`), גוף הכפתור לוקח 55.2 מהם, ומתוכם 47.2 תוכן
+ * (אייקון 32 + רווח 2 + תווית 13.2 — בדיוק). רצועת החץ אינה מקבלת את 22px
+ * שהיא מבקשת אלא את מה שנשאר, 12.8, כי היא הפריט היחיד שמתכווץ.
+ *
+ * כלומר כל פיקסל שנוסיף כאן יורד **מהחץ**. הפס הוא 3px ועוד 2px רווח, ולכן
+ * אייקון של 32 היה מוריד את החץ ל-7.8px — צ'יפ בן 8px בקופסה שקטנה ממנו,
+ * ורצועה שאינה נראית כמו זו של „תאריך ושעה”. ב-26: 26+2+3+2+13.2 = 46.2,
+ * והחץ נשאר ~13.8 — אותה רצועה בדיוק.
+ */
+const LARGE_ICON_PX = 26;
 
 /**
  * `null` = „ללא צבע”, ולא מחרוזת ריקה. זה החוזה של המנוע: `format.color` /
@@ -265,6 +330,22 @@ const popoverRef = ref<HTMLElement | null>(null);
 const customColorRef = ref<HTMLInputElement | null>(null);
 const isOpen = ref(false);
 const superdoc = inject(ACTIVE_SUPERDOC, shallowRef<SuperDoc | null>(null));
+
+/**
+ * שלוש קבוצות המחלקות — המעטפת, הגוף והחץ.
+ *
+ * בגדול הן הגלובליות של הרצועה (`.word-split*`, `.word-btn.btn-large`),
+ * ובקטן המקומיות של הפקד. ולא ערבוב של השתיים: `.color-btn-wrapper` קובע
+ * `height: var(--ribbon-row-h)` והוא `scoped`, כלומר ספציפי יותר
+ * מ-`.word-split--large` — הוא היה כובש את הגובה בחזרה ל-22px.
+ */
+const wrapperClass = computed(() =>
+  isLarge.value
+    ? ['word-split', 'word-split--large', { 'word-split--open': isOpen.value }]
+    : ['color-btn-wrapper', { active: isOpen.value }],
+);
+const mainClass = computed(() => (isLarge.value ? ['word-btn', 'btn-large'] : ['color-main-btn']));
+const arrowClass = computed(() => (isLarge.value ? ['word-split__arrow'] : ['color-arrow-btn']));
 
 /**
  * הבחירה האחרונה בפקד הזה. `undefined` = טרם נבחר בו דבר.
@@ -291,7 +372,7 @@ const activeColor = computed<string | null>(() =>
 
 /** אותו ערך במילים — לטולטיפ ולקורא מסך, שאינם רואים את הפס. */
 const activeColorName = computed(() =>
-  activeColor.value === null ? menuString('ללא צבע') : colorName(activeColor.value),
+  activeColor.value === null ? menuString(props.clearLabel) : colorName(activeColor.value),
 );
 
 const { popoverStyle } = usePopoverPosition(containerRef, popoverRef, isOpen);
@@ -376,10 +457,13 @@ onUnmounted(() => {
   border-color: var(--word-btn-active-border);
 }
 
+/* ריפוד אנכי 0, ולא 1px: הגובה של המעטפת קבוע (22px), וכל פיקסל שנלקח כאן
+   נלקח מהפס. החשבון המלא — 16 (אייקון) + 1 (רווח) + 3 (פס) = 20, כלומר בדיוק
+   מה שנשאר אחרי שני הגבולות של המעטפת. */
 .color-main-btn {
   background: none;
   border: none;
-  padding: 1px 4px;
+  padding: 0 4px;
   cursor: pointer;
   display: flex;
   flex-direction: column;
@@ -390,10 +474,28 @@ onUnmounted(() => {
 }
 
 /* הפס שמתחת לאייקון — הצבע שהלחיצה תחיל, ולא צבע הטקסט שהסמן עומד עליו.
-   ראו `activeColor`. */
+   ראו `activeColor`.
+
+   `flex-shrink: 0` אינו הגנה משוערת אלא תיקון של תקלה שנמדדה: ל-`.svg-icon`
+   יש `flex-shrink: 0` משלו, ולכן כשהתוכן גלש מגובה הכפתור **הפס** ספג את כל
+   הדחיסה — `getBoundingClientRect().height` שלו היה 0 בשני הפקדים, כלומר
+   הסימן היחיד לצבע שהלחיצה תחיל לא נראה כלל. הגאומטריה מעליו מדויקת עכשיו,
+   וזה שומר שהפס לא יהיה שוב הראשון להיעלם אם אייקון או ריפוד ישתנו. */
+/* בווריאנט הגדול הפס רחב כמו האייקון שמעליו (`LARGE_ICON_PX`), ו-`margin-top`
+   יורד: ל-`.btn-large` יש `gap: 2px` משלו, ומרווח שני על אותו תפר היה נלקח
+   מרצועת החץ — היחידה שמתכווצת שם. ראו ההערה על `LARGE_ICON_PX`.
+
+   כל שאר הגאומטריה של הווריאנט הזה אינה כאן אלא ב-`.word-split--large`
+   (styles/ribbon.css), במכוון: זה אותו דפוס של „תאריך ושעה”. */
+.color-picker-container--large .color-indicator-bar {
+  width: 26px;
+  margin-top: 0;
+}
+
 .color-indicator-bar {
   width: 16px;
   height: 3px;
+  flex-shrink: 0;
   border-radius: 1px;
   margin-top: 1px;
   box-shadow: 0 0 1px rgba(0, 0, 0, 0.4);

@@ -131,6 +131,14 @@ const MEASURE = `(() => {
         .map((content) => round(content.getBoundingClientRect().height)),
     )),
     overflow,
+    /* הפס שמתחת לאייקון בבורר הצבע — הסימן היחיד לצבע שלחיצה אחת תחיל.
+       הוא נמדד כאן ולא ב-jsdom מאותה סיבה כמו כל השאר בקובץ: הוא **נדחס**.
+       ל-svg-icon יש flex-shrink של אפס, ולכן כשהתוכן גלש מגובה הכפתור הקבוע
+       הפס ספג את כל הדחיסה וגובהו בפועל היה 0 — כלל CSS תקין לגמרי
+       (height של 3px) שהתוצאה שלו אינה נראית. */
+    colorBars: Array.from(body.querySelectorAll('.color-indicator-bar')).map((bar) =>
+      round(bar.getBoundingClientRect().height),
+    ),
     tabStripWidth: round(
       document.querySelector('.word-tab-strip').getBoundingClientRect().width,
     ),
@@ -224,6 +232,16 @@ try {
      ולא בגלל שהיא ריקה — הבדיקה למעלה כבר מדדה שיש בה קבוצות. */
   const scrolling = measured.filter((tab) => tab.scrolls).map((tab) => tab.label);
   check(scrolling.length === 0, `אין לשונית שגולשת אופקית ב-1440: ${scrolling.join(', ') || 'אין'}`);
+
+  /* 6. הפס של בורר הצבע נראה בפועל. „בית” הוא הלשונית שיש בה שני פקדים
+     כאלה, ולכן הבדיקה מחייבת שנמצאו פסים בכלל — אחרת מחיקה של הפס הייתה
+     עוברת כאן בירוק. */
+  const bars = measured.flatMap((tab) => tab.colorBars);
+  check(bars.length >= 2, `נמצאו ${bars.length} פסי צבע ברצועה`);
+  check(
+    bars.length > 0 && bars.every((height) => height >= 3),
+    `כל פס צבע נראה בגובה המלא: ${[...new Set(bars)].join(' / ')}px`,
+  );
 
   const response = await page.cdp.send('Page.captureScreenshot', { format: 'png' });
   if (response?.result?.data) {

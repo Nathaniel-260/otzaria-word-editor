@@ -142,6 +142,28 @@ export async function saveSpellcheckEnabled(enabled: boolean): Promise<void> {
   await tryCall('storage.set', { key: SPELLCHECK_KEY, value: enabled });
 }
 
+const CANVAS_COLOR_KEY = 'canvas-color';
+
+/**
+ * צבע הבד — המשטח שסביב הדף. `null` = אין העדפה, והבד עוקב אחרי ערכת הנושא
+ * של אוצריא.
+ *
+ * מוחזר גולמי ולא כצבע: מה שמגיע מ-`storage` הוא JSON שנכתב בהפעלה קודמת,
+ * והאימות שלו יושב אצל הקורא (composables/canvas-color.ts) — שם גם מוגדר
+ * מה נחשב צבע, ושם נכתב מה ש*נשמר*. שתי הגדרות לאותה שאלה הן בדיוק המקום
+ * שבו ערך פגום עובר באחת מהן ונופל בשנייה.
+ *
+ * העדפה של התוכנה ולא תכונה של המסמך — כמו הסרגל ובדיקת האיות שמעל, ומאותה
+ * סיבה: הבד הוא שכבת התצוגה שלנו, והוא נבנה מחדש בכל פתיחת מסמך.
+ */
+export async function loadCanvasColor(): Promise<unknown> {
+  return tryCall<unknown>('storage.get', { key: CANVAS_COLOR_KEY });
+}
+
+export async function saveCanvasColor(color: string | null): Promise<void> {
+  await tryCall('storage.set', { key: CANVAS_COLOR_KEY, value: color });
+}
+
 const SPELLCHECK_WORDS_KEY = 'spellcheck-user-words';
 
 /**

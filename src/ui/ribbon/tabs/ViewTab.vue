@@ -75,21 +75,64 @@
         @click="runFitPageWidth()"
       />
     </RibbonGroup>
+
+    <!-- רקע -->
+    <RibbonGroup
+      title="רקע"
+      icon="shading"
+    >
+      <!--
+        קבוצה משלו, ולא שורה שלישית ב„הצג”: „הצג” הוא מתגי הצגה/הסתרה (סרגל,
+        סימני עיצוב), וצבע אינו אחד מהם. הקבוצה היא המקבילה של „רקע עמוד”
+        בלשונית „עיצוב” של Word, והיא נקראת „רקע” ולא „רקע עמוד” מפני שהיא
+        אינה נוגעת בעמוד: הצבע חל על הבד — המשטח שסביב הדף — והוא העדפת
+        תצוגה, לא תכונה של המסמך. `.word-group-content` מרכז פקד יחיד בגובה
+        הקבוצה מאליו (styles/ribbon.css), ולכן אין כאן מחסנית.
+
+        בלי `disabled`: הבד נראה גם כשאין מסמך פתוח, ואין כאן פקודת מנוע
+        שיכולה להיכשל — הצביעה היא CSS על שורש המסמך.
+
+        `apply-on-click="false"` מבטל את הפיצול: הפס כאן מראה את הצבע שהבד
+        **כבר** צבוע בו, ולכן „החל את הצבע שמוצג” הוא לחיצה שאינה עושה דבר.
+        שני חצאי הפקד פותחים את הפלטה. ראו `applyOnClick` בקומפוננטה.
+
+        `variant="large"` מפני שהוא לבדו בקבוצה: פקד בן 22px בקבוצה בת 70px
+        נראה אבוד, והדפוס הגדול הוא זה של „תאריך ושעה” — אייקון ותווית
+        בעמודה, ורצועת חץ במלוא הרוחב מתחת.
+      -->
+      <ColorPickerPopover
+        :model-value="canvasColor ?? ''"
+        icon="shading"
+        variant="large"
+        label="צבע רקע"
+        title="צבע רקע העורך"
+        :default-color="canvasSwatch"
+        clear-label="ברירת מחדל"
+        :apply-on-click="false"
+        @change="onCanvasColorChange"
+      />
+    </RibbonGroup>
   </div>
 </template>
 
 <script setup lang="ts">
-import { inject, shallowRef } from 'vue';
+import { computed, inject, shallowRef } from 'vue';
 import type { SuperDoc } from 'superdoc';
 import RibbonGroup from '../common/RibbonGroup.vue';
 import RibbonStack from '../common/RibbonStack.vue';
 import RibbonButton from '../common/RibbonButton.vue';
+import ColorPickerPopover from '../common/ColorPickerPopover.vue';
 import { useCommand } from '../../../composables/useCommand';
 import { COMMAND_REPORTER, type CommandReporter } from '../../../composables/keys';
 import { ACTIVE_SUPERDOC } from '../../../engine/document-api';
 import { editorStackWidth, fitWidthPercent } from '../../../engine/fit-width';
 import { zoomBounds } from '../../../engine/zoom';
 import { zoomPayload } from '../../../engine/payloads';
+import {
+  canvasColor,
+  setCanvasColor,
+  themeCanvasColor,
+} from '../../../composables/canvas-color';
 
 defineEmits<{
   (e: 'toggle-focus-mode'): void;
@@ -141,6 +184,28 @@ async function runFitPageWidth(): Promise<void> {
   }
 
   await zoomCmd.run(zoomPayload(percent));
+}
+
+/**
+ * הצבע שהפס מתחת לאייקון מראה, ושלחיצה על הכפתור הראשי תחיל.
+ *
+ * ההעדפה כשיש אחת, וצבע ערכת הנושא כשאין — כלומר הפס מראה תמיד את מה שהבד
+ * צבוע בו **עכשיו**. בלי הענף השני הוא היה מראה שחור (ברירת המחדל של הבורר)
+ * כל עוד לא נבחר צבע, כלומר מבטיח שלחיצה תצבע את הבד בשחור.
+ *
+ * `undefined` — כשצבע הערכה אינו נקרא — מחזיר את הבורר לברירת המחדל שלו,
+ * וזה גם מה שקורה בהרכבת בדיקה בלי גיליונות סגנון.
+ */
+const canvasSwatch = computed(() => canvasColor.value ?? themeCanvasColor());
+
+/**
+ * `null` מהבורר („ברירת מחדל”) הוא הסרת ההעדפה, לא צביעה בשקוף: הבד חוזר
+ * לעקוב אחרי ערכת הנושא. ראו composables/canvas-color.ts.
+ *
+ * בלי `await`: הצביעה עצמה סינכרונית, וההמתנה היחידה היא הכתיבה ל-storage.
+ */
+function onCanvasColorChange(color: string | null): void {
+  void setCanvasColor(color);
 }
 </script>
 

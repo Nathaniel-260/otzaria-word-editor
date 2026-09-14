@@ -415,6 +415,8 @@ vi.mock('../../src/host/settings', () => ({
   },
   loadSpellcheckEnabled: async () => false,
   saveSpellcheckEnabled: async () => {},
+  loadCanvasColor: async () => null,
+  saveCanvasColor: async () => {},
   loadSpellcheckWords: async () => [],
   saveSpellcheckWords: async () => {},
   loadRecentDocuments: async () => stub.storedRecents,

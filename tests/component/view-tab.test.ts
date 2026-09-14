@@ -10,9 +10,14 @@
  * (engine/fit-width.ts — לולאת המשוב שנמדדה במנוע), ולכן הבדיקה שלו היא
  * דו-שלבית: גיאומטריה ידועה בכפיל + מאגס ברוחב ידוע, ואז ה-payload שיצא.
  */
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ViewTab from '../../src/ui/ribbon/tabs/ViewTab.vue';
 import { ZOOM_PERCENT_MAX } from '../../src/engine/zoom';
+import {
+  CANVAS_COLOR_VAR,
+  THEME_CANVAS_VAR,
+  applyCanvasColor,
+} from '../../src/composables/canvas-color';
 import {
   autoUnmount,
   buttonByTip,
@@ -21,6 +26,17 @@ import {
   settle,
   type SuperdocDoubleOptions,
 } from './harness';
+
+/**
+ * הכתיבה ל-`storage` של אוצריא היא הצד השני של „הצבע נזכר”, והיא אינה
+ * נראית ב-DOM. `tryCall` בולעת כשל בשקט מחוץ לאוצריא (host/otzaria-client.ts),
+ * ולכן בלי הכפיל הזה הבדיקה הייתה עוברת בירוק גם על פקד ששוכח כל בחירה.
+ */
+const saveCanvasColor = vi.hoisted(() => vi.fn(async () => {}));
+vi.mock('../../src/host/settings', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/host/settings')>()),
+  saveCanvasColor,
+}));
 
 autoUnmount();
 
@@ -199,5 +215,110 @@ describe('כפתורי לשונית „תצוגה”', () => {
     await buttonByTip(harness.wrapper, HUNDRED_TITLE).trigger('click');
     await settle();
     expect(harness.adapter.calls).toEqual([]);
+  });
+});
+/**
+ * צבע הבד — המשטח שסביב הדף.
+ *
+ * הפקד הזה אינו פקודת מנוע: הוא כותב טוקן CSS על שורש המסמך ושומר את הבחירה
+ * (composables/canvas-color.ts). לכן מה שנמדד כאן הוא שלוש הטענות שהמשתמש
+ * רואה — הבד נצבע, „ברירת מחדל” מחזירה אותו לעקוב אחרי ערכת הנושא, והפס
+ * מתחת לאייקון מבטיח את מה שהלחיצה תחיל.
+ *
+ * הקבוצה בלשונית „תצוגה” ולא ב„בית”: זו העדפת תצוגה, לא תכונה של המסמך.
+ */
+describe('צבע רקע העורך', () => {
+  /**
+   * מה שפותח את הפלטה. הפקד כאן הוא `variant="large"` — הדפוס המפוצל הגדול
+   * של „תאריך ושעה” — ולכן רצועת החץ היא המחלקה הגלובלית של הרצועה ולא
+   * `.color-arrow-btn` המקומית. הסלקטור בקבוע אחד כדי שהחלפת הדפוס תיפול
+   * כאן פעם אחת, ולא בארבע בדיקות נפרדות.
+   */
+  const TRIGGER = '.word-split--large .word-split__arrow';
+
+  /** הצהרת הטוקן על שורש המסמך, כפי שהדפדפן היה קורא אותה. */
+  function declared(): string {
+    return document.documentElement.style.getPropertyValue(CANVAS_COLOR_VAR);
+  }
+
+  beforeEach(() => {
+    saveCanvasColor.mockClear();
+    // צבע ערכת נושא ידוע — זה מה ש-`themeCanvasColor` קוראת, וזה מה שהבד
+    // מצויר בו כשאין העדפה.
+    document.documentElement.style.setProperty(THEME_CANVAS_VAR, '#edebe9');
+  });
+
+  afterEach(() => {
+    applyCanvasColor(null);
+    document.documentElement.style.removeProperty(THEME_CANVAS_VAR);
+  });
+
+  it('בחירת צבע צובעת את הבד ונזכרת', async () => {
+    const harness = mountUi(ViewTab);
+    await settle();
+
+    await harness.wrapper.find(TRIGGER).trigger('click');
+    await harness.wrapper.find('.standard-colors-row .color-swatch').trigger('click');
+    await settle();
+
+    // הצבע הראשון ב„צבעים רגילים” (ColorPickerPopover.vue).
+    expect(declared()).toBe('#c00000');
+    expect(saveCanvasColor).toHaveBeenCalledWith('#c00000');
+  });
+
+  it('„ברירת מחדל” מסירה את ההצהרה — הבד חוזר לעקוב אחרי ערכת הנושא', async () => {
+    // הלב של התיקון: אילו הניקוי היה כותב אפור קבוע, הבד היה נשאר בהיר
+    // כשאוצריא עוברת למצב כהה. היעדר ההצהרה הוא מה שמחזיר את המעקב.
+    const harness = mountUi(ViewTab);
+    await settle();
+
+    await harness.wrapper.find(TRIGGER).trigger('click');
+    await harness.wrapper.find('.standard-colors-row .color-swatch').trigger('click');
+    await settle();
+    expect(declared()).not.toBe('');
+
+    await harness.wrapper.find(TRIGGER).trigger('click');
+    await harness.wrapper.find('.palette-clear-btn').trigger('click');
+    await settle();
+
+    expect(declared()).toBe('');
+    expect(saveCanvasColor).toHaveBeenLastCalledWith(null);
+  });
+
+  it('הפריט המנקה אומר „ברירת מחדל” ולא „ללא צבע”', async () => {
+    // „ללא צבע” הוא תיאור שגוי של מה שהלחיצה עושה: היא מחזירה את צבע ערכת
+    // הנושא, ומשטח חסר צבע אינו קיים כאן. ראו `clearLabel`.
+    const harness = mountUi(ViewTab);
+    await settle();
+
+    await harness.wrapper.find(TRIGGER).trigger('click');
+    await settle();
+
+    expect(harness.wrapper.find('.palette-clear-btn').text()).toBe('ברירת מחדל');
+  });
+
+  it('הפקד הוא הדפוס המפוצל הגדול — אותן מחלקות כמו „תאריך ושעה”', async () => {
+    // הוא לבדו בקבוצה בת 70px, ופקד בן 22px נראה שם אבוד. המחלקות הן
+    // הגלובליות של הרצועה ולא עותק מקומי שלהן: כך הגאומטריה של שני הדפוסים
+    // אינה יכולה להיפרד. ראו `variant` ב-ColorPickerPopover.
+    const harness = mountUi(ViewTab);
+    await settle();
+
+    const split = harness.wrapper.find('.word-split.word-split--large');
+    expect(split.exists()).toBe(true);
+    expect(split.find('.word-btn.btn-large').exists()).toBe(true);
+    expect(split.find('.word-split__arrow').exists()).toBe(true);
+    expect(split.find('.btn-label').text()).toBe('צבע רקע');
+  });
+
+  it('בלי העדפה הפס מראה את צבע ערכת הנושא, ולא שחור', async () => {
+    // ברירת המחדל של הבורר היא `#000000`, והפס הוא ההבטחה של הכפתור הראשי —
+    // כלומר בלי הענף הזה הפקד היה מבטיח „לחיצה תצבע את הבד בשחור”.
+    const harness = mountUi(ViewTab);
+    await settle();
+
+    expect(harness.wrapper.find('.color-indicator-bar').attributes('style')).toContain(
+      'rgb(237, 235, 233)',
+    );
   });
 });

@@ -521,6 +521,12 @@ const EN: Readonly<Record<string, string>> = {
   'שינוי גודל תצוגה': 'Zoom',
   'התאם את תצוגת העמוד לרוחב החלון': 'Fit the page view to the window width',
   'רוחב עמוד': 'Page Width',
+  'רקע': 'Background',
+  'צבע רקע': 'Background Color',
+  'צבע רקע העורך': 'Editor Background Color',
+  // הפריט המנקה בבורר צבע הבד. „ללא צבע” של הפלטה אינו נכון שם — הניקוי
+  // מחזיר את צבע ערכת הנושא, ולא מסיר צבע. ראו `clearLabel` ב-ColorPickerPopover.
+  'ברירת מחדל': 'Default',
 
   // ── לשונית „אוצריא” ────────────────────────────────────────────────
   'אוצריא': 'Otzaria',
