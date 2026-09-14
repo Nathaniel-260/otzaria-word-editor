@@ -21,6 +21,11 @@ export interface ShellActionDeps {
   openDocument: () => void;
   selectAll: () => void;
   pageBreak: () => void;
+  /**
+   * מתג הרווח שלפני הפסקה (Ctrl+0). פעולה ולא רשומה עם payload קבוע, מאותו
+   * טעם כמו `growFont`: מה שהיא שולחת תלוי במה שכבר מוצהר בפסקה.
+   */
+  toggleSpaceBefore: () => void;
   openLink: () => void;
   /**
    * גודל הגופן תלוי במה שהמנוע מדווח על הבחירה הנוכחית, ולכן הוא פעולה ולא
@@ -138,6 +143,9 @@ export function createShellActionRunner(
         return true;
       case 'page-break':
         deps.pageBreak();
+        return true;
+      case 'space-before-toggle':
+        deps.toggleSpaceBefore();
         return true;
       case 'link':
         deps.openLink();

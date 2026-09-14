@@ -17,6 +17,7 @@ function setup(over: Partial<ShellActionDeps> = {}) {
     openDocument: vi.fn(),
     selectAll: vi.fn(),
     pageBreak: vi.fn(),
+    toggleSpaceBefore: vi.fn(),
     openLink: vi.fn(),
     growFont: vi.fn(),
     shrinkFont: vi.fn(),
@@ -188,6 +189,7 @@ describe('createShellActionRunner', () => {
     expect(deps.findAgain).toHaveBeenNthCalledWith(1, 'next');
     expect(deps.findAgain).toHaveBeenNthCalledWith(2, 'prev');
 
+    run('space-before-toggle');
     run('insert-citation');
     run('search-otzaria');
     run('open-library');
@@ -199,6 +201,7 @@ describe('createShellActionRunner', () => {
     expect(deps.openDocument).toHaveBeenCalledTimes(1);
     expect(deps.selectAll).toHaveBeenCalledTimes(1);
     expect(deps.pageBreak).toHaveBeenCalledTimes(1);
+    expect(deps.toggleSpaceBefore).toHaveBeenCalledTimes(1);
     expect(deps.save).not.toHaveBeenCalled();
   });
 

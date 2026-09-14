@@ -496,7 +496,7 @@ import {
   type FormattingMarksModel,
 } from './engine/formatting-marks';
 import type { FormattingMarksBlock } from './engine/formatting-marks-layer';
-import { readParagraphIndents } from './engine/paragraph-format';
+import { readParagraphIndents, toggleSelectionSpacing } from './engine/paragraph-format';
 import type { RulerUnit } from './engine/ruler-geometry';
 import {
   applyHebrewDocumentDefaults,
@@ -4652,6 +4652,7 @@ const runShellAction = createShellActionRunner({
   // הכפתורים המקבילים ברצועה — ולכן אותה פונקציה, ואותו דיווח.
   selectAll: () => void runSelectAll(),
   pageBreak: () => void runPageBreak(),
+  toggleSpaceBefore: () => void runToggleSpaceBefore(),
   growFont: () => void runFontStep(grownFontSize),
   shrinkFont: () => void runFontStep(shrunkFontSize),
   vertAlign: (kind) => void runVertAlign(kind),
@@ -4779,6 +4780,18 @@ async function runSelectAll(): Promise<void> {
 
 async function runPageBreak(): Promise<void> {
   reportCommand(await startParagraphOnNewPage(activeSuperdoc.value), 'page-break-before');
+}
+
+/**
+ * Ctrl+0 — מוסיף או מסיר 12 נקודות רווח לפני הפסקה, על כל הבחירה.
+ *
+ * 12 הוא הערך ש-Word קובע באותו צירוף, והוא חוזר כאן כמספר ולא כקבוע משותף
+ * עם הרצועה: `SPACE_STEP_TWIPS` שם הוא בחירת מוצר של הפקד, וקבוע אחד לשניהם
+ * היה קושר את הקיצור לשינוי בתפריט. הכלל עצמו — מתי מוסיף ומתי מסיר — כן
+ * משותף, ויושב ב-`toggleSelectionSpacing`.
+ */
+async function runToggleSpaceBefore(): Promise<void> {
+  reportCommand(await toggleSelectionSpacing(activeSuperdoc.value, 'before', 12 * 20), 'space-before-toggle');
 }
 
 /**
