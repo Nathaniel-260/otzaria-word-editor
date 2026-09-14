@@ -445,6 +445,27 @@ export const TELL_ME_ACTIONS: readonly TellMeAction[] = [
     command: { id: 'indent-decrease' },
   },
   {
+    /*
+     * הפקד עצמו, ולא ערך מסוים בו: הוא מחזיק גם את מרווח השורות וגם את
+     * הרווח בין הפסקאות, ומי שמחפש „רווח בין פסקאות” מחפש אותו ולא את 1.5.
+     * `ribbonTab` ולא `command` — תפריט אינו פקודה שאפשר להריץ מכאן.
+     */
+    id: 'para-spacing-menu',
+    title: 'מרווח שורות וריווח',
+    category: 'בית > פסקה',
+    description: inTab('home', 'מרווח שורות וריווח'),
+    keywords: [
+      'מרווח שורות וריווח',
+      'רווח בין פסקאות',
+      'ריווח בין פסקאות',
+      'רווח לפני הפסקה',
+      'רווח אחרי הפסקה',
+      'paragraph spacing',
+    ],
+    icon: 'lineSpacing',
+    ribbonTab: 'home',
+  },
+  {
     id: 'para-spacing-1',
     title: 'מרווח שורות 1.0 (יחיד)',
     category: 'בית > פסקה',

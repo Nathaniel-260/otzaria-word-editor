@@ -1492,6 +1492,53 @@ export async function setPicker(
   await picker.trigger('keydown', { key: 'Enter' });
 }
 
+/* ------------------------------------------------------------------ */
+/* תפריטי הרצועה (RibbonMenuButton)                                    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * פותחת תפריט של פקד ברצועה לפי הטולטיפ שלו, ומחזירה את תוויות הפריטים.
+ *
+ * כאן ולא בקובץ בדיקה יחיד מפני שיש כבר שלושה צרכנים (רשימות, שדות, מרווח
+ * שורות), וכל אחד מהם כתב לעצמו את אותן שתי שורות. במצב מפוצל הלחיצה היא על
+ * החץ ולא על הגוף — הגוף מפעיל פעולה — ולכן העוטפת מחפשת אותו קודם.
+ */
+export async function openRibbonMenu(wrapper: VueWrapper, tip: string): Promise<string[]> {
+  const button = buttonByTip(wrapper, tip);
+  const menu = button.element.closest('.ribbon-menu');
+  // לחיצה על פקד פתוח **סוגרת** אותו. בדיקה שקוראת „מה מוצג” פעמיים בריצה
+  // אחת הייתה מקבלת רשימה ריקה בפעם השנייה, ונראית ככשל של הפקד.
+  if (!menu?.querySelector('.ribbon-menu__popover')) {
+    const arrow = wrapper
+      .findAll('.word-split__arrow')
+      .find((node) => node.element.closest('.ribbon-menu') === menu);
+    await (arrow ?? button).trigger('click');
+    await settle();
+  }
+  return wrapper.findAll('.ribbon-menu__item-label').map((node) => node.text());
+}
+
+/** לוחצת על פריט בתפריט פתוח, לפי התווית שלו. */
+export async function clickRibbonMenuItem(wrapper: VueWrapper, label: string): Promise<void> {
+  const item = wrapper
+    .findAll('.ribbon-menu__item')
+    .find((node) => node.find('.ribbon-menu__item-label').text() === label);
+  if (!item) throw new Error(`הפריט „${label}” לא נמצא בתפריט`);
+  await item.trigger('click');
+  await settle();
+}
+
+/**
+ * התווית של הפריט המסומן בתפריט הפתוח, או `''` כשאין כזה.
+ *
+ * זה מה שהחליף את `pickerValue` למרווח השורות: הערך הנוכחי אינו כתוב בפקד
+ * אלא מסומן בתוך התפריט, בדיוק כמו ב-Word.
+ */
+export function checkedRibbonMenuItem(wrapper: VueWrapper): string {
+  const checked = wrapper.find('.ribbon-menu__item--checked');
+  return checked.exists() ? checked.find('.ribbon-menu__item-label').text() : '';
+}
+
 const NO_TIP: TipContent = { title: '', shortcut: '', description: '' };
 
 /**

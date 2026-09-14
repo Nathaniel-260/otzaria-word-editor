@@ -67,21 +67,49 @@
       :aria-label="menuString(label)"
       :style="popoverStyle"
       @pointerdown.prevent.stop
+      @mouseleave="emit('hover', null)"
     >
-      <button
+      <template
         v-for="item in items"
         :key="item.id"
-        type="button"
-        class="ribbon-menu__item"
-        role="menuitem"
-        @click="choose(item.id)"
       >
-        <span class="ribbon-menu__item-label">{{ menuString(item.label) }}</span>
-        <span
-          v-if="item.hint"
-          class="ribbon-menu__item-hint"
-        >{{ menuString(item.hint) }}</span>
-      </button>
+        <!-- קו הפרדה **לפני** הפריט ולא אחריו: כך הקבוצה האחרונה אינה נגמרת
+             בקו מיותר, ומי שמוסיף פריט לסוף אינו צריך להזיז דגל מפריט לפריט. -->
+        <div
+          v-if="item.separatorBefore"
+          class="ribbon-menu__separator"
+          role="separator"
+        />
+        <button
+          type="button"
+          class="ribbon-menu__item"
+          :class="{ 'ribbon-menu__item--checked': item.checked }"
+          :role="item.checked === undefined ? 'menuitem' : 'menuitemradio'"
+          :aria-checked="item.checked === undefined ? undefined : item.checked ? 'true' : 'false'"
+          :disabled="item.disabled"
+          @click="choose(item.id)"
+          @mouseenter="emit('hover', item.id)"
+          @focus="emit('hover', item.id)"
+        >
+          <span class="ribbon-menu__item-label">{{ menuString(item.label) }}</span>
+          <span
+            v-if="item.hint"
+            class="ribbon-menu__item-hint"
+          >{{ menuString(item.hint) }}</span>
+        </button>
+      </template>
+
+      <!--
+        שובר הפריטים: תוכן שאינו פעולה — תצוגה מקדימה, דגימה, הסבר. הוא יושב
+        **מחוץ** ללולאת הפריטים ולא כפריט מנוטרל, כדי שניווט המקלדת בתפריט לא
+        יעצור עליו ו-`role="menu"` לא יכיל ילד שאינו `menuitem`.
+      -->
+      <div
+        v-if="$slots.footer"
+        class="ribbon-menu__footer"
+      >
+        <slot name="footer" />
+      </div>
     </div>
   </div>
 </template>
@@ -116,6 +144,21 @@ interface MenuItem {
   label: string;
   /** שורה שנייה קטנה — היחידות או ההסבר. אופציונלית. */
   hint?: string;
+  /**
+   * פריט שהוא **בחירה מתוך קבוצה**, ומצבו כרגע. `undefined` = פריט פעולה
+   * רגיל, וזו ההבחנה שקובעת גם את ה-`role`: `menuitemradio` נדרש `aria-checked`,
+   * ו-`menuitem` אסור שיישא אותו.
+   *
+   * הסימון עצמו הוא הדלקה (`--word-btn-active`) ולא סימן ✓, וזה אינו ויתור
+   * אלא שפת הבית: כך `StyleGallery` מסמנת את הסגנון הנוכחי. ✓ ללא כלום היה
+   * מחייב אייקון חדש, ואייקון של וי נופל מרצפת 70% של שער האייקונים (ראו
+   * ההערה על `dismiss` ב-icons.ts) — כלומר סימן שהיה נראה קטן מכל שכניו.
+   */
+  checked?: boolean;
+  /** פריט שאינו לחיץ כרגע. הסיבה שייכת ל-`hint`. */
+  disabled?: boolean;
+  /** קו הפרדה מעל הפריט — תחילתה של קבוצה חדשה בתפריט. */
+  separatorBefore?: boolean;
 }
 
 const props = withDefaults(
@@ -171,6 +214,17 @@ const emit = defineEmits<{
   (e: 'select', id: string): void;
   /** לחיצה על גוף הכפתור המפוצל. אינו נפלט במצב הרגיל. */
   (e: 'action'): void;
+  /**
+   * התפריט נפתח. הפריטים כבר מצוירים כשזה נורה — כלומר צרכן שמרענן כאן מצב
+   * מהמנוע מצייר מחדש, ואינו מעכב את הפתיחה. זו ההכרעה: תפריט שממתין לקריאה
+   * מהמסמך לפני שהוא נפתח מרגיש תקוע, ו-`doc.get()` סורק את המסמך כולו.
+   */
+  (e: 'open'): void;
+  /**
+   * הפריט שהסימון עומד עליו, או `null` כשיצא מכולם. נועד לתצוגה מקדימה
+   * ב-`footer` — מה שהלחיצה **תעשה**, לפני שהיא נעשית.
+   */
+  (e: 'hover', id: string | null): void;
 }>();
 
 const containerRef = ref<HTMLElement | null>(null);
@@ -181,11 +235,20 @@ const { popoverStyle } = usePopoverPosition(containerRef, popoverRef, isOpen);
 
 function close(): void {
   isOpen.value = false;
+  // סגירה היא גם יציאה מכל פריט. בלי זה תצוגה מקדימה שנפתחה על ריחוף נשארת
+  // תקועה על הפריט האחרון עד הפתיחה הבאה — `mouseleave` אינו נורה על אלמנט
+  // שהוסר מה-DOM.
+  emit('hover', null);
 }
 
 function toggle(): void {
   if (props.disabled) return;
-  isOpen.value = !isOpen.value;
+  if (isOpen.value) {
+    close();
+    return;
+  }
+  isOpen.value = true;
+  emit('open');
 }
 
 function choose(id: string): void {
@@ -264,6 +327,38 @@ onUnmounted(() => {
 
 .ribbon-menu__item:hover {
   background: var(--color-primary-subtle);
+}
+
+/* הפריט הנבחר בקבוצה — אותה הדלקה של כפתור דלוק ברצועה, ולא סימן ✓.
+   ההנמקה ב-`checked` שבטיפוס `MenuItem`. המסגרת היא מה שמבדיל אותו מריחוף:
+   שניהם על אותו רקע, ובלעדיה „מה נבחר” ו„מה העכבר עליו” נראים זהה. */
+.ribbon-menu__item--checked {
+  background: var(--word-btn-active);
+  box-shadow: inset 0 0 0 1px var(--word-btn-active-border);
+}
+
+.ribbon-menu__item:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+.ribbon-menu__item:disabled:hover {
+  background: transparent;
+}
+
+/* השוליים האופקיים מיישרים את הקו לרוחב התווית ולא לרוחב הפופאובר — קו
+   שנוגע בשתי הדפנות נראה כמו חלוקה של החלון, ולא כמו הפרדה בין קבוצות. */
+.ribbon-menu__separator {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--color-outline);
+  opacity: 0.5;
+}
+
+.ribbon-menu__footer {
+  margin-top: 4px;
+  padding-top: 6px;
+  border-top: 1px solid var(--color-outline);
 }
 
 .ribbon-menu__item-label {

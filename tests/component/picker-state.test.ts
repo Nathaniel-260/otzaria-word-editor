@@ -25,6 +25,7 @@ import {
   setPicker,
   settle,
 } from './harness';
+import { checkedRibbonMenuItem, clickRibbonMenuItem, openRibbonMenu } from './harness';
 
 autoUnmount();
 
@@ -38,6 +39,9 @@ autoUnmount();
 function shown(harness: ReturnType<typeof mountUi>, title: string): string {
   return pickerValue(harness.wrapper, title);
 }
+
+/** התפריט שהחליף את בורר מרווח השורות. */
+const SPACING_MENU = 'מרווח שורות וריווח';
 
 const READONLY = {
   'font-family': 'document-readonly',
@@ -73,15 +77,18 @@ describe('מסמך שדוחה את הפקודה', () => {
     expect(shown(harness, 'גודל גופן')).toBe('20');
   });
 
-  it('בורר מרווח השורות חוזר למרווח שבמסמך', async () => {
+  it('תפריט מרווח השורות חוזר למרווח שבמסמך', async () => {
     const harness = mountUi(HomeTab, { adapter: createCommandDouble({ failures: READONLY }) });
     await settle();
-    const before = shown(harness, 'מרווח בין שורות');
+    await openRibbonMenu(harness.wrapper, SPACING_MENU);
+    const before = checkedRibbonMenuItem(harness.wrapper);
 
-    await setPicker(harness.wrapper, 'מרווח בין שורות', '3.0');
+    await clickRibbonMenuItem(harness.wrapper, '3.0');
     await settle();
 
-    expect(shown(harness, 'מרווח בין שורות')).toBe(before);
+    // הלחיצה סוגרת את התפריט; פתיחה מחדש היא הדרך לראות מה מסומן עכשיו.
+    await openRibbonMenu(harness.wrapper, SPACING_MENU);
+    expect(checkedRibbonMenuItem(harness.wrapper)).toBe(before);
   });
 
   it('„הגדל גופן” אינו מטפס — כל לחיצה מחשבת מאותו גודל', async () => {

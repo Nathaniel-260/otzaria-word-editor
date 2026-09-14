@@ -102,7 +102,7 @@ const INSTRUMENT = `
     return '';
   }
 
-  /** הערכים שהבוררים מציגים: גופן, גודל, מרווח שורות. */
+  /** הערכים שהבוררים מציגים: גופן וגודל. (מרווח השורות הוא תפריט, לא בורר.) */
   function pickerSig() {
     var root = document.querySelector('.word-ribbon-container');
     if (!root) return 'no-ribbon';
