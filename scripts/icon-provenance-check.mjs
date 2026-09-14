@@ -72,6 +72,16 @@ const VARIANT = '_20_regular.svg';
  * לשנות אף קו**, כלומר בלי ששרשור ה-`d` ירגיש — כל ה-PR מתבטל והשער עובר
  * בירוק. באייקון שאינו נגזר transform אסור לגמרי, כדי שלא ייכנס אחד בלי
  * שיירשם ויימדד.
+ *
+ * `omitted` הוא הדרך השנייה לגזור: **חלק מהגליף לא נלקח כלל**. ב-`fontColor`
+ * זה המלבן החלול שמתחת לאות — הפקד כבר מצייר שם פס בצבע שהלחיצה תחיל, ושני
+ * מלבנים זה מעל זה הם סימן אחד יותר מדי. מה שנרשם כאן הוא הקווים שהושמטו,
+ * מילה במילה כפי שהם במקור, והשער דורש ש-**שרשור מה שנשאר ומה שהושמט יחזיר
+ * את הגליף בדיוק**. זו אותה טענה כמו בסידור מחדש, ובאותה חוזקה: אי אפשר
+ * לזייף אותה בלי לשנות את המקור, ולכן היא עדיין מפרידה בין „נלקח חלק” לבין
+ * „צויר מחדש”. אייקון שהוא רק השמטה, בלי transform, הוא עדיין נגזרת — ולכן
+ * נגזרת נדרשת ל-`transform` **או** ל-`omitted`, ודי באחד מהם. ב-`fontColor`
+ * יש את שניהם: מה שנשאר אחרי ההשמטה גם הוגדל למרכז הגריד.
  */
 const DERIVED = new Map([
   [
@@ -81,6 +91,17 @@ const DERIVED = new Map([
       order: [0],
       transform: 'translate(20 0) scale(-1 1)',
       why: 'הגליף כולו משוקף סביב x=10 — דף, קיפול ותבליטים — כמו text_bullet_list_rtl',
+    },
+  ],
+  [
+    'fontColor',
+    {
+      from: 'text_color',
+      order: [0],
+      transform: 'translate(-7.5 -1) scale(1.75)',
+      omitted:
+        'M4.5 12c-.83 0-1.5.67-1.5 1.5v3c0 .83.67 1.5 1.5 1.5h11c.83 0 1.5-.67 1.5-1.5v-3c0-.83-.67-1.5-1.5-1.5zM4 13.5c0-.28.22-.5.5-.5h11c.28 0 .5.22.5.5v3a.5.5 0 0 1-.5.5h-11a.5.5 0 0 1-.5-.5z',
+      why: 'האות בלבד, מוגדלת למרכז הגריד; המלבן החלול הושמט — הפקד מצייר שם את הצבע עצמו',
     },
   ],
 ]);
@@ -193,13 +214,22 @@ for (const [list, label] of [
 // שער שני, וגם הוא אינו זקוק לרשת: ה-`transform` הוא הקוד היחיד שלנו באייקון
 // נגזר — הקווים הם של Microsoft — ולכן הוא נבדק כמחרוזת מדויקת, ואסור בכל
 // אייקון אחר. ראו את ההערה על DERIVED.
+// נגזרת שאינה מסדרת מחדש ואינה משמיטה דבר היא **העתק**, ומקומה בטבלת
+// ההעתקים ולא ברשימה שמרפה את ההשוואה ה-byte-for-byte.
+for (const [name, spec] of DERIVED) {
+  if (!spec.transform && !spec.omitted)
+    problems.push(`${name}: נרשם כנגזר בלי transform ובלי omitted — זהו העתק, ומקומו בטבלה`);
+}
+
 for (const [name, raw] of icons) {
   const found = [...raw.matchAll(/\stransform="([^"]+)"/g)].map((m) => m[1]);
   const want = DERIVED.get(name)?.transform;
   if (!want) {
     if (found.length)
       problems.push(
-        `${name}: transform="${found[0]}" באייקון שאינו נגזר — צריך להירשם ב-DERIVED כדי שיימדד`
+        `${name}: transform="${found[0]}" ${
+          DERIVED.has(name) ? 'שאינו רשום ב-DERIVED' : 'באייקון שאינו נגזר'
+        } — צריך להירשם ב-DERIVED כדי שיימדד`
       );
   } else if (found.length !== 1 || found[0] !== want) {
     const got = found.length ? found.map((t) => `"${t}"`).join(', ') : 'אין';
@@ -277,9 +307,16 @@ if (!pkg.dir) {
         problems.push(`${name}: order אינו תמורה של ${parts.length} החלקים — [${spec.order}]`);
         continue;
       }
-      const rebuilt = spec.order.map((i) => parts[i]).join('');
+      // מה שנשאר ומה שהושמט, יחד, הם הגליף. באייקון שלא הושמט ממנו דבר
+      // `omitted` ריק, וזו בדיוק ההשוואה הקודמת.
+      const rebuilt = spec.order.map((i) => parts[i]).join('') + (spec.omitted ?? '');
       if (rebuilt === source) console.log(`  נגזר — ${name}: מ-${spec.from}. ${spec.why}`);
-      else problems.push(`${name}: שרשור החלקים אינו מחזיר את ${spec.from} — הקווים שונו, לא רק סודרו`);
+      else if (spec.omitted)
+        problems.push(
+          `${name}: שרשור מה שנשאר ומה שהושמט אינו מחזיר את ${spec.from} — הקווים שונו, לא רק נגזרו`
+        );
+      else
+        problems.push(`${name}: שרשור החלקים אינו מחזיר את ${spec.from} — הקווים שונו, לא רק סודרו`);
     }
 
     // הכיוון ההפוך: חריג שיש לו כבר מקבילה מדויקת אינו חריג. בלי זה הרשימה
