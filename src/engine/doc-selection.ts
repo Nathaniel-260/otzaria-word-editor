@@ -87,6 +87,22 @@ export interface DocSelectionSnapshot {
   hasRange: boolean;
   /** מזהה הפסקה שהבחירה מתחילה בה, או `null`. */
   blockId: string | null;
+  /**
+   * **כל** הפסקאות שהבחירה נוגעת בהן, לפי סדרן, בלי כפילויות.
+   *
+   * `blockId` לידו הוא הראשון מהן, והוא נשאר מפני שרוב הצרכנים פועלים על
+   * פסקה אחת (דיאלוג הפסקה, מעבר עמוד) — ושינוי שלו לרשימה היה מכריח כל
+   * אחד מהם להכריע מחדש על מה הוא פועל.
+   *
+   * הרשימה קיימת בשביל ההפך: פעולות שב-Word חלות על **כל** הבחירה, כמו
+   * „הוסף רווח לפני הפסקה”. `format.paragraph.setSpacing` מקבל כתובת של
+   * בלוק יחיד (`ParagraphTarget` בחוזה), ולכן החלה על בחירה מרובה היא לולאה
+   * כאן — ואי אפשר לכתוב אותה בלי לדעת מי כל הפסקאות.
+   *
+   * המנוע מחזיר קטע לכל פסקה גם כשהבחירה רציפה, ולכן אין צורך „למלא” בלוקים
+   * שבאמצע: הם שם. קטע בלי `blockId` מדולג.
+   */
+  blockIds: readonly string[];
   /** ה-story, כשהבחירה אינה בגוף המסמך (כותרת עליונה/תחתונה). */
   story: unknown | null;
   /**
@@ -113,6 +129,7 @@ export function emptySelectionSnapshot(): DocSelectionSnapshot {
     text: '',
     hasRange: false,
     blockId: null,
+    blockIds: [],
     story: null,
     empty: true,
   };
@@ -164,6 +181,16 @@ export async function readDocSelection(
   const first = segments.find((segment) => typeof segment?.blockId === 'string');
   const hasWrappableRange = segments.some((segment) => isWrappableSegment(segment));
   const text = typeof info.text === 'string' ? info.text : '';
+  // `Set` ולא סינון: המנוע מחזיר קטע לכל ריצה, ופסקה עם כמה ריצות מסומנות
+  // מופיעה יותר מפעם אחת. כתיבה כפולה לאותה פסקה היא NO_OP בשנייה, אבל גם
+  // ספירה שגויה בכל מי שיציג „N פסקאות”.
+  const blockIds = [
+    ...new Set(
+      segments
+        .map((segment) => segment?.blockId)
+        .filter((blockId): blockId is string => typeof blockId === 'string' && blockId !== ''),
+    ),
+  ];
 
   return {
     // `target` נמסר רק כשיש בו קטע שאפשר לפעול עליו. `{segments: []}` היה
@@ -188,6 +215,7 @@ export async function readDocSelection(
     // ולא היה נכתב כלום. בדיקה תפסה את זה.
     hasRange: hasWrappableRange,
     blockId: first?.blockId ?? null,
+    blockIds,
     story: info.target?.story ?? null,
     empty: typeof info.empty === 'boolean' ? info.empty : !(hasWrappableRange || text.length > 0),
   };
