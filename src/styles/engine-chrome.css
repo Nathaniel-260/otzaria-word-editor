@@ -91,34 +91,20 @@
   width: auto;
 }
 
-/* באנר „edit-rejected" של המנוע — הסתרה, לא עברות.
+/* באנר „edit-rejected" של המנוע — אין כאן כלל, וזה מכוון.
 
-   superdoc@2.11.0 הוסיף הודעת מצב צפה מעל בד המסמך:
-   „This edit couldn't be completed. Adjust the selection and try again.",
-   שנורית כשמחיקה במקלדת (Backspace/Delete/Cut) נדחית. בניגוד להודעה
-   המקבילה ב-2.10.0 (`author-required`), שהייתה `sd-visually-hidden` ולכן
-   בלתי נראית, זו **מצוירת** — ‎`position: sticky` בראש `.superdoc__layers`.
+   superdoc 2.11.0 ו-2.12.0 ציירו מעל בד המסמך הודעה אנגלית על מחיקה
+   במקלדת שנדחתה, גם תחת `ui: false` (דווח למעלה:
+   https://github.com/superdoc/docx-editor/issues/3957), וכאן היה כלל
+   שהסתיר אותה. ב-2.15.0-next.15 הבאנר ירד מהאריזה: לא העוטף
+   `.superdoc__mutation-status` ולא התכונה `data-superdoc-v2-edit-rejected`.
+   הדחייה מגיעה עכשיו רק דרך `onException` עם `code: 'edit-rejected'`
+   (create-editor.ts), ושם היא נרשמת ללוג — כמו שהייתה נרשמת גם קודם.
+   לכן הכלל נמחק ולא נשאר להסתיר DOM שאינו קיים.
+   tests/contract/engine-edit-rejected-banner.test.ts נופל אם הבאנר חוזר
+   לאריזה, ואז צריך להחזיר הסתרה — בלי `:has()`, מהסיבה שלמטה.
 
-   **היא פועלת גם תחת `ui: false`.** נמדד בשני ה-dist הארוזים: ב-2.10.0
-   `.superdoc__mutation-status` אינו קיים בעץ כלל, וב-2.11.0 הוא קיים ונושא
-   את המשפט האנגלי. דווח למעלה:
-   https://github.com/superdoc/docx-editor/issues/3957
-
-   למה הסתרה ולא ::after כמו בשאר הגיליון: הטקסט כאן הוא צומת טקסט ישיר של
-   ה-`p`, לא `> span` שאפשר לכבות — ו-`role="status" aria-live="polite"`
-   אומר שקורא מסך יקריא את צומת הטקסט ולא את הפסאודו. כלומר „תרגום” ב-CSS
-   היה משאיר אנגלית מוקראת מתחת לעברית מצוירת. עד שיהיה מתג או הגדרת
-   טקסטים במנוע, הסתרה היא הדבר הכן.
-
-   מה המשתמש מפסיד: כלום שהוא רואה היום ממילא. הכשל מגיע אלינו גם דרך
-   `onException` עם `code: 'edit-rejected'` (create-editor.ts), ושם הוא
-   נרשם ללוג. הודעה עברית משלנו על מחיקה שנדחתה היא פיצ'ר בפני עצמו.
-
-   העיגון הוא ב-`data-superdoc-v2-edit-rejected` — תכונה סמנטית — ולא
-   במחלקה. tests/contract/engine-edit-rejected-banner.test.ts מאמת שהיא
-   עדיין קיימת באריזה: אם SuperDoc יסגור את הבאג או ישנה את המבנה, הבדיקה
-   תיפול, וזה הסימן למחוק את הכלל הזה במקום להשאיר הסתרה של DOM שאינו קיים.
-   **למה `> [data-…]` ולא `:has()`, וזה נמדד.** הגרסה הראשונה של הכלל הסתירה
+   **הלקח שנשאר מהכלל: `:has()` נמדד כאן כמוקש.** הגרסה הראשונה של הכלל הסתירה
    את העוטף דרך `.superdoc__mutation-status:has([data-superdoc-v2-edit-rejected])`,
    וזה היה מקור האיטיות בהקלדה: `:has()` שהעוגן שלו יושב בתוך `.superdoc`
    גרם ל-Blink לסמן את `.superdoc` כמושפע מ-`:has()`, ומרגע זה כל הוספה או
@@ -128,12 +114,8 @@
    בזמן ריצה ולפני ההקלדה, הורידה אותם ל-0 ול-3, ומחיקת כלל אקראי אחר לא
    שינתה דבר (trace של Chrome, `disabled-by-default-devtools.timeline.invalidationTracking`:
    „Affected by :has()” על `DIV.superdoc`, „Invalidation set invalidates
-   subtree”). הסלקטור כאן מסתיר את ה-`<p>` שנושא את התכונה ולא את העוטף —
-   העוטף הוא `height: 0` בלי ריפוד ורקע (SuperDoc.vue, `.superdoc__mutation-status`),
-   ולכן אין הבדל נראה — ובלי `:has()` בכלל. שער ההיגיינה
-   (tests/unit/css-hygiene.test.ts) חוסם `:has()` חדש בגיליונות, ו-
-   scripts/qa/typing-style-recalc-qa.mjs סופר את החישובים המלאים בזמן הקלדה
-   בדפדפן אמיתי, כדי שהתופעה לא תחזור בשקט. */
-:root:not([data-menu-locale='en']) .superdoc__mutation-status > [data-superdoc-v2-edit-rejected] {
-  display: none;
-}
+   subtree”). הגרסה שהחליפה אותה הסתירה את ה-`<p>` כילד ישיר של העוטף
+   (`.superdoc__mutation-status > [data-superdoc-v2-edit-rejected]`), ובלי
+   `:has()` בכלל. שער ההיגיינה (tests/unit/css-hygiene.test.ts) חוסם `:has()`
+   חדש בגיליונות, ו-scripts/qa/typing-style-recalc-qa.mjs סופר את החישובים
+   המלאים בזמן הקלדה בדפדפן אמיתי, כדי שהתופעה לא תחזור בשקט. */
