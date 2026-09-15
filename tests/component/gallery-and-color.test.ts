@@ -297,6 +297,29 @@ describe('ColorPickerPopover', () => {
     expect((bar(harness).element as HTMLElement).style.backgroundColor).toBe(asCss('#FFFF00'));
   });
 
+  it('`applyOnClick: false` — החצי הראשי פותח את הפלטה ואינו מחיל דבר', async () => {
+    // הפיצול נכון לצבע של בחירה, ולא לצבע של משטח יחיד: בבד (רקע העורך)
+    // הפס מראה את הצבע שהמשטח כבר צבוע בו, ו„החל את הצבע שמוצג” הוא לחיצה
+    // שאינה עושה כלום. נמדד בשער „אין כפתור מת” ב-ribbon-tabs.
+    const harness = mountUi(ColorPickerPopover, {
+      props: {
+        icon: 'shading',
+        title: 'צבע רקע העורך',
+        defaultColor: '#EDEBE9',
+        applyOnClick: false,
+      },
+    });
+
+    await harness.wrapper.find('.color-main-btn').trigger('click');
+
+    expect(harness.wrapper.emitted('change')).toBeUndefined();
+    expect(harness.wrapper.find('.color-palette-popover').exists()).toBe(true);
+
+    // ולחיצה שנייה סוגרת — אותו מתג כמו החץ, ולא פתיחה בלבד.
+    await harness.wrapper.find('.color-main-btn').trigger('click');
+    expect(harness.wrapper.find('.color-palette-popover').exists()).toBe(false);
+  });
+
   it('„ללא צבע” נדבק אף הוא: הלחיצה הבאה מנקה ואינה מחילה את ברירת המחדל', async () => {
     const harness = mountUi(ColorPickerPopover, {
       props: { icon: 'highlight', title: 'צבע סימון', defaultColor: '#FFFF00' },

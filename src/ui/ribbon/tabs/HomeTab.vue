@@ -381,14 +381,40 @@
 
         <div class="word-separator" />
 
-        <RibbonSelect
-          :model-value="selectedLineSpacing"
-          :options="spacingSelectOptions"
+        <!--
+          „מרווח שורות וריווח” — התפריט שב-Word מחזיק את שני הדברים יחד: את
+          המרחק בין השורות **בתוך** הפסקה, ואת הרווח שמפריד פסקה מחברתה.
+
+          היה כאן בורר מספרים, והוא החזיק רק את הראשון; השני היה מגיע רק דרך
+          דיאלוג „פסקה”, כלומר מי שחיפש „רווח בין פסקאות” לא מצא אותו. שניהם
+          תחת פקד אחד הם גם פחות פקדים ברצועה, לא יותר.
+
+          שני כפתורי הצעד שלצדו נשארים: הם מגיעים לערכים שאינם ברשימה (1.2,
+          1.35) בלי לפתוח דבר.
+        -->
+        <RibbonMenuButton
+          icon="lineSpacing"
+          label="מרווח שורות וריווח"
+          variant="icon-only"
+          tooltip="מרווח שורות וריווח"
           :disabled="!lineSpacingCmd.enabled.value || lineSpacingInFlight"
-          width="48px"
-          title="מרווח בין שורות"
-          @update:model-value="onLineSpacingChange"
-        />
+          :items="spacingMenuItems"
+          @open="onSpacingMenuOpen"
+          @hover="onSpacingMenuHover"
+          @select="onSpacingMenuSelect"
+        >
+          <template #footer>
+            <SpacingPreview
+              :text-width-twips="paraTextWidthTwips"
+              :font-size-pt="paraFontSizePt"
+              :before-twips="previewSpacing.beforeTwips"
+              :after-twips="previewSpacing.afterTwips"
+              :line-twips="previewSpacing.lineTwips"
+              :line-rule="previewSpacing.rule"
+              :rtl="paraSectionRtl"
+            />
+          </template>
+        </RibbonMenuButton>
 
         <!--
           שני הכפתורים האלה הם הבורר שלצדם בצעד אחד: הרשימה מציעה שש
@@ -503,7 +529,8 @@ import RibbonGroup from '../common/RibbonGroup.vue';
 import RibbonStack from '../common/RibbonStack.vue';
 import RibbonButton from '../common/RibbonButton.vue';
 import RibbonMenuButton from '../common/RibbonMenuButton.vue';
-import RibbonSelect, { type SelectOption } from '../common/RibbonSelect.vue';
+import SpacingPreview from '../common/SpacingPreview.vue';
+import type { SelectOption } from '../common/RibbonSelect.vue';
 import RibbonCombo from '../common/RibbonCombo.vue';
 import ColorPickerPopover from '../common/ColorPickerPopover.vue';
 import StyleGallery from '../common/StyleGallery.vue';
@@ -533,13 +560,18 @@ import {
   TWIPS_PER_PT,
   addParagraphTabStop,
   applyParagraphIndentation,
+  applyParagraphContextualSpacing,
   applyParagraphKeepOptions,
   applyParagraphSpacing,
   clearAllParagraphTabStops,
   emptyParagraphFormat,
   readParagraphFormat,
   readParagraphIndents,
+  readSelectionSpacing,
   removeParagraphTabStop,
+  toggleSelectionSpacing,
+  type LineSpacingRule,
+  type ParagraphSpacingEntry,
   type TabStop,
 } from '../../../engine/paragraph-format';
 import {
@@ -684,15 +716,6 @@ const textColor = computed(() => engineTextColor.value ?? '');
 const highlightColor = computed(() => engineHighlight.value ?? '');
 
 /**
- * `numeric` נדרש מרגע שיש כפתורי צעד: 1.2 שנוצר בלחיצה אינו באפשרויות,
- * ובלי הדגל הוא נכנס **בראש** הרשימה — כלומר „1.2, 1.0, 1.15, 1.5…”, סולם
- * שאי אפשר לאמוד בו מרחק. עם הדגל הוא נכנס בין 1.15 ל-1.5.
- */
-const spacingSelectOptions = computed(() =>
-  withCurrent(SPACING_OPTIONS, selectedLineSpacing.value, { numeric: true }),
-);
-
-/**
  * שני כפתורי הצעד נכבים בקצות הסולם. `currentLineHeight` ולא מה שהמנוע
  * מדווח: מה שהכפתור מזיז הוא מה שמוצג, כולל בחירה שטרם נענתה — אחרת שתי
  * לחיצות רצופות היו שולחות את אותו ערך פעמיים.
@@ -716,6 +739,191 @@ const shrinkSpacingHint = computed(() =>
     ? `מצמצם את מרווח השורות ל-${shrunkLineHeight(currentLineHeight.value)}`
     : `${MIN_LINE_HEIGHT} הוא המרווח הקטן ביותר כאן. מתחתיו — „תפריט פסקה”`,
 );
+
+/* ------------------------------------------------------------------ */
+/* תפריט „מרווח שורות וריווח”                                          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * כמה „הוסף רווח לפני/אחרי הפסקה” מוסיף: 12 נקודות.
+ *
+ * זה הערך ש-Word קובע ב-Ctrl+0 מאז שהקיצור קיים, ולכן הוא גם מה שהמשתמש
+ * שמגיע משם מצפה לו. הוא יושב כאן ולא ב-payloads.ts מפני שאינו חוזה מול
+ * ולידטור של המנוע אלא בחירת מוצר — המנוע מקבל כל מספר לא-שלילי.
+ */
+const SPACE_STEP_TWIPS = 12 * TWIPS_PER_PT;
+
+const SPACE_BEFORE_ID = 'space-before';
+const SPACE_AFTER_ID = 'space-after';
+const PARAGRAPH_OPTIONS_ID = 'paragraph-options';
+const LINE_ITEM_PREFIX = 'line:';
+
+/** הכפולה שפריט מרווח שורות נושא, או `null` אם אינו כזה. */
+function lineItemMultiplier(id: string | null): number | null {
+  if (id === null || !id.startsWith(LINE_ITEM_PREFIX)) return null;
+  return parseLineHeight(id.slice(LINE_ITEM_PREFIX.length));
+}
+
+/**
+ * הריווח של כל פסקה בבחירה, כפי שנקרא בפתיחת התפריט. `[]` = טרם נקרא, או
+ * שאין מה לקרוא (אין סמן, המסמך נטען).
+ *
+ * למה נקרא בפתיחה ולא מוחזק חי: הקריאה עוברת ב-`doc.get()`, שסורק את המסמך
+ * כולו. מעקב מתמיד אחרי הסמן היה משלם את המחיר הזה בכל תזוזה — זו הסיבה
+ * שהסרגל משהה את הקריאה שלו ומפסיק כשהוא מוסתר (ראו `readParagraphIndents`).
+ */
+const spacingEntries = shallowRef<readonly ParagraphSpacingEntry[]>([]);
+
+/** הפריט שהעכבר עומד עליו, למען פס התצוגה. `null` = אף אחד. */
+const spacingHover = ref<string | null>(null);
+
+/** הריווח של הפסקה שהתווית מדברת עליה — הראשונה בבחירה, כמו ב-Word. */
+const spacingHead = computed(() => spacingEntries.value[0]?.spacing ?? null);
+
+/**
+ * האם כבר יש רווח לפני/אחרי הפסקה — כלומר אם הפריט אומר „הסר” או „הוסף”.
+ *
+ * ההכרעה נופלת על מה ש**מוצהר בפסקה**, ולא על מה שהיא מציגה בפועל: ריווח
+ * שיורש מהסגנון אינו נקרא מ-`doc.get()` (ראו `spacingFromProps`). המשמעות
+ * המעשית היא מקרה קצה אחד — פסקה שהסגנון שלה כבר קובע 12 נק' תראה „הוסף”,
+ * והלחיצה תקבע במפורש את אותו מספר. לא נמדד שינוי חזותי, וזו גם ההתנהגות
+ * הסבירה: מה שהמשתמש רואה נשאר.
+ */
+const hasSpaceBefore = computed(() => (spacingHead.value?.beforeTwips ?? 0) > 0);
+const hasSpaceAfter = computed(() => (spacingHead.value?.afterTwips ?? 0) > 0);
+
+/**
+ * מה שהפס מצייר: מצב הפסקה, ועליו מה שהפריט שמרחפים עליו יעשה.
+ *
+ * `lineTwips` נופל ל-`currentLineHeight` כשהפסקה אינה מצהירה מרווח שורות,
+ * ולא ל-240: הבורר שהיה כאן הציג את מה שהמנוע מדווח — כלומר את הערך האפקטיבי,
+ * כולל זה שיורש מהסגנון — ופס שהיה מצייר „בודדת” על פסקה שנראית 1.5 היה סותר
+ * את מה שרואים מאחוריו.
+ */
+const previewSpacing = computed<{
+  beforeTwips: number;
+  afterTwips: number;
+  lineTwips: number;
+  rule: LineSpacingRule;
+}>(() => {
+  const head = spacingHead.value;
+  const base = {
+    beforeTwips: head?.beforeTwips ?? 0,
+    afterTwips: head?.afterTwips ?? 0,
+    lineTwips: head?.lineTwips ?? Math.round(currentLineHeight.value * 240),
+    rule: head?.rule ?? ('auto' as LineSpacingRule),
+  };
+  const hovered = spacingHover.value;
+  if (hovered === null) return base;
+  if (hovered === SPACE_BEFORE_ID) {
+    return { ...base, beforeTwips: hasSpaceBefore.value ? 0 : SPACE_STEP_TWIPS };
+  }
+  if (hovered === SPACE_AFTER_ID) {
+    return { ...base, afterTwips: hasSpaceAfter.value ? 0 : SPACE_STEP_TWIPS };
+  }
+  const multiplier = lineItemMultiplier(hovered);
+  if (multiplier === null) return base;
+  // ריחוף על ערך מרווח שורות מצייר אותו כ„אוטומטי” גם כשהפסקה ב„בדיוק”:
+  // זה מה שהלחיצה תעשה — פקודת `line-height` שולחת כפולה, לא מרחק.
+  return { ...base, lineTwips: Math.round(multiplier * 240), rule: 'auto' };
+});
+
+/**
+ * הפריטים, בסדר של Word: הערכים, „אפשרויות…”, ואז שני הרווחים.
+ *
+ * `withCurrent` נשאר מהבורר שהיה כאן, ולא הוחלף ב-`checked` בלבד: כפתורי
+ * הצעד שלצד התפריט מייצרים ערכים שאינם ברשימה (1.2, 1.35), ורשימה קבועה
+ * הייתה משאירה אותם בלי שום סימן — כלומר לחיצה על „הגדל” שאינה נראית בשום
+ * מקום. `numeric` הוא מה שמכניס אותם **במקומם** בסולם ולא בראשו.
+ */
+const spacingMenuItems = computed(() => [
+  ...withCurrent(SPACING_OPTIONS, selectedLineSpacing.value, { numeric: true }).map((option) => ({
+    id: `${LINE_ITEM_PREFIX}${option.value}`,
+    label: option.label,
+    checked: option.value === selectedLineSpacing.value,
+  })),
+  {
+    id: PARAGRAPH_OPTIONS_ID,
+    label: 'אפשרויות מרווח שורות…',
+    separatorBefore: true,
+  },
+  {
+    id: SPACE_BEFORE_ID,
+    label: hasSpaceBefore.value ? 'הסר רווח לפני הפסקה' : 'הוסף רווח לפני הפסקה',
+    separatorBefore: true,
+  },
+  {
+    id: SPACE_AFTER_ID,
+    label: hasSpaceAfter.value ? 'הסר רווח אחרי הפסקה' : 'הוסף רווח אחרי הפסקה',
+  },
+]);
+
+/**
+ * פתיחת התפריט: קוראים את מצב הבחירה, ואת גיאומטריית העמוד שהפס נמדד בה.
+ *
+ * שתי הקריאות אינן מעכבות את הפתיחה — התפריט כבר מצויר כשהן יוצאות לדרך.
+ * עד שהן חוזרות התוויות אומרות „הוסף” (ברירת המחדל של פסקה שאינה מצהירה),
+ * והפס מצייר את מרווח השורות שהבורר ידע ממילא. כישלון של אחת מהן אינו מדווח:
+ * תפריט שנפתח אינו פעולה של המשתמש שאפשר להתלונן עליה, והלחיצה עצמה כן מדווחת.
+ */
+async function onSpacingMenuOpen(): Promise<void> {
+  spacingHover.value = null;
+  spacingEntries.value = (await readSelectionSpacing(superdoc.value)) ?? [];
+  // `paraTextWidthTwips`/`paraSectionRtl` משותפים עם דיאלוג הפסקה, ובכוונה:
+  // שניהם מתארים את **המקטע** ולא את הפקד, ושתי עותקים שלהם היו יכולים לומר
+  // דברים שונים על אותו עמוד. מי שנפתח אחרון פשוט קורא אותם מחדש.
+  const page = await readPageMargins(superdoc.value);
+  paraTextWidthTwips.value = page
+    ? Math.max(0, page.pageWidthTwips - page.leftTwips - page.rightTwips)
+    : 0;
+  paraSectionRtl.value = page?.direction === 'rtl';
+}
+
+function onSpacingMenuHover(id: string | null): void {
+  spacingHover.value = id;
+}
+
+function onSpacingMenuSelect(id: string): void {
+  if (id === PARAGRAPH_OPTIONS_ID) {
+    void onOpenParagraph();
+    return;
+  }
+  if (id === SPACE_BEFORE_ID || id === SPACE_AFTER_ID) {
+    void applySpacePatch(id);
+    return;
+  }
+  const multiplier = lineItemMultiplier(id);
+  if (multiplier !== null) void applyLineSpacing(multiplier);
+}
+
+/**
+ * „הוסף/הסר רווח” על **כל** הפסקאות המסומנות.
+ *
+ * הכלל — מתי זה מוסיף ומתי מסיר — יושב ב-`toggleSelectionSpacing` ולא כאן,
+ * מפני שהקיצור Ctrl+0 מפעיל בדיוק את אותו דבר מהמקלדת. הוא גם קורא את הבחירה
+ * מחדש ואינו נשען על מה שנקרא בפתיחת התפריט: בין פתיחה ללחיצה אפשר לבטל
+ * בקיצור מקלדת, ורשימה ישנה הייתה כותבת על מצב שכבר אינו קיים.
+ */
+async function applySpacePatch(id: string): Promise<void> {
+  if (lineSpacingInFlight.value) return;
+  lineSpacingInFlight.value = true;
+  try {
+    const outcome = await toggleSelectionSpacing(
+      superdoc.value,
+      id === SPACE_BEFORE_ID ? 'before' : 'after',
+      SPACE_STEP_TWIPS,
+    );
+    if (!outcome.ok) {
+      report(outcome, 'paragraph-spacing');
+      return;
+    }
+    // התוויות („הוסף” מול „הסר”) נגזרות מהמצב שנקרא, ולכן הן חייבות להתרענן
+    // אחרי כתיבה — אחרת פתיחה שנייה של התפריט מציעה להוסיף מה שהרגע נוסף.
+    spacingEntries.value = (await readSelectionSpacing(superdoc.value)) ?? [];
+  } finally {
+    lineSpacingInFlight.value = false;
+  }
+}
 
 /* ------------------------------------------------------------------ */
 /* הפעלה                                                              */
@@ -744,12 +952,6 @@ async function applyLineSpacing(multiplier: number): Promise<void> {
   } finally {
     lineSpacingInFlight.value = false;
   }
-}
-
-function onLineSpacingChange(val: string): void {
-  const multiplier = parseLineHeight(val);
-  if (multiplier === null) return;
-  void applyLineSpacing(multiplier);
 }
 
 /**
@@ -1123,6 +1325,8 @@ function onParagraphSubmit(payload: {
   keepNext: boolean;
   keepLines: boolean;
   widowControl: boolean;
+  /** `null` = „ללא שינוי” בפקד התלת-מצבי, ואז לא נשלחת קריאה כלל. */
+  contextualSpacing: boolean | null;
 }): void {
   paragraphOpen.value = false;
   const target = paraTarget;
@@ -1148,14 +1352,20 @@ function onParagraphSubmit(payload: {
   void runParagraph(async () => {
     // שלוש פעולות על אותו pPr; כשל אחד אינו מבטל את האחרים, וכל אחת מדווחת
     // בפני עצמה — NO_OP כבר מטופל בתוך המודול.
+    // „ללא שינוי” אינו קריאה: `setFlowOptions` הוא patch, ולכן דילוג עליו
+    // משאיר את `w:contextualSpacing` בדיוק כפי שהיה. ראו את המדידה ב-
+    // `applyParagraphContextualSpacing`.
     const outcomes = [
       await applyParagraphIndentation(superdoc.value, target, indentation),
       await applyParagraphSpacing(superdoc.value, target, spacing),
       await applyParagraphKeepOptions(superdoc.value, target, keep),
+      ...(payload.contextualSpacing === null
+        ? []
+        : [await applyParagraphContextualSpacing(superdoc.value, target, payload.contextualSpacing)]),
     ];
     for (const [index, outcome] of outcomes.entries()) {
       if (!outcome.ok) {
-        report(outcome, ['paragraph-indent', 'paragraph-spacing', 'paragraph-keep'][index]);
+        report(outcome, ['paragraph-indent', 'paragraph-spacing', 'paragraph-keep', 'paragraph-contextual'][index]);
         return;
       }
     }

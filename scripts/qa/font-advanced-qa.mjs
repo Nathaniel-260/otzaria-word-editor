@@ -131,6 +131,59 @@ async function selectRange(from, to) {
 }
 
 /**
+ * מה שנבחר **לפי המנוע** — בלוק והיסטים. `ui.selection.get().text` אינו
+ * מוחזר ב-2.15.0-next.15 (נמדד: חסר), ומה שנראה מסומן על המסך אינו ראיה.
+ */
+const engineSelection = () =>
+  app.js(`(async function(){
+    var info = await window.__otzariaEditor.superdoc.activeEditor.doc.selection.current();
+    var t = (info && info.selectionTarget) || {};
+    return JSON.stringify({
+      empty: !!(info && info.empty),
+      startBlock: t.start ? t.start.blockId : null, start: t.start ? t.start.offset : null,
+      endBlock: t.end ? t.end.blockId : null, end: t.end ? t.end.offset : null
+    });
+  })()`).then(JSON.parse);
+
+/**
+ * בוחרת מילה שעומדת לבדה בפסקה. מחזירה null כשהמנוע מאשר שנבחרה המילה כולה
+ * ורק היא, ואחרת את מה שכן נבחר.
+ *
+ * ## למה האימות הוא חלק מהבחירה
+ *
+ * שלב 5 שואל „נכתב ל-docx?” על הריצה שהטקסט שלה הוא בדיוק המילה. בחירה שנחתה
+ * שלוש אותיות ליד נענתה שם „לא נכתב” — כלומר נקראה ככשל של המנוע — כשבפועל
+ * העיצוב נכתב, רק על אותיות אחרות. `caretPara` מאמת את הפסקה, וההיסטים
+ * 0..אורך המילה באותו בלוק מאמתים את הטווח; מה שאינו כזה נופל כאן, בשמו.
+ */
+async function selectAlone(word) {
+  let at;
+  try {
+    at = await T(app.caretPara(word), `סמן בפסקה „${word}”`, 90_000);
+  } catch (error) {
+    return `הסמן לא הגיע לפסקה „${word}”: ${error && error.message}`;
+  }
+  /*
+   * ההרחבה היא לכיוון **החזותי** של המילה, ולא `ArrowRight` תמיד: המנוע מזיז
+   * את הסמן בחצים לפי מה שנראה על המסך, ולכן בפסקה שכולה עברית `ArrowRight`
+   * הולך אחורה לוגית. נמדד כאן: הבחירה על „אבגד” יצאה מהפסקה אל זו שלפניה
+   * (בלוק אחר, היסט 3). מילה עברית נבחרת בחץ שמאלה, לועזית בחץ ימינה.
+   */
+  const [key, code] = /[\u0590-\u05FF]/.test(word) ? ['ArrowLeft', 37] : ['ArrowRight', 39];
+  await app.press('Home', 'Home', 36);
+  await app.sleep(140);
+  for (let i = 0; i < word.length; i++) {
+    await app.press(key, key, code, 8);
+    await app.sleep(22);
+  }
+  await app.sleep(500);
+  const sel = await T(engineSelection(), 'selection.current');
+  const exact =
+    !sel.empty && sel.startBlock === at.nodeId && sel.endBlock === at.nodeId && sel.start === 0 && sel.end === word.length;
+  return exact ? null : `הבחירה אינה „${word}” (בלוק ${at.nodeId}, 0..${word.length}): ${JSON.stringify(sel)}`;
+}
+
+/**
  * האפקטים שהדיאלוג מכריז עליהם כ„נכתבים ולא מצוירים”, והחתימה שתעיד שהם
  * **כן** צוירו.
  *
@@ -163,7 +216,14 @@ const EFFECT_PROBES = [
 
 // `fontSizeCs` חייב להימדד על כתב מורכב אמיתי. באנגלית מותר למנוע להתעלם
 // מ-`w:szCs`; עברית מבדילה בין „לא צויר” בפועל לבין מסלול שלא הופעל כלל.
-const LINES = ['numx spac', 'outl shdw embs impr', 'kern dstx אבגד'];
+//
+// שלוש השורות האחרונות הן מילה אחת לפסקה, וזה תיקון שנמדד ולא סגנון. שלוש
+// המילים ישבו פעם בשורה אחת, `kern dstx אבגד`, והבחירה של שלב 5 הייתה Home
+// ואחריו חצים. שלב 4 מפצל את השורה לשלוש ריצות, ומאותו רגע Home בפסקה
+// המעורבת נחת בהיסט 9 — תחילת ` אבגד` — ולא ב-0 (נמדד על 2.15.0-next.15):
+// הקרנינג נכתב על ` אבג`, העברית נשארה בלי בחירה, והשלב היה אדום גם על 2.14
+// בלי שהמנוע שינה דבר. בפסקה של מילה אחת אין גבול בין ריצות שהסמן נופל עליו.
+const LINES = ['numx spac', 'outl shdw embs impr', 'dstx', 'kern', 'אבגד'];
 
 try {
   /* חלון רחב — ברירת המחדל ב-headless צרה, והרצועה גולשת ממנה. */
@@ -294,7 +354,7 @@ try {
   /* ============ 4. „קו חוצה כפול” — הטענה שההודעה עצמה מוסרת ============ */
   await app.reset();
   await app.caret(4);
-  await selectRange(5, 9); // 'dstx' — המילה השנייה בשורה השלישית
+  await selectRange(0, 4); // 'dstx' — לבדה בשורה השלישית
   if (!(await app.click('מתקדם', { after: 1200 }))) {
     report.fail('„קו חוצה כפול” — מצויר, וכקו בודד', 'הדיאלוג לא נפתח');
   } else if (!(await tri('קו חוצה כפול', 'yes'))) {
@@ -336,14 +396,19 @@ try {
    * שני אלה אינם כפתורי מיתוג אלא שדות מספר, ולכן הם כאן ולא ב-`EFFECT_PROBES`.
    */
   const FIELD_PROBES = [
-    { label: 'קרנינג', id: 'fa-kerning', value: '12', xml: /<w:kern w:val="24"/, word: 'kern', at: 0 },
-    { label: 'גודל הגופן המורכב', id: 'fa-sizecs', value: '28', xml: /<w:szCs w:val="56"/, word: 'אבגד', at: 10 },
+    { label: 'קרנינג', id: 'fa-kerning', value: '12', xml: /<w:kern w:val="24"/, word: 'kern' },
+    { label: 'גודל הגופן המורכב', id: 'fa-sizecs', value: '28', xml: /<w:szCs w:val="56"/, word: 'אבגד' },
   ];
   const fieldMismatch = [];
   for (const probe of FIELD_PROBES) {
     await app.reset();
-    await app.caret(4);
-    await selectRange(probe.at, probe.at + 4);
+    // הבחירה מאומתת מול המנוע לפני שהדיאלוג נפתח — ראו `selectAlone`. בחירה
+    // שנחתה ליד המילה נענתה כאן „לא נכתב ל-docx”, כלומר כשל שנתלה במנוע.
+    const missed = await selectAlone(probe.word);
+    if (missed) {
+      fieldMismatch.push(`${probe.label}: ${missed}`);
+      continue;
+    }
     if (!(await app.click('מתקדם', { after: 1200 }))) {
       fieldMismatch.push(`${probe.label}: הדיאלוג לא נפתח`);
       continue;
@@ -363,13 +428,17 @@ try {
     note(`${probe.label} (${probe.word}): rPr=${JSON.stringify(rpr)} | לפני=${JSON.stringify(before)} | אחרי=${JSON.stringify(after)} | הודעה=${JSON.stringify(face.notice)}`);
 
     const inFile = !!rpr && probe.xml.test(rpr);
-    if (!after.found) {
-      fieldMismatch.push(`${probe.label}: הריצה לא נמצאה על המסך — אין מה למדוד`);
+    // שתי התמונות, ולא רק זו שאחרי: „לפני” שלא נמצאה הייתה נקראת כ„אינו
+    // מצויר” — כלומר אישור שקט להודעה, בדיוק כשאין במה למדוד אותה.
+    if (!before.found || !after.found) {
+      fieldMismatch.push(
+        `${probe.label}: הריצה לא נמצאה על המסך — אין מה למדוד (לפני=${before.found}, אחרי=${after.found})`,
+      );
       continue;
     }
     // „מצויר” כאן הוא **כל** שינוי בסגנון המחושב, ולא תכונה אחת: אין מראש
     // מועמד יחיד לקרנינג או לגודל CS, וכל שינוי היה מפריך את ההודעה.
-    const isDrawn = before.found && JSON.stringify(before) !== JSON.stringify(after);
+    const isDrawn = JSON.stringify(before) !== JSON.stringify(after);
     const named = (face.notice ?? '').includes(probe.label);
     if (!inFile) fieldMismatch.push(`${probe.label}: לא נכתב ל-docx`);
     else if (isDrawn && named) fieldMismatch.push(`${probe.label}: **כן** מצויר — יש להסיר אותו מההודעה`);

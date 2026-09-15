@@ -69,6 +69,7 @@ export type ShellAction =
   | 'open-document'
   | 'select-all'
   | 'page-break'
+  | 'space-before-toggle'
   | 'link'
   | 'font-grow'
   | 'font-shrink'
@@ -763,6 +764,24 @@ export const SHORTCUTS = [
     ctrl: true,
     command: 'line-height',
     payload: lineHeightPayload(1.5),
+  },
+  {
+    /*
+     * Ctrl+0 הוא מתג ולא ערך, ולכן `action` ולא `command` עם payload: מה
+     * שהוא שולח תלוי במה שכבר מוצהר בפסקה — 12 נקודות כשאין, ואפס כשיש.
+     * ההכרעה עצמה ב-`toggleSelectionSpacing` (engine/paragraph-format.ts),
+     * ומשותפת לו ולפריט שבתפריט „מרווח שורות וריווח”.
+     *
+     * שכניו כאן (Ctrl+1/2/5) הם ריווח **שורות**, וזה ריווח **פסקה** — אותה
+     * שכנות בדיוק שיש להם ב-Word, ומאותו טעם: כולם „כמה אוויר בפסקה”.
+     */
+    id: 'space-before-toggle',
+    label: 'Ctrl+0',
+    description: 'הוספה או הסרה של רווח לפני הפסקה',
+    group: 'paragraph',
+    code: 'Digit0',
+    ctrl: true,
+    action: 'space-before-toggle',
   },
   {
     id: 'heading-1',

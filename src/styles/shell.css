@@ -72,12 +72,16 @@ button:disabled {
   cursor: default;
 }
 
-/* אזור המסמך. flex ולא חישוב גבהים — פס או שורת מצב שישתנו לא ישברו אותו. */
+/* אזור המסמך. flex ולא חישוב גבהים — פס או שורת מצב שישתנו לא ישברו אותו.
+
+   הרקע נקרא מ-`--word-canvas-bg`, כמו בכלל ה-`scoped` המקביל ב-App.vue (שהוא
+   שמנצח כאן, בזכות מאפיין ה-scope): הבד הוא האלמנט היחיד שצבע הרקע של המשתמש
+   חל עליו, ושתי ההצהרות חייבות לנקוב באותו מקור. ראו styles/tokens.css. */
 .editor-stack {
   position: relative;
   flex: 1 1 auto;
   min-height: 0;
-  background: var(--color-surface-container-highest);
+  background: var(--word-canvas-bg);
 }
 
 /* כל מסמך מקבל host משלו, וכולם באותו מקום: מסמך שנטען יושב מעל הפעיל עד

@@ -57,7 +57,7 @@ process.exit(report.print() > 0 ? 1 : 0);
 - `clickGallery(label)`, `galleryItems()`
 - `clickPalette(index)`, `paletteSwatches()`, `paletteOpen()`
 - `clickTableCell(row, col)`
-- `selectValue(name, value)` / `options(name)` — ל-`<select>` (בורר גופן, גודל, מרווח שורות)
+- `selectValue(name, value)` / `options(name)` — ל-`<select>` (בורר גופן, גודל)
 
 **דיאלוגים** — `dialog()` (שם + כל הפקדים), `dialogFill(idאוName, value)`, `clickDialog(name)`
 

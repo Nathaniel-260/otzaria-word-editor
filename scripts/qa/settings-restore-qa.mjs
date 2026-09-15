@@ -256,4 +256,75 @@ await stage('dialog', { 'shulchan-dialog:crop-marks': { mm: 7 } }, async (app) =
       );
 });
 
+/* ------------------------------------------------------------------ */
+/* 7. צבע הבד — העדפה שסופה פיקסל מצויר, ולא מצב של פקד                 */
+/* ------------------------------------------------------------------ */
+
+/**
+ * ההעדפה הזאת שונה מכל קודמותיה בשרשרת שהיא עוברת: אחסון → נרמול → טוקן CSS
+ * על שורש המסמך → כלל ב-`.editor-stack` → הרקע שהדפדפן מצייר. חמש חוליות,
+ * ואף אחת מהן אינה נראית במצב של פקד — לכן הנמדד כאן הוא הצבע **המחושב**
+ * של הבד עצמו, לא מה שהבורר בלשונית „תצוגה” מציג.
+ *
+ * המדידה השנייה היא הסיבה ש-`--word-canvas-bg` קיים בכלל: הסרגלים נצבעים
+ * מטוקן ערכת הנושא, ודריסה שלו במקום טוקן נפרד הייתה צובעת גם אותם. שער
+ * שמודד רק את הבד היה מאשר בירוק גם את המימוש הרחב מדי.
+ *
+ * `#3366cc` ולא צבע מהפלטה: הוא אינו ערך של שום טוקן בערכה, ולכן אי-אפשר
+ * להגיע אליו במקרה.
+ */
+const CANVAS_SEED = '#3366cc';
+const CANVAS_PAINTED = 'rgb(51, 102, 204)';
+
+// הסרגל נזרע דלוק כדי שיהיה מה למדוד עליו: ברירת המחדל שלו כבויה, ובלי
+// הזריעה מדידת „הצבע אינו נוזל לסרגלים” הייתה מדלגת על עצמה בשקט.
+await stage('canvas', { 'canvas-color': CANVAS_SEED, 'ruler-visible': true }, async (app) => {
+  const read = () =>
+    app.js(`(function () {
+      var stack = document.querySelector('.editor-stack');
+      if (!stack) return null;
+      var ruler = document.querySelector('.doc-vruler');
+      var root = getComputedStyle(document.documentElement);
+      return JSON.stringify({
+        canvas: getComputedStyle(stack).backgroundColor,
+        ruler: ruler ? getComputedStyle(ruler).backgroundColor : null,
+        canvasToken: root.getPropertyValue('--word-canvas-bg').trim(),
+        themeToken: root.getPropertyValue('--color-surface-container-highest').trim(),
+      });
+    })()`);
+
+  const paint = await until(read, (raw) => raw !== null && JSON.parse(raw).canvas === CANVAS_PAINTED, {
+    ms: 15_000,
+  });
+  const m = paint.value === null ? {} : JSON.parse(paint.value);
+  console.log(`  בד=${m.canvas} | סרגל=${m.ruler} (${paint.waited}ms)`);
+  console.log(`  טוקנים: --word-canvas-bg=${m.canvasToken} | ערכת נושא=${m.themeToken}`);
+
+  paint.ok
+    ? report.pass('צבע בד שנשמר חוזר ונצבע', `${m.canvas} אחרי ${paint.waited}ms`)
+    : report.fail(
+        'צבע בד שנשמר חוזר ונצבע',
+        `הבד מצויר ${m.canvas} — נזרע ${CANVAS_SEED}, כלומר ${CANVAS_PAINTED}`,
+      );
+
+  // הדריסה חייבת להיות על הטוקן של הבד בלבד. אילו היא נעשתה על טוקן ערכת
+  // הנושא, שני הערכים היו זהים — וכל מה שנצבע ממנו (הסרגלים, הפינה ביניהם,
+  // כפתור היציאה ממצב מיקוד) היה נצבע יחד עם הבד.
+  m.themeToken && m.themeToken.toLowerCase() !== CANVAS_SEED
+    ? report.pass('הדריסה על טוקן הבד בלבד', `ערכת הנושא נשארה ${m.themeToken}`)
+    : report.fail(
+        'הדריסה על טוקן הבד בלבד',
+        `--color-surface-container-highest הוא ${m.themeToken} — ההעדפה נכתבה על טוקן ערכת הנושא`,
+      );
+
+  m.ruler === null
+    ? report.fail('צבע הבד אינו נוזל לסרגלים', 'הסרגל נזרע דלוק ואינו ב-DOM — אין מה למדוד')
+    : m.ruler !== CANVAS_PAINTED
+      ? report.pass('צבע הבד אינו נוזל לסרגלים', `הסרגל נשאר ${m.ruler}`)
+      : report.fail(
+          'צבע הבד אינו נוזל לסרגלים',
+          `הסרגל נצבע ${m.ruler} — אותו צבע כמו הבד`,
+        );
+});
+
 process.exit(report.print() > 0 ? 1 : 0);

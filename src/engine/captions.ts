@@ -60,11 +60,14 @@
  * ההסרה. נמדד שהתוצאה זהה תו-בתו לכיתוב שנוצר מאפס, שהמיקום בתוך המסמך
  * נשמר, ושהמספור מתעדכן — כלומר הקובץ שנכתב הוא קנוני, ולא „כמעט”.
  * המחיר מוצהר, והוא בשני מישורים. **בהיסטוריה:** שני צעדים במקום אחד.
- * **בעוגן:** `captions.insert` מקבל כתובת של פסקה בלבד — עוגן `tbl:…`
- * הוחזר `TARGET_NOT_FOUND` (וזה גם מה שחסר בתיעוד המנוע, ראו
- * docs/engine-gaps.md). לכן שני מצבים אינם ניתנים לעריכה כך: כיתוב שהוא
- * הבלוק היחיד במסמך, וכיתוב ששכנו הוא טבלה או תמונה — הכיתוב שמתחת ללוח,
- * שהוא המקרה השכיח. בשניהם הפעולה מסרבת **לפני** ההסרה ומסבירה.
+ * **בעוגן:** `captions.insert` מקבל פסקה או טבלה עליונה, ולא כל בלוק.
+ * הטבלה נוספה במנוע: עד 2.14.0-next.5 עוגן `tbl:…` הוחזר
+ * `TARGET_NOT_FOUND`, וב-2.15.0-next.15 נמדד שהוא מתקבל בשני הכיוונים —
+ * ובלבד שהכתובת נושאת `nodeType: 'table'`. לכן הכיתוב שמתחת ללוח, המקרה
+ * השכיח, נערך עכשיו במסלול הישיר, וגם „טבלה │ כיתוב │ טבלה”. מה שנשאר:
+ * כיתוב שהוא הבלוק היחיד במסמך, וכיתוב ששכניו אינם פסקה ואינם טבלה (תוכן
+ * עניינים, למשל — נמדד `INVALID_TARGET`). בשניהם הפעולה מסרבת **לפני**
+ * ההסרה ומסבירה.
  *
  * ומעל שניהם רשת ביטחון: הסרה שהצליחה והוספה שנכשלה אחריה מנסה להחזיר את
  * התוכן הישן למקומו, ורק כשגם השחזור נכשל ההודעה אומרת שהכיתוב הוסר
@@ -140,10 +143,21 @@ import { receiptFailureText, thrownText, type DocReceipt, type MaybePromise } fr
 /* צורת ה-API. מוגדרת כאן ואינה מיובאת — ראו document-api.ts            */
 /* ------------------------------------------------------------------ */
 
+/**
+ * סוגי הבלוקים שהמנוע מקבל כעוגן ל-`captions.insert` — ורק הם.
+ *
+ * נמדד על 2.15.0-next.15: טבלה התקבלה כעוגן בשני הכיוונים, ובלוק מסוג
+ * `tableOfContents` הוחזר `INVALID_TARGET` עם נוסח המנוע עצמו — „paragraph-like
+ * blocks or top-level tables”. שליחת אותו בלוק כ„פסקה” מחזירה `success: true`
+ * וכותבת את הכיתוב **בתוך** ה-sdt, כלומר מסמך שגוי בשקט. לכן הרשימה סגורה,
+ * ואינה „כל מה שאינו פסקה”.
+ */
+type AnchorNodeType = 'paragraph' | 'table';
+
 /** `CaptionAddress` — מה שכל פעולת כיתוב מקבלת כ-`target`. */
 interface CaptionAddress {
   kind: 'block';
-  nodeType: 'paragraph';
+  nodeType: AnchorNodeType;
   nodeId: string;
 }
 
@@ -158,10 +172,11 @@ interface RawCaption {
 /**
  * `BlockNodeInfo` בחלק שנצרך כאן: „מי בא לפני מי”, ו**מאיזה סוג**.
  *
- * `nodeType` אינו קישוט: `captions.insert` מקבל כתובת שהיא `paragraph`
- * בלבד, ובלוק שאינו פסקה (טבלה, תמונה, תוכן עניינים) מוחזר ממנו
- * `TARGET_NOT_FOUND`. בלעדיו העוגן שנבחר לעריכה יכול להיות טבלה, וההסרה
- * שקדמה לו כבר מחקה את הכיתוב.
+ * `nodeType` אינו קישוט: הכתובת חייבת לשאת את הסוג **האמיתי** של הבלוק.
+ * נמדד: טבלה שנשלחה כ-`paragraph` הוחזרה `TARGET_NOT_FOUND`, פסקה שנשלחה
+ * כ-`table` הוחזרה `TARGET_NOT_FOUND`, וכתובת בלי `nodeType` הוחזרה
+ * `INVALID_TARGET`. ומעבר לזה: סוג שאינו ברשימת ה-`AnchorNodeType` חייב
+ * להיחסם לפני ההסרה, אחרת ההסרה כבר מחקה את הכיתוב.
  */
 interface RawBlock {
   nodeId?: string;
@@ -248,16 +263,16 @@ const NO_NEIGHBOUR_DETAIL =
   'הכיתוב הוא הפסקה היחידה במסמך, ואין לידה פסקה שאליה אפשר להצמיד אותו מחדש';
 
 /**
- * המצב השני שבו עריכה מסרבת: כיתוב ש**שני** שכניו אינם פסקאות — טבלה
- * מלמעלה וטבלה מלמטה, למשל.
+ * המצב השני שבו עריכה מסרבת: כיתוב ששני שכניו אינם פסקה ואינם טבלה — למשל
+ * כיתוב שנצמד לתוכן עניינים.
  *
- * `captions.insert` מקבל כתובת של פסקה בלבד; עוגן `tbl:…` הוחזר במדידה
- * `TARGET_NOT_FOUND`. בלי הסירוב הזה ההסרה מצליחה, ההוספה נכשלת, והכיתוב
- * שהמשתמש ביקש לערוך פשוט נעלם. הכיתוב שמתחת ללוח — המקרה השכיח — **אינו**
- * נופל לכאן: הוא נתפס בנפילה-לאחור אל הפסקה שאחריו.
+ * טבלה **אינה** נופלת לכאן מאז 2.15.0-next.15 (ראו `AnchorNodeType`), אבל
+ * בלוק מסוג `tableOfContents` נמדד `INVALID_TARGET`, ושליחתו כ„פסקה” כותבת
+ * את הכיתוב בתוך ה-sdt. בלי הסירוב הזה ההסרה מצליחה, ההוספה נכשלת או כותבת
+ * במקום הלא נכון, והכיתוב שהמשתמש ביקש לערוך פשוט נעלם.
  */
-const NOT_PARAGRAPH_DETAIL =
-  'הבלוק שליד הכיתוב אינו פסקה (טבלה או תמונה), ואי אפשר להצמיד אליו את הכיתוב מחדש';
+const NOT_ANCHORABLE_DETAIL =
+  'הבלוק שליד הכיתוב אינו פסקה ואינו טבלה, ואי אפשר להצמיד אליו את הכיתוב מחדש';
 
 /**
  * הנוסח היחיד שמודה באובדן. הוא נאמר רק כשההסרה הצליחה, ההוספה נכשלה,
@@ -443,8 +458,13 @@ export function captionDisplay(label: string, number: number, text: string): str
   return text === '' ? head : `${head}: ${text}`;
 }
 
-function addressOf(nodeId: string): CaptionAddress {
-  return { kind: 'block', nodeType: 'paragraph', nodeId };
+/**
+ * כתובת של בלוק. ברירת המחדל `paragraph`, וזה הסוג של כל **יעד** כאן —
+ * `captions.remove` ו-`paragraphs.setDirection` מקבלים את פסקת הכיתוב עצמה.
+ * העוגן של `captions.insert` הוא היחיד שיכול להיות גם טבלה.
+ */
+function addressOf(nodeId: string, nodeType: AnchorNodeType = 'paragraph'): CaptionAddress {
+  return { kind: 'block', nodeType, nodeId };
 }
 
 /* ------------------------------------------------------------------ */
@@ -559,11 +579,18 @@ async function blockOrder(
   const blocks: OrderedBlock[] = [];
   for (const block of listed.items) {
     if (typeof block.nodeId !== 'string' || block.nodeId === '') continue;
-    // סוג שאינו מחרוזת נחשב „לא פסקה”, ולכן יחסום את העריכה: מנוע שאינו
-    // מדווח סוג אינו נותן ראיה שאפשר להיצמד לבלוק, וניחוש כאן הוא מחיקה.
+    // סוג שאינו מחרוזת נחשב „לא ניתן להיצמדות”, ולכן יחסום את העריכה: מנוע
+    // שאינו מדווח סוג אינו נותן ראיה שאפשר להיצמד לבלוק, וניחוש כאן הוא מחיקה.
     blocks.push({ nodeId: block.nodeId, nodeType: typeof block.nodeType === 'string' ? block.nodeType : '' });
   }
   return { ok: true, blocks };
+}
+
+/** הסוג שהעוגן יישלח בו, או `null` כשהמנוע אינו מקבל בלוק כזה כעוגן. */
+function anchorTypeOf(block: OrderedBlock | null): AnchorNodeType | null {
+  if (block?.nodeType === 'paragraph') return 'paragraph';
+  if (block?.nodeType === 'table') return 'table';
+  return null;
 }
 
 /**
@@ -572,17 +599,21 @@ async function blockOrder(
  * הבלוק שלפניו ו-`below`, ואם הוא הראשון — הבלוק שאחריו ו-`above`. נקרא
  * **לפני** ההסרה, כי אחריה הכיתוב כבר אינו ברשימה ואי אפשר לדעת איפה היה.
  *
- * העוגן חייב להיות **פסקה**: `captions.insert` דוחה `tbl:…` ב-
- * `TARGET_NOT_FOUND`, וכיתוב מתחת לטבלה — הצורה השכיחה ביותר, וזו שמגיעה
- * מכל docx מיובא — נשען בדיוק על שכן כזה. לכן כשהבלוק שלפניו אינו פסקה
- * נבדק הבלוק שאחריו, ו„מעל הבא” מחזיר את הכיתוב לאותו רווח שממנו הוסר.
- * רק כששני השכנים אינם פסקאות הפעולה מסרבת — לפני שנגעו במסמך.
+ * טבלה היא עוגן קביל, וזה **שינוי במנוע**: עד 2.14.0-next.5 הוחזר על
+ * `tbl:…` ‏`TARGET_NOT_FOUND`, ולכן הכיתוב שמתחת ללוח — הצורה השכיחה
+ * ביותר, וזו שמגיעה מכל docx מיובא — נצמד חזרה אל הפסקה שאחריו. ב-
+ * 2.15.0-next.15 נמדד שעוגן טבלה מתקבל בשני הכיוונים, ובלבד שהכתובת נושאת
+ * `nodeType: 'table'` ולא `'paragraph'`. לכן הכיתוב חוזר עכשיו אל הלוח
+ * עצמו, ו„טבלה │ כיתוב │ טבלה” — שסורב עד כה — נערך.
+ *
+ * הנפילה-לאחור אל הבלוק שאחרי נשארת בשביל מה שעדיין נדחה (תוכן עניינים,
+ * למשל), ואחריה הסירוב — לפני שנגעו במסמך.
  */
 function neighbourAnchor(
   blocks: readonly OrderedBlock[],
   nodeId: string,
 ):
-  | { ok: true; anchor: string; position: CaptionPosition }
+  | { ok: true; anchor: CaptionAddress; position: CaptionPosition }
   | { ok: false; detail: string; reason: string } {
   const index = blocks.findIndex((block) => block.nodeId === nodeId);
   if (index === -1) return { ok: false, detail: NOT_FOUND_DETAIL, reason: 'caption-not-found' };
@@ -591,18 +622,20 @@ function neighbourAnchor(
   const after = index < blocks.length - 1 ? blocks[index + 1] : null;
 
   // שני העוגנים מחזירים את הכיתוב לאותו רווח בדיוק: „מתחת לקודם” ו„מעל
-  // הבא” הם אותו מקום. נמדד בדפדפן על `פסקה │ tbl │ כיתוב │ פסקה` —
-  // העוגן הראשון נדחה, השני התקבל, והכיתוב חזר בין הטבלה לפסקה, עם אותו
-  // מספר. התיעוד ב-docs/engine-gaps.md.
-  if (before?.nodeType === 'paragraph') {
-    return { ok: true, anchor: before.nodeId, position: 'below' };
+  // הבא” הם אותו מקום. נמדד בדפדפן על `פסקה │ tbl │ כיתוב │ טבלה` — ההסרה
+  // וההוספה מחדש בעוגן הטבלה שלפני החזירו את הכיתוב בין שתי הטבלאות, עם
+  // אותו מספר. התיעוד ב-docs/engine-gaps.md.
+  const beforeType = anchorTypeOf(before);
+  if (before && beforeType) {
+    return { ok: true, anchor: addressOf(before.nodeId, beforeType), position: 'below' };
   }
-  if (after?.nodeType === 'paragraph') {
-    return { ok: true, anchor: after.nodeId, position: 'above' };
+  const afterType = anchorTypeOf(after);
+  if (after && afterType) {
+    return { ok: true, anchor: addressOf(after.nodeId, afterType), position: 'above' };
   }
 
   if (!before && !after) return { ok: false, detail: NO_NEIGHBOUR_DETAIL, reason: 'no-neighbour' };
-  return { ok: false, detail: NOT_PARAGRAPH_DETAIL, reason: 'anchor-not-paragraph' };
+  return { ok: false, detail: NOT_ANCHORABLE_DETAIL, reason: 'anchor-kind-unsupported' };
 }
 
 /* ------------------------------------------------------------------ */
@@ -650,14 +683,14 @@ function validateDraft(
 async function writeCaption(
   host: CaptionsTarget,
   failedAction: string,
-  input: { adjacentTo: string; position: CaptionPosition; label: string; text: string },
+  input: { adjacentTo: CaptionAddress; position: CaptionPosition; label: string; text: string },
 ): Promise<CommandOutcome> {
   const insert = docOf(host)?.captions?.insert;
   if (typeof insert !== 'function') return unsupported(failedAction);
 
   const inserted = await attempt(failedAction, () =>
     insert({
-      adjacentTo: addressOf(input.adjacentTo),
+      adjacentTo: input.adjacentTo,
       position: input.position,
       label: input.label,
       text: input.text,
@@ -693,8 +726,10 @@ export async function insertCaption(
   const caret = await caretBlock(host, INSERT_FAILED);
   if (!caret.ok) return caret.outcome;
 
+  // הסמן יושב תמיד בפסקה — גם כשהיא פסקה בתוך תא של טבלה (נמדד: לחיצה
+  // בתוך לוח מדווחת את פסקת התא, לא את הלוח). לכן הכתובת כאן היא פסקה.
   return writeCaption(host, INSERT_FAILED, {
-    adjacentTo: caret.nodeId,
+    adjacentTo: addressOf(caret.nodeId),
     position: draft.position === 'above' ? 'above' : 'below',
     label: valid.label,
     text: valid.text,
@@ -711,8 +746,8 @@ export async function insertCaption(
  *
  * העוגן נקרא לפני ההסרה, והסירוב על שכן שאינו קביל קודם לה: הסרה
  * שהצליחה והוספה שנכשלה אחריה היא טקסט שנמחק בלי דרך חזרה, וזה בדיוק המצב
- * שהסדר הזה מונע. שני סירובים כאלה: כיתוב בלי שכן כלל, ושכן שאינו פסקה —
- * הכיתוב שמתחת לטבלה, שהוא המקרה השכיח.
+ * שהסדר הזה מונע. שני סירובים כאלה: כיתוב בלי שכן כלל, ושכן שאינו פסקה
+ * ואינו טבלה — תוכן עניינים, למשל.
  *
  * ואם ההוספה בכל זאת נכשלה אחרי הסרה שהצליחה, התוכן הישן מוחזר למקומו,
  * ורק שחזור שגם הוא נכשל מדווח כאובדן. ראו `LOST_MESSAGE`.

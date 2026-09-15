@@ -428,7 +428,6 @@ import {
 } from './sessions/editor-swap';
 import {
   applyPaneScroll,
-  guardPaneScroll,
   readPaneScroll,
   repairPaneScroll,
   type PaneScroll,
@@ -496,7 +495,7 @@ import {
   type FormattingMarksModel,
 } from './engine/formatting-marks';
 import type { FormattingMarksBlock } from './engine/formatting-marks-layer';
-import { readParagraphIndents } from './engine/paragraph-format';
+import { readParagraphIndents, toggleSelectionSpacing } from './engine/paragraph-format';
 import type { RulerUnit } from './engine/ruler-geometry';
 import {
   applyHebrewDocumentDefaults,
@@ -551,6 +550,7 @@ import {
   saveRulerVisible,
   loadSpellcheckEnabled,
   saveSpellcheckEnabled,
+  loadCanvasColor,
   loadSessionRecord,
   saveSessionRecord,
   loadRecentDocuments,
@@ -596,6 +596,7 @@ import {
 } from './host/workspace';
 import { onPluginHidden, onPluginShown } from './host/lifecycle';
 import { revealZone, type RevealBounds, type RevealZone } from './composables/focus-mode';
+import { applyCanvasColor, normalizeCanvasColor } from './composables/canvas-color';
 import { enterFullscreen, exitFullscreen, isFullscreen, watchFullscreen } from './composables/window-fullscreen';
 import SvgIcon from './ui/icons/SvgIcon.vue';
 import { copySelection, cutSelection, pasteFromClipboard, selectWholeDocument } from './engine/clipboard';
@@ -1416,51 +1417,20 @@ function documentScrollHost(session: DocumentSession): HTMLElement | null {
 }
 
 /**
- * מפרק את השומר של הגלילה בטאב הפעיל. אחד בכל רגע — ראו `restorePaneScroll`.
- */
-let paneScrollGuard: (() => void) | null = null;
-
-/**
  * מחזירה לטאב שנכנס את מיקום הגלילה שנשמר בו.
- *
- * ## שלוש פעולות, ולא אחת
  *
  * **השמה, ועוד אחת בפריים הבא.** הפאנל בדיוק יצא מ-`display: none`, והדפדפן
  * מחשב את גובה התוכן שלו מחדש. השמה שקורית לפני שהחישוב הזה הסתיים נחתכת
  * לגובה שעדיין אינו נכון (`scrollTop` נצמד למקסימום האפשרי באותו רגע). שתיהן
  * אידמפוטנטיות — ראו `applyPaneScroll`.
- *
- * **ואחריהן שומר על אירוע הגלילה הראשון**, וזה מה שמתקן את הבאג שנשאר פתוח:
- * שתי ההשמות נמדדו כמצליחות (`scrollTop` הוא 720 בכל נקודות הזמן — מיד,
- * מיקרו-משימה, rAF, rAF שני ו-150ms), ואז **גלגלת אחת** החזירה אפס. הכתיבה
- * היא של המנוע ולא של הדפדפן, והיא קורית מתוך הגלגלת עצמה — כלומר אחרי כל
- * מה שאנחנו יכולים לעשות מכאן. ההנמקה המלאה והמדידה: `sessions/pane-scroll.ts`
- * ו-`docs/engine-gaps.md`.
- *
- * ## למה השומר נדרך בתוך ה-rAF ולא לפניו
- *
- * ההשמה הראשונה עלולה להיחתך (ראו למעלה), ואירוע הגלילה שהיא יורה היה נראה
- * לשומר בדיוק כמו „המשתמש גלל למקום אחר” — כלומר מכבה אותו לפני שהמנוע כתב
- * בכלל. אירועי גלילה נורים לפני קריאות ה-rAF של אותו פריים, ולכן דריכה בתוך
- * ה-rAF היא הרגע הראשון שבו כבר אין הד תלוי באוויר.
  */
 function restorePaneScroll(session: DocumentSession, scroll: PaneScroll): void {
-  const arm = (): void => {
-    paneScrollGuard?.();
-    paneScrollGuard = guardPaneScroll(documentScrollHost(session), scroll);
-  };
-
   applyPaneScroll(documentScrollHost(session), scroll);
-  if (typeof requestAnimationFrame !== 'function') {
-    arm();
-    return;
-  }
+  if (typeof requestAnimationFrame !== 'function') return;
   requestAnimationFrame(() => {
     // רק אם הוא עדיין הפעיל: מעבר טאב מהיר יותר מפריים היה מחזיר את הגלילה
     // של הטאב הקודם לתוך זה שנכנס אחריו.
-    if (activeSession.value !== session) return;
-    applyPaneScroll(documentScrollHost(session), scroll);
-    arm();
+    if (activeSession.value === session) applyPaneScroll(documentScrollHost(session), scroll);
   });
 }
 
@@ -2052,10 +2022,6 @@ function restoreFromSession(session: DocumentSession): void {
  */
 function activateTab(session: DocumentSession): void {
   if (activeSession.value === session) return;
-
-  // השומר שייך לטאב שיוצא, והוא מאזין ל-host שלו. ראו `restorePaneScroll`.
-  paneScrollGuard?.();
-  paneScrollGuard = null;
 
   const previous = activeSession.value;
   if (previous) {
@@ -3427,7 +3393,12 @@ async function onPickAndOpen(onLeavingPicker?: () => void): Promise<void> {
       }
 
       if (decision.action === 'save-first') {
-        const outcome = await save.saveNow({ suggestedName: documentFileName(title.value, saveExtension.value) });
+        // `untilClean`: המסמך הזה עומד להתחלף, ואין אחריו השהיה של autosave
+        // שתשמור את מה שהוקלד בזמן הסבב. ראו `saveLoop`.
+        const outcome = await save.saveNow({
+          suggestedName: documentFileName(title.value, saveExtension.value),
+          untilClean: true,
+        });
         if (outcome.status !== 'saved') {
           if (outcome.status === 'failed') setStatus(outcome.message, true);
           else setStatus('הפתיחה נעצרה — המסמך לא נשמר');
@@ -3468,7 +3439,10 @@ async function onNewDocument(): Promise<boolean> {
     if (decision.action === 'switch') await discardWithBackup(activeSession.value);
     if (decision.action === 'cancel') return false;
     if (decision.action === 'save-first') {
-      const outcome = await save.saveNow({ suggestedName: documentFileName(title.value, saveExtension.value) });
+      const outcome = await save.saveNow({
+        suggestedName: documentFileName(title.value, saveExtension.value),
+        untilClean: true,
+      });
       if (outcome.status !== 'saved') return false;
     }
   }
@@ -3895,6 +3869,8 @@ async function resolveUnsavedBeforeClose(
   if (decision.action === 'save-first') {
     const outcome = await session.save.saveNow({
       suggestedName: documentFileName(sessionDisplayTitle(session), sessionSaveExtension(session)),
+      // הטאב נסגר מיד אחרי זה — ראו `saveLoop`.
+      untilClean: true,
     });
     // שמירה שנכשלה או שבוטלה עוצרת את הסגירה: המשתמש ביקש לשמור, ולסגור בכל
     // זאת היה מתעלם ממה שביקש.
@@ -4652,6 +4628,7 @@ const runShellAction = createShellActionRunner({
   // הכפתורים המקבילים ברצועה — ולכן אותה פונקציה, ואותו דיווח.
   selectAll: () => void runSelectAll(),
   pageBreak: () => void runPageBreak(),
+  toggleSpaceBefore: () => void runToggleSpaceBefore(),
   growFont: () => void runFontStep(grownFontSize),
   shrinkFont: () => void runFontStep(shrunkFontSize),
   vertAlign: (kind) => void runVertAlign(kind),
@@ -4779,6 +4756,18 @@ async function runSelectAll(): Promise<void> {
 
 async function runPageBreak(): Promise<void> {
   reportCommand(await startParagraphOnNewPage(activeSuperdoc.value), 'page-break-before');
+}
+
+/**
+ * Ctrl+0 — מוסיף או מסיר 12 נקודות רווח לפני הפסקה, על כל הבחירה.
+ *
+ * 12 הוא הערך ש-Word קובע באותו צירוף, והוא חוזר כאן כמספר ולא כקבוע משותף
+ * עם הרצועה: `SPACE_STEP_TWIPS` שם הוא בחירת מוצר של הפקד, וקבוע אחד לשניהם
+ * היה קושר את הקיצור לשינוי בתפריט. הכלל עצמו — מתי מוסיף ומתי מסיר — כן
+ * משותף, ויושב ב-`toggleSelectionSpacing`.
+ */
+async function runToggleSpaceBefore(): Promise<void> {
+  reportCommand(await toggleSelectionSpacing(activeSuperdoc.value, 'before', 12 * 20), 'space-before-toggle');
 }
 
 /**
@@ -5108,6 +5097,7 @@ onMounted(async () => {
       storedRecents,
       storedDiscarded,
       storedSpellcheck,
+      storedCanvasColor,
       customShortcutsNotice,
     ] =
       await Promise.all([
@@ -5117,6 +5107,7 @@ onMounted(async () => {
         loadRecentDocuments(),
         loadDiscardBackups(),
         loadSpellcheckEnabled(),
+        loadCanvasColor(),
         // לפני פתיחת המסמך הראשון: MacroKit קוראת `reservedShortcuts` פעם
         // אחת בלבד. אם הקיצורים האישיים ייטענו אחר כך, מאקרו קיים יכול
         // להיקשר אליהם לפני שהם מוכרזים כשמורים ולהשתיק אותם.
@@ -5132,6 +5123,11 @@ onMounted(async () => {
     // אותה הכרעה בדיוק כמו של „אחרונים”: מה שמגיע מ-storage אין לו הבטחת
     // סדר, והמיון הוא של הרשימה שכל שאר הקוד רואה — לא של התצוגה בלבד.
     discardedBackups.value = normalizeBackups(storedDiscarded);
+    // צבע הבד מוחל כאן ולא בלשונית „תצוגה”: הפקד שמשנה אותו יושב בלשונית
+    // שמורכבת רק כשהיא הפעילה (`v-else-if` ב-Ribbon.vue), והבד נראה מהרגע
+    // הראשון. `applyCanvasColor` ולא `setCanvasColor` — זו קריאה, ואין טעם
+    // לכתוב חזרה ל-storage את מה שהרגע נקרא ממנו.
+    applyCanvasColor(normalizeCanvasColor(storedCanvasColor));
 
     // בדיקת האיות — **לא** ב-await: משיכת המילון היא 1.3MB, והעלייה לא
     // תמתין לה. מי שהדליק בהפעלה הקודמת יקבל את הסימון כשהמילון יגיע.
@@ -5220,8 +5216,6 @@ onUnmounted(() => {
   contextMenuListener = null;
   fullscreenListener?.();
   fullscreenListener = null;
-  paneScrollGuard?.();
-  paneScrollGuard = null;
   // מעטפת שנפרקת בזמן מסך מלא הייתה משאירה את החלון מורחב בלי מי שיצא ממנו.
   if (isFullscreen()) void exitFullscreen();
   // הפריט עצמו אינו מוסר כאן: אוצריא מסירה את רישומי המופע בעצמה בפירוק,
@@ -5684,12 +5678,15 @@ async function discardedBytes(session: DocumentSession): Promise<Uint8Array | nu
   inset: 0;
 }
 
+/* הרקע הוא `--word-canvas-bg` ולא טוקן ערכת הנושא ישירות: זהו הבד, והוא
+   האלמנט היחיד שהמשתמש יכול לצבוע (composables/canvas-color.ts). ברירת
+   המחדל של הטוקן היא אותו צבע ערכת נושא בדיוק — ראו styles/tokens.css. */
 .editor-stack {
   position: relative;
   flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
-  background: var(--color-surface-container-highest);
+  background: var(--word-canvas-bg);
   overflow: hidden;
 }
 

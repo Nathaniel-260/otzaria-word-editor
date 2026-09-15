@@ -15,9 +15,10 @@ import HomeTab from '../../src/ui/ribbon/tabs/HomeTab.vue';
 import {
   autoUnmount,
   buttonByTip,
+  checkedRibbonMenuItem,
   createCommandDouble,
   mountUi,
-  pickerValue,
+  openRibbonMenu,
   settle,
   tipOf,
 } from './harness';
@@ -26,14 +27,25 @@ autoUnmount();
 
 const GROW = 'הגדל מרווח שורות';
 const SHRINK = 'הקטן מרווח שורות';
-const PICKER = 'מרווח בין שורות';
+const MENU = 'מרווח שורות וריווח';
+
+/**
+ * המרווח שהפקד מציג — הפריט המסומן בתפריט, אחרי פתיחתו.
+ *
+ * היה כאן `pickerValue` על `<select>`. הבורר הוחלף בתפריט של Word, ולכן
+ * „מה מוצג” אינו ערך של פקד אלא פריט מסומן: הפתיחה היא חלק מהקריאה.
+ */
+async function shownSpacing(wrapper: Parameters<typeof openRibbonMenu>[0]): Promise<string> {
+  await openRibbonMenu(wrapper, MENU);
+  return checkedRibbonMenuItem(wrapper);
+}
 
 describe('צעד במרווח השורות', () => {
   it('„הגדל” שולח 0.1 מעל מה שמוצג, ולא את האפשרות הבאה בבורר', async () => {
     const harness = mountUi(HomeTab);
     await settle();
     // 1.5 הוא DEFAULT_LINE_HEIGHT, ומה שהבורר מציג כשאין דיווח מהמנוע.
-    expect(pickerValue(harness.wrapper, PICKER)).toBe('1.5');
+    expect(await shownSpacing(harness.wrapper)).toBe('1.5');
 
     await buttonByTip(harness.wrapper, GROW).trigger('click');
     await settle();
@@ -41,7 +53,7 @@ describe('צעד במרווח השורות', () => {
     // 2.0 היא האפשרות הבאה ברשימה; מי שלוחץ „הגדל” מבקש 1.6.
     expect(harness.adapter.payloads('line-height')).toEqual([{ lineHeight: 1.6 }]);
     expect(harness.adapter.rejected).toEqual([]);
-    expect(pickerValue(harness.wrapper, PICKER)).toBe('1.6');
+    expect(await shownSpacing(harness.wrapper)).toBe('1.6');
   });
 
   it('„הקטן” יורד בצעד אחד', async () => {
@@ -52,7 +64,7 @@ describe('צעד במרווח השורות', () => {
     await settle();
 
     expect(harness.adapter.payloads('line-height')).toEqual([{ lineHeight: 1.4 }]);
-    expect(pickerValue(harness.wrapper, PICKER)).toBe('1.4');
+    expect(await shownSpacing(harness.wrapper)).toBe('1.4');
   });
 
   it('שלוש לחיצות צועדות שלושה צעדים, ולא שולחות את אותו ערך שוב', async () => {
@@ -71,7 +83,7 @@ describe('צעד במרווח השורות', () => {
     ]);
   });
 
-  it('ערך שנוצר בלחיצה נכנס לבורר במקומו לפי הסדר', async () => {
+  it('ערך שנוצר בלחיצה נכנס לתפריט במקומו לפי הסדר', async () => {
     const harness = mountUi(HomeTab);
     await settle();
 
@@ -79,10 +91,8 @@ describe('צעד במרווח השורות', () => {
     await settle();
 
     // בראש הרשימה הוא היה נותן „1.6, 1.0, 1.15…” — סולם שאי אפשר לאמוד בו מרחק.
-    const values = harness.wrapper
-      .findAll(`select[data-tip-title="${PICKER}"] option`)
-      .map((option) => option.attributes('value'));
-    expect(values).toEqual(['1.0', '1.15', '1.5', '1.6', '2.0', '2.5', '3.0']);
+    const labels = await openRibbonMenu(harness.wrapper, MENU);
+    expect(labels.slice(0, 7)).toEqual(['1.0', '1.15', '1.5', '1.6', '2.0', '2.5', '3.0']);
   });
 
   it('בקצות הסולם הכפתור כבוי, והכרטיס אומר למה ולאן להמשיך', async () => {
@@ -109,7 +119,7 @@ describe('צעד במרווח השורות', () => {
     expect(tipOf(shrink).description).toBe('0.1 הוא המרווח הקטן ביותר כאן. מתחתיו — „תפריט פסקה”');
   });
 
-  it('הכפתורים כבויים כשהפקודה אינה זמינה, כמו הבורר שלצדם', async () => {
+  it('הכפתורים כבויים כשהפקודה אינה זמינה, כמו התפריט שלצדם', async () => {
     const harness = mountUi(HomeTab, {
       adapter: createCommandDouble({ states: { 'line-height': { enabled: false } } }),
     });
@@ -119,7 +129,7 @@ describe('צעד במרווח השורות', () => {
     expect(buttonByTip(harness.wrapper, SHRINK).attributes('disabled')).toBeDefined();
   });
 
-  it('בזמן שהקבלה באוויר, הבורר והצעד השני נעולים', async () => {
+  it('בזמן שהקבלה באוויר, התפריט והצעד השני נעולים', async () => {
     const adapter = createCommandDouble({ held: ['line-height'] });
     const harness = mountUi(HomeTab, { adapter });
     await settle();
@@ -130,7 +140,7 @@ describe('צעד במרווח השורות', () => {
     expect(adapter.payloads('line-height')).toEqual([{ lineHeight: 1.6 }]);
     expect(buttonByTip(harness.wrapper, GROW).attributes('disabled')).toBeDefined();
     expect(buttonByTip(harness.wrapper, SHRINK).attributes('disabled')).toBeDefined();
-    expect(harness.wrapper.find(`select[data-tip-title="${PICKER}"]`).attributes('disabled')).toBeDefined();
+    expect(buttonByTip(harness.wrapper, MENU).attributes('disabled')).toBeDefined();
 
     // גם dispatch מלאכותי של אירוע אינו פותח בקשה שנייה.
     await buttonByTip(harness.wrapper, SHRINK).trigger('click');
@@ -173,7 +183,8 @@ describe('צעד במרווח השורות', () => {
     }
 
     expect([...drawings.values()].filter((names) => names.length > 1)).toEqual([]);
-    // ושהמדידה ראתה את הקבוצה כולה: שמונה פקדים בשורה העליונה, שישה בתחתונה.
-    expect(drawings.size).toBe(14);
+    // ושהמדידה ראתה את הקבוצה כולה: שמונה פקדים בשורה העליונה, שבעה בתחתונה
+    // (הבורר שהיה שם הוחלף בתפריט „מרווח שורות וריווח”, שיש לו ציור משלו).
+    expect(drawings.size).toBe(15);
   });
 });

@@ -445,6 +445,27 @@ export const TELL_ME_ACTIONS: readonly TellMeAction[] = [
     command: { id: 'indent-decrease' },
   },
   {
+    /*
+     * הפקד עצמו, ולא ערך מסוים בו: הוא מחזיק גם את מרווח השורות וגם את
+     * הרווח בין הפסקאות, ומי שמחפש „רווח בין פסקאות” מחפש אותו ולא את 1.5.
+     * `ribbonTab` ולא `command` — תפריט אינו פקודה שאפשר להריץ מכאן.
+     */
+    id: 'para-spacing-menu',
+    title: 'מרווח שורות וריווח',
+    category: 'בית > פסקה',
+    description: inTab('home', 'מרווח שורות וריווח'),
+    keywords: [
+      'מרווח שורות וריווח',
+      'רווח בין פסקאות',
+      'ריווח בין פסקאות',
+      'רווח לפני הפסקה',
+      'רווח אחרי הפסקה',
+      'paragraph spacing',
+    ],
+    icon: 'lineSpacing',
+    ribbonTab: 'home',
+  },
+  {
     id: 'para-spacing-1',
     title: 'מרווח שורות 1.0 (יחיד)',
     category: 'בית > פסקה',
@@ -1082,6 +1103,27 @@ export const TELL_ME_ACTIONS: readonly TellMeAction[] = [
     description: inTab('view', 'רוחב עמוד'),
     keywords: ['רוחב עמוד', 'התאם לרוחב', 'זום', 'fit width'],
     icon: 'fitWidth',
+    ribbonTab: 'view',
+  },
+  {
+    /*
+     * „רקע עמוד” הוא מה שרוב המשתמשים יחפשו, וזה **לא** מה שהפקד עושה: הצבע
+     * חל על הבד — המשטח שסביב הדף — והוא העדפת תצוגה שאינה נכתבת למסמך. לכן
+     * הוא מילת מפתח ולא הכותרת. `ribbonTab` ולא `command`: מה שנפתח הוא פלטה.
+     */
+    id: 'view-canvas-color',
+    title: 'צבע רקע',
+    category: 'תצוגה',
+    description: inTab('view', 'צבע רקע'),
+    keywords: [
+      'צבע רקע',
+      'רקע',
+      'רקע עמוד',
+      'צבע רקע העורך',
+      'background color',
+      'page color',
+    ],
+    icon: 'shading',
     ribbonTab: 'view',
   },
   {

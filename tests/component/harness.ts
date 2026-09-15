@@ -418,10 +418,11 @@ export interface SuperdocDoubleOptions {
   captions?: {
     /**
      * `tableBefore` שם לפני הכיתוב בלוק `tbl:*` מסוג `table`, ו-`tableAfter`
-     * אחריו. הראשון הוא הצורה השכיחה של כיתוב במסמך אמיתי — „טבלה 1: …”
-     * שמתחת ללוח — וזו שנמדדה: העוגן הטבעי הוא אז הטבלה, ו-`captions.insert`
-     * מקבל כתובת של פסקה בלבד. שניהם יחד הם המצב שאין לו עוגן כלל. כפיל של
-     * פסקאות בלבד לא היה מודד אף אחד מהמסלולים האלה.
+     * אחריו — הצורה השכיחה של כיתוב במסמך אמיתי („טבלה 1: …” שמתחת ללוח),
+     * ומאז 2.15.0-next.15 גם העוגן שנשלח בפועל. `tocBefore`/`tocAfter` שמים
+     * שם בלוק `tableOfContents`, שהוא הסוג שהמנוע עדיין דוחה — ובלעדיו אין
+     * מה שיוכיח שהסירוב שנשאר עדיין חוסם. כפיל של פסקאות בלבד לא היה מודד
+     * אף אחד מהמסלולים האלה.
      */
     items?: readonly {
       nodeId: string;
@@ -429,6 +430,8 @@ export interface SuperdocDoubleOptions {
       text?: string;
       tableBefore?: boolean;
       tableAfter?: boolean;
+      tocBefore?: boolean;
+      tocAfter?: boolean;
     }[];
   };
 }
@@ -588,9 +591,15 @@ export function createSuperdocDouble(options: SuperdocDoubleOptions = {}): Super
         ...(item.tableBefore
           ? [{ nodeId: `tbl:${item.nodeId}-before`, nodeType: 'table', styleId: '' }]
           : []),
+        ...(item.tocBefore
+          ? [{ nodeId: `toc:${item.nodeId}-before`, nodeType: 'tableOfContents', styleId: '' }]
+          : []),
         { nodeId: item.nodeId, nodeType: 'paragraph', styleId: 'Caption' },
         ...(item.tableAfter
           ? [{ nodeId: `tbl:${item.nodeId}-after`, nodeType: 'table', styleId: '' }]
+          : []),
+        ...(item.tocAfter
+          ? [{ nodeId: `toc:${item.nodeId}-after`, nodeType: 'tableOfContents', styleId: '' }]
           : []),
       ]),
     )
@@ -962,21 +971,32 @@ export function createSuperdocDouble(options: SuperdocDoubleOptions = {}): Super
         const failed = receipt('captions.insert');
         if (!failed.success) return failed;
         const { adjacentTo, position, label, text } = input as {
-          adjacentTo: { nodeId: string };
+          adjacentTo: { nodeId: string; nodeType?: string };
           position: 'above' | 'below';
           label: string;
           text?: string;
         };
         const at = blocks.findIndex((block) => block.nodeId === adjacentTo.nodeId);
-        // בלוק שאינו פסקה נדחה כמו בלוק שאינו קיים, וזה מה שנמדד במנוע
-        // האמיתי: `adjacentTo` של `tbl:*` מוחזר `TARGET_NOT_FOUND` באותו
-        // נוסח בדיוק.
-        if (at === -1 || blocks[at].nodeType !== 'paragraph') {
+        // הכתובת חייבת לשאת את הסוג **האמיתי** של הבלוק, וזה מה שנמדד על
+        // 2.15.0-next.15: טבלה שנשלחה כ-`paragraph`, ופסקה שנשלחה כ-`table`,
+        // מוחזרות שתיהן `TARGET_NOT_FOUND` באותו נוסח.
+        if (at === -1 || blocks[at].nodeType !== adjacentTo.nodeType) {
           return {
             success: false,
             failure: {
               code: 'TARGET_NOT_FOUND',
-              message: `target paragraph ${adjacentTo.nodeId} was not found`,
+              message: `target ${adjacentTo.nodeType ?? 'paragraph'} ${adjacentTo.nodeId} was not found`,
+            },
+          };
+        }
+        // פסקה וטבלה עליונה, ותו לא: בלוק `tableOfContents` נמדד `INVALID_TARGET`
+        // גם כשהכתובת נושאת את סוגו, בנוסח של המנוע עצמו.
+        if (blocks[at].nodeType !== 'paragraph' && blocks[at].nodeType !== 'table') {
+          return {
+            success: false,
+            failure: {
+              code: 'INVALID_TARGET',
+              message: `create.paragraph only supports before/after placement relative to paragraph-like blocks or top-level tables; received ${blocks[at].nodeType}.`,
             },
           };
         }
@@ -1490,6 +1510,53 @@ export async function setPicker(
   await picker.trigger('focus');
   await picker.setValue(value);
   await picker.trigger('keydown', { key: 'Enter' });
+}
+
+/* ------------------------------------------------------------------ */
+/* תפריטי הרצועה (RibbonMenuButton)                                    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * פותחת תפריט של פקד ברצועה לפי הטולטיפ שלו, ומחזירה את תוויות הפריטים.
+ *
+ * כאן ולא בקובץ בדיקה יחיד מפני שיש כבר שלושה צרכנים (רשימות, שדות, מרווח
+ * שורות), וכל אחד מהם כתב לעצמו את אותן שתי שורות. במצב מפוצל הלחיצה היא על
+ * החץ ולא על הגוף — הגוף מפעיל פעולה — ולכן העוטפת מחפשת אותו קודם.
+ */
+export async function openRibbonMenu(wrapper: VueWrapper, tip: string): Promise<string[]> {
+  const button = buttonByTip(wrapper, tip);
+  const menu = button.element.closest('.ribbon-menu');
+  // לחיצה על פקד פתוח **סוגרת** אותו. בדיקה שקוראת „מה מוצג” פעמיים בריצה
+  // אחת הייתה מקבלת רשימה ריקה בפעם השנייה, ונראית ככשל של הפקד.
+  if (!menu?.querySelector('.ribbon-menu__popover')) {
+    const arrow = wrapper
+      .findAll('.word-split__arrow')
+      .find((node) => node.element.closest('.ribbon-menu') === menu);
+    await (arrow ?? button).trigger('click');
+    await settle();
+  }
+  return wrapper.findAll('.ribbon-menu__item-label').map((node) => node.text());
+}
+
+/** לוחצת על פריט בתפריט פתוח, לפי התווית שלו. */
+export async function clickRibbonMenuItem(wrapper: VueWrapper, label: string): Promise<void> {
+  const item = wrapper
+    .findAll('.ribbon-menu__item')
+    .find((node) => node.find('.ribbon-menu__item-label').text() === label);
+  if (!item) throw new Error(`הפריט „${label}” לא נמצא בתפריט`);
+  await item.trigger('click');
+  await settle();
+}
+
+/**
+ * התווית של הפריט המסומן בתפריט הפתוח, או `''` כשאין כזה.
+ *
+ * זה מה שהחליף את `pickerValue` למרווח השורות: הערך הנוכחי אינו כתוב בפקד
+ * אלא מסומן בתוך התפריט, בדיוק כמו ב-Word.
+ */
+export function checkedRibbonMenuItem(wrapper: VueWrapper): string {
+  const checked = wrapper.find('.ribbon-menu__item--checked');
+  return checked.exists() ? checked.find('.ribbon-menu__item-label').text() : '';
 }
 
 const NO_TIP: TipContent = { title: '', shortcut: '', description: '' };

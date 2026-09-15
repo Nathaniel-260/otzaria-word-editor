@@ -141,6 +141,30 @@ function makeCtx(app) {
     throw new Error(`הסמן לא הגיע לפסקה ${k} (נמצא ב-${JSON.stringify(last)})`);
   }
 
+  /**
+   * גרירה מפסקה לפסקה — בחירה שנוגעת בכמה, כדי לבדוק פעולות שחלות על כולן.
+   *
+   * `selectPara` שמתחתיה גוררת בתוך שורה אחת, וזה מספיק לפעולה שפועלת על
+   * הפסקה שהסמן בה. „הוסף רווח” פועל על כל הבחירה, ובחירה של פסקה אחת אינה
+   * מבדילה בין המימוש הנכון לבין זה שמסתפק בראשונה.
+   */
+  async function selectParaRange(from, to) {
+    const a = JSON.parse(await js(LINE(from)));
+    const b = JSON.parse(await js(LINE(to)));
+    const move = (x, y, buttons) => app.cdp.send('Input.dispatchMouseEvent',
+      { type: 'mouseMoved', x, y, button: buttons ? 'left' : 'none', buttons, clickCount: 1 });
+    await move(a.right, a.y, 0);
+    await app.cdp.send('Input.dispatchMouseEvent',
+      { type: 'mousePressed', x: a.right, y: a.y, button: 'left', buttons: 1, clickCount: 1 });
+    await app.sleep(80);
+    await move(b.left, b.y, 1);
+    await app.sleep(120);
+    await app.cdp.send('Input.dispatchMouseEvent',
+      { type: 'mouseReleased', x: b.left, y: b.y, button: 'left', buttons: 0, clickCount: 1 });
+    await app.sleep(700);
+    return { selection: await app.selection() };
+  }
+
   /** בוחרת את הפסקה k כטווח: גרירה מקצה לקצה. */
   async function selectPara(k) {
     const r = JSON.parse(await js(LINE(k)));
@@ -271,7 +295,7 @@ function makeCtx(app) {
     return files;
   }
 
-  return { js, currentBlock, caretAt, selectPara, clickEl, fill, docx, clickStyle, clean, closeDialogs, step, seed, LINE, TEXT_BOX };
+  return { js, currentBlock, caretAt, selectPara, selectParaRange, clickEl, fill, docx, clickStyle, clean, closeDialogs, step, seed, LINE, TEXT_BOX };
 }
 
 /** מריצה שלב בדפדפן משלו — המנוע מתדרדר אחרי כמה עשרות ייצואים. */
@@ -327,12 +351,15 @@ async function phase(label, body) {
 
 const LINES = ['alpha rho', 'beta', 'gamma', 'delta', 'epsilon rho', 'zeta'];
 
+/** הפקד שהחליף את בורר מרווח השורות — תפריט „מרווח שורות וריווח” של Word. */
+const SPACING_MENU = 'מרווח שורות וריווח';
+
 /* ================================================================== */
 /* שלב א' — פיסקה                                                      */
 /* ================================================================== */
 
 await phase('שלב א — קבוצת „פיסקה"', async (app, ctx) => {
-  const { js, caretAt, selectPara, clickEl, fill, docx, clickStyle, clean, closeDialogs, step, seed, TEXT_BOX } = ctx;
+  const { js, caretAt, selectPara, selectParaRange, clickEl, fill, docx, clickStyle, clean, closeDialogs, step, seed, TEXT_BOX } = ctx;
 
   /* -------- מצב הפתיחה --------
    *
@@ -436,30 +463,111 @@ await phase('שלב א — קבוצת „פיסקה"', async (app, ctx) => {
   /* -------- מרווח בין שורות -------- */
   await step('מרווח בין שורות', async () => {
     await caretAt(1);
-    const opts = await app.options('מרווח בין שורות');
-    console.log('אפשרויות:', JSON.stringify(opts));
+    // הבורר שהיה כאן הוחלף בתפריט של Word. הערכים הם פריטים, לא `option`,
+    // ולכן `openMenu`/`clickMenu` ולא `options`/`selectValue`.
+    const items = (await app.openMenu(SPACING_MENU)) ?? [];
+    const values = items.map((item) => item.label).filter((label) => /^\d+(\.\d+)?$/.test(label));
+    console.log('פריטי התפריט:', JSON.stringify(items.map((i) => i.label)));
+    if (!values.length) { report.fail('מרווח בין שורות', `אין ערכים בתפריט: ${JSON.stringify(items)}`); return; }
     const results = [];
-    for (const opt of opts) {
+    for (const value of values) {
       await caretAt(1);
-      await app.selectValue('מרווח בין שורות', opt.value);
-      await app.sleep(900);
-      const pPr = pPrOf(await docx(`spacing-${opt.value}`), 'beta') || '';
+      await app.openMenu(SPACING_MENU);
+      await app.clickMenu(value, { after: 900 });
+      const pPr = pPrOf(await docx(`spacing-${value}`), 'beta') || '';
+      await caretAt(1);
+      await app.openMenu(SPACING_MENU);
+      const shown = await app.js(
+        `(function(){var el=document.querySelector('.ribbon-menu__item--checked .ribbon-menu__item-label');return el?el.textContent.trim():'';})()`,
+      );
+      await app.escape();
       results.push({
-        value: opt.value,
+        value,
         line: pPr.match(/<w:spacing[^>]*w:line="(\d+)"/)?.[1] ?? null,
         rule: pPr.match(/<w:spacing[^>]*w:lineRule="([^"]+)"/)?.[1] ?? null,
-        shown: (await app.state('מרווח בין שורות')).value,
-        expected: Math.round(Number(opt.value) * 240),
+        shown,
+        expected: Math.round(Number(value) * 240),
       });
-      console.log(`מרווח ${opt.value}: ${JSON.stringify(results[results.length - 1])}`);
+      console.log(`מרווח ${value}: ${JSON.stringify(results[results.length - 1])}`);
     }
     const c = await clean();
     const bad = results.filter((r) => Number(r.line) !== r.expected);
     const shownBad = results.filter((r) => r.shown !== r.value);
     if (bad.length) report.fail('מרווח בין שורות', `ערכים שלא נכתבו: ${JSON.stringify(bad)}`);
-    else if (shownBad.length) report.partial('מרווח בין שורות', `נכתבו נכון אך הבורר מציג ערך אחר: ${JSON.stringify(shownBad)}`);
+    else if (shownBad.length) report.partial('מרווח בין שורות', `נכתבו נכון אך התפריט מסמן אחרת: ${JSON.stringify(shownBad)}`);
     else if (!c.ok) report.fail('מרווח בין שורות', c.detail);
     else report.pass('מרווח בין שורות', `כל ${results.length} הערכים: ${results.map((r) => `${r.value}→w:line=${r.line}`).join(', ')} (lineRule=auto)`);
+  });
+
+  /* -------- רווח בין פסקאות: הוסף, הסר, ועל כל הבחירה -------- */
+  await step('רווח לפני הפסקה', async () => {
+    await caretAt(1);
+    const opened = (await app.openMenu(SPACING_MENU)) ?? [];
+    const addLabel = (opened.find((item) => item.label.indexOf('רווח לפני') > 0) || {}).label ?? '';
+    console.log('התווית בפתיחה:', addLabel);
+    if (addLabel.indexOf('הוסף') !== 0) {
+      report.fail('רווח לפני הפסקה', `פסקה בלי ריווח מציעה „${addLabel}” במקום „הוסף…”`);
+      await app.escape();
+      return;
+    }
+
+    await app.clickMenu(addLabel, { after: 900 });
+    const added = pPrOf(await docx('space-before-add'), 'beta') || '';
+    const before = added.match(/<w:spacing[^>]*w:before="(\d+)"/)?.[1] ?? null;
+
+    // התווית חייבת להתהפך: פתיחה שנייה שמציעה שוב „הוסף” היא פקד שמשקר.
+    await caretAt(1);
+    const reopened = (await app.openMenu(SPACING_MENU)) ?? [];
+    const removeLabel = (reopened.find((item) => item.label.indexOf('רווח לפני') > 0) || {}).label ?? '';
+
+    await app.clickMenu(removeLabel, { after: 900 });
+    const removed = pPrOf(await docx('space-before-remove'), 'beta') || '';
+    const after = removed.match(/<w:spacing[^>]*w:before="(\d+)"/)?.[1] ?? null;
+
+    const c = await clean();
+    console.log(`w:before אחרי הוספה=${before} | התווית השנייה=${removeLabel} | אחרי הסרה=${after}`);
+    if (before !== '240') report.fail('רווח לפני הפסקה', `נכתב w:before=${before} במקום 240 (12 נק')`);
+    else if (removeLabel.indexOf('הסר') !== 0) report.fail('רווח לפני הפסקה', `אחרי ההוספה התווית נשארה „${removeLabel}”`);
+    else if (after !== '0' && after !== null) report.fail('רווח לפני הפסקה', `ההסרה השאירה w:before=${after}`);
+    else if (!c.ok) report.fail('רווח לפני הפסקה', c.detail);
+    else report.pass('רווח לפני הפסקה', `הוספה → w:before="240"; התווית התהפכה ל„${removeLabel}”; הסרה → w:before=${after ?? 'הוסר'}`);
+    await app.escape();
+  });
+
+  await step('רווח אחרי, על כל הפסקאות המסומנות', async () => {
+    // גרירה על פסקה 1 בלבד אינה מספיקה: מה שנבדק כאן הוא שהפעולה אינה
+    // מסתפקת בפסקה שהסמן בה, וזה נראה רק על בחירה שנוגעת ביותר מאחת.
+    const sel = await selectParaRange(1, 2);
+    console.log('בחירה על שתי פסקאות:', JSON.stringify(sel));
+    const opened = (await app.openMenu(SPACING_MENU)) ?? [];
+    const label = (opened.find((item) => item.label.indexOf('רווח אחרי') > 0) || {}).label ?? '';
+    if (label.indexOf('הוסף') !== 0) {
+      report.fail('רווח אחרי, על כל הפסקאות המסומנות', `התווית היא „${label}”`);
+      await app.escape();
+      return;
+    }
+
+    await app.clickMenu(label, { after: 1200 });
+    const files = await docx('space-after-multi');
+    const afterOf = (text) => (pPrOf(files, text) || '').match(/<w:spacing[^>]*w:after="(\d+)"/)?.[1] ?? null;
+    const beta = afterOf('beta');
+    const gamma = afterOf('gamma');
+    const untouched = afterOf('zeta');
+
+    const c = await clean();
+    console.log(`beta=${beta} gamma=${gamma} zeta=${untouched}`);
+    if (beta !== '240' || gamma !== '240') {
+      report.fail('רווח אחרי, על כל הפסקאות המסומנות',
+        `רק חלק מהבחירה קיבל את הריווח: beta=${beta}, gamma=${gamma}`);
+    } else if (untouched === '240') {
+      report.fail('רווח אחרי, על כל הפסקאות המסומנות', 'פסקה מחוץ לבחירה (zeta) קיבלה ריווח');
+    } else if (!c.ok) {
+      report.fail('רווח אחרי, על כל הפסקאות המסומנות', c.detail);
+    } else {
+      report.pass('רווח אחרי, על כל הפסקאות המסומנות',
+        `שתי הפסקאות בבחירה קיבלו w:after="240", וזו שמחוצה לה נשארה ${untouched ?? 'בלי ריווח'}`);
+    }
+    await app.escape();
   });
 
   /* -------- הזחה -------- */

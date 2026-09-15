@@ -209,6 +209,23 @@ const EN: Readonly<Record<string, string>> = {
   'מותח את השורות עד שני השוליים, מלבד השורה האחרונה':
     'Stretches the lines to both margins, except the last line',
   'מרווח בין שורות': 'Line Spacing',
+  'מרווח שורות וריווח': 'Line and Paragraph Spacing',
+  'אפשרויות מרווח שורות…': 'Line Spacing Options…',
+  'הוסף רווח לפני הפסקה': 'Add Space Before Paragraph',
+  'הסר רווח לפני הפסקה': 'Remove Space Before Paragraph',
+  'הוסף רווח אחרי הפסקה': 'Add Space After Paragraph',
+  'הסר רווח אחרי הפסקה': 'Remove Space After Paragraph',
+  // כיתוב פס התצוגה שבתחתית אותו תפריט. „נק׳” הוא הגרש העברי ולא אפוסטרוף —
+  // אותה מחרוזת בדיוק נסרקת בשער הכיסוי, ושתי הצורות אינן אותו מפתח.
+  'שורה בודדת': 'Single',
+  'שורה כפולה': 'Double',
+  'מרובה': 'Multiple',
+  'בדיוק': 'Exactly',
+  'לפחות': 'At least',
+  'לפני': 'Before',
+  'אחרי': 'After',
+  'נק׳': 'pt',
+  'התצוגה תופיע כשהמסמך ייטען': 'The preview appears once the document loads',
   'הגדל מרווח שורות': 'Increase Line Spacing',
   'הקטן מרווח שורות': 'Decrease Line Spacing',
   'תפריט פסקה': 'Paragraph dialog',
@@ -504,6 +521,12 @@ const EN: Readonly<Record<string, string>> = {
   'שינוי גודל תצוגה': 'Zoom',
   'התאם את תצוגת העמוד לרוחב החלון': 'Fit the page view to the window width',
   'רוחב עמוד': 'Page Width',
+  'רקע': 'Background',
+  'צבע רקע': 'Background Color',
+  'צבע רקע העורך': 'Editor Background Color',
+  // הפריט המנקה בבורר צבע הבד. „ללא צבע” של הפלטה אינו נכון שם — הניקוי
+  // מחזיר את צבע ערכת הנושא, ולא מסיר צבע. ראו `clearLabel` ב-ColorPickerPopover.
+  'ברירת מחדל': 'Default',
 
   // ── לשונית „אוצריא” ────────────────────────────────────────────────
   'אוצריא': 'Otzaria',

@@ -22,8 +22,10 @@ import ColorPickerPopover from '../../src/ui/ribbon/common/ColorPickerPopover.vu
 import {
   autoUnmount,
   buttonByTip,
+  clickRibbonMenuItem,
   createCommandDouble,
   mountUi,
+  openRibbonMenu,
   setPicker,
   settle,
   tipSelector,
@@ -185,7 +187,8 @@ describe('פסקה', () => {
     const harness = mountUi(HomeTab);
     await settle();
 
-    await setPicker(harness.wrapper, 'מרווח בין שורות', '1.5');
+    await openRibbonMenu(harness.wrapper, 'מרווח שורות וריווח');
+    await clickRibbonMenuItem(harness.wrapper, '1.5');
     await settle();
 
     expect(harness.adapter.payloads('line-height')).toEqual([{ lineHeight: 1.5 }]);

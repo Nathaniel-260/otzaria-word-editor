@@ -45,9 +45,13 @@ const NUMBER = 1;
  * `.ribbon-menu` הוא ה-root class של RibbonMenuButton. אם הקומפוננטה אינה
  * מיובאת, האלמנט הזה פשוט לא קיים — לא שגיאה, לא אזהרה שרואים במבט ראשון,
  * רק 0 תוצאות כאן.
+ *
+ * הסינון ל-`.word-split` הוא מה שמשאיר כאן את **הכפתורים המפוצלים** בלבד:
+ * בקבוצה יושב גם תפריט „מרווח שורות וריווח”, שאינו מפוצל (אין לו פעולה על
+ * הגוף), וספירה שכוללת אותו הייתה אומרת „שלושה כפתורי רשימה”.
  */
 function splits(wrapper: VueWrapper) {
-  return wrapper.findAll('.ribbon-menu');
+  return wrapper.findAll('.ribbon-menu').filter((node) => node.find('.word-split').exists());
 }
 
 /** פותחת את התפריט של אחד הכפתורים ומחזירה את תוויות הפריטים שבו. */

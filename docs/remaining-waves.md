@@ -713,12 +713,12 @@ doc.plan.execute({
 | פעולה מדווחת הצלחה וכותבת שדה שאינו קוד Word | `crossRefs.insert`, `authorities.entries.insert`, `subEntry` של המפתח | פרק את ה-zip. אל תשלח. |
 | `configure` בולע ערכים בשקט | `toc`, `index`, `authorities`, `captions`, `footnotes` | ולידציה אצלנו + שער XML |
 | ערך **שבחוזה** נכתב כאסימון שאינו של Word | `symbol`/`chicago`, `eachSection`/`eachSect`, `sectionEnd`/`sectEnd` | בדוק כל ערך ב-union מול ECMA-376 |
-| `update` מוסיף במקום להחליף | `captions.update` | עקיפה ב-`remove`+`insert` **עם** אימות עוגן ורשת שחזור |
+| `update` מוסיף במקום להחליף | `captions.update` | עקיפה ב-`remove`+`insert` **עם** אימות סוג עוגן (מ-`blocks.list`) ורשת שחזור |
 | כתובות לא-ייחודיות | שתי טבלאות תוכן עניינים = אותו `nodeId` | דה-דופליקציה, ודיווח חלקיות במקום „בוצע” |
 | ישות אחת מסתירה אחרת באותה כתובת | הערת שוליים מול הערת סיום | `get` לאימות + **נעילה** (TOCTOU) |
 | `list` מחזיר עמוד ומטופל כמסמך | `fields`, `toc`, `sections` | שאיבה עד `total`; כשל חלקי = מצב ריק |
 | הסרה משאירה שיירים | `toc.remove` | ניקוי מפורש + הודעה כשהזיהוי לא תפס |
-| עוגן שאינו פסקה נדחה | `captions.insert` על `tbl:*` | אימות סוג לפני מגע + נפילה-לאחור |
+| כתובת עם `nodeType` שקרי מתקבלת ונכתבת במקום הלא-נכון | `captions.insert`/`captions.update` על בלוק `tableOfContents` שנשלח כ-`paragraph` | סוג אמיתי מ-`blocks.list`, רשימה סגורה של סוגים שאומתו, סירוב על כל השאר לפני מגע |
 | הכפיל אינו יודע לייצר את המסלול | גל 8 (רק פסקאות), גל 9 (אותו tick) | הרחב את הכפיל, לא רק את הבדיקות |
 | אין דרך להזיז את הסמן בין stories | כותרות, מספרי עמודים | אמור זאת ב-tooltip; אל תבטיח |
 | `selection.current` אינו מדווח מקטע | כל `sections.*` | הפעולה חלה על כל המקטעים, ומתועדת ככזאת |

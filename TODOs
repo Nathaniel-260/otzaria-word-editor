@@ -9,7 +9,7 @@
 
 ## מעקב מנוע
 
-באנר „edit-rejected” של superdoc@2.11.0 — מוסתר אצלנו ב-engine-chrome.css, כי הוא מצויר באנגלית גם תחת `ui: false`. דווח כ-superdoc/docx-editor#3957. בכל שדרוג מנוע לבדוק אם נסגר (מתג, הגדרת טקסטים, או כיבוד `ui: false`) — ואז למחוק את הכלל ואת tests/contract/engine-edit-rejected-banner.test.ts, במקום להשאיר הסתרה מיותרת
+באנר „edit-rejected” של superdoc@2.11.0 — [סגור ב-superdoc 2.15.0-next.15] היה מוסתר אצלנו ב-engine-chrome.css, כי צויר באנגלית גם תחת `ui: false`. דווח כ-superdoc/docx-editor#3957; המנוע תיקן זאת ומפסיק לצייר את הבאנר. כלל ההסתרה הוסר, ו-tests/contract/engine-edit-rejected-banner.test.ts הפוך לבדוק את זה (קומיט 5f72a38)
 
 
 https://mitmachim.top/post/1238414

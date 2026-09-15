@@ -287,20 +287,42 @@ async function widen(app) {
   await sleep(2_000);
 }
 
-/** פותחת docx דרך בורר הקבצים של הדמה — התבנית של load-progress-qa.mjs. */
+const titleNow = (app) => app.js("document.querySelector('.doc-title-input')?.value ?? null");
+
+/**
+ * פותחת docx דרך בורר הקבצים של הדמה, במסלול שהמשתמש עובר בו — התבנית של
+ * load-progress-qa.mjs: „פתח קובץ” ברצועה פותח את דיאלוג הפתיחה, והבורר נקרא
+ * רק מ„עיון בקבצים…” שבתוכו.
+ *
+ * **והפתיחה מוכחת, לא מונחת.** גרסה קודמת לחצה על „פתח קובץ” בלבד, מלפני
+ * שהכפתור פתח דיאלוג, והמתינה שמונה שניות. שום מסמך לא נפתח: השער מדד את
+ * המסמך שהוקלד, דיווח שלוש שורות אדומות על כל מנוע, וזה נראה בדיוק כמו פער
+ * במנוע (נמדד על 2.15.0-next.15: `rPrChange` נכנסו 2, יצאו 0). לכן ההמתנה היא
+ * לכותרת של **המסמך הזה** — שם קובץ ו-token משלו לכל פתיחה, אחרת פתיחה שנייה
+ * שלא קרתה נראית כמו הראשונה — ופתיחה שלא הגיעה זורקת, כלומר כשל של השער.
+ */
 async function open(app, buffer, name) {
   const dataUrl = `data:${DOCX_MIME};base64,` + buffer.toString('base64');
   await app.js(
     `window.__qaHost.replies['fs.pickUserFile']=function(){return Promise.resolve({success:true,error:null,` +
-      `data:{token:'qa-bcs',url:${JSON.stringify(dataUrl)},name:${JSON.stringify(name)},size:${buffer.length},access:'readwrite'}})}`,
+      `data:{token:${JSON.stringify(`qa-bcs-${name}`)},url:${JSON.stringify(dataUrl)},name:${JSON.stringify(name)},size:${buffer.length},access:'readwrite'}})}`,
   );
   await app.tab('קובץ');
-  if (!(await app.click('פתח קובץ', { after: 8_000 }))) throw new Error('„פתח קובץ” לא נמצא ברצועה');
+  if (!(await app.click('פתח קובץ', { after: 600 }))) throw new Error('„פתח קובץ” לא נמצא ברצועה');
+  // גוף הדיאלוג נגלל; כפתור מחוץ לחלון מקבל rect אך הלחיצה נופלת באוויר.
+  await app.js("document.querySelector('.open-browse')?.scrollIntoView({ block: 'center' })");
+  if (!(await app.click('עיון בקבצים…', { after: 300 }))) throw new Error('„עיון בקבצים…” לא נמצא בדיאלוג הפתיחה');
+
+  const title = name.replace(/\.docx$/i, '');
   for (let waited = 0; waited < 40_000; waited += 250) {
     await sleep(250);
-    if (!(await app.exists('.status-load'))) break;
+    if (!(await app.exists('.status-load')) && (await titleNow(app)) === title) {
+      // הכותרת מתעדכנת לפני שהמנוע סיים לצייר את העמוד.
+      await sleep(2_500);
+      return;
+    }
   }
-  await sleep(2_500);
+  throw new Error(`„${name}” לא נפתח בתוך 40 שניות — הכותרת: „${await titleNow(app)}”`);
 }
 
 const SEED = ['שבועת הדיינין', 'מודה במקצת'];
@@ -334,12 +356,12 @@ async function main() {
 
     /* -------- שני המסלולים שבהם `bCs` מגיע במסמכים אמיתיים -------- */
     let statusAfterRepair = null;
-    for (const [name, inject] of [
-      ['bCs על הריצה', injectRunLevel],
-      ['bCs על ברירות המחדל', injectDefaults],
+    for (const [name, inject, file] of [
+      ['bCs על הריצה', injectRunLevel, 'bcs-run.docx'],
+      ['bCs על ברירות המחדל', injectDefaults, 'bcs-defaults.docx'],
     ]) {
       const docx = injectInto(seeded, inject);
-      await open(app, docx, 'bcs.docx');
+      await open(app, docx, file);
       const rows = await lines(app);
       if (statusAfterRepair === null) statusAfterRepair = await app.status();
       log(`${name}:`, JSON.stringify(rows.map((row) => `${row.text}=${row.weight}`)));

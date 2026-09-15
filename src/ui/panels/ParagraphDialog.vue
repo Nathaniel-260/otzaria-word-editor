@@ -158,6 +158,21 @@
                   <span class="pd-unit">נק'</span>
                 </template>
               </div>
+              <!--
+                „אל תוסיף רווח בין פסקאות מאותו סגנון” (`w:contextualSpacing`).
+                ב-Word זו תיבת סימון, וכאן היא פקד תלת-מצבי — לא בחירת עיצוב
+                אלא מדידה: המנוע **אינו מחזיר** את הערך (נמדד; ראו
+                `applyParagraphContextualSpacing`), ותיבה דו-מצבית הייתה
+                נפתחת תמיד ריקה ו„אישור” היה מכבה הגדרה שהמשתמש קבע ב-Word.
+                „ללא שינוי” אינו שולח כלום, והפעולה במנוע היא patch.
+              -->
+              <div class="pd-row pd-row-tri">
+                <TriToggle
+                  v-model="contextual"
+                  label="אל תוסיף רווח בין פסקאות מאותו סגנון"
+                  description="מבטל את הריווח שלפני ואחרי בין פסקאות רצופות שיש להן אותו סגנון"
+                />
+              </div>
             </fieldset>
           </div>
 
@@ -430,6 +445,7 @@ import {
   PREVIEW_TARGET_LINES,
   paragraphPreviewGeometry,
 } from '../../engine/paragraph-preview';
+import TriToggle, { type TriState } from './common/TriToggle.vue';
 import { useDialogDrag } from '../../composables/dialog-drag';
 import { useDialogDefaultAction } from '../../composables/dialog-default-action';
 
@@ -498,6 +514,8 @@ const emit = defineEmits<{
       keepNext: boolean;
       keepLines: boolean;
       widowControl: boolean;
+      /** `null` = „ללא שינוי”, ואז ההורה אינו קורא למנוע כלל. */
+      contextualSpacing: boolean | null;
     },
   ];
   'tab-add': [tab: { positionTwips: number; alignment: TabAlignment; leader?: TabLeader }];
@@ -521,6 +539,13 @@ const beforePt = ref('0');
 const afterPt = ref('0');
 const lineMode = ref<string>('240');
 const linePt = ref('12');
+/**
+ * „אל תוסיף רווח בין פסקאות מאותו סגנון”. נפתח תמיד ב„ללא שינוי” — ולא
+ * מהתצלום — מפני שהמנוע אינו מחזיר את הערך כלל (נמדד; ראו
+ * `applyParagraphContextualSpacing`). מצב שאינו „ללא שינוי” הוא היחיד שנשלח.
+ */
+const contextual = ref<TriState>('');
+
 const keepNext = ref(false);
 const keepLines = ref(false);
 const widowControl = ref(true);
@@ -556,6 +581,7 @@ watch(
       lineMode.value = known.includes(String(snap.spacing.lineTwips)) ? String(snap.spacing.lineTwips) : '240';
       linePt.value = twipsToPtText(snap.spacing.lineTwips || 240);
     }
+    contextual.value = '';
     keepNext.value = snap.keepNext;
     keepLines.value = snap.keepLines;
     widowControl.value = snap.widowControl;
@@ -745,6 +771,7 @@ function onSubmit(): void {
     keepNext: keepNext.value,
     keepLines: keepLines.value,
     widowControl: widowControl.value,
+    contextualSpacing: contextual.value === '' ? null : contextual.value === 'yes',
   });
 }
 </script>
@@ -853,6 +880,17 @@ function onSubmit(): void {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+/* הפקד התלת-מצבי הוא כפתור ברוחב מלא, ולא שדה בשורת תווית: התווית שלו היא
+   משפט („אל תוסיף רווח בין פסקאות מאותו סגנון”), ושורת `flex` רגילה הייתה
+   דוחסת אותו לרוחב של מספר. */
+.pd-row-tri {
+  margin-block-start: 2px;
+}
+
+.pd-row-tri > * {
+  inline-size: 100%;
 }
 
 /* שורת הטאב היא ארבעה פקדים בעמודה של חצי דיאלוג — היא נשברת ולא גולשת. */

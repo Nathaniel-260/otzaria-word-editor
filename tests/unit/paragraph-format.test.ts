@@ -22,7 +22,11 @@ import {
   emptyParagraphFormat,
   readParagraphFormat,
   readParagraphIndents,
+  applyParagraphContextualSpacing,
+  applySelectionSpacing,
+  readSelectionSpacing,
   removeParagraphTabStop,
+  toggleSelectionSpacing,
 } from '../../src/engine/paragraph-format';
 
 const CARET = {
@@ -35,6 +39,7 @@ type OpName =
   | 'setSpacing'
   | 'clearSpacing'
   | 'setKeepOptions'
+  | 'setFlowOptions'
   | 'setTabStop'
   | 'clearTabStop'
   | 'clearAllTabStops';
@@ -54,7 +59,7 @@ function fakeDoc(options: {
 } = {}) {
   const calls = new Map<OpName, unknown[]>();
   const paragraph: Record<string, unknown> = {};
-  for (const name of ['setIndentation', 'clearIndentation', 'setSpacing', 'clearSpacing', 'setKeepOptions', 'setTabStop', 'clearTabStop', 'clearAllTabStops'] as const) {
+  for (const name of ['setIndentation', 'clearIndentation', 'setSpacing', 'clearSpacing', 'setKeepOptions', 'setFlowOptions', 'setTabStop', 'clearTabStop', 'clearAllTabStops'] as const) {
     const impl = options.ops?.[name];
     if (impl === undefined) continue;
     calls.set(name, []);
@@ -699,5 +704,342 @@ describe('readParagraphIndents', () => {
 
   it('גרסה בלי `get` אינה זורקת', async () => {
     expect(await readParagraphIndents({ activeEditor: { doc: {} } } as never)).toBeNull();
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* ריווח על כל הבחירה — מה שתפריט „מרווח שורות וריווח” מפעיל            */
+/* ------------------------------------------------------------------ */
+
+/** בחירה שנוגעת בשלוש פסקאות, כפי שהמנוע מחזיר אותה — קטע לכל ריצה. */
+const RANGE_OVER_THREE = {
+  target: {
+    kind: 'text',
+    segments: [
+      { blockId: 'p1', range: { start: 4, end: 9 } },
+      { blockId: 'p2', range: { start: 0, end: 11 } },
+      // אותה פסקה פעמיים: פסקה עם שתי ריצות מסומנות מחזירה שני קטעים.
+      { blockId: 'p2', range: { start: 11, end: 14 } },
+      { blockId: 'p3', range: { start: 0, end: 3 } },
+    ],
+  },
+};
+
+function bodyOf(entries: readonly (readonly [string, Record<string, unknown> | undefined])[]) {
+  return {
+    body: entries.map(([id, props]) => ({
+      id,
+      kind: 'paragraph',
+      paragraph: { inlines: [], ...(props === undefined ? {} : { props }) },
+    })),
+  };
+}
+
+describe('readSelectionSpacing', () => {
+  it('מחזירה פסקה לכל בלוק בבחירה, בלי כפילויות, ובקריאת `get` אחת', async () => {
+    const { host, doc } = fakeDoc({
+      selection: RANGE_OVER_THREE,
+      get: bodyOf([
+        ['p1', { spacing: { before: 6, after: 0, line: 18, lineRule: 'exact' } }],
+        ['p2', undefined],
+        ['p3', { spacing: { after: 12 } }],
+      ]),
+    });
+    const getSpy = vi.spyOn(doc as unknown as { get: () => unknown }, 'get');
+
+    const entries = await readSelectionSpacing(host);
+
+    expect(entries?.map((entry) => entry.target.nodeId)).toEqual(['p1', 'p2', 'p3']);
+    expect(getSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('שדה שאינו מוצהר חוזר `null` — ולא אפס', async () => {
+    const { host } = fakeDoc({
+      selection: RANGE_OVER_THREE,
+      get: bodyOf([
+        ['p1', { spacing: { before: 6 } }],
+        ['p2', undefined],
+        ['p3', undefined],
+      ]),
+    });
+
+    const entries = await readSelectionSpacing(host);
+
+    // זו ההבחנה שכל המודול נשען עליה: `null` = יורש מהסגנון, `0` = הוצהר אפס.
+    expect(entries?.[0].spacing).toEqual({
+      beforeTwips: 120,
+      afterTwips: null,
+      lineTwips: null,
+      rule: null,
+    });
+    expect(entries?.[1].spacing).toEqual({
+      beforeTwips: null,
+      afterTwips: null,
+      lineTwips: null,
+      rule: null,
+    });
+  });
+
+  it('`nodeType` נקרא מ-`blocks.list` בקריאה אחת, ולא אחת לכל פסקה', async () => {
+    const { host, doc } = fakeDoc({
+      selection: RANGE_OVER_THREE,
+      get: bodyOf([['p1', undefined], ['p2', undefined], ['p3', undefined]]),
+      blocks: [
+        { nodeId: 'p1', nodeType: 'heading' },
+        { nodeId: 'p2', nodeType: 'listItem' },
+      ],
+    });
+    const listSpy = vi.spyOn((doc as unknown as { blocks: { list: () => unknown } }).blocks, 'list');
+
+    const entries = await readSelectionSpacing(host);
+
+    expect(entries?.map((entry) => entry.target.nodeType)).toEqual([
+      'heading',
+      'listItem',
+      // מזהה שאינו ברשימה נופל ל„פסקה” ואינו קורא שוב.
+      'paragraph',
+    ]);
+    expect(listSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('בלי בחירה — `null`, ובלי הודעה', async () => {
+    const { host } = fakeDoc({ selection: { target: { kind: 'text', segments: [] } }, get: bodyOf([]) });
+    expect(await readSelectionSpacing(host)).toBeNull();
+  });
+});
+
+describe('applySelectionSpacing', () => {
+  it('נשלח רק מה שהיה מוצהר, ועליו הצד שהשתנה', async () => {
+    const { host, calls } = fakeDoc({
+      ops: { setSpacing: ok },
+      selection: RANGE_OVER_THREE,
+      get: bodyOf([
+        ['p1', { spacing: { line: 18, lineRule: 'exact' } }],
+        ['p2', undefined],
+      ]),
+    });
+    const entries = await readSelectionSpacing(host);
+
+    await applySelectionSpacing(host, entries ?? [], { beforeTwips: 240 });
+
+    const sent = calls.get('setSpacing') as Record<string, unknown>[];
+    // מרווח השורות של p1 נשלח בחזרה כפי שהיה — בלעדיו `setSpacing` היה מוחק אותו.
+    expect(sent[0]).toEqual({
+      target: { kind: 'block', nodeType: 'paragraph', nodeId: 'p1' },
+      before: 240,
+      line: 360,
+      lineRule: 'exact',
+    });
+    // ו-p2 לא הצהיר דבר, ולכן נשלח בו רק מה שהמשתמש ביקש: קיבוע מרווח שורות
+    // שיורש מהסגנון היה מנתק את הפסקה ממנו לתמיד.
+    expect(sent[1]).toEqual({
+      target: { kind: 'block', nodeType: 'paragraph', nodeId: 'p2' },
+      before: 240,
+    });
+  });
+
+  it('כשל בפסקה אחת עוצר, ואינו משאיר את השאר חצי-מוחל בשקט', async () => {
+    let call = 0;
+    const { host, calls } = fakeDoc({
+      ops: {
+        setSpacing: () => {
+          call += 1;
+          return call === 2 ? { success: false, failure: { code: 'LOCKED', message: 'נעול' } } : { success: true };
+        },
+      },
+      selection: RANGE_OVER_THREE,
+      get: bodyOf([['p1', undefined], ['p2', undefined], ['p3', undefined]]),
+    });
+    const entries = await readSelectionSpacing(host);
+
+    const outcome = await applySelectionSpacing(host, entries ?? [], { afterTwips: 240 });
+
+    expect(outcome.ok).toBe(false);
+    expect(calls.get('setSpacing')).toHaveLength(2);
+  });
+
+  it('בלי פסקאות — כשל „יש למקם את הסמן”, ובלי קריאה למנוע', async () => {
+    const { host, calls } = fakeDoc({ ops: { setSpacing: ok } });
+
+    const outcome = await applySelectionSpacing(host, [], { beforeTwips: 240 });
+
+    expect(outcome).toEqual({
+      ok: false,
+      message: 'יש למקם את הסמן במסמך',
+      reason: 'selection-required',
+    });
+    expect(calls.get('setSpacing')).toHaveLength(0);
+  });
+});
+
+describe('toggleSelectionSpacing', () => {
+  function withHead(props: Record<string, unknown> | undefined) {
+    return fakeDoc({
+      ops: { setSpacing: ok },
+      selection: RANGE_OVER_THREE,
+      get: bodyOf([['p1', props], ['p2', undefined], ['p3', undefined]]),
+    });
+  }
+
+  it('אין רווח → מוסיף את הצעד, בכל הפסקאות', async () => {
+    const { host, calls } = withHead(undefined);
+
+    const outcome = await toggleSelectionSpacing(host, 'before', 240);
+
+    expect(outcome.ok).toBe(true);
+    const sent = calls.get('setSpacing') as Record<string, unknown>[];
+    expect(sent).toHaveLength(3);
+    expect(sent.every((input) => input.before === 240)).toBe(true);
+  });
+
+  it('יש רווח → מסיר, וההכרעה נופלת על הפסקה הראשונה בלבד', async () => {
+    const { host, calls } = withHead({ spacing: { before: 12 } });
+
+    await toggleSelectionSpacing(host, 'before', 240);
+
+    const sent = calls.get('setSpacing') as Record<string, unknown>[];
+    // כל השלוש מקבלות אפס — גם אלה שלא היה בהן רווח מלכתחילה. בחירה מעורבת
+    // שהייתה מוכרעת לכל פסקה בנפרד הייתה נשארת מעורבת, רק הפוך.
+    expect(sent.map((input) => input.before)).toEqual([0, 0, 0]);
+  });
+
+  it('„אחרי” הוא צד נפרד, ואינו נוגע ב„לפני”', async () => {
+    const { host, calls } = withHead({ spacing: { before: 12 } });
+
+    await toggleSelectionSpacing(host, 'after', 240);
+
+    const sent = calls.get('setSpacing') as Record<string, unknown>[];
+    expect(sent[0]).toEqual({
+      target: { kind: 'block', nodeType: 'paragraph', nodeId: 'p1' },
+      before: 240,
+      after: 240,
+    });
+  });
+
+  it('בלי סמן — כשל, ובלי כתיבה', async () => {
+    const { host, calls } = fakeDoc({
+      ops: { setSpacing: ok },
+      selection: { target: { kind: 'text', segments: [] } },
+      get: bodyOf([]),
+    });
+
+    const outcome = await toggleSelectionSpacing(host, 'before', 240);
+
+    expect(outcome).toMatchObject({ ok: false, reason: 'selection-required' });
+    expect(calls.get('setSpacing')).toHaveLength(0);
+  });
+});
+
+describe('applyParagraphContextualSpacing', () => {
+  it('נשלח `contextualSpacing` בלבד — ולא מצב מלא של אפשרויות הזרימה', async () => {
+    const { host, calls } = fakeDoc({ ops: { setFlowOptions: ok } });
+
+    const outcome = await applyParagraphContextualSpacing(host, { nodeId: 'p3' }, true);
+
+    expect(outcome.ok).toBe(true);
+    // `setFlowOptions` הוא patch (נמדד), ולכן מפתח שאינו נשלח אינו נוגע במה
+    // שקיים. שליחת `pageBreakBefore: false` „ליתר ביטחון” הייתה מכבה מעבר
+    // עמוד שהמשתמש הגדיר.
+    expect(calls.get('setFlowOptions')?.[0]).toEqual({
+      target: { nodeId: 'p3' },
+      contextualSpacing: true,
+    });
+  });
+
+  it('כיבוי נשלח כ-`false` מפורש, ולא בהשמטה', async () => {
+    const { host, calls } = fakeDoc({ ops: { setFlowOptions: ok } });
+
+    await applyParagraphContextualSpacing(host, { nodeId: 'p3' }, false);
+
+    expect(calls.get('setFlowOptions')?.[0]).toEqual({
+      target: { nodeId: 'p3' },
+      contextualSpacing: false,
+    });
+  });
+
+  it('גרסה בלי הפעולה מדווחת „אינו זמין” ואינה זורקת', async () => {
+    const { host } = fakeDoc({ ops: { setFlowOptions: null } });
+
+    const outcome = await applyParagraphContextualSpacing(host, { nodeId: 'p3' }, true);
+
+    expect(outcome).toMatchObject({ ok: false, reason: 'command-unsupported' });
+  });
+});
+
+/**
+ * יחידת `spacing.line` מהמודל — שתי יחידות לפי `lineRule`.
+ *
+ * הטבלה כאן היא בדיוק מה שנמדד ב-`scripts/line-unit-probe.mjs` על המנוע
+ * האמיתי: ב-`auto` המודל מחזיר כפולה, ובשאר נקודות. ההמרה האחידה שהייתה
+ * כאן קודם הקטינה כל מרווח אוטומטי פי 12, ושתי תקלות שקטות נגזרו ממנה —
+ * ראו `lineTwipsFromModel`.
+ */
+describe('יחידת מרווח השורות שהמודל מחזיר', () => {
+  const declaring = (spacing: Record<string, unknown>) =>
+    fakeDoc({
+      selection: RANGE_OVER_THREE,
+      get: bodyOf([['p1', { spacing }], ['p2', undefined], ['p3', undefined]]),
+    });
+
+  it('`auto` — המודל מחזיר כפולה, ו-twips הם ×240', async () => {
+    const { host } = declaring({ line: 3, lineRule: 'auto' });
+
+    const entries = await readSelectionSpacing(host);
+
+    expect(entries?.[0].spacing.lineTwips).toBe(720);
+  });
+
+  it('`exact` — המודל מחזיר נקודות, ו-twips הם ×20', async () => {
+    const { host } = declaring({ line: 18, lineRule: 'exact' });
+
+    const entries = await readSelectionSpacing(host);
+
+    expect(entries?.[0].spacing.lineTwips).toBe(360);
+  });
+
+  it('`line` בלי `lineRule` נקרא כ-`auto` — כמו ב-OOXML', async () => {
+    const { host } = declaring({ line: 1.5 });
+
+    const entries = await readSelectionSpacing(host);
+
+    expect(entries?.[0].spacing.lineTwips).toBe(360);
+    expect(entries?.[0].spacing.rule).toBeNull();
+  });
+
+  it('סבב קריאה-כתיבה-קריאה אינו מכווץ את המרווח', async () => {
+    // זו התקלה שהשער תפס: 3 → 60 → 0.25 → 5. הכתיבה חייבת להחזיר את אותם
+    // twips שנקראו, אחרת כל „הוסף רווח” מקטין את מרווח השורות בשקט.
+    const { host, calls } = fakeDoc({
+      ops: { setSpacing: ok },
+      selection: RANGE_OVER_THREE,
+      get: bodyOf([['p1', { spacing: { line: 3, lineRule: 'auto' } }]]),
+    });
+    const entries = await readSelectionSpacing(host);
+
+    await applySelectionSpacing(host, entries ?? [], { beforeTwips: 240 });
+
+    expect((calls.get('setSpacing')?.[0] as Record<string, unknown>).line).toBe(720);
+  });
+
+  it('הדיאלוג נפתח על המרווח האמיתי, ולא על „בודדת”', async () => {
+    // `readParagraphFormat` הוא מה שממלא את הבורר בדיאלוג. 1.5 שהוחזר כ-30
+    // twips לא התאים לאף אפשרות, הבורר נפל ל-240, ו„אישור” כתב 240 — כלומר
+    // שינה את המסמך בלי שאיש ביקש.
+    const { host } = fakeDoc({
+      get: {
+        body: [
+          {
+            id: 'p3',
+            kind: 'paragraph',
+            paragraph: { inlines: [], props: { spacing: { line: 1.5, lineRule: 'auto' } } },
+          },
+        ],
+      },
+    });
+
+    const result = await readParagraphFormat(host);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.snapshot.spacing.lineTwips).toBe(360);
   });
 });

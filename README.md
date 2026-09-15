@@ -131,8 +131,10 @@ const resolved = resolution.status === "uniform" ? resolution.value : void 0;
 של אוצריא, זה מה שמצטבר ל„כמה שניות”.
 
 המקור לא היה בקוד שרץ בהקלדה (פחות מאחוז מהזמן היה שלנו) אלא בכלל CSS יחיד
-ב‑[src/styles/engine-chrome.css](src/styles/engine-chrome.css): ההסתרה של באנר
-`edit-rejected` של המנוע נכתבה כ‑`.superdoc__mutation-status:has([data-superdoc-v2-edit-rejected])`.
+שישב ב‑[src/styles/engine-chrome.css](src/styles/engine-chrome.css): מ‑superdoc 2.11.0
+המנוע צייר באנר אנגלי „edit-rejected” מעל המסמך כשעריכה נדחתה, גם תחת `ui: false`
+([superdoc/docx-editor#3957](https://github.com/superdoc/docx-editor/issues/3957)), וההסתרה
+שלו נכתבה כ‑`.superdoc__mutation-status:has([data-superdoc-v2-edit-rejected])`.
 `:has()` שהעוגן שלו יושב **בתוך** `.superdoc` גורם ל‑Blink לסמן את `.superdoc`
 כמושפע מ‑`:has()`, ומאותו רגע כל הוספה או הסרה של צומת במסמך — כל תו — מתזמנת
 חישוב סגנון של תת‑העץ כולו (ב‑trace: „Affected by :has()” על `DIV.superdoc`,
@@ -140,13 +142,13 @@ const resolved = resolution.status === "uniform" ? resolution.value : void 0;
 מסמך: מחיקת הכלל הזה בלבד, בזמן ריצה, הורידה את החישובים המלאים ל‑0 ואת ה‑long
 tasks ל‑3; מחיקת כלל אקראי אחר, או של ה‑`:has()` שברצועה, לא שינתה דבר.
 
-התיקון מסתיר את ה‑`<p>` שנושא את התכונה כילד ישיר של העוטף, בלי `:has()` —
-העוטף הוא `height: 0` בלי ריפוד, ואין הבדל נראה. שני שערים שומרים שזה לא
-יחזור: [tests/unit/css-hygiene.test.ts](tests/unit/css-hygiene.test.ts) חוסם כל
-`:has()` שלא אושר במפורש עם נימוק, ו‑`npm run check:typing-recalc`
-([scripts/qa/typing-style-recalc-qa.mjs](scripts/qa/typing-style-recalc-qa.mjs))
-מקליד במסמך של כמה עמודים תחת trace של ה‑renderer וסופר חישובי סגנון בגודל
-המסמך כולו — הוא אדום על הכלל הישן (112 חישובים ב‑40 הקשות) וירוק אחרי התיקון.
+התיקון אז הסתיר את ה‑`<p>` שנושא את התכונה כילד ישיר של העוטף, בלי `:has()` —
+העוטף הוא `height: 0` בלי ריפוד, ואין הבדל נראה. מ‑superdoc 2.15.0-next.15 המנוע
+הפסיק לצייר את הבאנר; הדחייה מגיעה עכשיו רק דרך `onException`, ואצלנו היא
+נרשמת בלוג בלבד — ולכן הכלל ירד לגמרי מ‑engine-chrome.css. שני שערים שומרים
+שזה לא יחזור: [tests/unit/css-hygiene.test.ts](tests/unit/css-hygiene.test.ts) חוסם כל
+`:has()` חדש שלא אושר במפורש עם נימוק, ו‑[tests/contract/engine-edit-rejected-banner.test.ts](tests/contract/engine-edit-rejected-banner.test.ts)
+נכשל אם הבאנר חוזר להיצבע או אם כלל ההסתרה חוזר לקובץ.
 לאבחון ידני יש [scripts/typing-latency-probe.mjs](scripts/typing-latency-probe.mjs):
 זמן מלחיצה עד ציור, long tasks, והודעות קונסולה לכל הקשה — גם על התוסף כשהוא
 רץ **בתוך אוצריא** (`--attach`, אחרי הרצת אוצריא עם

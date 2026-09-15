@@ -61,6 +61,7 @@ describe('readDocSelection', () => {
       text: 'בראשית',
       hasRange: true,
       blockId: 'p7',
+      blockIds: ['p7'],
       story: null,
       empty: false,
     });
