@@ -3429,7 +3429,12 @@ async function onPickAndOpen(onLeavingPicker?: () => void): Promise<void> {
       }
 
       if (decision.action === 'save-first') {
-        const outcome = await save.saveNow({ suggestedName: documentFileName(title.value, saveExtension.value) });
+        // `untilClean`: המסמך הזה עומד להתחלף, ואין אחריו השהיה של autosave
+        // שתשמור את מה שהוקלד בזמן הסבב. ראו `saveLoop`.
+        const outcome = await save.saveNow({
+          suggestedName: documentFileName(title.value, saveExtension.value),
+          untilClean: true,
+        });
         if (outcome.status !== 'saved') {
           if (outcome.status === 'failed') setStatus(outcome.message, true);
           else setStatus('הפתיחה נעצרה — המסמך לא נשמר');
@@ -3470,7 +3475,10 @@ async function onNewDocument(): Promise<boolean> {
     if (decision.action === 'switch') await discardWithBackup(activeSession.value);
     if (decision.action === 'cancel') return false;
     if (decision.action === 'save-first') {
-      const outcome = await save.saveNow({ suggestedName: documentFileName(title.value, saveExtension.value) });
+      const outcome = await save.saveNow({
+        suggestedName: documentFileName(title.value, saveExtension.value),
+        untilClean: true,
+      });
       if (outcome.status !== 'saved') return false;
     }
   }
@@ -3897,6 +3905,8 @@ async function resolveUnsavedBeforeClose(
   if (decision.action === 'save-first') {
     const outcome = await session.save.saveNow({
       suggestedName: documentFileName(sessionDisplayTitle(session), sessionSaveExtension(session)),
+      // הטאב נסגר מיד אחרי זה — ראו `saveLoop`.
+      untilClean: true,
     });
     // שמירה שנכשלה או שבוטלה עוצרת את הסגירה: המשתמש ביקש לשמור, ולסגור בכל
     // זאת היה מתעלם ממה שביקש.

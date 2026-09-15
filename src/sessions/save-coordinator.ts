@@ -10,7 +10,7 @@
  *
  * 1. **ה-revision מצולם לפני הייצוא.** אם המשתמש הקליד בזמן שהשמירה רצה,
  *    ה-Blob שנשמר אינו מכיל את ההקלדה הזאת — ולכן `savedRevision` מתקדם רק
- *    למה שיוצא בפועל, והמסמך נשאר dirty ומריץ סבב נוסף.
+ *    למה שיוצא בפועל, והמסמך נשאר dirty. מה שקורה איתו אחר כך — ראו `saveLoop`.
  * 2. **אין שתי שמירות במקביל.** שתיהן היו מייצאות, מעלות ועושות commit לאותו
  *    יעד, וסדר הסיום אינו מובטח — כלומר גרסה ישנה יכולה לדרוס חדשה.
  * 3. **סבב שייך למסמך שפתח אותו.** `reset` (מעבר מסמך) מעלה epoch, וסבב עם
@@ -95,6 +95,16 @@ export interface SaveSnapshot {
   isSaving: boolean;
 }
 
+export interface SaveNowOptions {
+  forceSaveAs?: boolean;
+  suggestedName?: string;
+  /**
+   * למי שממשיך לפעולה שאין אחריה שמירה נוספת: סגירת טאב, יציאה, פתיחת מסמך
+   * אחר. ראו `saveLoop`.
+   */
+  untilClean?: boolean;
+}
+
 /** debounce של autosave. ערך התכנית (§9.3). */
 export const AUTOSAVE_DELAY_MS = 2500;
 
@@ -170,7 +180,7 @@ export interface SaveCoordinator {
   adoptTarget(target: { token: string; name: string } | null): void;
   /** מאפס לספירה נקייה — לשימוש בפתיחת מסמך אחר. */
   reset(target?: { token: string; name: string } | null): void;
-  saveNow(options?: { forceSaveAs?: boolean; suggestedName?: string }): Promise<SaveOutcome>;
+  saveNow(options?: SaveNowOptions): Promise<SaveOutcome>;
   /**
    * ממתין לסבב השמירה שרץ, אם רץ. נפתר מיד כשאין אחד, ולעולם אינו נדחה —
    * מי שקורא רוצה לדעת ש„הרגע הזה נגמר”, לא מה הייתה התוצאה.
@@ -198,6 +208,18 @@ function sameSnapshot(a: SaveSnapshot, b: SaveSnapshot): boolean {
   );
 }
 
+/**
+ * מה שביקשו משרשרת סבבים אחת — מי שפתח אותה, ומי שהצטרף אליה באמצע. אובייקט
+ * לכל שרשרת ולא דגלים משותפים: שרשרת שממתינה לסבב של מסמך קודם מקבלת בקשות
+ * עוד לפני שהיא רצה, והסבב הקודם אינו רשאי לצרוך אותן.
+ */
+interface ChainRequests {
+  /** „שמור” נוסף הגיע בזמן שהסבב רץ — סבב אחד נוסף, אם המסמך השתנה. */
+  again: boolean;
+  /** מישהו צריך מסמך נקי — סבבים עד שאין שינוי. */
+  untilClean: boolean;
+}
+
 export function createSaveCoordinator(deps: SaveCoordinatorDeps): SaveCoordinator {
   let dirtyRevision = 0;
   let savedRevision = 0;
@@ -209,6 +231,8 @@ export function createSaveCoordinator(deps: SaveCoordinatorDeps): SaveCoordinato
   let inFlight: Promise<SaveOutcome> | null = null;
   /** ה-epoch שאליו שייך הסבב שרץ. */
   let inFlightEpoch = -1;
+  /** הבקשות של השרשרת שרצה. ראו `saveLoop`. */
+  let inFlightRequests: ChainRequests | null = null;
   let autosaveTimer: ReturnType<typeof setTimeout> | undefined;
   /**
    * מתג המשתמש. `reset` (מעבר מסמך) אינו מאפס אותו בכוונה: זו העדפה של מי
@@ -455,39 +479,69 @@ export function createSaveCoordinator(deps: SaveCoordinatorDeps): SaveCoordinato
     return { status: 'saved', token: result.token, name: name ?? '', size: blob.size };
   }
 
+  /**
+   * שינוי שקרה בזמן הסבב אינו בקובץ. מה עושים איתו תלוי במי שביקש:
+   *
+   * - **ברירת המחדל — כלום כאן.** הוא עובר להשהיה הרגילה של ה-autosave
+   *   (`runChain`), כלומר שמירה אחת אחרי שהמשתמש מפסיק להקליד. סבב מיידי היה
+   *   משרשר שמירות כל עוד ההקלדה נמשכת — ייצוא, העלאה ו-commit לדיסק שוב
+   *   ושוב — ומאט בדיוק את ההקלדה שהוא בא לשמור. זה קרה מרגע שהמנוע הפסיק
+   *   לבלוע הקשות בזמן ייצוא (superdoc/docx-editor#3993): עד אז כמעט לא
+   *   נשאר שינוי כזה.
+   * - **`again`** — „שמור” מפורש הגיע בזמן הסבב. המשתמש ביקש את מה שעל המסך
+   *   עכשיו, ולכן סבב אחד נוסף.
+   * - **`untilClean`** — הקורא ממשיך לסגירה, ליציאה או למסמך אחר, ואין אחריו
+   *   הזדמנות. סבבים עד שהמסמך נקי. שם המשתמש אינו מקליד, ולכן בפועל זה סבב
+   *   נוסף לכל היותר.
+   *
+   * אין כאן בדיקת epoch, בכוונה: הלופ ממשיך רק על `saved`, ו-`saved` אפשרי
+   * רק כשה-epoch תאם (הסבב נעצר לפני ה-commit אחרת). בדיקה נוספת כאן הייתה
+   * קוד שאין דרך להגיע אליו, ולכן גם אין דרך לבדוק אותו.
+   */
   async function saveLoop(
     mine: number,
     forceSaveAs: boolean,
-    suggestedName?: string,
+    suggestedName: string | undefined,
+    requests: ChainRequests,
   ): Promise<SaveOutcome> {
     let outcome = await runOnce(mine, forceSaveAs, suggestedName);
 
-    // שינוי שקרה בזמן הסבב אינו בקובץ. סבב נוסף — הפעם ליעד שכבר קיים, ולכן
-    // בלי דיאלוג.
-    //
-    // אין כאן בדיקת epoch, בכוונה: הלופ ממשיך רק על `saved`, ו-`saved` אפשרי
-    // רק כשה-epoch תאם (הסבב נעצר לפני ה-commit אחרת). בדיקה נוספת כאן הייתה
-    // קוד שאין דרך להגיע אליו, ולכן גם אין דרך לבדוק אותו.
-    while (outcome.status === 'saved' && dirtyRevision !== savedRevision && !disposed) {
+    while (
+      outcome.status === 'saved' &&
+      dirtyRevision !== savedRevision &&
+      !disposed &&
+      (requests.again || requests.untilClean)
+    ) {
+      // מאופס לפני הסבב ולא אחריו: „שמור” שיגיע בזמן הסבב הזה מבקש את
+      // הסבב שאחריו.
+      requests.again = false;
+      // הסבב הנוסף כותב ליעד שכבר קיים, ולכן בלי דיאלוג.
       outcome = await runOnce(mine, false, suggestedName);
     }
 
     return outcome;
   }
 
-  function saveNow(
-    options: { forceSaveAs?: boolean; suggestedName?: string } = {},
-  ): Promise<SaveOutcome> {
+  function saveNow(options: SaveNowOptions = {}): Promise<SaveOutcome> {
     if (disposed) return Promise.resolve({ status: 'clean' });
     // „שמור” הוא הכרעה על מה ששוחזר, בדיוק כמו עריכה. משוחרר **לפני**
     // `cancelAutosave`: השחרור מתזמן טיימר, והביטול שאחריו מנקה אותו.
     releaseRestoreHold();
     cancelAutosave();
 
-    // שמירה שרצה **על אותו מסמך** — מצטרפים אליה. הלופ שלה כבר יטפל בשינוי
-    // שנעשה בינתיים, וכך אין שני סבבים שכותבים לאותו יעד בסדר סיום שאינו
-    // מובטח.
-    if (inFlight && inFlightEpoch === epoch) return inFlight;
+    // שמירה שרצה **על אותו מסמך** — מצטרפים אליה, ומשאירים לה את הבקשה:
+    // הלופ שלה יריץ את הסבב הנוסף אם המסמך השתנה בינתיים. כך אין שני סבבים
+    // שכותבים לאותו יעד בסדר סיום שאינו מובטח.
+    //
+    // גם ה-autosave מגיע לכאן, ו-`again` נכון גם לו: הטיימר יורה רק אחרי
+    // השהיה שלמה בלי הקלדה, כלומר המשתמש עצר — וזה בדיוק הרגע לשמור.
+    if (inFlight && inFlightEpoch === epoch && inFlightRequests) {
+      if (options.untilClean) inFlightRequests.untilClean = true;
+      else inFlightRequests.again = true;
+      return inFlight;
+    }
+
+    const requests: ChainRequests = { again: false, untilClean: options.untilClean ?? false };
 
     // סבב שרץ ושייך למסמך קודם: אין להצטרף אליו — התוצאה שלו תהיה `stale`,
     // והמשתמש היה מקבל „לחצתי שמור וכלום לא קרה”. ממתינים לו וממשיכים.
@@ -496,9 +550,10 @@ export function createSaveCoordinator(deps: SaveCoordinatorDeps): SaveCoordinato
       const mineAfterWait = epoch;
       const chained = previous
         .catch(() => undefined)
-        .then(() => runChain(mineAfterWait, options));
+        .then(() => runChain(mineAfterWait, options, requests));
       inFlight = chained;
       inFlightEpoch = epoch;
+      inFlightRequests = requests;
       publish();
       return chained;
     }
@@ -522,9 +577,10 @@ export function createSaveCoordinator(deps: SaveCoordinatorDeps): SaveCoordinato
       return Promise.resolve({ status: 'clean' });
     }
 
-    const run = runChain(epoch, options);
+    const run = runChain(epoch, options, requests);
     inFlight = run;
     inFlightEpoch = epoch;
+    inFlightRequests = requests;
     publish();
     return run;
   }
@@ -533,17 +589,21 @@ export function createSaveCoordinator(deps: SaveCoordinatorDeps): SaveCoordinato
    * מריץ סבב ומשחרר את ה-single-flight בסופו. מופרד כדי ששרשור אחרי סבב של
    * מסמך קודם יעבור באותו מסלול בדיוק.
    */
-  function runChain(
-    mine: number,
-    options: { forceSaveAs?: boolean; suggestedName?: string },
-  ): Promise<SaveOutcome> {
-    return saveLoop(mine, options.forceSaveAs ?? false, options.suggestedName).finally(() => {
+  function runChain(mine: number, options: SaveNowOptions, requests: ChainRequests): Promise<SaveOutcome> {
+    return saveLoop(mine, options.forceSaveAs ?? false, options.suggestedName, requests).finally(() => {
       // אם בינתיים נרשם סבב חדש יותר, לא לדרוך עליו.
       if (inFlightEpoch === mine) {
         inFlight = null;
         inFlightEpoch = -1;
+        inFlightRequests = null;
       }
       publish();
+      // מה שהוקלד בזמן הסבב ולא נכנס אליו ממתין להשהיה הרגילה — ראו
+      // `saveLoop`. בדרך כלל הטיימר כבר מתוזמן מ-`markDirty`, והוא נשאר
+      // כמו שהוא: תזמון מחדש כאן היה דוחה אותו אל אחרי סוף הסבב. המקרה שבו
+      // אין טיימר הוא „שמור בשם” הראשון, שבזמנו עוד לא היה יעד ו-`markDirty`
+      // לא תזמן דבר. `scheduleAutosave` עצמו מכבד מתג, יעד, הקפאה ו-dirty.
+      if (mine === epoch && autosaveTimer === undefined) scheduleAutosave();
     });
   }
 

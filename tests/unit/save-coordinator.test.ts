@@ -355,7 +355,60 @@ describe('שמירות מתחרות', () => {
     expect(h.commits).toHaveLength(1);
   });
 
-  it('עריכה בזמן שמירה מריצה סבב נוסף ואינה מסומנת כשמורה', async () => {
+  it('עריכה בזמן שמירה אינה מסומנת כשמורה, ונשמרת בהשהיה הרגילה — לא בסבב מיידי', async () => {
+    vi.useFakeTimers();
+    const h = harness();
+    h.coordinator.adoptTarget({ token: 'tok', name: 'a.docx' });
+    h.coordinator.markDirty();
+    let release!: () => void;
+    h.onUpload(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+
+    const saving = h.coordinator.saveNow();
+    await flush();
+    // המשתמש הקליד בזמן שהסבב באוויר.
+    h.coordinator.markDirty();
+    h.onUpload(async () => {});
+    release();
+    const outcome = await saving;
+
+    expect(outcome.status).toBe('saved');
+    expect(h.exportCount()).toBe(1);
+    expect(h.coordinator.snapshot.isDirty).toBe(true);
+    expect(h.coordinator.snapshot.isSaving).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS);
+    expect(h.exportCount()).toBe(2);
+    expect(h.coordinator.snapshot.isDirty).toBe(false);
+  });
+
+  it('הקלדה רצופה בזמן שמירה אינה משרשרת סבבים אחד אחרי השני', async () => {
+    // התרחיש שהלופ הקודם יצר: כל סבב נגמר כשכבר יש שינוי, ומיד נפתח הבא —
+    // ייצוא, העלאה ו-commit לדיסק לכל אורך ההקלדה.
+    vi.useFakeTimers();
+    const h = harness();
+    h.coordinator.adoptTarget({ token: 'tok', name: 'a.docx' });
+    h.onExport(() => new Promise<Blob>((resolve) => setTimeout(() => resolve(new Blob(['docx'])), 300)));
+
+    h.coordinator.markDirty();
+    void h.coordinator.saveNow();
+    for (let i = 0; i < 20; i += 1) {
+      await vi.advanceTimersByTimeAsync(100);
+      h.coordinator.markDirty();
+    }
+    expect(h.exportCount()).toBe(1);
+
+    // ההקלדה נעצרה: שמירה אחת, אחרי ההשהיה.
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS + 1_000);
+    expect(h.exportCount()).toBe(2);
+    expect(h.coordinator.snapshot.isDirty).toBe(false);
+  });
+
+  it('„שמור” נוסף בזמן סבב מריץ סבב אחד נוסף, ליעד שהתקבל בראשון', async () => {
     const h = harness();
     h.coordinator.markDirty();
     let release!: () => void;
@@ -368,18 +421,70 @@ describe('שמירות מתחרות', () => {
 
     const saving = h.coordinator.saveNow();
     await flush();
-    // המשתמש הקליד בזמן שהסבב הראשון באוויר.
+    h.coordinator.markDirty();
+    // המשתמש ביקש שוב — את מה שעל המסך עכשיו.
+    expect(h.coordinator.saveNow()).toBe(saving);
+    h.onUpload(async () => {});
+    release();
+    await saving;
+
+    expect(h.exportCount()).toBe(2);
+    expect(h.coordinator.snapshot.isDirty).toBe(false);
+    // הסבב השני כותב ליעד שהתקבל בראשון — בלי דיאלוג נוסף.
+    expect(h.commits[1].targetToken).toBe('token-new');
+  });
+
+  it('untilClean — מי שסוגר אחרי השמירה מקבל מסמך נקי', async () => {
+    const h = harness();
+    h.coordinator.markDirty();
+    let release!: () => void;
+    h.onUpload(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+
+    const saving = h.coordinator.saveNow({ untilClean: true });
+    await flush();
     h.coordinator.markDirty();
     h.onUpload(async () => {});
     release();
     const outcome = await saving;
 
     expect(outcome.status).toBe('saved');
-    // שני סבבים: הראשון לא הכיל את ההקלדה, השני כן.
     expect(h.exportCount()).toBe(2);
     expect(h.coordinator.snapshot.isDirty).toBe(false);
-    // הסבב השני כותב ליעד שהתקבל בראשון — בלי דיאלוג נוסף.
     expect(h.commits[1].targetToken).toBe('token-new');
+  });
+
+  it('untilClean שמצטרף לסבב שרץ ממשיך עד שהמסמך נקי, ולא רק סבב אחד', async () => {
+    const h = harness();
+    h.coordinator.adoptTarget({ token: 'tok', name: 'a.docx' });
+    h.coordinator.markDirty();
+    const gates: Array<() => void> = [];
+    h.onUpload(
+      () =>
+        new Promise<void>((resolve) => {
+          gates.push(resolve);
+        }),
+    );
+
+    const saving = h.coordinator.saveNow();
+    await flush();
+    h.coordinator.markDirty();
+    expect(h.coordinator.saveNow({ untilClean: true })).toBe(saving);
+    gates[0]();
+    for (let i = 0; i < 50 && gates.length < 2; i += 1) await flush();
+    expect(gates, 'הסבב השני לא הגיע להעלאה').toHaveLength(2);
+    // עריכה גם בזמן הסבב השני: `again` היה נעצר כאן, `untilClean` לא.
+    h.coordinator.markDirty();
+    h.onUpload(async () => {});
+    gates[1]();
+    await saving;
+
+    expect(h.exportCount()).toBe(3);
+    expect(h.coordinator.snapshot.isDirty).toBe(false);
   });
 
   it('עריכה בזמן שמירה שנכשלה משאירה מלוכלך בלי סבב נוסף', async () => {
@@ -469,6 +574,34 @@ describe('autosave', () => {
 
     expect(h.exportCount()).toBe(0);
   });
+
+  it('עריכה בזמן „שמור בשם” הראשון נשמרת בהשהיה, ליעד שהתקבל בו', async () => {
+    // בזמן הסבב עוד אין יעד, ולכן `markDirty` אינו מתזמן דבר. בלי התזמון
+    // בסוף הסבב העריכה הייתה מחכה להקשה הבאה — ואם אין כזו, לנצח.
+    const h = harness();
+    h.coordinator.markDirty();
+    let release!: () => void;
+    h.onUpload(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+
+    const saving = h.coordinator.saveNow();
+    await flush();
+    h.coordinator.markDirty();
+    h.onUpload(async () => {});
+    release();
+    await saving;
+    expect(h.exportCount()).toBe(1);
+    expect(h.coordinator.snapshot.isDirty).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS);
+    expect(h.exportCount()).toBe(2);
+    expect(h.commits[1].targetToken).toBe('token-new');
+    expect(h.coordinator.snapshot.isDirty).toBe(false);
+  });
 });
 
 /**
@@ -516,6 +649,31 @@ describe('מתג השמירה האוטומטית', () => {
     await expect(h.coordinator.saveNow()).resolves.toMatchObject({ status: 'saved' });
     expect(h.exportCount()).toBe(1);
     expect(h.coordinator.snapshot.isDirty).toBe(false);
+  });
+
+  it('כבוי — מה שהוקלד בזמן שמירה ידנית נשאר לא-שמור, כמו ב-Word', async () => {
+    const h = harness();
+    h.coordinator.adoptTarget({ token: 'tok', name: 'a.docx' });
+    h.coordinator.setAutosaveEnabled(false);
+    h.coordinator.markDirty();
+    let release!: () => void;
+    h.onUpload(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+
+    const saving = h.coordinator.saveNow();
+    await flush();
+    h.coordinator.markDirty();
+    h.onUpload(async () => {});
+    release();
+    await saving;
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DELAY_MS * 4);
+
+    expect(h.exportCount()).toBe(1);
+    expect(h.coordinator.snapshot.isDirty).toBe(true);
   });
 
   it('הדלקה חוזרת שומרת מסמך מלוכלך אחרי ההשהיה הרגילה, ולא מיד', async () => {
@@ -884,7 +1042,8 @@ describe('מעבר מסמך בזמן שמירה', () => {
         }),
     );
 
-    const savingA = h.coordinator.saveNow();
+    // `untilClean`, כי רק איתו עריכה בזמן הסבב מריצה סבב נוסף מיד.
+    const savingA = h.coordinator.saveNow({ untilClean: true });
     await flush();
     // עריכה נוספת של א', שבלי ה-epoch הייתה מפעילה סבב שני…
     h.coordinator.markDirty();
