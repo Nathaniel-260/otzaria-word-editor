@@ -989,6 +989,181 @@ async function sectionCaptions() {
 }
 
 /* ================================================================== */
+/* מקטע ז' — כיתוב שהעוגן שלו לוח                                       */
+/* ================================================================== */
+
+/**
+ * רצף הבלוקים של גוף המסמך, כפי שהוא נכתב ל-docx.
+ *
+ * `TBL{`/`}TBL` הם גבולות הלוח, `CAP:` פסקה בסגנון `Caption`, ו-`P:` כל שאר
+ * הפסקאות — כולל אלה שבתוך התאים. זה מה שמפריד „הכיתוב מתחת ללוח” מ„הכיתוב
+ * בתוך התא”, ושתיהן נראות אותו דבר בחיפוש טקסט פשוט.
+ */
+function bodyTokens(doc) {
+  const body = doc.split('<w:body>')[1] ?? '';
+  const tokens = [];
+  const re = /<w:tbl>|<\/w:tbl>|<w:p\b[^>]*\/>|<w:p\b[^>]*>[\s\S]*?<\/w:p>/g;
+  let match;
+  while ((match = re.exec(body))) {
+    const piece = match[0];
+    if (piece === '<w:tbl>') tokens.push('TBL{');
+    else if (piece === '</w:tbl>') tokens.push('}TBL');
+    else {
+      const text = (piece.match(/<w:t[^>]*>[^<]*<\/w:t>/g) ?? []).join('').replace(/<[^>]+>/g, '');
+      // כיתוב = סגנון `Caption` **וגם** שדה `SEQ`. הפסקה שנוצרת אחרי לוח
+      // שהוכנס על פסקת כיתוב יורשת את הסגנון בלי שדה, והיא אינה כיתוב.
+      const caption = /w:val="Caption"/.test(piece) && /SEQ/.test(piece);
+      tokens.push((caption ? 'CAP:' : 'P:') + text.slice(0, 28));
+    }
+  }
+  return tokens;
+}
+
+/**
+ * רעש בלי הכשלים שאינם שייכים לנמדד כאן.
+ *
+ * כתיבת טיוטת ההפעלה למרחב הפרטי נכשלת בדמה של המאחז (`host-stub.js` אינו
+ * מממש אחסון), והטיימר שלה יורה באמצע המקטע הזה מפני שהוא ארוך. שורה כזאת
+ * אינה אומרת דבר על הכיתוב, והיא ממשיכה להידפס ללוג.
+ */
+function captionNoise(text) {
+  return (text ?? '')
+    .split('; ')
+    .filter((part) => part !== '' && !/session-draft/.test(part))
+    .join('; ');
+}
+
+/** לוח 2×2 מהרצועה, במקום שהסמן עומד בו. */
+async function insertTable(app) {
+  await app.tab('הוספה');
+  await app.click('טבלה', { after: 600 });
+  const picked = await app.clickTableCell(2, 2, { after: 2500 });
+  await app.tab('הפניות');
+  return picked;
+}
+
+/**
+ * „הוסף כיתוב” על לוח — מסלול המשתמש מקצה לקצה.
+ *
+ * המקטע נכתב אחרי **שינוי במנוע**: עד 2.14.0-next.5 `captions.insert` החזיר
+ * על עוגן `tbl:…` ‏`TARGET_NOT_FOUND`, ולכן עריכת כיתוב ששני שכניו לוחות
+ * סורבה כליל. ב-2.15.0-next.15 נמדד שעוגן לוח מתקבל — ובלבד שהכתובת נושאת
+ * `nodeType: 'table'` — וכאן נבדק שזה מה שהתוסף שולח בפועל, דרך הדיאלוג,
+ * ושמה שנכתב ל-docx הוא כיתוב אחד בין שני הלוחות ולא בתוך אחד מהם.
+ */
+async function sectionCaptionsTable() {
+  const app = await openApp({ name: 'ref-cap-table', port: PORT });
+  try {
+    await widen(app);
+    await seed(app, ['פסקה לפני הלוח']);
+    await app.tab('הפניות');
+
+    await step('כיתוב מתחת ללוח', async () => {
+      await caretLine(app, 0);
+      const picked = await insertTable(app);
+      // הסמן נוחת אחרי ההוספה בפסקה שאחרי הלוח (נמדד), ולכן „מעל” מציב את
+      // הכיתוב בדיוק בין הלוח לפסקה ההיא.
+      await app.reset();
+      const { clicked, on } = await clickChecked(app, 'הוסף כיתוב', { after: 900 });
+      const dlg = await app.dialog();
+      if (!clicked || !dlg) {
+        report.fail('כיתוב מתחת ללוח', `הדיאלוג לא נפתח (${on.why})`);
+        return;
+      }
+      await app.dialogFill('cp-label', 'טבלה');
+      await app.dialogFill('cp-text', 'סדר הדורות');
+      await app.dialogFill('cp-position', 'above');
+      await app.sleep(200);
+      await app.reset();
+      const inserted = await app.clickDialog('הוסף כיתוב', { after: 2500 });
+      await app.clickDialog('סגור', { after: 500 });
+      const raw = await noise(app);
+      const bad = captionNoise(raw);
+      const tokens = bodyTokens((await snap(app)).doc);
+      const at = tokens.findIndex((token) => token.startsWith('CAP:'));
+      const afterTable = at > 0 && tokens[at - 1] === '}TBL';
+      log('לוח:', picked, '| הוכנס:', inserted, '| רעש גולמי:', raw || '(אין)', '| רצף:', JSON.stringify(tokens), '| רעש:', bad || '(אין)');
+      if (inserted && afterTable && !bad)
+        report.pass('כיתוב מתחת ללוח', 'פסקת הכיתוב נכתבה מיד אחרי `</w:tbl>`, ולא בתוך תא');
+      else report.fail('כיתוב מתחת ללוח', `רצף: ${JSON.stringify(tokens)}; רעש: ${bad || 'אין'}`);
+    });
+
+    await step('עריכת כיתוב שלוח משני צדדיו', async () => {
+      // הסמן על פסקת הכיתוב, ולוח שני אחריה: זה המסמך שהעריכה סירבה לו עד
+      // 2.14.0-next.5 — שני השכנים אינם פסקאות.
+      await caretText(app, 'סדר הדורות');
+      await insertTable(app);
+      const before = bodyTokens((await snap(app)).doc);
+      const at = before.findIndex((token) => token.startsWith('CAP:'));
+      const between = at > 0 && before[at - 1] === '}TBL' && before[at + 1] === 'TBL{';
+      log('לפני העריכה:', JSON.stringify(before), '| בין שני לוחות:', between);
+      if (!between) {
+        report.stuck('עריכת כיתוב שלוח משני צדדיו', `המסמך לא נבנה כמתוכנן: ${JSON.stringify(before)}`);
+        return;
+      }
+
+      await app.reset();
+      const { clicked, on } = await clickChecked(app, 'הוסף כיתוב', { after: 900 });
+      if (!clicked) {
+        report.fail('עריכת כיתוב שלוח משני צדדיו', `הכפתור לא נמצא (${on.why})`);
+        return;
+      }
+      await app.clickSel('.cp-list-item', 0, { after: 400 });
+      await app.dialogFill('cp-text', 'סדר הדורות המתוקן');
+      await app.sleep(200);
+      await app.reset();
+      const saved = await app.clickDialog('שמור שינויים', { after: 3000 });
+      await app.clickDialog('סגור', { after: 500 });
+      const raw = await noise(app);
+      const bad = captionNoise(raw);
+      const after = await snap(app);
+      const tokens = bodyTokens(after.doc);
+      const now = tokens.findIndex((token) => token.startsWith('CAP:'));
+      const stillBetween = now > 0 && tokens[now - 1] === '}TBL' && tokens[now + 1] === 'TBL{';
+      const onlyOne = tokens.filter((token) => token.startsWith('CAP:')).length === 1;
+      const hasNew = /סדר הדורות המתוקן/.test(after.doc);
+      const hasOld = tokens.some((token) => token === 'CAP:טבלה 1: סדר הדורות');
+      const capPara = after.doc.match(/<w:p [^>]*>(?:(?!<\/w:p>)[\s\S])*?w:pStyle w:val="Caption"[\s\S]*?<\/w:p>/);
+      const seq = capPara && /SEQ\s+טבלה/.test(capPara[0]);
+      const bidi = capPara && /<w:bidi\/>/.test(capPara[0]);
+      log('נשמר:', saved, '| רעש גולמי:', raw || '(אין)', '| רצף:', JSON.stringify(tokens), '| SEQ:', seq, '| bidi:', bidi, '| רעש:', bad || '(אין)');
+      if (saved && hasNew && !hasOld && onlyOne && stillBetween && seq && bidi && !bad)
+        report.pass('עריכת כיתוב שלוח משני צדדיו', 'הכיתוב נערך וחזר בין שני הלוחות, עם שדה SEQ ו-bidi');
+      else if (!hasNew)
+        report.fail('עריכת כיתוב שלוח משני צדדיו', `הטקסט לא הוחלף. רצף: ${JSON.stringify(tokens)}; רעש: ${bad || 'אין'}`);
+      else
+        report.fail(
+          'עריכת כיתוב שלוח משני צדדיו',
+          `hasOld=${hasOld} onlyOne=${onlyOne} between=${stillBetween} seq=${seq} bidi=${bidi}; רעש: ${bad || 'אין'}`,
+        );
+    });
+
+    await step('עוגן שאינו לוח ואינו פסקה — עדיין נדחה במנוע', async () => {
+      // מה שמצדיק את הסירוב שנשאר בקוד: בלוק `tableOfContents` כעוגן. אם
+      // המנוע יתחיל לקבל אותו, השורה הזאת תיפול — וזו בדיוק ההתראה שצריך
+      // כדי להרחיב את רשימת הסוגים ב-engine/captions.ts.
+      const probe = await docApi(
+        app,
+        `const made=await d.create.tableOfContents({at:{kind:'documentStart'}, instruction:'TOC \\\\o "1-3" \\\\h \\\\z'});` +
+          `const blocks=((await d.blocks.list({limit:200,offset:0})).blocks||[]);` +
+          `const sdt=blocks.find(b=>b.nodeType!=='paragraph'&&b.nodeType!=='table');` +
+          `if(!sdt)return JSON.stringify({made:!!(made&&made.success), sdt:null});` +
+          `const tried=await d.captions.insert({adjacentTo:{kind:'block',nodeType:sdt.nodeType,nodeId:sdt.nodeId},position:'below',label:'איור',text:'בדיקה'});` +
+          `return JSON.stringify({made:!!(made&&made.success), sdt:sdt.nodeType, code:tried&&tried.failure&&tried.failure.code, ok:!!(tried&&tried.success)})`,
+      ).then(JSON.parse);
+      log('תוכן עניינים כעוגן:', JSON.stringify(probe));
+      if (probe.sdt && probe.code && !probe.ok)
+        report.pass('עוגן שאינו לוח ואינו פסקה', `${probe.sdt} נדחה ב-${probe.code} — הסירוב שבקוד עדיין נחוץ`);
+      else if (probe.ok)
+        report.fail('עוגן שאינו לוח ואינו פסקה', `${probe.sdt} התקבל — אפשר להרחיב את רשימת הסוגים`);
+      else report.stuck('עוגן שאינו לוח ואינו פסקה', `לא נוצר בלוק לבדיקה: ${JSON.stringify(probe)}`);
+    });
+  } finally {
+    app.close();
+  }
+}
+
+/* ================================================================== */
 
 const only = process.argv[2];
 const sections = {
@@ -998,6 +1173,7 @@ const sections = {
   index: sectionIndex,
   citations: sectionCitations,
   captions: sectionCaptions,
+  captionsTable: sectionCaptionsTable,
 };
 
 for (const [key, fn] of Object.entries(sections)) {

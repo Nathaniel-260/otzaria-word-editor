@@ -64,9 +64,10 @@ interface FakeOptions {
    * מזהי הבלוקים של המסמך, בסדרם. ברירת המחדל: `block-1` ואחריו הכיתובים —
    * כלומר לכל כיתוב יש שכן קודם.
    *
-   * מזהה שמתחיל ב-`tbl:` מדווח `nodeType: 'table'`, כמו במנוע האמיתי. זה
-   * המסלול של הכיתוב שמתחת ללוח — הצורה השכיחה של כיתוב, ובלעדיה הכפיל
-   * היה מסמך של פסקאות בלבד ולא היה מודד את מה שהפיל את העריכה.
+   * מזהה שמתחיל ב-`tbl:` מדווח `nodeType: 'table'` ומזהה שמתחיל ב-`toc:`
+   * מדווח `tableOfContents`, כמו במנוע האמיתי. הראשון הוא המסלול של הכיתוב
+   * שמתחת ללוח — הצורה השכיחה של כיתוב — והשני הוא הסוג שהמנוע עדיין דוחה.
+   * בלעדיהם הכפיל היה מסמך של פסקאות בלבד, ולא היה מודד אף אחד מהשניים.
    */
   blocks?: readonly string[];
   /** `total` שהמנוע מדווח, כשהוא שונה מאורך העמוד — כלומר שאיבת עמודים. */
@@ -118,6 +119,18 @@ function fakeEngine(options: FakeOptions = {}) {
   const blockIds = [...(options.blocks ?? ['block-1', ...captions.map((item) => item.nodeId)])];
   const caret = options.caret === undefined ? { blockId: 'block-1' } : options.caret;
 
+  /**
+   * הסוג שהמנוע מדווח על בלוק: `tbl:*` טבלה, `toc:*` תוכן עניינים, וכל
+   * השאר פסקה. מזהה שאינו במסמך מחזיר `null` — כך „לא נמצא” נשאר „לא נמצא”
+   * ואינו הופך בשקט לפסקה.
+   */
+  function blockTypeOf(nodeId: string): string | null {
+    if (!blockIds.includes(nodeId)) return null;
+    if (nodeId.startsWith('tbl:')) return 'table';
+    if (nodeId.startsWith('toc:')) return 'tableOfContents';
+    return 'paragraph';
+  }
+
   /** עמוד תחת `limit`/`offset`, כמו `DiscoveryOutput` האמיתי. */
   function page<T>(items: readonly T[], total: number, input: unknown) {
     const query = (input ?? {}) as { limit?: number; offset?: number };
@@ -139,9 +152,7 @@ function fakeEngine(options: FakeOptions = {}) {
         const offset = query.offset ?? 0;
         const end = query.limit === undefined ? undefined : offset + query.limit;
         return {
-          blocks: blockIds
-            .slice(offset, end)
-            .map((nodeId) => ({ nodeId, nodeType: nodeId.startsWith('tbl:') ? 'table' : 'paragraph' })),
+          blocks: blockIds.slice(offset, end).map((nodeId) => ({ nodeId, nodeType: blockTypeOf(nodeId) })),
           total: blockIds.length,
         };
       }),
@@ -172,9 +183,34 @@ function fakeEngine(options: FakeOptions = {}) {
         });
         return page(items, options.captionsTotal ?? items.length, input);
       }),
-      insert: route('captions.insert', () => {
+      insert: route('captions.insert', (input) => {
         const failure = onceFailure('captions.insert') ?? failures['captions.insert'];
         if (failure) return { success: false, failure };
+        /*
+          הכתובת נבדקת כאן, ולא נבלעת: נמדד על 2.15.0-next.15 שהמנוע דורש את
+          הסוג **האמיתי** של הבלוק — טבלה שנשלחה כ-`paragraph` ופסקה שנשלחה
+          כ-`table` הוחזרו שתיהן `TARGET_NOT_FOUND` — ושבלוק `tableOfContents`
+          נדחה `INVALID_TARGET` גם עם סוגו הנכון. כפיל שמקבל כל כתובת היה
+          מאשר בירוק בדיוק את השגיאה שהבדיקות האלה נכתבו בשבילה.
+        */
+        const { adjacentTo } = (input ?? {}) as { adjacentTo?: { nodeId?: string; nodeType?: string } };
+        const nodeId = adjacentTo?.nodeId ?? '';
+        const actual = blockTypeOf(nodeId);
+        if (actual === null || actual !== adjacentTo?.nodeType) {
+          return {
+            success: false,
+            failure: {
+              code: 'TARGET_NOT_FOUND',
+              message: `target ${adjacentTo?.nodeType ?? 'paragraph'} ${nodeId} was not found`,
+            },
+          };
+        }
+        if (actual !== 'paragraph' && actual !== 'table') {
+          return {
+            success: false,
+            failure: { code: 'INVALID_TARGET', message: `received ${actual}.` },
+          };
+        }
         return { success: true, caption: { kind: 'block', nodeType: 'paragraph', nodeId: 'caption-new' } };
       }),
       remove: route('captions.remove', () => receipt('captions.remove')),
@@ -367,10 +403,11 @@ describe('עריכת כיתוב', () => {
     expect(engine.ops()).not.toContain('captions.remove');
   });
 
-  it('שכן שהוא טבלה — נופלת לאחור אל הפסקה שאחרי, ומחזירה לאותו רווח', async () => {
+  it('שכן שהוא טבלה — העוגן הוא הטבלה עצמה, עם הסוג האמיתי שלה', async () => {
     // הצורה שנמדדה בדפדפן, והשכיחה ביותר: פסקה, טבלה, הכיתוב שמתחתיה,
-    // ופסקה. `tbl:…` כעוגן מוחזר `TARGET_NOT_FOUND` (נמדד), ולכן העוגן הוא
-    // הפסקה שאחרי הכיתוב עם „מעל” — אותו רווח בדיוק.
+    // ופסקה. עד 2.14.0-next.5 `tbl:…` כעוגן הוחזר `TARGET_NOT_FOUND` והעוגן
+    // היה הפסקה שאחרי; ב-2.15.0-next.15 נמדד שהעוגן מתקבל — ובלבד
+    // ש-`nodeType` הוא `table` ולא `paragraph`.
     const engine = fakeEngine({
       captions: [{ nodeId: 'cap-1', label: 'טבלה', text: 'סדר הדורות' }],
       blocks: ['block-1', 'tbl:4122CC21', 'cap-1', 'block-2'],
@@ -384,10 +421,34 @@ describe('עריכת כיתוב', () => {
     expect(outcome).toEqual({ ok: true });
     expect(engine.inputs('captions.insert')).toEqual([
       {
-        adjacentTo: { kind: 'block', nodeType: 'paragraph', nodeId: 'block-2' },
-        position: 'above',
+        adjacentTo: { kind: 'block', nodeType: 'table', nodeId: 'tbl:4122CC21' },
+        position: 'below',
         label: 'טבלה',
         text: 'סדר הדורות המתוקן',
+      },
+    ]);
+  });
+
+  it('שכן שהמנוע דוחה — נופלת לאחור אל הבלוק שאחרי, ומחזירה לאותו רווח', async () => {
+    // תוכן עניינים כשכן: נמדד `INVALID_TARGET`, ושליחתו כ„פסקה” כותבת את
+    // הכיתוב בתוך ה-sdt. לכן העוגן הוא הבלוק שאחרי עם „מעל” — אותו רווח.
+    const engine = fakeEngine({
+      captions: [{ nodeId: 'cap-1', label: 'איור' }],
+      blocks: ['block-1', 'toc:4122CC30', 'cap-1', 'block-2'],
+    });
+    const outcome = await updateCaption(engine.host, 'cap-1', {
+      label: 'איור',
+      text: 'x',
+      position: 'below',
+    });
+
+    expect(outcome).toEqual({ ok: true });
+    expect(engine.inputs('captions.insert')).toEqual([
+      {
+        adjacentTo: { kind: 'block', nodeType: 'paragraph', nodeId: 'block-2' },
+        position: 'above',
+        label: 'איור',
+        text: 'x',
       },
     ]);
   });
@@ -411,7 +472,10 @@ describe('עריכת כיתוב', () => {
     ]);
   });
 
-  it('טבלה משני הצדדים — מסרבת לפני שנגעה במסמך, ואינה מוחקת את הכיתוב', async () => {
+  it('טבלה משני הצדדים — נערך, ונשאר בין שתי הטבלאות', async () => {
+    // המצב שסורב עד 2.14.0-next.5. נמדד בדפדפן על 2.15.0-next.15 במסמך
+    // `טבלה │ כיתוב │ טבלה`: ההסרה וההוספה מחדש בעוגן הטבלה שלפני החזירו
+    // את הכיתוב לאותו רווח, עם אותו מספר.
     const engine = fakeEngine({
       captions: [{ nodeId: 'cap-1', label: 'טבלה', text: 'סדר הדורות' }],
       blocks: ['tbl:4122CC21', 'cap-1', 'tbl:4122CC22'],
@@ -422,9 +486,31 @@ describe('עריכת כיתוב', () => {
       position: 'below',
     });
 
+    expect(outcome).toEqual({ ok: true });
+    expect(engine.inputs('captions.insert')).toEqual([
+      {
+        adjacentTo: { kind: 'block', nodeType: 'table', nodeId: 'tbl:4122CC21' },
+        position: 'below',
+        label: 'טבלה',
+        text: 'סדר הדורות המתוקן',
+      },
+    ]);
+  });
+
+  it('שני שכנים שהמנוע דוחה — מסרבת לפני שנגעה במסמך, ואינה מוחקת את הכיתוב', async () => {
+    const engine = fakeEngine({
+      captions: [{ nodeId: 'cap-1', label: 'איור', text: 'שרטוט המשכן' }],
+      blocks: ['toc:4122CC30', 'cap-1', 'toc:4122CC31'],
+    });
+    const outcome = await updateCaption(engine.host, 'cap-1', {
+      label: 'איור',
+      text: 'שרטוט המשכן המתוקן',
+      position: 'below',
+    });
+
     expect(outcome.ok).toBe(false);
-    expect(outcome.ok === false && outcome.reason).toBe('anchor-not-paragraph');
-    expect(outcome.ok === false && outcome.message).toContain('אינו פסקה');
+    expect(outcome.ok === false && outcome.reason).toBe('anchor-kind-unsupported');
+    expect(outcome.ok === false && outcome.message).toContain('אינו פסקה ואינו טבלה');
     expect(engine.ops()).not.toContain('captions.remove');
     expect(engine.ops()).not.toContain('captions.insert');
   });

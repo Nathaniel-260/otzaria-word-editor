@@ -81,10 +81,10 @@ describe('הרצועה', () => {
     ]);
   });
 
-  it('כיתוב שמתחת לטבלה נערך, וחוזר בדיוק בין הטבלה לפסקה שאחריה', async () => {
+  it('כיתוב שמתחת לטבלה נערך, וחוזר אל הטבלה עצמה', async () => {
     // הצורה שנמדדה בדפדפן: `פסקה │ tbl │ כיתוב │ פסקה`. העוגן הטבעי הוא
-    // הטבלה, ו-`captions.insert` דוחה אותה — ולכן העוגן הוא הפסקה שאחרי
-    // הכיתוב עם „מעל”, שהוא אותו רווח בדיוק. נמדד גם שהמספור נשמר.
+    // הטבלה, ומ-2.15.0-next.15 המנוע מקבל אותה — ובלבד שהכתובת נושאת
+    // `nodeType: 'table'`. נמדד גם שהמספור נשמר.
     const superdoc = createSuperdocDouble({
       captions: {
         items: [
@@ -107,8 +107,8 @@ describe('הרצועה', () => {
 
     expect(superdoc.inputs('captions.insert')).toEqual([
       {
-        adjacentTo: { kind: 'block', nodeType: 'paragraph', nodeId: 'cap-2' },
-        position: 'above',
+        adjacentTo: { kind: 'block', nodeType: 'table', nodeId: 'tbl:cap-1-before' },
+        position: 'below',
         label: 'טבלה',
         text: 'סדר הדורות המתוקן',
       },
@@ -120,7 +120,10 @@ describe('הרצועה', () => {
     expect(shown).toEqual(['טבלה 1: סדר הדורות המתוקן', 'טבלה 2: ייחוסי תנאים']);
   });
 
-  it('כיתוב שטבלה משני צדדיו — העריכה מסרבת, והכיתוב נשאר במסמך', async () => {
+  it('כיתוב שטבלה משני צדדיו נערך, ונשאר בין שתי הטבלאות', async () => {
+    // המצב שסורב עד 2.14.0-next.5, כשעוגן טבלה הוחזר `TARGET_NOT_FOUND`.
+    // נמדד בדפדפן על 2.15.0-next.15: הסרה והוספה מחדש בעוגן הטבלה שלפני
+    // מחזירות את הכיתוב בדיוק לאותו רווח.
     const superdoc = createSuperdocDouble({
       captions: {
         items: [
@@ -146,13 +149,55 @@ describe('הרצועה', () => {
     });
     await settle(30);
 
+    expect(superdoc.inputs('captions.insert')).toEqual([
+      {
+        adjacentTo: { kind: 'block', nodeType: 'table', nodeId: 'tbl:cap-1-before' },
+        position: 'below',
+        label: 'טבלה',
+        text: 'סדר הדורות המתוקן',
+      },
+    ]);
+    expect(harness.reports[harness.reports.length - 1]?.outcome.ok).toBe(true);
+
+    const shown = [...document.querySelectorAll('.cp-list-text')].map((item) => item.textContent);
+    expect(shown).toEqual(['טבלה 1: סדר הדורות המתוקן']);
+  });
+
+  it('כיתוב שתוכן עניינים משני צדדיו — העריכה מסרבת, והכיתוב נשאר במסמך', async () => {
+    // מה שנשאר מהעקיפה: סוג בלוק שהמנוע עדיין דוחה (`INVALID_TARGET`,
+    // נמדד). הסירוב קודם להסרה — אחרת הכיתוב היה נמחק בלי שיוחזר.
+    const superdoc = createSuperdocDouble({
+      captions: {
+        items: [
+          {
+            nodeId: 'cap-1',
+            label: 'איור',
+            text: 'שרטוט המשכן',
+            tocBefore: true,
+            tocAfter: true,
+          },
+        ],
+      },
+    });
+    const harness = mountUi(ReferencesTab, { superdoc });
+    await settle();
+
+    await button(harness, 'הוסף כיתוב').trigger('click');
+    await settle();
+
+    harness.wrapper.findComponent(CaptionDialog).vm.$emit('update', {
+      id: 'cap-1',
+      draft: { label: 'איור', text: 'שרטוט המשכן המתוקן', position: 'below' },
+    });
+    await settle(30);
+
     expect(superdoc.ops()).not.toContain('captions.remove');
     const last = harness.reports[harness.reports.length - 1]?.outcome;
     expect(last?.ok).toBe(false);
-    expect(last?.ok === false && last.message).toContain('אינו פסקה');
+    expect(last?.ok === false && last.message).toContain('אינו פסקה ואינו טבלה');
 
     const shown = [...document.querySelectorAll('.cp-list-text')].map((item) => item.textContent);
-    expect(shown).toEqual(['טבלה 1: סדר הדורות']);
+    expect(shown).toEqual(['איור 1: שרטוט המשכן']);
   });
 
   it('אחרי העריכה הרשימה שבדיאלוג מציגה את הטקסט החדש, ולא כפול', async () => {
