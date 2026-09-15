@@ -428,7 +428,6 @@ import {
 } from './sessions/editor-swap';
 import {
   applyPaneScroll,
-  guardPaneScroll,
   readPaneScroll,
   repairPaneScroll,
   type PaneScroll,
@@ -1418,51 +1417,20 @@ function documentScrollHost(session: DocumentSession): HTMLElement | null {
 }
 
 /**
- * מפרק את השומר של הגלילה בטאב הפעיל. אחד בכל רגע — ראו `restorePaneScroll`.
- */
-let paneScrollGuard: (() => void) | null = null;
-
-/**
  * מחזירה לטאב שנכנס את מיקום הגלילה שנשמר בו.
- *
- * ## שלוש פעולות, ולא אחת
  *
  * **השמה, ועוד אחת בפריים הבא.** הפאנל בדיוק יצא מ-`display: none`, והדפדפן
  * מחשב את גובה התוכן שלו מחדש. השמה שקורית לפני שהחישוב הזה הסתיים נחתכת
  * לגובה שעדיין אינו נכון (`scrollTop` נצמד למקסימום האפשרי באותו רגע). שתיהן
  * אידמפוטנטיות — ראו `applyPaneScroll`.
- *
- * **ואחריהן שומר על אירוע הגלילה הראשון**, וזה מה שמתקן את הבאג שנשאר פתוח:
- * שתי ההשמות נמדדו כמצליחות (`scrollTop` הוא 720 בכל נקודות הזמן — מיד,
- * מיקרו-משימה, rAF, rAF שני ו-150ms), ואז **גלגלת אחת** החזירה אפס. הכתיבה
- * היא של המנוע ולא של הדפדפן, והיא קורית מתוך הגלגלת עצמה — כלומר אחרי כל
- * מה שאנחנו יכולים לעשות מכאן. ההנמקה המלאה והמדידה: `sessions/pane-scroll.ts`
- * ו-`docs/engine-gaps.md`.
- *
- * ## למה השומר נדרך בתוך ה-rAF ולא לפניו
- *
- * ההשמה הראשונה עלולה להיחתך (ראו למעלה), ואירוע הגלילה שהיא יורה היה נראה
- * לשומר בדיוק כמו „המשתמש גלל למקום אחר” — כלומר מכבה אותו לפני שהמנוע כתב
- * בכלל. אירועי גלילה נורים לפני קריאות ה-rAF של אותו פריים, ולכן דריכה בתוך
- * ה-rAF היא הרגע הראשון שבו כבר אין הד תלוי באוויר.
  */
 function restorePaneScroll(session: DocumentSession, scroll: PaneScroll): void {
-  const arm = (): void => {
-    paneScrollGuard?.();
-    paneScrollGuard = guardPaneScroll(documentScrollHost(session), scroll);
-  };
-
   applyPaneScroll(documentScrollHost(session), scroll);
-  if (typeof requestAnimationFrame !== 'function') {
-    arm();
-    return;
-  }
+  if (typeof requestAnimationFrame !== 'function') return;
   requestAnimationFrame(() => {
     // רק אם הוא עדיין הפעיל: מעבר טאב מהיר יותר מפריים היה מחזיר את הגלילה
     // של הטאב הקודם לתוך זה שנכנס אחריו.
-    if (activeSession.value !== session) return;
-    applyPaneScroll(documentScrollHost(session), scroll);
-    arm();
+    if (activeSession.value === session) applyPaneScroll(documentScrollHost(session), scroll);
   });
 }
 
@@ -2054,10 +2022,6 @@ function restoreFromSession(session: DocumentSession): void {
  */
 function activateTab(session: DocumentSession): void {
   if (activeSession.value === session) return;
-
-  // השומר שייך לטאב שיוצא, והוא מאזין ל-host שלו. ראו `restorePaneScroll`.
-  paneScrollGuard?.();
-  paneScrollGuard = null;
 
   const previous = activeSession.value;
   if (previous) {
@@ -5252,8 +5216,6 @@ onUnmounted(() => {
   contextMenuListener = null;
   fullscreenListener?.();
   fullscreenListener = null;
-  paneScrollGuard?.();
-  paneScrollGuard = null;
   // מעטפת שנפרקת בזמן מסך מלא הייתה משאירה את החלון מורחב בלי מי שיצא ממנו.
   if (isFullscreen()) void exitFullscreen();
   // הפריט עצמו אינו מוסר כאן: אוצריא מסירה את רישומי המופע בעצמה בפירוק,
