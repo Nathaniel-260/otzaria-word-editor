@@ -76,7 +76,7 @@ export const TABLE_CONTEXT_COMMANDS: readonly CommandId[] = COMMAND_GROUPS.table
  * אם גרסה עתידית תתמוך בהם.
  */
 export const KNOWN_UNSUPPORTED_COMMANDS = {
-  'table-fix': 'תיקון טבלה אינו נתמך במנוע 2.12.0',
+  'table-fix': 'תיקון טבלה אינו נתמך במנוע 2.15.0-next.15',
 } as const;
 
 /** צורת המינימום מ-`superdoc.ui` שנדרשת לבדיקת יכולות. */
