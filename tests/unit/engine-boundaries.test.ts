@@ -172,28 +172,36 @@ describe('מדידת העמוד המצויר', () => {
  * ציבורי: `readMountedLayoutData` מתאר שורות ב-`fromRun`/`toChar` ואינו נותן
  * את אורכי הריצות, כלומר אי אפשר להמיר אותם להיסט בלי לנחש.
  *
- * מה שהחריגה **אינה** מתירה, וזה מה שנמדד כאן: מקום שני שנוגע באותם עיגונים,
- * וכל דבר שאינו קריאת תכונה. הזזת הסמן עצמה נעשית דרך ה-API של המנוע
+ * קורא שני, מאותו טעם בדיוק: engine/rtl-caret.ts. חצים אופקיים בשורה עברית
+ * זזים לכיוון ההפוך מהמקש בכל פסקה שיש בה רשימה, טאב, ספרות או לטינית, וכדי
+ * לתקן צריך לדעת איפה **מצויר** כל תו — גם זו תוצאה של פריסה בלי API. שם
+ * העיגונים נקראים משלושה מקומות: ה-fragment, השורה, ו**הריצה** (`SPAN.
+ * superdoc-text-run` / `.superdoc-tab`), שנושאת טווח pm משלה. ההצדקה והמדידה
+ * (התאמה 20/20, 18/18, 12/12, 17/17 מול מקום הסמן שהמנוע עצמו מצייר) בהערת
+ * הפתיחה שם.
+ *
+ * מה שהחריגה **אינה** מתירה, וזה מה שנמדד כאן: מקום שלישי שנוגע באותם
+ * עיגונים, וכל דבר שאינו קריאה. הזזת הסמן עצמה נעשית דרך ה-API של המנוע
  * (`authoring.setSelectionTarget`) ולא דרך ה-DOM.
  */
 describe('טווח ה-pm של השורה המצוירת', () => {
-  const READER = 'engine/rtl-line-end.ts';
+  const READERS = ['engine/rtl-line-end.ts', 'engine/rtl-caret.ts'];
 
   function normalize(path: string): string {
     return path.split(sep).join('/');
   }
 
-  it('רק rtl-line-end.ts נוגע בעיגונים של השורה', () => {
+  it('רק rtl-line-end.ts ו-rtl-caret.ts נוגעים בעיגונים של השורה', () => {
     const offenders = hits(/data-pm-(?:start|end)|data-source-node-id/).filter(
-      (hit) => !normalize(hit).startsWith(READER),
+      (hit) => !READERS.some((reader) => normalize(hit).startsWith(reader)),
     );
 
     expect(offenders).toEqual([]);
   });
 
-  it('הקריאה היא תכונות בלבד — אינה בונה, מוחקת או כותבת', () => {
-    const reader = sources.find(({ path }) => normalize(path) === READER);
-    expect(reader, READER).toBeDefined();
+  it.each(READERS)('%s קורא בלבד — אינו בונה, מוחק או כותב', (path) => {
+    const reader = sources.find((file) => normalize(file.path) === path);
+    expect(reader, path).toBeDefined();
 
     const source = reader?.text ?? '';
     expect(source).toMatch(/getAttribute/);
