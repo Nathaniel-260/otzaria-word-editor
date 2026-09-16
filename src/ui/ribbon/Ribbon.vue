@@ -81,8 +81,10 @@
       />
       <HomeTab
         v-else-if="currentTabId === 'home'"
+        :list-autoformat-enabled="listAutoformatEnabled"
         @open-find="$emit('open-find')"
         @open-replace="$emit('open-replace')"
+        @toggle-list-autoformat="$emit('toggle-list-autoformat')"
       />
       <InsertTab
         v-else-if="currentTabId === 'insert'"
@@ -170,6 +172,7 @@ withDefaults(
     isOpening?: boolean;
     isExiting?: boolean;
     bookCompletionEnabled?: boolean;
+    listAutoformatEnabled?: boolean;
   }>(),
   {
     hasDocument: false,
@@ -178,6 +181,7 @@ withDefaults(
     isOpening: false,
     isExiting: false,
     bookCompletionEnabled: false,
+    listAutoformatEnabled: true,
   },
 );
 
@@ -230,6 +234,7 @@ defineEmits<{
   (e: 'macro-record'): void;
   (e: 'macro-play'): void;
   (e: 'toggle-book-completion'): void;
+  (e: 'toggle-list-autoformat'): void;
 }>();
 
 /** רק הלשונית הפעילה נמצאת ב-tab order, ולכן החצים צריכים להזיז מיקוד בעצמם. */

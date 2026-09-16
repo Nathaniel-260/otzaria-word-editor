@@ -274,6 +274,22 @@ button:disabled {
   }
 }
 
+/* וכשאין מיקוד — אין סמן.
+   סמן מהבהב אומר „ההקלדה תיכנס לכאן”, ולכן כשהמיקוד אינו במסמך — החלון עבר
+   לחלון אחר, או שפקד של הממשק לקח אותו — הוא אומר דבר שאינו נכון. זו התנהגות
+   Word, וגם של כל שדה טקסט בדפדפן. מי שמחליט זה ui/shell/caret-focus.ts, ושם
+   גם המדידה שממנה זה בא.
+
+   `opacity` ולא `display`: הקופסה נשארת, ומי שמודד את **מקום** הסמן ולא את
+   נראותו (scripts/qa/click-snap-qa.mjs, scripts/qa/rtl-caret-probe.mjs)
+   ממשיך לקבל את אותו מלבן. שתי ההצהרות יחד ולא רק כיבוי האנימציה — אנימציה
+   שנעצרת משאירה את מה שהיה בפריים האחרון, כלומר סמן גלוי בחצי מהמקרים. */
+.word-app-shell[data-caret-idle='true'] .sd-v2-local-selection-caret,
+.word-app-shell[data-caret-idle='true'] [data-v2-local-selection-caret] {
+  animation: none !important;
+  opacity: 0 !important;
+}
+
 .status {
   flex-shrink: 0;
   padding: 4px 16px;

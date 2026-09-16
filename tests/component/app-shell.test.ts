@@ -414,6 +414,8 @@ vi.mock('../../src/host/settings', () => ({
     stub.persistedSessions.push(value);
   },
   loadSpellcheckEnabled: async () => false,
+  loadListAutoformatEnabled: async () => true,
+  saveListAutoformatEnabled: async () => {},
   saveSpellcheckEnabled: async () => {},
   loadCanvasColor: async () => null,
   saveCanvasColor: async () => {},

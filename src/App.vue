@@ -6,6 +6,7 @@
       { 'focus-mode': isFocusMode },
       isFocusMode && revealed ? `reveal-${revealed}` : '',
     ]"
+    :data-caret-idle="caretIdle ? 'true' : null"
     @pointermove="onPointerMove"
     @pointerleave="revealed = null"
     @pointerdown.capture="keepCaret"
@@ -60,6 +61,7 @@
         :is-opening="isOpening"
         :is-exiting="isExiting"
         :book-completion-enabled="bookCompletionEnabled"
+        :list-autoformat-enabled="listAutoformatEnabled"
         @new-doc="openOpenDialog('new')"
         @open-doc="openOpenDialog('open')"
         @save-doc="onSave(false)"
@@ -82,6 +84,7 @@
         @macro-record="onMacroRecord"
         @macro-play="onMacroPlay"
         @toggle-book-completion="onToggleBookCompletion"
+        @toggle-list-autoformat="onToggleListAutoformat"
       />
 
       <!-- שורת הסרגל האופקי. הפינה שלפניו רחבה כמו הסרגל האנכי, וכך שניהם
@@ -458,6 +461,7 @@ import { registerShulchanTools } from './engine/shulchan/tools-registration';
 import MacrosDialog from './ui/panels/MacrosDialog.vue';
 import { installBookCompletion } from './engine/book-completion-overlay';
 import { installAtMention } from './engine/at-mention-overlay';
+import { installListAutoformat } from './engine/list-autoformat-install';
 import { preflightSource } from './engine/docx-preflight';
 import { installDocumentFontAliases } from './engine/docx-fonts';
 import {
@@ -550,6 +554,8 @@ import {
   saveRulerVisible,
   loadSpellcheckEnabled,
   saveSpellcheckEnabled,
+  loadListAutoformatEnabled,
+  saveListAutoformatEnabled,
   loadCanvasColor,
   loadSessionRecord,
   saveSessionRecord,
@@ -589,6 +595,8 @@ import {
 } from './engine/caret-anchor';
 import { createTextCursorWatch } from './engine/text-cursor';
 import { installRtlLineEnd } from './engine/rtl-line-end';
+import { installRtlVisualArrows } from './engine/rtl-caret';
+import { installCaretVisibility, type CaretVisibilityUi } from './engine/caret-visibility';
 import {
   deleteWorkspaceEntry,
   readWorkspaceBytes,
@@ -641,6 +649,7 @@ import { watchUndoRedoKeys, type UndoRedoWatcher } from './ui/shortcuts/undo-red
 import { createFocusRing } from './ui/shortcuts/focus-ring';
 import { focusDocument } from './engine/focus';
 import { createCaretKeeper } from './ui/shell/caret-keeper';
+import { watchCaretFocus, type CaretFocusHandle } from './ui/shell/caret-focus';
 
 const editorStackRef = ref<HTMLElement | null>(null);
 const shellRef = ref<HTMLElement | null>(null);
@@ -675,6 +684,15 @@ function whenIdle(work: () => void): void {
  * ב-engine/click-focus.ts.
  */
 const keepCaret = createCaretKeeper({ documentArea: () => editorStackRef.value });
+
+/**
+ * ‏„אין מיקוד” נמסר למעטפת כתכונה, ומשם ל-CSS שמכבה את הסמן — ראו
+ * ui/shell/caret-focus.ts ו-`[data-caret-idle]` ב-styles/shell.css. המצב
+ * ההתחלתי הוא „מהבהב”: המדידה הראשונה רצה עם ההתקנה ב-`onMounted` ומתקנת אותו
+ * מיד, ובין שני הרגעים עוד אין מסמך ואין סמן.
+ */
+const caretIdle = ref(false);
+let caretFocus: CaretFocusHandle | null = null;
 
 const commandAdapter = shallowRef<CommandAdapter | null>(null);
 provide(COMMAND_ADAPTER, commandAdapter);
@@ -851,6 +869,8 @@ const isStatusError = ref(false);
 const isFocusMode = ref(false);
 const revealed = ref<RevealZone>(null);
 const bookCompletionEnabled = ref(false);
+/** זיהוי רשימות בהקלדה. ברירת המחדל דלוקה — ראו host/settings.ts. */
+const listAutoformatEnabled = ref(true);
 
 /**
  * הלשונית ברצועה ומצב הכיווץ. הוחזקו עד עכשיו בתוך `Ribbon.vue` עצמו, ועלו
@@ -2523,6 +2543,28 @@ async function openDocumentInto(
   editor.onDispose(() => sessionLineEnd.dispose());
 
   /**
+   * חצים אופקיים בשורה עברית — ראו engine/rtl-caret.ts. אותה תבנית ואותו
+   * טעם כמו `End` שמעליו, ומאזין נפרד ולא הרחבה שלו: זה מקש אחר, עם מדידה
+   * אחרת מאחוריו, והם נופלים חזרה למנוע בתנאים שונים.
+   */
+  const sessionVisualArrows = installRtlVisualArrows({
+    host: paintedHost(editor.ui),
+    superdoc: editor.superdoc,
+  });
+  editor.onDispose(() => sessionVisualArrows.dispose());
+
+  /**
+   * „מקלידים ולא רואים” בחלון צר — ראו engine/caret-visibility.ts. פר-session
+   * מאותה סיבה כמו שני המאזינים שמעליו: המנוי הוא על הבחירה של **המסמך הזה**
+   * והגלילה היא של מיכל הגלילה שלו.
+   */
+  const sessionCaretVisibility = installCaretVisibility({
+    host: paintedHost(editor.ui),
+    ui: editor.ui as CaretVisibilityUi,
+  });
+  editor.onDispose(() => sessionCaretVisibility.dispose());
+
+  /**
    * „גבולות עמוד” של ה-session: אותה תבנית בדיוק כמו הסרגל, ומאותה סיבה —
    * הוא קורא את המקטע של **המסמך הזה**, ולכן הוא נבנה ונפרק איתו. קריאה
    * מיידית מיד אחרי היצירה (`refreshNow`) ולא רק בהמתנה ל-`onUpdate` הראשון:
@@ -4143,6 +4185,29 @@ watch([activeEditorContainer, activeSuperdoc, documentGeneration], () => {
   });
 });
 
+function onToggleListAutoformat(): void {
+  listAutoformatEnabled.value = !listAutoformatEnabled.value;
+  void saveListAutoformatEnabled(listAutoformatEnabled.value);
+}
+
+/**
+ * זיהוי רשימות בהקלדה (engine/list-autoformat-install.ts), על אותו container
+ * ובאותם תנאים כמו השניים שמעליו.
+ *
+ * בלי `CommandAdapter`, בשונה מתפריט המספור: המודול קורא ל-`lists.create`
+ * ישירות, וזו פעולה מכוונת ולא טוגל — ראו ההנמקה ב-`apply` שם.
+ */
+let listAutoformat: ReturnType<typeof installListAutoformat> | null = null;
+watch([activeEditorContainer, activeSuperdoc, listAutoformatEnabled, documentGeneration], () => {
+  listAutoformat?.dispose();
+  listAutoformat = null;
+  if (!listAutoformatEnabled.value || !activeEditorContainer.value || !activeSuperdoc.value) return;
+  listAutoformat = installListAutoformat({
+    container: activeEditorContainer.value,
+    host: activeSuperdoc.value,
+  });
+});
+
 /**
  * עד איפה מגיעים הפסים בפועל — הגובל שמחזיק את החשיפה פתוחה.
  *
@@ -5077,6 +5142,15 @@ onMounted(async () => {
     isBlocked: isOutsideDocumentEditing,
   });
 
+  // הסמן מהבהב רק כשההקלדה באמת תיכנס למסמך. אותו `documentArea` בדיוק של
+  // שומר הסמן שלמעלה, ומאותה סיבה: זה מה שמגדיר „בתוך המסמך”.
+  caretFocus = watchCaretFocus({
+    documentArea: () => editorStackRef.value,
+    onChange: (paint) => {
+      caretIdle.value = !paint;
+    },
+  });
+
   if (editorStackRef.value) {
     // לפני פתיחת המסמך הראשון: `observeZoom` יורה מיד עם ה-snapshot, וללא
     // הפקד הזה הדיווח הראשון היה הולך לאיבוד.
@@ -5098,6 +5172,7 @@ onMounted(async () => {
       storedDiscarded,
       storedSpellcheck,
       storedCanvasColor,
+      storedListAutoformat,
       customShortcutsNotice,
     ] =
       await Promise.all([
@@ -5108,6 +5183,7 @@ onMounted(async () => {
         loadDiscardBackups(),
         loadSpellcheckEnabled(),
         loadCanvasColor(),
+        loadListAutoformatEnabled(),
         // לפני פתיחת המסמך הראשון: MacroKit קוראת `reservedShortcuts` פעם
         // אחת בלבד. אם הקיצורים האישיים ייטענו אחר כך, מאקרו קיים יכול
         // להיקשר אליהם לפני שהם מוכרזים כשמורים ולהשתיק אותם.
@@ -5116,6 +5192,7 @@ onMounted(async () => {
         loadCustomShortcutList({ announce: false }),
       ]);
     autosaveEnabled.value = storedAutosave;
+    listAutoformatEnabled.value = storedListAutoformat;
     rulerPreference = storedRuler;
     // ממוינת כבר כאן ולא רק בתצוגה: זו הרשימה שכל שאר הקוד רואה, ורשימה
     // שמגיעה מ-storage אין לה הבטחת סדר.
@@ -5203,6 +5280,8 @@ onUnmounted(() => {
   directionShortcut?.dispose();
   undoRedoWatcher?.dispose();
   undoRedoWatcher = null;
+  caretFocus?.dispose();
+  caretFocus = null;
   // חיפוש-בזמן-הקלדה שממתין ירוץ אחרי הפירוק על handle של controller מפורק.
   // בכל הטאבים, לא רק הפעיל — לכולם יש `searchAdapter`/`keeper` משלהם.
   for (const s of sessions.values()) {

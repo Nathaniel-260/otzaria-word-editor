@@ -190,6 +190,8 @@ const EN: Readonly<Record<string, string>> = {
   'המר לטקסט…': 'Convert to text…',
   'לחץ שוב לאישור — הפעולה בלתי-הפיכה':
     'Click again to confirm — this action cannot be undone',
+  'זיהוי רשימות בהקלדה: פעיל': 'List autoformat while typing: on',
+  'זיהוי רשימות בהקלדה: כבוי': 'List autoformat while typing: off',
   'כיוון פסקה מימין לשמאל': 'Paragraph direction right-to-left',
   'מסדר את הפסקה לקריאה בעברית: ההזחה והיישור בצד ימין':
     'Sets the paragraph up for Hebrew reading: indent and alignment on the right',

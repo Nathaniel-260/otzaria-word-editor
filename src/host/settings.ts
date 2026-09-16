@@ -142,6 +142,24 @@ export async function saveSpellcheckEnabled(enabled: boolean): Promise<void> {
   await tryCall('storage.set', { key: SPELLCHECK_KEY, value: enabled });
 }
 
+const LIST_AUTOFORMAT_KEY = 'list-autoformat-enabled';
+
+/**
+ * זיהוי רשימות בהקלדה — „‏`א)` ורווח” הופך את הפסקה לרשימה. ברירת המחדל
+ * **דלוקה**, וכל מה שאינו `false` מפורש נקרא כדלוק: זו התנהגות ש-Word נותן
+ * מאז ומעולם, ומשתמש שלא הביע דעה מצפה לה.
+ *
+ * ובכל זאת יש מתג, בשונה מאזכור „@”: כאן המנגנון **משנה טקסט שהמשתמש
+ * הקליד**, ומי שכותב „1. ” בכוונה כטקסט חייב דרך לכבות אותו.
+ */
+export async function loadListAutoformatEnabled(): Promise<boolean> {
+  return (await tryCall<unknown>('storage.get', { key: LIST_AUTOFORMAT_KEY })) !== false;
+}
+
+export async function saveListAutoformatEnabled(enabled: boolean): Promise<void> {
+  await tryCall('storage.set', { key: LIST_AUTOFORMAT_KEY, value: enabled });
+}
+
 const CANVAS_COLOR_KEY = 'canvas-color';
 
 /**
