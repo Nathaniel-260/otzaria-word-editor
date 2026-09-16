@@ -18,6 +18,8 @@
  * החבילה נושאת חלק מאקרו בפועל.
  */
 import type { SuperDoc } from 'superdoc';
+import type { Bytes } from './docx-parts';
+import { postflightDocx } from './docx-run-direction';
 
 /** הסיומות של חבילות OOXML לעיבוד תמלילים שהתוסף מכיר. */
 export const WORD_EXTENSIONS = ['docx', 'docm', 'dotx', 'dotm'] as const;
@@ -48,11 +50,43 @@ const EXTENSION_PATTERN = new RegExp(`\\.(${WORD_EXTENSIONS.join('|')})$`, 'i');
 /**
  * ייצוא המסמך. `exportType: ['docx']` הוא משפחת הפורמט של המנוע ואינו נוגע
  * לסיומת: חבילה עם מאקרו יוצאת מכאן עם המאקרו שלה בפנים.
+ *
+ * זו נקודת החנק היחידה של הכתיבה — שמירה, „שמור בשם” והחלפת הקובץ כולן עוברות
+ * כאן — ולכן זה גם המקום שבו הריצות העבריות מסומנות `<w:rtl/>` לפני שהבייטים
+ * יוצאים. ראו engine/docx-run-direction.ts.
  */
 export async function exportDocx(superdoc: SuperDoc): Promise<Blob> {
   const blob = await superdoc.export({ exportType: ['docx'], triggerDownload: false });
   if (!(blob instanceof Blob)) throw new Error('הייצוא לא החזיר קובץ');
-  return blob;
+  return markRunDirection(blob);
+}
+
+/**
+ * הבייטים של ה-Blob, או `null` כשאי אפשר לקרוא אותם.
+ *
+ * `arrayBuffer` נבדק ולא מונח: ב-jsdom הוא אינו קיים, ובלי הבדיקה כל בדיקת
+ * יחידה שנוגעת בייצוא הייתה זורקת `TypeError` במקום לרוץ.
+ */
+async function blobBytes(blob: Blob): Promise<Bytes | null> {
+  if (typeof blob.arrayBuffer !== 'function') return null;
+  return new Uint8Array(await blob.arrayBuffer()) as Bytes;
+}
+
+/**
+ * סימון הריצות העבריות בבייטים שיוצאים.
+ *
+ * אותו כלל כמו בכיוון הנכנס (`docx-preflight.ts`): **לתקן, ולא לחסום.** כל כשל
+ * — Blob שאינו נקרא, zip שאינו נפרס, דוחס שאינו קיים — מחזיר את המקור כמות
+ * שהוא. נקודה בצד הלא נכון היא באג; שמירה שנכשלת היא אובדן עבודה.
+ */
+async function markRunDirection(blob: Blob): Promise<Blob> {
+  try {
+    const bytes = await blobBytes(blob);
+    const marked = bytes && (await postflightDocx(bytes));
+    return marked ? new Blob([marked], { type: blob.type || DOCX_MIME }) : blob;
+  } catch {
+    return blob;
+  }
 }
 
 /** הסיומת שבשם הקובץ, או `null` כשאינה אחת מהמוכרות. */
