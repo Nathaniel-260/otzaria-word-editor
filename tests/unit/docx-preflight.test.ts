@@ -23,8 +23,6 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { deflateRawSync } from 'node:zlib';
 import {
   COMPLEX_SCRIPT_BOLD_NOTICE,
-  CONTENT_PARTS,
-  crc32 as moduleCrc32,
   DEFAULT_TAB_STOP_TWIPS,
   FONT_TABLE_PART,
   preflightDocx,
@@ -34,6 +32,7 @@ import {
   repairSettings,
   SETTINGS_PART,
 } from '../../src/engine/docx-preflight';
+import { CONTENT_PARTS, crc32 as moduleCrc32 } from '../../src/engine/docx-parts';
 import { NO_VBA } from '../../src/engine/vba-import';
 
 const SETTINGS_WITH_ZERO =
