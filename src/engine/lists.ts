@@ -153,6 +153,24 @@ async function resolveListItem(host: ListsTarget): Promise<ListItemResolution> {
     return { kind: 'unknown' };
   }
   if (!blockId) return { kind: 'unknown' };
+  return resolveListItemAt(host, blockId);
+}
+
+/**
+ * אותה הכרעה, על בלוק שהקורא כבר מחזיק את המזהה שלו.
+ *
+ * מיוצאת בשביל `list-autoformat-install.ts`: זיהוי הרשימות בהקלדה כבר קרא את
+ * הסמן בעצמו (הוא צריך גם את ההיסט), וקריאה שנייה ל-`selection.current` שם
+ * הייתה גם מיותרת וגם מרוץ — בין שתי הקריאות המשתמש ממשיך להקליד. חשוב מכך:
+ * `numbered-list` הוא **טוגל**, ושם בדיוק נדרשת ההפרדה בין „אינו רשימה”
+ * להכרעה שלא התקבלה.
+ */
+export async function resolveListItemAt(
+  host: ListsTarget,
+  blockId: string,
+): Promise<ListItemResolution> {
+  const doc = docOf(host);
+  if (!doc) return { kind: 'unknown' };
   const address: ListItemAddress = { kind: 'block', nodeType: 'listItem', nodeId: blockId };
 
   const getState = doc.lists?.getState;
@@ -189,7 +207,7 @@ async function resolveAddress(host: ListsTarget): Promise<ListItemAddress | null
   return resolution.kind === 'item' ? resolution.address : null;
 }
 
-interface ListItemAddress {
+export interface ListItemAddress {
   kind: 'block';
   nodeType: 'listItem';
   nodeId: string;
@@ -201,7 +219,7 @@ interface ListItemAddress {
  * זרקה, אין `blockId`, `getState` חסרה/זרקה/לא הכריעה, `blocks.list`
  * חסרה/זרקה, או שאינה מונה את הבלוק כלל (פריט בתא טבלה).
  */
-type ListItemResolution =
+export type ListItemResolution =
   | { kind: 'item'; address: ListItemAddress }
   | { kind: 'not-list' }
   | { kind: 'unknown' };

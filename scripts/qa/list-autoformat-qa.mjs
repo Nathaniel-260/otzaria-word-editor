@@ -1,0 +1,357 @@
+/**
+ * זיהוי רשימות בהקלדה — השער, מול Chrome אמיתי ועל ה-dist הבנוי.
+ *
+ * מה שנמדד כאן ולא ניתן למדוד ב-jsdom:
+ *
+ *   1. **`lists.create` בקריאה אחת.** האם המנוע מקבל `mode:'fromParagraphs'`
+ *      עם `style` ו-`sequence` יחד — כלומר האם אפשר ליצור רשימה **ישר**
+ *      בסגנון המבוקש, בלי לעבור דרך רשימה עשרונית ולתקן אותה אחר כך. זה
+ *      ההבדל בין „‏`א)` מופיע” לבין „‏`1.` מהבהב ואז מתחלף”.
+ *   2. **הסמן שמצויר על המסך** — `א)` ולא `1.` ולא ריק.
+ *   3. **הסמן של המשתמש** נשאר במסמך אחרי ההמרה.
+ *   4. **מה שנכתב ל-docx**: `numFmt` ו-`lvlText` ב-numbering.xml.
+ *   5. Backspace מיד אחרי ההמרה מחזיר את הטקסט.
+ *   6. „‏`ב.`” אינו מומר — ההגנה מפני „ב׳ בניסן”.
+ *   7. הקלדה רציפה: הסמן מצויר **לפני** שההקלדה נגמרת, ו-Enter ואז סמן
+ *      ממיר רק את הפסקה החדשה. סמן באמצע פסקה אינו מומר.
+ *
+ *   node scripts/qa/list-autoformat-qa.mjs
+ */
+import { openApp, createReport } from './harness.mjs';
+
+const report = createReport('זיהוי רשימות בהקלדה', { strict: true });
+const app = await openApp({ name: 'list-autoformat', port: Number(process.env.QA_PORT ?? 9623) });
+
+/** הסמנים שמצוירים בפועל — מה שהמשתמש רואה. */
+const markers = () =>
+  app
+    .js(
+      `JSON.stringify(Array.from(document.querySelectorAll('[class*="list-marker"]'))` +
+        `.filter(function(n){ return n.getBoundingClientRect().width > 0; })` +
+        `.map(function(n){ return n.textContent.replace(/\\u200f/g,'').trim(); }))`,
+    )
+    .then(JSON.parse);
+
+/** הרמה הראשונה של הרשימה שבסמן, כפי שהמנוע מדווח אותה. */
+const levelZero = () =>
+  app
+    .js(
+      `(async function(){
+    try {
+      var doc = window.__otzariaEditor.superdoc.activeEditor.doc;
+      var info = await doc.selection.current();
+      var seg = info && info.target && info.target.segments && info.target.segments[0];
+      if (!seg) return JSON.stringify({ err: 'no block' });
+      var address = { kind: 'block', nodeType: 'listItem', nodeId: seg.blockId };
+      var state = await doc.lists.getState({ target: { kind: 'block', nodeType: 'paragraph', nodeId: seg.blockId } });
+      if (!state || state.isListItem !== true) return JSON.stringify({ isListItem: false, state: state });
+      var style = await doc.lists.getStyle({ target: address });
+      var levels = (style && style.style && style.style.levels) || [];
+      var zero = levels.filter(function(l){ return l && l.level === 0; })[0] || null;
+      return JSON.stringify({ isListItem: true, level0: zero });
+    } catch (e) { return JSON.stringify({ err: String((e && e.message) || e) }); }
+  })()`,
+    )
+    .then(JSON.parse);
+
+/** הטקסט של הפסקה שבסמן, וההיסט של הסמן בתוכה. */
+const paragraph = () =>
+  app
+    .js(
+      `(async function(){
+    try {
+      var doc = window.__otzariaEditor.superdoc.activeEditor.doc;
+      var info = await doc.selection.current();
+      var t = info && info.selectionTarget;
+      var seg = info && info.target && info.target.segments && info.target.segments[0];
+      if (!seg) return JSON.stringify({ err: 'no block' });
+      var r = await doc.ranges.resolve({
+        start: { kind: 'point', point: { kind: 'text', blockId: seg.blockId, offset: 0 } },
+        end: { kind: 'point', point: { kind: 'text', blockId: seg.blockId, offset: 400 } },
+      });
+      return JSON.stringify({
+        text: (r && r.preview && r.preview.text) || '',
+        caret: t && t.start ? t.start.offset : null,
+        blockId: seg.blockId,
+      });
+    } catch (e) { return JSON.stringify({ err: String((e && e.message) || e) }); }
+  })()`,
+    )
+    .then(JSON.parse);
+
+/**
+ * מרוקן את המסמך ומחזיר את הסמן לתחילתו.
+ *
+ * `clearContent` לבדו אינו מספיק: הוא מנקה את הטקסט ומשאיר את הפסקה **פריט
+ * רשימה**, והמקרה הבא היה נמדד על בלוק שכבר ברשימה — כלומר על כלום. נמדד
+ * בריצה הראשונה של השער, כשכל המקרים אחרי הראשון החזירו תשובות של המקרה
+ * שלפניהם.
+ */
+async function clearDoc() {
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    await app.js(`(async function(){
+      var doc = window.__otzariaEditor.superdoc.activeEditor.doc;
+      try { await doc.clearContent({}); } catch (e) {}
+      try {
+        var info = await doc.selection.current();
+        var seg = info && info.target && info.target.segments && info.target.segments[0];
+        if (seg) {
+          var state = await doc.lists.getState({ target: { kind: 'block', nodeType: 'paragraph', nodeId: seg.blockId } });
+          if (state && state.isListItem === true) {
+            await doc.lists.remove({ target: { kind: 'block', nodeType: 'listItem', nodeId: seg.blockId } });
+          }
+        }
+      } catch (e) {}
+    })()`);
+    await app.sleep(500);
+    await app.caret(0);
+    await app.sleep(300);
+    const state = await levelZero();
+    const text = await paragraph();
+    if (state.isListItem !== true && text.text === '') return;
+  }
+  throw new Error('הניקוי בין המקרים לא הצליח להחזיר פסקה ריקה שאינה רשימה');
+}
+
+/** ידית האבחון של המודול — installs/evaluates/applies. */
+const debugHandle = () =>
+  app.js('JSON.stringify(window.__otzariaListAutoformat || null)').then(JSON.parse);
+
+try {
+  // ── 0. האם המודול בכלל הותקן ─────────────────────────────────────────────
+  const installed = await debugHandle();
+  console.log('ידית האבחון בעלייה:', JSON.stringify(installed));
+  installed && installed.installs > 0
+    ? report.pass('המודול הותקן על המסמך', `installs=${installed.installs}`)
+    : report.fail('המודול הותקן על המסמך', JSON.stringify(installed));
+
+  // ── 1. `lists.create` בקריאה אחת ─────────────────────────────────────────
+  await app.caret(0);
+  await app.type('x', 60);
+  await app.sleep(700);
+
+  const createReceipt = await app
+    .js(
+      `(async function(){
+    try {
+      var doc = window.__otzariaEditor.superdoc.activeEditor.doc;
+      var info = await doc.selection.current();
+      var seg = info.target.segments[0];
+      var out = await doc.lists.create({
+        mode: 'fromParagraphs',
+        target: { kind: 'block', nodeType: 'paragraph', nodeId: seg.blockId },
+        kind: 'ordered',
+        style: { version: 1, levels: [{ level: 0, numFmt: 'hebrew1', lvlText: '%1)', markerFont: '' }] },
+        sequence: { mode: 'new', startAt: 1 },
+      });
+      return JSON.stringify(out);
+    } catch (e) { return JSON.stringify({ threw: String((e && e.message) || e) }); }
+  })()`,
+    )
+    .then(JSON.parse);
+  await app.sleep(900);
+
+  const createdOk = createReceipt && createReceipt.success === true;
+  const drawn = await markers();
+  console.log('lists.create receipt:', JSON.stringify(createReceipt).slice(0, 400));
+  console.log('סמנים אחרי create:', JSON.stringify(drawn));
+
+  createdOk
+    ? report.pass('lists.create מקבל style ו-sequence בקריאה אחת', JSON.stringify(drawn))
+    : report.fail('lists.create מקבל style ו-sequence בקריאה אחת', JSON.stringify(createReceipt).slice(0, 200));
+
+  drawn.some((m) => m.includes('א'))
+    ? report.pass('הסמן שצויר הוא עברי', drawn.join(' '))
+    : report.fail('הסמן שצויר הוא עברי', drawn.join(' ') || 'אין סמן');
+
+  // ── 2. הקלדה אמיתית: „א) ” ───────────────────────────────────────────────
+  await clearDoc();
+  await app.type('א', 60);
+  await app.type(')', 60);
+  await app.type(' ', 60);
+  await app.sleep(1200);
+
+  console.log('עקבה אחרי „א) ”:', JSON.stringify(await debugHandle()));
+  const afterHebrew = await levelZero();
+  const paraHebrew = await paragraph();
+  const markersHebrew = await markers();
+  console.log('אחרי „א) ”:', JSON.stringify({ afterHebrew, paraHebrew, markersHebrew }));
+
+  afterHebrew.isListItem === true
+    ? report.pass('„א) ” הפך את הפסקה לרשימה', JSON.stringify(afterHebrew.level0))
+    : report.fail('„א) ” הפך את הפסקה לרשימה', JSON.stringify(afterHebrew).slice(0, 200));
+
+  afterHebrew.level0 && afterHebrew.level0.numFmt === 'hebrew1'
+    ? report.pass('numFmt הוא hebrew1', String(afterHebrew.level0.numFmt))
+    : report.fail('numFmt הוא hebrew1', JSON.stringify(afterHebrew.level0));
+
+  afterHebrew.level0 && afterHebrew.level0.lvlText === '%1)'
+    ? report.pass('המפריד שהוקלד נשמר בתבנית', String(afterHebrew.level0.lvlText))
+    : report.fail('המפריד שהוקלד נשמר בתבנית', JSON.stringify(afterHebrew.level0));
+
+  paraHebrew.text === ''
+    ? report.pass('הסמן שהוקלד נבלע', JSON.stringify(paraHebrew.text))
+    : report.fail('הסמן שהוקלד נבלע', JSON.stringify(paraHebrew.text));
+
+  // התקלה שדווחה: „הסמן נעלם מהמקום שלו”.
+  paraHebrew.caret === 0
+    ? report.pass('הסמן נשאר בתחילת הפריט', String(paraHebrew.caret))
+    : report.fail('הסמן נשאר בתחילת הפריט', String(paraHebrew.caret));
+
+  markersHebrew.some((m) => m.includes('א'))
+    ? report.pass('המסך מצייר סמן עברי ולא עשרוני', markersHebrew.join(' '))
+    : report.fail('המסך מצייר סמן עברי ולא עשרוני', markersHebrew.join(' ') || 'אין');
+
+  // ── 3. ההקלדה ממשיכה לתוך הפריט ──────────────────────────────────────────
+  await app.type('טקסט', 50);
+  await app.sleep(700);
+  const typedInto = await paragraph();
+  typedInto.text === 'טקסט'
+    ? report.pass('ההקלדה נכנסת לפריט', JSON.stringify(typedInto.text))
+    : report.fail('ההקלדה נכנסת לפריט', JSON.stringify(typedInto.text));
+
+  // ── 3א. הקלדה רציפה — ההמרה יוצאת לפני שההקלדה נגמרת ──────────────────
+  /*
+   * הדיווח שהוביל לכתיבה מחדש: „זה עובר רק אחרי שאני גומר להקליד”. במנוע
+   * כל קריאה חסומה עד שההקלדה נעצרת, ולכן ההמרה חייבת לצאת בלי קריאה.
+   * נמדד מול הסמן **המצויר**, לא מול קבלה.
+   */
+  await clearDoc();
+  await app.js(`(function(){
+    window.__laEv = [];
+    if (!window.__laObs) {
+      window.__laObs = true;
+      document.addEventListener('keydown', function(e){ window.__laEv.push({ k: 'down', t: performance.now() }); }, true);
+      new MutationObserver(function(){
+        var has = Array.prototype.some.call(document.querySelectorAll('[class*="list-marker"]'), function(n){
+          return n.getBoundingClientRect().width > 0 && n.textContent.indexOf('\\u05d0') >= 0;
+        });
+        if (has && !window.__laEv.some(function(e){ return e.k === 'marker'; })) window.__laEv.push({ k: 'marker', t: performance.now() });
+      }).observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true });
+    }
+    return true;
+  })()`);
+  await app.type('א) חידוש נוסף', 120);
+  await app.sleep(1500);
+  const flow = JSON.parse(await app.js('JSON.stringify(window.__laEv)'));
+  const flowMarker = flow.find((e) => e.k === 'marker');
+  const flowLast = [...flow].reverse().find((e) => e.k === 'down');
+  const flowPara = await paragraph();
+  console.log('רציף:', JSON.stringify({ flowPara, markerBeforeLastKey: !!flowMarker && flowMarker.t < flowLast.t }));
+
+  flowMarker && flowMarker.t < flowLast.t
+    ? report.pass('הקלדה רציפה: הסמן מצויר לפני ההקשה האחרונה')
+    : report.fail('הקלדה רציפה: הסמן מצויר לפני ההקשה האחרונה', JSON.stringify({ flowMarker, flowLast }));
+
+  flowPara.text === 'חידוש נוסף' && flowPara.caret === flowPara.text.length
+    ? report.pass('הקלדה רציפה: הטקסט נשמר והסמן בסופו', JSON.stringify(flowPara))
+    : report.fail('הקלדה רציפה: הטקסט נשמר והסמן בסופו', JSON.stringify(flowPara));
+
+  // ── 3ב. Enter מפסקה רגילה, ומיד סמן ────────────────────────────────────
+  await clearDoc();
+  await app.type('פתיחה', 90);
+  await app.sleep(900);
+  await app.press('Enter', 'Enter', 13, 0, '\r');
+  await app.sleep(120);
+  await app.type('א) טקסט', 120);
+  await app.sleep(1500);
+  const afterEnter = JSON.parse(
+    await app.js(`(async function(){
+      var l = await window.__otzariaEditor.superdoc.activeEditor.doc.blocks.list({ includeText: true });
+      return JSON.stringify((l.blocks || []).map(function(b){ return [b.nodeType, b.text]; }));
+    })()`),
+  );
+  console.log('Enter ואז סמן:', JSON.stringify(afterEnter));
+  JSON.stringify(afterEnter) === JSON.stringify([['paragraph', 'פתיחה'], ['listItem', 'טקסט']])
+    ? report.pass('Enter ואז סמן: רק הפסקה החדשה הומרה', JSON.stringify(afterEnter))
+    : report.fail('Enter ואז סמן: רק הפסקה החדשה הומרה', JSON.stringify(afterEnter));
+
+  // ── 3ג. סמן שהוקלד באמצע פסקה אינו מומר ──────────────────────────────
+  await clearDoc();
+  await app.type('abc', 90);
+  await app.sleep(600);
+  // End מאפס את הרצף: „א)” שאחריו הוא רצף חדש, שמתחיל בהיסט 3.
+  await app.press('End', 'End', 35);
+  await app.sleep(150);
+  await app.type('א) ', 120);
+  await app.sleep(2000);
+  const midState = await levelZero();
+  const midPara = await paragraph();
+  midState.isListItem !== true && midPara.text === 'abcא) '
+    ? report.pass('סמן באמצע פסקה נשאר טקסט', JSON.stringify(midPara.text))
+    : report.fail('סמן באמצע פסקה נשאר טקסט', JSON.stringify({ midState, midPara }));
+
+  // ── 4. „ב. ” אינו מומר ───────────────────────────────────────────────────
+  await clearDoc();
+  await app.type('ב', 60);
+  await app.type('.', 60);
+  await app.type(' ', 60);
+  await app.sleep(1000);
+  const afterBet = await levelZero();
+  const paraBet = await paragraph();
+  console.log('אחרי „ב. ”:', JSON.stringify({ afterBet, paraBet }));
+
+  afterBet.isListItem !== true && paraBet.text === 'ב. '
+    ? report.pass('„ב. ” נשאר טקסט', JSON.stringify(paraBet.text))
+    : report.fail('„ב. ” נשאר טקסט', JSON.stringify({ afterBet, text: paraBet.text }).slice(0, 200));
+
+  // ── 5. Backspace אחרי ההמרה — הטיפול הוא של המנוע ─────────────────────
+  /*
+   * לא היה כאן מסלול משלנו, והוא ירד אחרי מדידה: המנוע מסיר את הרשימה
+   * בתחילת פריט ומשאיר את הטקסט, טוב יותר מ-Word (שמשאיר את ההזחה). השער
+   * נועל את ההתנהגות **שלו**, כי עליה אנחנו נשענים — ר' list-backspace-owner-probe.
+   */
+  await clearDoc();
+  await app.type('1', 60);
+  await app.type('.', 60);
+  await app.type(' ', 60);
+  await app.sleep(1200);
+  const beforeBack = await levelZero();
+  await app.type('חידוש', 50);
+  await app.sleep(700);
+  await app.press('Home', 'Home', 36);
+  await app.sleep(400);
+  await app.press('Backspace', 'Backspace', 8);
+  await app.sleep(900);
+  const afterBack = await levelZero();
+  const paraBack = await paragraph();
+  console.log('Backspace:', JSON.stringify({ beforeBack, afterBack, paraBack }));
+
+  beforeBack.isListItem === true && afterBack.isListItem !== true && paraBack.text === 'חידוש'
+    ? report.pass('Backspace בתחילת הפריט מסיר את הרשימה ומשאיר את הטקסט', JSON.stringify(paraBack.text))
+    : report.fail(
+        'Backspace בתחילת הפריט מסיר את הרשימה ומשאיר את הטקסט',
+        JSON.stringify({ before: beforeBack.isListItem, after: afterBack.isListItem, text: paraBack.text }),
+      );
+
+  // ── 6. מה שנכתב ל-docx ───────────────────────────────────────────────────
+  await clearDoc();
+  await app.type('א', 60);
+  await app.type(')', 60);
+  await app.type(' ', 60);
+  await app.sleep(1000);
+  await app.type('חידוש', 50);
+  await app.sleep(900);
+
+  const files = await app.docx();
+  const numbering = files['word/numbering.xml'] || '';
+  const fmts = [...numbering.matchAll(/<w:numFmt w:val="([^"]+)"/g)].map((x) => x[1]);
+  const texts = [...numbering.matchAll(/<w:lvlText w:val="([^"]*)"/g)].map((x) => x[1]);
+  console.log('numbering.xml numFmt:', JSON.stringify(fmts.slice(0, 10)));
+  console.log('numbering.xml lvlText:', JSON.stringify(texts.slice(0, 10)));
+
+  fmts.includes('hebrew1')
+    ? report.pass('hebrew1 נכתב ל-numbering.xml', fmts.filter((f) => f.startsWith('hebrew')).join(','))
+    : report.fail('hebrew1 נכתב ל-numbering.xml', fmts.slice(0, 8).join(',') || 'אין');
+
+  texts.includes('%1)')
+    ? report.pass('התבנית %1) נכתבה ל-numbering.xml', '%1)')
+    : report.fail('התבנית %1) נכתבה ל-numbering.xml', texts.slice(0, 8).join(',') || 'אין');
+
+  console.log('ידית האבחון בסוף:', JSON.stringify(await debugHandle()));
+  console.log('לוג:', JSON.stringify(await app.log()));
+} finally {
+  app.close();
+}
+
+process.exit(report.print() > 0 ? 1 : 0);
