@@ -19,7 +19,7 @@
  */
 import type { SuperDoc } from 'superdoc';
 import type { Bytes } from './docx-parts';
-import { postflightDocx } from './docx-run-direction';
+import { postflightDocx } from './docx-postflight';
 
 /** הסיומות של חבילות OOXML לעיבוד תמלילים שהתוסף מכיר. */
 export const WORD_EXTENSIONS = ['docx', 'docm', 'dotx', 'dotm'] as const;
@@ -52,13 +52,23 @@ const EXTENSION_PATTERN = new RegExp(`\\.(${WORD_EXTENSIONS.join('|')})$`, 'i');
  * לסיומת: חבילה עם מאקרו יוצאת מכאן עם המאקרו שלה בפנים.
  *
  * זו נקודת החנק היחידה של הכתיבה — שמירה, „שמור בשם” והחלפת הקובץ כולן עוברות
- * כאן — ולכן זה גם המקום שבו הריצות העבריות מסומנות `<w:rtl/>` לפני שהבייטים
- * יוצאים. ראו engine/docx-run-direction.ts.
+ * כאן — ולכן זה גם המקום שבו הבייטים עוברים את התיקונים של הדרך החוצה (ריצות
+ * עבריות, מזהי מספור) לפני שהם נכתבים. ראו engine/docx-postflight.ts.
  */
-export async function exportDocx(superdoc: SuperDoc): Promise<Blob> {
+export async function exportDocx(superdoc: SuperDoc, options: ExportDocxOptions = {}): Promise<Blob> {
   const blob = await superdoc.export({ exportType: ['docx'], triggerDownload: false });
   if (!(blob instanceof Blob)) throw new Error('הייצוא לא החזיר קובץ');
-  return markRunDirection(blob);
+  return options.postflight === false ? blob : markRunDirection(blob);
+}
+
+export interface ExportDocxOptions {
+  /**
+   * `false` — הבייטים כפי שהמנוע כתב אותם. לטיוטת השחזור בלבד: היא נטענת
+   * חזרה **לעורך**, שאינו צריך את התיקונים של Word, והיא נכתבת עשר שניות
+   * אחרי כל שינוי. נמדד: החלק הסינכרוני של התיקון לוקח ‎~30ms לאלף פסקאות,
+   * ‎~200ms לעשרת אלפים, ועד שנייה לארבעים אלף — עצירה של ההקלדה בכל טיוטה.
+   */
+  postflight?: boolean;
 }
 
 /**
@@ -73,7 +83,7 @@ async function blobBytes(blob: Blob): Promise<Bytes | null> {
 }
 
 /**
- * סימון הריצות העבריות בבייטים שיוצאים.
+ * התיקונים של הדרך החוצה על הבייטים שיוצאים.
  *
  * אותו כלל כמו בכיוון הנכנס (`docx-preflight.ts`): **לתקן, ולא לחסום.** כל כשל
  * — Blob שאינו נקרא, zip שאינו נפרס, דוחס שאינו קיים — מחזיר את המקור כמות

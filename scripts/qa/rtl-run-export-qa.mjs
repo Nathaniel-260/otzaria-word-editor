@@ -16,10 +16,17 @@
  * וזאת גם הבקרה: אותו מסמך דרך `app.docx()` חייב לצאת **בלי** אף `w:rtl`. שער
  * ששתי הקריאות בו נותנות אותו דבר אינו מודד את השלב שלנו אלא את המנוע.
  *
+ * ושני דברים נוספים שנכתבים באותה שמירה:
+ *   - **ריצה מעורבת מפוצלת.** „מילה Word בעברית.” כריצה אחת יצאה בלי הצהרה,
+ *     ו-Word הציג אותה הפוכה. בקובץ שנשמר היא חייבת להיות כמה ריצות: הלטינית
+ *     בלי `w:rtl`, והעבריות איתה.
+ *   - **nsid ייחודי.** רשימה עברית שנוצרה בהקלדה ירשה את ה-nsid של ההגדרה
+ *     העשרונית, ו-Word הציג אותה כ-„1. 2.”.
+ *
  * הרצה:  node scripts/qa/rtl-run-export-qa.mjs   (QA_PORT דורס 9387)
  */
 import { openApp, createReport, unzip } from './harness.mjs';
-import { buildDocx } from './docx-fixtures.mjs';
+import { buildDocx, numberingXml } from './docx-fixtures.mjs';
 
 const RTL = '<w:bidi/>';
 
@@ -35,6 +42,21 @@ const BOLD_PARA =
   `<w:p><w:pPr>${RTL}</w:pPr>` +
   `<w:r><w:rPr><w:b/></w:rPr><w:t xml:space="preserve">כותרת מודגשת</w:t></w:r>` +
   `</w:p>`;
+
+/** משפט עברי עם מילה לועזית, כריצה אחת — כמו שהעורך כותב אותו. */
+const MIXED_PARA =
+  `<w:p><w:pPr>${RTL}</w:pPr>` +
+  `<w:r><w:t xml:space="preserve">מילה Word בעברית.</w:t></w:r>` +
+  `</w:p>`;
+
+/**
+ * הגדרת המספור של הפיקסטורה, עם `w:nsid` — כמו בתבנית של המנוע. בלעדיו אין מה
+ * לשכפל, ובדיקת הייחודיות עוברת על כלום (נמדד: `nsids: []`).
+ */
+const NUMBERING = numberingXml().replace(
+  '<w:multiLevelType w:val="hybridMultilevel"/>',
+  '<w:nsid w:val="587013BA"/><w:multiLevelType w:val="hybridMultilevel"/>',
+);
 
 /** פסקה לטינית — מה שאסור לגעת בו. */
 const LATIN_PARA =
@@ -105,7 +127,7 @@ function paragraphsOf(xml) {
 try {
   await captureUpload();
   const opened = await openDocx(
-    buildDocx({ body: HEBREW_PARA + BOLD_PARA + LATIN_PARA }),
+    buildDocx({ body: HEBREW_PARA + BOLD_PARA + MIXED_PARA + LATIN_PARA, numbering: NUMBERING }),
     'rtl-run-export',
   );
   if (opened !== 'rtl-run-export') {
@@ -141,6 +163,12 @@ try {
       await app.sleep(500);
       await app.type('א');
       await app.sleep(900);
+      // רשימה עברית מזיהוי ההקלדה, בפסקה חדשה — בשביל בדיקת ה-nsid.
+      await app.press('End', 'End', 35);
+      await app.press('Enter', 'Enter', 13, 0, '\r');
+      await app.sleep(400);
+      await app.type('א) פריט', 90);
+      await app.sleep(1500);
       await app.press('s', 'KeyS', 83, 2, 's');
       await app.sleep(6000);
 
@@ -171,6 +199,29 @@ try {
             'מראת ההדגשה',
             `rtl=${bold.rtl}, bCs=${bold.boldCs} — בלי bCs ההדגשה נעלמת ב-Word`,
           );
+
+        const documentXml = parts['word/document.xml'] ?? '';
+        const mixed = (documentXml.match(/<w:p[ >][\s\S]*?<\/w:p>/g) ?? []).find((para) => para.includes('Word'));
+        const mixedRuns = (mixed?.match(/<w:r[ >][\s\S]*?<\/w:r>/g) ?? []).map((run) => ({
+          text: (run.match(/<w:t[^>]*>([^<]*)<\/w:t>/) ?? [])[1] ?? '',
+          rtl: /<w:rtl\s*\/>/.test(run),
+        }));
+        console.log('הפסקה המעורבת:', JSON.stringify(mixedRuns));
+        const latinRun = mixedRuns.find((run) => run.text.includes('Word'));
+        const hebrewRuns = mixedRuns.filter((run) => /[א-ת]/.test(run.text));
+        if (!mixed) report.fail('ריצה מעורבת', 'הפסקה לא נמצאה בקובץ שנשמר');
+        else if (latinRun && !latinRun.rtl && latinRun.text.trim() === 'Word' && hebrewRuns.length >= 2 && hebrewRuns.every((run) => run.rtl))
+          report.pass('ריצה מעורבת מפוצלת לפי כיוון', mixedRuns.map((run) => `${run.rtl ? 'R' : 'L'}:${run.text}`).join(' | '));
+        else report.fail('ריצה מעורבת מפוצלת לפי כיוון', JSON.stringify(mixedRuns));
+
+        const numbering = parts['word/numbering.xml'] ?? '';
+        const nsids = [...numbering.matchAll(/<w:abstractNum\b[\s\S]*?<w:nsid w:val="([^"]+)"/g)].map((m) => m[1].toUpperCase());
+        const hebrewList = /<w:numFmt w:val="hebrew1"/.test(numbering);
+        console.log('nsid:', JSON.stringify(nsids), 'hebrew1:', hebrewList);
+        if (!hebrewList) report.fail('nsid ייחודי', 'הרשימה העברית לא נכתבה — אין מה לבדוק');
+        else if (nsids.length < 2) report.fail('nsid ייחודי', `פחות משתי הגדרות עם nsid (${nsids.length}) — הבדיקה אינה מודדת דבר`);
+        else if (new Set(nsids).size === nsids.length) report.pass('nsid ייחודי לכל הגדרת מספור', nsids.join(','));
+        else report.fail('nsid ייחודי לכל הגדרת מספור', `כפולים: ${nsids.join(',')}`);
 
         if (!latin) report.fail('הפסקה הלטינית', 'לא נמצאה בקובץ שנשמר');
         else if (latin.rtl === 0) report.pass('הפסקה הלטינית לא נגעה', `${latin.runs} ריצות, 0 מוצהרות`);

@@ -49,16 +49,40 @@
  *
  * ## הכלל שנבחר, ולמה
  *
- * ריצה שיש בה אות עברית ואין בה אות לטינית — מסומנת. ריצה שיש בה שתיהן אינה
- * מסומנת: סימון היה מחיל את גופן הכתב המורכב על החלק הלטיני שבה, וזה שינוי
- * אמיתי במסמך בשביל מקרה שאינו הדיווח. ריצה שכולה ניטרלית — נקודה שהיא ריצה
- * בפני עצמה, וזה **המקרה שדווח** — יורשת את הכיוון של השכן החזק הקרוב ביותר
- * בפסקה, קודם אחורה ואז קדימה. זה מה ש-Word עצמו עושה בהקלדה, שם הכיוון נקבע
- * לפי המקלדת שהייתה פעילה כשהתו הוקלד.
+ * ריצה שיש בה אות עברית ואין בה אות לטינית — מסומנת. ריצה שכולה ניטרלית —
+ * נקודה שהיא ריצה בפני עצמה, וזה **המקרה שדווח** — יורשת את הכיוון של השכן
+ * החזק הקרוב ביותר בפסקה, קודם אחורה ואז קדימה. זה מה ש-Word עצמו עושה
+ * בהקלדה, שם הכיוון נקבע לפי המקלדת שהייתה פעילה כשהתו הוקלד.
+ *
+ * ### ריצה שיש בה שתיהן — מפוצלת
+ *
+ * „מילה Word בעברית.” שהוקלדה בעורך יוצאת כריצה **אחת**. גרסה קודמת השאירה
+ * אותה בלי הצהרה, ו-Word הציג אותה **הפוכה**: ‏„.בעברית Word מילה” — הנקודה
+ * בתחילת השורה וגם סדר המילים (נמדד ב-PDF מ-Word). סימון הריצה כולה מתקן את
+ * הסדר אבל מחיל את גופן הכתב המורכב על המילה הלטינית (נמדד: Arial במקום
+ * Aptos). לכן הריצה מפוצלת לפי כיוון — עברית עם `w:rtl` והמראה, לטינית כפי
+ * שהייתה — וזה בדיוק מה ש-Word עצמו כותב כשמקלידים אותו משפט. גם זה נמדד:
+ * שלוש ריצות מציגות את המשפט נכון, עם הגופן הלטיני במקומו.
+ *
+ * הכיוון של כל תו בריצה כזו נקבע לפי UBA, ברמת הפסקה כולה ולא רק הריצה:
+ * ספרה הולכת אחרי החזק שלפניה (W7, N1), ותו ניטרלי בין שני כיוונים שונים —
+ * או בקצה הפסקה — מקבל את כיוון הפסקה (N2). „הרווח שאחרי Word” הוא הדוגמה:
+ * שיוך שלו ללטינית היה מצייר אותו בצד הלא נכון של המילה.
+ *
+ * פיצול נעשה רק בריצה **פשוטה** — `rPr` וטקסט, בלי טאב, שבירה, שדה או ציור —
+ * ורק כשאין ב-`rPr` שלה `rPrChange` (מזהה השינוי היה משוכפל) או הצהרת `rtl`
+ * קיימת. בכל מקרה אחר הריצה נשארת כפי שהייתה, כמו קודם.
  *
  * ריצה שכבר **מצהירה** `w:rtl` — בכל ערך — אינה מקבלת הצהרה שנייה; ההצהרה של
  * מי שכתב את הקובץ גוברת. אבל אם ההצהרה שלו דולקת, המראה כן מוחלת עליה: משתמש
  * שהדגיש ריצה עברית קיימת קיבל ממנו `w:b` בלבד, וזו בדיוק ההדגשה שנעלמת.
+ *
+ * ## סדר האיברים
+ *
+ * ‏`w:rtl` נכתב במקומו לפי הסכמה של `CT_RPr` (ECMA-376 §17.3.2.28): **לפני**
+ * `cs`, `em`, `lang`, `eastAsianLayout`, `specVanish`, `oMath` ו-`rPrChange`,
+ * ולא סתם לפני הסוגר. Word 16 סובל גם את הסדר ההפוך (נמדד), אבל צרכן שמאמת
+ * מול הסכמה אינו חייב.
  *
  * ## למה על הבייטים ולא במודל
  *
@@ -73,15 +97,7 @@
  * כמו בכיוון הנכנס — כל כשל בדרך מחזיר את המקור כמות שהוא. שמירה שנכשלת היא
  * נזק גדול בהרבה מנקודה בצד הלא נכון.
  */
-import {
-  CONTENT_PARTS,
-  SKIPPED_SPANS,
-  TOKEN_SOURCE,
-  isOn,
-  rewriteDocxXmlParts,
-  valueOf,
-  type Bytes,
-} from './docx-parts';
+import { SKIPPED_SPANS, TOKEN_SOURCE, isOn, valueOf } from './docx-parts';
 
 /**
  * אותיות חזקות מימין לשמאל: הבלוק העברי, הערבי, הסורי, והצורות המוצגות.
@@ -94,19 +110,38 @@ const RTL_STRONG = /[֐-׿؀-ۿ܀-ݏ߀-ࣿיִ-﷿ﹰ-﻿]/;
 /** אותיות חזקות משמאל לימין: לטינית על הרחבותיה, יוונית וקירילית. */
 const LTR_STRONG = /[A-Za-zÀ-ʯͰ-ϿЀ-ӿ]/;
 
+/** ספרות „אירופיות” (EN ב-UBA): חלשות, והכיוון שלהן נגזר מהסביבה. */
+const EUROPEAN_DIGIT = /[0-9０-９]/;
+
+/** מה שבא **אחרי** `w:rtl` ב-`CT_RPr`. `w:rtl` נכתב לפני הראשון שבהם. */
+const AFTER_RTL = new Set(['cs', 'em', 'lang', 'eastAsianLayout', 'specVanish', 'oMath', 'rPrChange']);
+
 /** הכיוון שנגזר מתוכן הריצה. */
 type RunDirection = 'rtl' | 'ltr' | 'mixed' | 'neutral';
 
-/** הכנסה אחת לתוך ה-XML: המקום, והטקסט שייכנס בו. */
-interface Insert {
+/** סיווג תו אחד: חזק ימין-לשמאל, חזק שמאל-לימין, ספרה, או ניטרלי. */
+type CharClass = 'R' | 'L' | 'EN' | 'N';
+
+/**
+ * שינוי אחד ב-XML: הכנסה (`end === at`) או החלפה של `[at, end)`.
+ * מיקומים הם היסטים ב-XML המקורי.
+ */
+interface Edit {
   at: number;
+  end: number;
   text: string;
 }
 
 /** מה שנאסף על ה-`rPr` החיה של ריצה. מיקומים הם היסטים ב-XML המקורי. */
 interface RunProps {
-  /** מיקום `</w:rPr>` הסוגר. לשם נכנסת ההצהרה. */
+  /** מיקום `<w:rPr>` הפותח. */
+  openAt: number;
+  /** מיקום `</w:rPr>` הסוגר. */
   closeAt: number;
+  /** מיד אחרי `</w:rPr>`. */
+  closeEnd: number;
+  /** האיבר הראשון שחייב לבוא אחרי `w:rtl`, או `null` — ואז הסוגר. */
+  rtlAt: number | null;
   /** הקידומת של ה-`rPr`, כדי שהאיברים שייכתבו יישאו את אותה. */
   prefix: string;
   /** סוף התג של `b`, כדי ש-`bCs` ייכתב מיד אחריו לפי סדר הסכמה. */
@@ -125,15 +160,21 @@ interface RunProps {
   hasFontCs: boolean;
   /** מה ש-`w:rtl` מצהירה, או `null` כשאינה שם. */
   declaredRtl: boolean | null;
+  /** יש בה `rPrChange` — היסטוריה של שינוי מסומן, עם מזהה משלה. */
+  hasChange: boolean;
 }
 
 /** ריצה אחת בפסקה. */
 interface RunRecord {
+  /** מיקום `<w:r …>`. */
+  start: number;
   /** מיד אחרי `<w:r …>` — שם נכנסת `rPr` חדשה, שחייבת להיות הבן הראשון. */
   afterOpen: number;
+  /** מיד אחרי `</w:r>`, או `-1` כל עוד הריצה פתוחה. */
+  end: number;
   prefix: string;
-  /** הטקסט של הריצה, לסיווג הכיוון. */
-  text: string;
+  /** הטקסט של הריצה כפי שהוא ב-XML — ישויות כמו `&amp;` עדיין מקודדות. */
+  raw: string;
   /** ריצה שיש בה `instrText` היא קוד שדה, ולעולם אינה מסומנת. */
   fieldCode: boolean;
   props: RunProps | null;
@@ -141,15 +182,41 @@ interface RunRecord {
   propsDepth: number;
   /** מיקום פתיחת `<w:t>` שנפתחה ועדיין לא נסגרה. */
   textFrom: number | null;
+  /** עומק האיברים שאינם `rPr` ואינם `t`. */
+  childDepth: number;
+  /** רק `rPr` וטקסט — ריצה שמותר לפצל. */
+  simple: boolean;
 }
 
-function newRun(afterOpen: number, prefix: string): RunRecord {
-  return { afterOpen, prefix, text: '', fieldCode: false, props: null, propsDepth: 0, textFrom: null };
+/** פסקה אחת: הריצות שנפתחו בה, והכיוון שלה. */
+interface ParagraphRecord {
+  runs: RunRecord[];
+  /** `<w:bidi/>` דולק ב-`pPr` שלה. */
+  rtl: boolean;
 }
 
-function newProps(prefix: string): RunProps {
+function newRun(start: number, afterOpen: number, prefix: string): RunRecord {
   return {
+    start,
+    afterOpen,
+    end: -1,
+    prefix,
+    raw: '',
+    fieldCode: false,
+    props: null,
+    propsDepth: 0,
+    textFrom: null,
+    childDepth: 0,
+    simple: true,
+  };
+}
+
+function newProps(prefix: string, openAt: number): RunProps {
+  return {
+    openAt,
     closeAt: -1,
+    closeEnd: -1,
+    rtlAt: null,
     prefix,
     boldEnd: null,
     boldOn: false,
@@ -164,6 +231,7 @@ function newProps(prefix: string): RunProps {
     fontsAscii: null,
     hasFontCs: false,
     declaredRtl: null,
+    hasChange: false,
   };
 }
 
@@ -187,11 +255,38 @@ function quoteAttribute(raw: string): string {
   return raw.replace(/"/g, '&quot;');
 }
 
+const NAMED_ENTITIES: Readonly<Record<string, string>> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
+
+/**
+ * הטקסט כפי שהוא נקרא. בלי זה `&amp;` נספר כשלוש אותיות לטיניות, וריצה עברית
+ * שיש בה „&” סווגה כמעורבת ולא סומנה כלל.
+ */
+function decodeText(raw: string): string {
+  return raw.replace(/&(?:#(\d+)|#x([0-9a-fA-F]+)|(amp|lt|gt|quot|apos));/g, (whole, dec, hex, named) => {
+    if (named) return NAMED_ENTITIES[named as string] ?? whole;
+    const code = dec ? Number.parseInt(dec as string, 10) : Number.parseInt(hex as string, 16);
+    return Number.isFinite(code) && code <= 0x10ffff ? String.fromCodePoint(code) : whole;
+  });
+}
+
+/** טקסט לתוך `<w:t>`. */
+function encodeText(text: string): string {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function charClass(ch: string): CharClass {
+  if (RTL_STRONG.test(ch)) return 'R';
+  if (LTR_STRONG.test(ch)) return 'L';
+  if (EUROPEAN_DIGIT.test(ch)) return 'EN';
+  return 'N';
+}
+
 /** סיווג הכיוון של ריצה לפי תוכנה. */
 function classify(run: RunRecord): RunDirection {
   if (run.fieldCode) return 'ltr';
-  const rtl = RTL_STRONG.test(run.text);
-  const ltr = LTR_STRONG.test(run.text);
+  const text = decodeText(run.raw);
+  const rtl = RTL_STRONG.test(text);
+  const ltr = LTR_STRONG.test(text);
   if (rtl && ltr) return 'mixed';
   if (rtl) return 'rtl';
   if (ltr) return 'ltr';
@@ -199,32 +294,50 @@ function classify(run: RunRecord): RunDirection {
 }
 
 /**
- * אילו מריצות הפסקה הן עבריות.
+ * הכיוון של כל תו ברצף, לפי UBA (W7, N1, N2) — `true` = ימין-לשמאל.
  *
- * ריצה ניטרלית יורשת מהשכן החזק הקרוב ביותר — קודם אחורה, ואם אין, קדימה.
- * פסקה שכולה ניטרלית אינה מסומנת כלל: אין בה שום עדות לכיוון, וניחוש כאן היה
- * משנה מסמכים לטיניים.
+ * ספרה אחרי חזק לטיני היא לטינית, וכל ספרה אחרת פועלת כחזקה ימנית על
+ * הניטרליים שלצידה. ניטרלי בין שני חזקים זהים מקבל את כיוונם; בין שונים, או
+ * בקצה, — את כיוון הפסקה.
  */
-function resolveDirections(runs: readonly RunRecord[]): boolean[] {
-  const kinds = runs.map(classify);
-  return kinds.map((kind, index) => {
-    if (kind !== 'neutral') return kind === 'rtl';
-    for (let back = index - 1; back >= 0; back--) {
-      if (kinds[back] !== 'neutral') return kinds[back] === 'rtl';
+function resolveChars(classes: readonly CharClass[], paragraphRtl: boolean): boolean[] {
+  const edge: 'R' | 'L' = paragraphRtl ? 'R' : 'L';
+  const strong: ('R' | 'L' | null)[] = [];
+  let last: 'R' | 'L' = edge;
+  for (const cls of classes) {
+    if (cls === 'R' || cls === 'L') {
+      last = cls;
+      strong.push(cls);
+    } else if (cls === 'EN') {
+      strong.push(last === 'L' ? 'L' : 'R');
+    } else {
+      strong.push(null);
     }
-    for (let ahead = index + 1; ahead < kinds.length; ahead++) {
-      if (kinds[ahead] !== 'neutral') return kinds[ahead] === 'rtl';
-    }
-    return false;
-  });
+  }
+
+  const before: ('R' | 'L')[] = [];
+  let previous: 'R' | 'L' = edge;
+  for (const value of strong) {
+    before.push(previous);
+    if (value) previous = value;
+  }
+
+  const result: boolean[] = new Array(classes.length);
+  let next: 'R' | 'L' = edge;
+  for (let i = classes.length - 1; i >= 0; i -= 1) {
+    const own = strong[i];
+    result[i] = (own ?? (before[i] === next ? next : edge)) === 'R';
+    if (own) next = own;
+  }
+  return result;
 }
 
 /** ההכנסות שריצה עברית אחת דורשת. ריק = אין מה לעשות בה. */
-function insertsFor(run: RunRecord): Insert[] {
+function insertsFor(run: RunRecord): Edit[] {
   const props = run.props;
   if (!props) {
     const p = run.prefix;
-    return [{ at: run.afterOpen, text: `<${p}:rPr><${p}:rtl/></${p}:rPr>` }];
+    return [{ at: run.afterOpen, end: run.afterOpen, text: `<${p}:rPr><${p}:rtl/></${p}:rPr>` }];
   }
 
   // הצהרה מפורשת מכובה — הכותב אמר „זו אינה עברית”, ואין לנו רשות להפוך אותה,
@@ -232,26 +345,140 @@ function insertsFor(run: RunRecord): Insert[] {
   if (props.declaredRtl === false) return [];
 
   const p = props.prefix;
-  const out: Insert[] = [];
-  if (props.boldEnd !== null && props.boldOn && !props.hasBoldCs) {
-    out.push({ at: props.boldEnd, text: `<${p}:bCs/>` });
-  }
-  if (props.italicEnd !== null && props.italicOn && !props.hasItalicCs) {
-    out.push({ at: props.italicEnd, text: `<${p}:iCs/>` });
-  }
+  const out: Edit[] = [];
+  const insert = (at: number, text: string) => out.push({ at, end: at, text });
+  if (props.boldEnd !== null && props.boldOn && !props.hasBoldCs) insert(props.boldEnd, `<${p}:bCs/>`);
+  if (props.italicEnd !== null && props.italicOn && !props.hasItalicCs) insert(props.italicEnd, `<${p}:iCs/>`);
   if (props.sizeEnd !== null && props.sizeVal !== null && !props.hasSizeCs) {
-    out.push({ at: props.sizeEnd, text: `<${p}:szCs ${p}:val="${quoteAttribute(props.sizeVal)}"/>` });
+    insert(props.sizeEnd, `<${p}:szCs ${p}:val="${quoteAttribute(props.sizeVal)}"/>`);
   }
   if (props.fontsAttrsEnd !== null && props.fontsAscii !== null && !props.hasFontCs) {
-    out.push({ at: props.fontsAttrsEnd, text: ` ${p}:cs="${quoteAttribute(props.fontsAscii)}"` });
+    insert(props.fontsAttrsEnd, ` ${p}:cs="${quoteAttribute(props.fontsAscii)}"`);
   }
-  if (props.declaredRtl === null) out.push({ at: props.closeAt, text: `<${p}:rtl/>` });
+  // אחרון, ובכוונה: כשהוא נופל באותו מקום כמו `szCs` (למשל `<w:sz/><w:lang/>`),
+  // הסדר כאן הוא הסדר שבקובץ — והמיון היציב שומר עליו.
+  if (props.declaredRtl === null) insert(props.rtlAt ?? props.closeAt, `<${p}:rtl/>`);
   return out;
 }
 
+/** מחילה שינויים על מחרוזת. השינויים ממוינים, ואינם חופפים. */
+function applyEdits(source: string, edits: readonly Edit[], offset = 0): string {
+  const sorted = [...edits].sort((first, second) => first.at - second.at);
+  const parts: string[] = [];
+  let at = 0;
+  for (const edit of sorted) {
+    parts.push(source.slice(at, edit.at - offset), edit.text);
+    at = edit.end - offset;
+  }
+  parts.push(source.slice(at));
+  return parts.join('');
+}
+
+/** האם ריצה מעורבת מותרת לפיצול — ההסבר בהערת הפתיחה. */
+function canSplit(run: RunRecord): boolean {
+  if (!run.simple || run.fieldCode || run.end < 0 || run.textFrom !== null) return false;
+  const props = run.props;
+  return !props || (props.closeEnd >= 0 && props.declaredRtl === null && !props.hasChange);
+}
+
 /**
- * מסמנת ריצות עבריות ב-`<w:rtl/>` ומשלימה את מראת הכתב המורכב. `null` = אין מה
- * לשנות.
+ * ריצה מעורבת כמה ריצות, אחת לכל קטע כיוון. `dirs` — הכיוון של כל תו.
+ * `null` = אין פיצול.
+ */
+function splitRun(xml: string, run: RunRecord, text: string, dirs: readonly boolean[]): Edit | null {
+  const chars = [...text];
+  if (chars.length !== dirs.length || !canSplit(run)) return null;
+
+  const segments: { text: string; rtl: boolean }[] = [];
+  chars.forEach((ch, i) => {
+    const last = segments[segments.length - 1];
+    if (last && last.rtl === dirs[i]) last.text += ch;
+    else segments.push({ text: ch, rtl: dirs[i]! });
+  });
+  if (segments.length < 2) return null;
+
+  const p = run.prefix;
+  const open = xml.slice(run.start, run.afterOpen);
+  const props = run.props;
+  const plain = props ? xml.slice(props.openAt, props.closeEnd) : '';
+  const marked = props
+    ? applyEdits(plain, insertsFor(run), props.openAt)
+    : `<${p}:rPr><${p}:rtl/></${p}:rPr>`;
+
+  const replacement = segments
+    .map((segment) => {
+      const rPr = segment.rtl ? marked : plain;
+      return `${open}${rPr}<${p}:t xml:space="preserve">${encodeText(segment.text)}</${p}:t></${p}:r>`;
+    })
+    .join('');
+  return { at: run.start, end: run.end, text: replacement };
+}
+
+/**
+ * השינויים שפסקה אחת דורשת.
+ *
+ * ריצה ניטרלית יורשת מהשכן החזק הקרוב ביותר — קודם אחורה, ואם אין, קדימה.
+ * שכן מעורב מוסר את הכיוון של התו שבקצה הקרוב שלו. פסקה שכולה ניטרלית אינה
+ * מסומנת כלל: אין בה שום עדות לכיוון, וניחוש כאן היה משנה מסמכים לטיניים.
+ */
+function paragraphEdits(xml: string, paragraph: ParagraphRecord): Edit[] {
+  const { runs } = paragraph;
+  const kinds = runs.map(classify);
+  const texts = runs.map((run) => (run.fieldCode ? '' : decodeText(run.raw)));
+
+  let charDirs: boolean[][] = [];
+  if (kinds.includes('mixed')) {
+    const classes = texts.flatMap((text) => [...text].map(charClass));
+    const resolved = resolveChars(classes, paragraph.rtl);
+    let cursor = 0;
+    charDirs = texts.map((text) => {
+      const length = [...text].length;
+      const part = resolved.slice(cursor, cursor + length);
+      cursor += length;
+      return part;
+    });
+  }
+
+  /** הכיוון שריצה חזקה מוסרת לשכן ניטרלי. `null` = אין לה מה למסור. */
+  const donor = (index: number, fromEnd: boolean): boolean | null => {
+    const kind = kinds[index];
+    if (kind === 'neutral') return null;
+    if (kind !== 'mixed') return kind === 'rtl';
+    const dirs = charDirs[index] ?? [];
+    return dirs.length ? dirs[fromEnd ? dirs.length - 1 : 0]! : null;
+  };
+
+  const edits: Edit[] = [];
+  runs.forEach((run, index) => {
+    const kind = kinds[index];
+
+    if (kind === 'mixed') {
+      if (run.props?.declaredRtl === true) {
+        edits.push(...insertsFor(run));
+        return;
+      }
+      const split = splitRun(xml, run, texts[index]!, charDirs[index] ?? []);
+      if (split) edits.push(split);
+      return;
+    }
+
+    let rtl = kind === 'rtl';
+    if (kind === 'neutral') {
+      let inherited: boolean | null = null;
+      for (let back = index - 1; back >= 0 && inherited === null; back -= 1) inherited = donor(back, true);
+      for (let ahead = index + 1; ahead < runs.length && inherited === null; ahead += 1) {
+        inherited = donor(ahead, false);
+      }
+      rtl = inherited === true;
+    }
+    if (rtl) edits.push(...insertsFor(run));
+  });
+  return edits;
+}
+
+/**
+ * מסמנת ריצות עבריות ב-`<w:rtl/>`, משלימה את מראת הכתב המורכב, ומפצלת ריצות
+ * מעורבות. `null` = אין מה לשנות.
  *
  * ## למה סורק ולא רגקס על `<w:r>…</w:r>`
  *
@@ -274,20 +501,15 @@ export function markRtlRuns(xml: string): string | null {
   // חיפוש אחד לפני הסריקה: מסמך שאין בו אף אות עברית אינו נוגע לזה בכלל.
   if (!RTL_STRONG.test(xml)) return null;
 
-  const inserts: Insert[] = [];
+  const edits: Edit[] = [];
   /** מחסנית הפסקאות — כל אחת והריצות שנפתחו בתוכה. */
-  const paragraphs: RunRecord[][] = [];
+  const paragraphs: ParagraphRecord[] = [];
   /** מחסנית הריצות, לטיפול בריצה שבתוך ריצה. */
   const runs: RunRecord[] = [];
-  /** עומק `pPr`. כל עוד הוא מעל אפס, `rPr` אינה של ריצה. */
+  /** עומק `pPr`. כל עוד הוא מעל אפס, מה שנסרק אינו של ריצה. */
   let paraPropsDepth = 0;
-
-  const collect = (list: readonly RunRecord[]): void => {
-    const rtl = resolveDirections(list);
-    list.forEach((run, index) => {
-      if (rtl[index]) inserts.push(...insertsFor(run));
-    });
-  };
+  /** עומק האיברים בתוך `pPr` — `w:bidi` נקרא רק כבן ישיר שלה. */
+  let paraPropsInner = 0;
 
   const token = new RegExp(TOKEN_SOURCE.source, 'g');
   for (let match = token.exec(xml); match; match = token.exec(xml)) {
@@ -304,121 +526,130 @@ export function markRtlRuns(xml: string): string | null {
     const [, closing, prefix, name, attributes] = match;
     const selfClosing = attributes.endsWith('/');
     const run = runs[runs.length - 1];
+    const paragraph = paragraphs[paragraphs.length - 1];
 
     if (name === 'pPr') {
       if (!selfClosing) paraPropsDepth += closing ? -1 : 1;
       if (paraPropsDepth < 0) paraPropsDepth = 0;
+      if (paraPropsDepth <= 1 && !closing) paraPropsInner = 0;
+      continue;
+    }
+
+    if (paraPropsDepth > 0) {
+      // `w:bidi` של `sectPr` או של `pPrChange` אינו כיוון הפסקה.
+      if (name === 'bidi' && !closing && paraPropsDepth === 1 && paraPropsInner === 0) {
+        if (paragraph) paragraph.rtl = isOn(attributes);
+      } else if (!selfClosing) {
+        paraPropsInner = Math.max(0, paraPropsInner + (closing ? -1 : 1));
+      }
       continue;
     }
 
     if (name === 'p' && !selfClosing) {
       if (closing) {
         const list = paragraphs.pop();
-        if (list) collect(list);
+        if (list) edits.push(...paragraphEdits(xml, list));
       } else {
-        paragraphs.push([]);
+        paragraphs.push({ runs: [], rtl: false });
       }
       continue;
     }
 
     if (name === 'r' && !selfClosing) {
       if (closing) {
+        if (run) run.end = token.lastIndex;
         runs.pop();
       } else {
-        const record = newRun(token.lastIndex, prefix);
+        const record = newRun(match.index, token.lastIndex, prefix);
         runs.push(record);
-        paragraphs[paragraphs.length - 1]?.push(record);
+        paragraph?.runs.push(record);
       }
       continue;
     }
 
     if (!run) continue;
 
-    if (name === 'rPr' && paraPropsDepth === 0 && !selfClosing) {
+    if (name === 'rPr' && !selfClosing) {
       if (closing) {
         if (run.propsDepth === 0) continue;
         run.propsDepth -= 1;
-        if (run.propsDepth === 0 && run.props) run.props.closeAt = match.index;
+        if (run.propsDepth === 0 && run.props) {
+          run.props.closeAt = match.index;
+          run.props.closeEnd = token.lastIndex;
+        }
       } else {
         run.propsDepth += 1;
-        if (run.propsDepth === 1) run.props = newProps(prefix);
+        if (run.propsDepth === 1) run.props = newProps(prefix, match.index);
       }
       continue;
     }
 
-    if (name === 'instrText') {
-      run.fieldCode = true;
+    if (run.propsDepth > 0) {
+      const props = run.props;
+      if (!props || run.propsDepth !== 1 || closing) continue;
+      const tagEnd = match.index + match[0].length;
+
+      if (AFTER_RTL.has(name) && props.rtlAt === null) props.rtlAt = match.index;
+
+      if (name === 'b') {
+        props.boldEnd = tagEnd;
+        props.boldOn = isOn(attributes);
+      } else if (name === 'bCs') {
+        props.hasBoldCs = true;
+      } else if (name === 'i') {
+        props.italicEnd = tagEnd;
+        props.italicOn = isOn(attributes);
+      } else if (name === 'iCs') {
+        props.hasItalicCs = true;
+      } else if (name === 'sz') {
+        props.sizeEnd = tagEnd;
+        props.sizeVal = valueOf(attributes);
+      } else if (name === 'szCs') {
+        props.hasSizeCs = true;
+      } else if (name === 'rFonts') {
+        // המקום שלפני סוגר התג: `/>` כשהוא סוגר את עצמו, ו-`>` כשלא.
+        props.fontsAttrsEnd = tagEnd - (selfClosing ? 2 : 1);
+        props.fontsAscii = attribute(attributes, 'ascii') ?? attribute(attributes, 'hAnsi');
+        props.hasFontCs = attribute(attributes, 'cs') !== null;
+      } else if (name === 'rtl') {
+        props.declaredRtl = isOn(attributes);
+      } else if (name === 'rPrChange') {
+        props.hasChange = true;
+      }
       continue;
     }
 
-    if (name === 't' && !selfClosing) {
+    if (name === 't') {
+      if (selfClosing) continue;
       if (closing) {
-        if (run.textFrom !== null) run.text += xml.slice(run.textFrom, match.index);
+        if (run.textFrom !== null) run.raw += xml.slice(run.textFrom, match.index);
         run.textFrom = null;
       } else {
+        if (run.childDepth !== 0) run.simple = false;
         run.textFrom = token.lastIndex;
       }
       continue;
     }
 
-    const props = run.props;
-    if (!props || run.propsDepth !== 1 || closing) continue;
-    const tagEnd = match.index + match[0].length;
-
-    if (name === 'b') {
-      props.boldEnd = tagEnd;
-      props.boldOn = isOn(attributes);
-    } else if (name === 'bCs') {
-      props.hasBoldCs = true;
-    } else if (name === 'i') {
-      props.italicEnd = tagEnd;
-      props.italicOn = isOn(attributes);
-    } else if (name === 'iCs') {
-      props.hasItalicCs = true;
-    } else if (name === 'sz') {
-      props.sizeEnd = tagEnd;
-      props.sizeVal = valueOf(attributes);
-    } else if (name === 'szCs') {
-      props.hasSizeCs = true;
-    } else if (name === 'rFonts') {
-      // המקום שלפני סוגר התג: `/>` כשהוא סוגר את עצמו, ו-`>` כשלא.
-      props.fontsAttrsEnd = tagEnd - (selfClosing ? 2 : 1);
-      props.fontsAscii = attribute(attributes, 'ascii') ?? attribute(attributes, 'hAnsi');
-      props.hasFontCs = attribute(attributes, 'cs') !== null;
-    } else if (name === 'rtl') {
-      props.declaredRtl = isOn(attributes);
+    if (name === 'instrText') run.fieldCode = true;
+    if (closing) {
+      if (run.childDepth > 0) run.childDepth -= 1;
+    } else {
+      // כל בן ישיר שאינו `rPr` או `t` — טאב, שבירה, שדה, ציור — הופך את הריצה
+      // לכזו שאין לפצל.
+      if (run.childDepth === 0) run.simple = false;
+      if (!selfClosing) run.childDepth += 1;
     }
   }
 
   // פסקה שלא נסגרה — מסמך קטוע. מה שנאסף בה תקף בדיוק כמו בפסקה שנסגרה.
   while (paragraphs.length > 0) {
     const list = paragraphs.pop();
-    if (list) collect(list);
+    if (list) edits.push(...paragraphEdits(xml, list));
   }
 
-  if (inserts.length === 0) return null;
-
-  // המיון נדרש: בתוך אותה ריצה סדר ההכנסות נגזר מסדר האיברים ב-`rPr`, והמנוע
-  // כותב אותם בסדר שלו (נמדד: `<w:rFonts/><w:sz/><w:i/><w:b/>`). שני היסטים
-  // זהים אינם אפשריים — כל הכנסה נתלית באיבר אחר.
-  inserts.sort((first, second) => first.at - second.at);
-
-  const parts: string[] = [];
-  let at = 0;
-  for (const insert of inserts) {
-    parts.push(xml.slice(at, insert.at), insert.text);
-    at = insert.at;
-  }
-  parts.push(xml.slice(at));
-  return parts.join('');
-}
-
-/**
- * בייטי DOCX שבהם הריצות העבריות מסומנות, או `null` כשאין מה לסמן.
- *
- * מיוצאת בנפרד מ-`markRunDirection` כדי שאפשר יהיה לבדוק אותה בלי `Blob` —
- * היא כל מה שנוגע לארכיון.
- */
-export function postflightDocx(bytes: Bytes): Promise<Bytes | null> {
-  return rewriteDocxXmlParts(bytes, (name) => CONTENT_PARTS.test(name), markRtlRuns);
+  if (edits.length === 0) return null;
+  // המיון היציב נדרש: בתוך אותה ריצה סדר ההכנסות נגזר מסדר האיברים ב-`rPr`,
+  // והמנוע כותב אותם בסדר שלו (נמדד: `<w:rFonts/><w:sz/><w:i/><w:b/>`).
+  return applyEdits(xml, edits);
 }

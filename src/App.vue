@@ -1706,7 +1706,9 @@ function initSessionKeeper(getSession: () => DocumentSession, id: DocumentSessio
     exportDocument: () => {
       const active = getSession().swap.current;
       if (!active) throw new Error('אין מסמך פתוח');
-      return exportDocx(active.superdoc);
+      // הטיוטה חוזרת לעורך ולא ל-Word — בלי התיקונים של הדרך החוצה, שעולים
+      // זמן בכל טיוטה. ראו `ExportDocxOptions.postflight`.
+      return exportDocx(active.superdoc, { postflight: false });
     },
     // ההמרה מ-`Blob` כאן ולא ב-host/workspace.ts: כאן יושב מי שמחזיק את
     // המנוע, ושם יושב מי שמדבר עם הגשר.
