@@ -23,10 +23,20 @@
  * ‏`Shift+חץ` נבדק לבעלות ולא לכיוון: הוא נשאר של המנוע (ההסבר ב-
  * `isHorizontalArrow`), והשורות שלו מוודאות שהבחירה עדיין נוצרת.
  *
+ * ושני דברים שהאינוריאנטה שלמעלה אינה רואה, ולכן נבדקים בנפרד:
+ *   - **תקיעה בתוך הבלוק.** ליד ספרה או אות לטינית בודדת הסמן קפץ בין שני
+ *     היסטים שמצוירים באותו x (הפרש 0.1px) — שום צעד אינו „לכיוון ההפוך”,
+ *     ובכל זאת הסמן אינו מתקדם. A→B→A→B באותו בלוק הוא כשל.
+ *   - **טבלה בין פסקאות.** החץ קפץ מעל הטבלה לפסקה שאחריה. הכניסה לתא היא
+ *     של המנוע, והשער מוודא שהיא לא נגזלה.
+ *   - **קצות המסמך.** בפסקה ראשונה ואחרונה שיש בהן ספרה (המנוע זז בהן לוגית)
+ *     ההקשה שנמסרה למנוע הזיזה לכיוון ההפוך, והבאה החזירה — תנודה בלי סוף.
+ *     שם אין לאן לזוז, והסמן חייב להישאר במקומו.
+ *
  *   npm run check:arrows            (QA_PORT עוקף 9714)
  */
 import { openApp, createReport } from './harness.mjs';
-import { zipStored } from './docx-fixtures.mjs';
+import { table, zipStored } from './docx-fixtures.mjs';
 
 const W =
   'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" ' +
@@ -85,6 +95,7 @@ function buildDocx(bodyXml) {
 }
 
 const BODY = [
+  p1('פתיחה 7 כאן', RTL),
   p1('אבגדהוז ראשון גדול', RTL),
   p1('מספור ראשון ברשימה', RTL + numPr(1)),
   p1('תבליט עגול בפריט', RTL + numPr(2)),
@@ -101,6 +112,11 @@ const BODY = [
   p1('הזחה בלי מספור כאן', RTL + '<w:pStyle w:val="ListParagraph"/>'),
   p1(Array.from({ length: 40 }, (_, i) => `מילה${i}`).join(' '), RTL),
   p1('plain latin paragraph', '', ''),
+  p1('סעיף 3 בחוק הזה', RTL),
+  pRuns([{ t: 'אות ', rPr: '<w:rtl/>' }, { t: 'a', rPr: '' }, { t: ' אחת בלבד', rPr: '<w:rtl/>' }], RTL),
+  p1('לפני הטבלה 4', RTL),
+  table(p1('תוך התא', RTL)),
+  p1('אחרי הטבלה 5', RTL),
 ].join('');
 
 const CASES = [
@@ -113,6 +129,9 @@ const CASES = [
   { label: 'הזחה בלי מספור', find: 'הזחה בלי מספור כאן' },
   { label: 'פסקה גולשת לשתי שורות', find: 'מילה0 מילה1' },
   { label: 'בקרה: פסקה לטינית', find: 'plain latin paragraph' },
+  // מהקצוות ולא מהאמצע, ובעשרה צעדים: כדי לעבור את התו הבודד מכל צד.
+  { label: 'ספרה בודדת', find: 'סעיף 3 בחוק הזה', edges: true },
+  { label: 'אות לטינית בודדת', find: 'אות a אחת בלבד', edges: true },
 ];
 
 const docx = buildDocx(BODY);
@@ -184,6 +203,43 @@ const asyncSelection = () =>
       } catch (e) { return JSON.stringify({ error: String(e).slice(0, 60) }); }
     })()`)
     .then(JSON.parse);
+
+/**
+ * מניחה סמן בקצה של הטקסט: `'left'` או `'right'`.
+ */
+async function caretEdge(find, side) {
+  const rect = JSON.parse(
+    await app.js(`(function(){
+      var frags = document.querySelectorAll('.superdoc-fragment');
+      for (var i = 0; i < frags.length; i++) {
+        if ((frags[i].textContent || '').indexOf(${JSON.stringify(find)}) < 0) continue;
+        var runs = frags[i].querySelectorAll('.superdoc-text-run');
+        var left = Infinity, right = -Infinity, top = 0, bottom = 0;
+        for (var j = 0; j < runs.length; j++) {
+          var r = runs[j].getBoundingClientRect();
+          if (!r.width) continue;
+          left = Math.min(left, r.left); right = Math.max(right, r.right);
+          top = r.top; bottom = r.bottom;
+        }
+        if (right < 0) return JSON.stringify(null);
+        return JSON.stringify({
+          x: Math.round(${JSON.stringify(side)} === 'left' ? left + 1 : right - 1),
+          y: Math.round((top + bottom) / 2),
+          nodeId: frags[i].getAttribute('data-source-node-id')
+        });
+      }
+      return JSON.stringify(null);
+    })()`),
+  );
+  if (!rect) throw new Error(`אין טקסט מצויר לפסקה „${find}”`);
+  await app.clickAt(rect.x, rect.y);
+  await app.sleep(600);
+  const state = await caretState();
+  if (state.block !== rect.nodeId) {
+    throw new Error(`הלחיצה נחתה על בלוק ${state.block} ולא על ${rect.nodeId}`);
+  }
+  return { ...state, nodeId: rect.nodeId };
+}
 
 /**
  * מניחה סמן ב**אמצע הטקסט** של הפסקה ולא במלבן השורה.
@@ -259,6 +315,17 @@ function violations(steps, toRight) {
   return { bad, moved };
 }
 
+/** תקיעה בתוך בלוק: A→B→A→B, כשכל הקשה מחליפה היסט ואינה מתקדמת. */
+function oscillations(steps) {
+  let hits = 0;
+  for (let i = 3; i < steps.length; i += 1) {
+    const [a, b, c, d] = [steps[i - 3], steps[i - 2], steps[i - 1], steps[i]];
+    if (a.block === b.block && b.block === c.block && c.block === d.block &&
+        a.off === c.off && b.off === d.off && a.off !== b.off) hits += 1;
+  }
+  return hits;
+}
+
 /** „נתקע”: חזרה לאותו (בלוק, היסט) אחרי ביקור בבלוק אחר. */
 function trapped(steps) {
   let loops = 0;
@@ -282,17 +349,22 @@ try {
   }
 
   for (const c of CASES) {
-    let start;
+    let right;
+    let left;
     try {
-      start = await caretMid(c.find);
+      if (c.edges) {
+        right = [await caretEdge(c.find, 'left'), ...(await walk('ArrowRight', 10))];
+        left = [await caretEdge(c.find, 'right'), ...(await walk('ArrowLeft', 10))];
+      } else {
+        const start = await caretMid(c.find);
+        right = [start, ...(await walk('ArrowRight', 6))];
+        await caretMid(c.find);
+        left = [start, ...(await walk('ArrowLeft', 6))];
+      }
     } catch (error) {
       report.stuck(c.label, String(error.message || error).slice(0, 90));
       continue;
     }
-
-    const right = [start, ...(await walk('ArrowRight', 6))];
-    await caretMid(c.find);
-    const left = [start, ...(await walk('ArrowLeft', 6))];
 
     console.log(`\n== ${c.label}`);
     console.log(`   ArrowRight: ${trace(right)}`);
@@ -301,8 +373,11 @@ try {
     const r = violations(right, true);
     const l = violations(left, false);
     const loops = trapped(right) + trapped(left);
+    const shaking = oscillations(right) + oscillations(left);
 
-    if (r.bad.length || l.bad.length) {
+    if (shaking) {
+      report.fail(c.label, `הסמן נתקע: ${shaking} תנודות בין שני היסטים באותו בלוק`);
+    } else if (r.bad.length || l.bad.length) {
       report.fail(
         c.label,
         `ימין הזיז שמאלה ב-${r.bad.length} צעדים (${r.bad.slice(0, 2).join('; ')}), ` +
@@ -314,6 +389,58 @@ try {
       report.fail(c.label, `מלכודת גבול: ${loops} חזרות לאותו היסט`);
     } else {
       report.pass(c.label, `${r.moved} צעדים ימינה, ${l.moved} שמאלה, אף אחד לכיוון ההפוך`);
+    }
+  }
+
+  /* -------- טבלה בין פסקאות: הכניסה לתא נשארת של המנוע -------- */
+  try {
+    const before = await caretEdge('לפני הטבלה', 'left');
+    const after = await caretEdge('אחרי הטבלה', 'right');
+    await caretEdge('לפני הטבלה', 'left');
+    await app.press('End', 'End', 35);
+    await app.sleep(300);
+    await app.press('ArrowLeft', 'ArrowLeft', 37);
+    await app.sleep(500);
+    const down = await caretState();
+    await caretEdge('אחרי הטבלה', 'right');
+    await app.press('Home', 'Home', 36);
+    await app.sleep(300);
+    await app.press('ArrowRight', 'ArrowRight', 39);
+    await app.sleep(500);
+    const up = await caretState();
+    console.log(`\n== טבלה: שמאל מסוף „לפני” → ${down.block}; ימין מתחילת „אחרי” → ${up.block}`);
+    const skipped = [];
+    if (down.block === after.nodeId || down.block === before.nodeId) skipped.push(`שמאל נחת ב-${down.block}`);
+    if (up.block === before.nodeId || up.block === after.nodeId) skipped.push(`ימין נחת ב-${up.block}`);
+    skipped.length
+      ? report.fail('טבלה בין פסקאות', `החץ לא נכנס לתא: ${skipped.join('; ')}`)
+      : report.pass('טבלה בין פסקאות', 'שני הכיוונים נכנסים לתא');
+  } catch (error) {
+    report.stuck('טבלה בין פסקאות', String(error.message || error).slice(0, 90));
+  }
+
+  /* -------- קצות המסמך: אין לאן לזוז, והסמן נשאר -------- */
+  for (const [label, find, side, homeKey, key] of [
+    ['תחילת המסמך', 'פתיחה 7 כאן', 'right', ['Home', 36], ['ArrowRight', 39]],
+    ['סוף המסמך', 'אחרי הטבלה 5', 'left', ['End', 35], ['ArrowLeft', 37]],
+  ]) {
+    try {
+      await caretEdge(find, side);
+      await app.press(homeKey[0], homeKey[0], homeKey[1]);
+      await app.sleep(300);
+      const edge = [await caretState()];
+      for (let i = 0; i < 5; i += 1) {
+        await app.press(key[0], key[0], key[1]);
+        await app.sleep(220);
+        edge.push(await caretState());
+      }
+      console.log(`\n== ${label}: ${trace(edge)}`);
+      const moved = edge.filter((s) => s.block !== edge[0].block || s.off !== edge[0].off).length;
+      moved === 0
+        ? report.pass(`${label} — הסמן נשאר במקומו`, `${edge[0].off}, ${edge.length - 1} הקשות`)
+        : report.fail(`${label} — הסמן זז`, `${moved} מתוך ${edge.length - 1} הקשות: ${trace(edge)}`);
+    } catch (error) {
+      report.stuck(label, String(error.message || error).slice(0, 90));
     }
   }
 

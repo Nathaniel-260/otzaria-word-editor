@@ -76,10 +76,37 @@
  * שמעליה — שהוא קצה שמאל שלה. בלי זה ההקשה הייתה חוזרת למנוע, והוא מזיז שם
  * קדימה לוגית, כלומר **שמאלה על המסך** — נמדד בשער.
  *
- * מה שנשאר למנוע: תחילת המסמך וסופו, פסקה שכנה שאינה באותו מכל ציור (כותרת
- * עליונה, תא טבלה), שורה שאינה מוכרזת `dir="rtl"` — שם הוא נמדד תקין —
+ * מה שנשאר למנוע: תנועה **בתוך** תא טבלה ובכותרת עליונה, פסקה שכנה שאינה
+ * צמודה במסמך, עמוד שעוד לא צויר, שורה שאינה מוכרזת `dir="rtl"` — שם הוא
+ * נמדד תקין —
  * ושורה שטווחי ה-pm המצוירים בה אינם רציפים. בכל אלה ההקשה עוברת אליו כפי
  * שהיא. שער: `npm run check:arrows`.
+ *
+ * ## תחילת המסמך וסופו — ההקשה נבלעת
+ *
+ * שם אין לאן לזוז, ומסירה למנוע אינה ניטרלית: בפסקה שהמנוע מזיז בה לוגית הוא
+ * זז לכיוון ההפוך, ההקשה הבאה שלנו מחזירה, והסמן קפץ בין שני היסטים בלי סוף
+ * (נמדד בשתי הקצוות). הקצה מזוהה מהעמודים, ולא מהיעדר פסקה ב-DOM: המנוע
+ * מצייר רק עמודים קרובים (נמדד: 3 מתוך 25), ולכן „אין פסקה אחרי” לבדו אינו
+ * סוף המסמך.
+ *
+ * ## פסקה שנחצית בין עמודים
+ *
+ * כל חלק שלה הוא fragment משלו, וההמשך מתחיל ב-pm שבו הקודם נגמר (נמדד:
+ * 1214..2112 ו-2112..2383, עם `data-continues-from-prev`). ההיסט של הסמן
+ * יחסי לתחילת **הפסקה**, ולא לתחילת ה-fragment, ולכן הבסיס נלקח מהחלק
+ * הראשון; בגבול עצמו — pm אחד ששייך לשניהם — ה-y של הסמן מכריע, כמו בין
+ * שורות גולשות. בלי זה החלק השני נמסר כולו למנוע, והחץ בגבול קפץ לתחילת
+ * השורה האחרונה בעמוד הקודם (נמדד: 898 → 811).
+ *
+ * ## טבלה שכנה — נכנסים לתא
+ *
+ * טבלה מצוירת כ-fragment בלי מזהה מקור, והפסקאות שבתאים שלה הן אלמנטים עם
+ * מזהה אבל בלי טווח משלהם — הטווח על השורות (נמדד: הטבלה pm 115..122, ובתוכה
+ * פסקת התא עם שורה 115..122; הפסקה שלפני נגמרת ב-114 וזו שאחרי מתחילה
+ * ב-123). מסירה למנוע אינה עובדת כאן בפסקה לוגית: הוא זז קדימה בתוך הפסקה
+ * ולא נכנס לטבלה (נמדד). לכן היעד הוא קצה הפסקה הראשונה בטבלה (קדימה) או
+ * האחרונה (אחורה). התנועה **בתוך** התא עצמו נשארת למנוע.
  */
 
 /** תו מצויר אחד: ההיסט שלו (ב-pm של המנוע) והתיבה שלו על המסך. */
@@ -87,6 +114,8 @@ export interface PaintedChar {
   pm: number;
   left: number;
   right: number;
+  /** התו עצמו. חסר בטאב, שאין לו טקסט. */
+  ch?: string;
 }
 
 /** מקום חוקי לסמן: ההיסט וה-x שבו הוא מצויר. */
@@ -102,10 +131,28 @@ export interface CaretSlot {
 const TOUCH = 0.6;
 
 /**
- * הכיוון של כל תו, מהגאומטריה בלבד.
+ * תווים שהדפדפן מסדר תמיד משמאל לימין: אותיות לטיניות, יווניות וקיריליות,
+ * וספרות (גם הערביות-הודיות). זו תכונה של התו ב-UBA, ולא הצהרה של המסמך.
+ */
+const LTR_INTRINSIC = /[0-9A-Za-zÀ-ɏͰ-ϿЀ-ӿ٠-٩۰-۹]/;
+
+/**
+ * הכיוון של כל תו.
  *
- * `true` = התו שייך לקטע ימין-לשמאל. תו שאין לו שכן צמוד משני צדדיו — למשל
- * רווח שמפריד בין עברית לאי לטיני, או טאב — נופל לכיוון השורה.
+ * `true` = התו שייך לקטע ימין-לשמאל. הכיוון נגזר מהגאומטריה: שני תווים עוקבים
+ * שהתיבות שלהם נוגעות שייכים לאותו קטע, והצד שבו הן נוגעות הוא הכיוון. תו
+ * שאין לו שכן צמוד משני צדדיו — למשל רווח שמפריד בין עברית לאי לטיני, או
+ * טאב — נופל לכיוון השורה.
+ *
+ * ## אי של תו אחד
+ *
+ * לגאומטריה יש נקודה עיוורת אחת: ספרה או אות לטינית **בודדת** בין שני תווים
+ * עבריים („סעיף 3 בחוק”, „אות a אחת”) נוגעת בשכניה בדיוק כמו תו עברי, כי אין
+ * לה שכן לטיני שיגלה את הכיוון שלה. היא סווגה כעברית, שני התפרים שלה נשארו
+ * יעדים, והמנוע מצייר את שניהם באותו x — ולכן כל הקשה החזירה את הסמן לתפר
+ * השני ולא עברה את התו (נמדד: „3” ב-[1005, 1013], והיסטים 5 ו-6 מצוירים שניהם
+ * ב-1005; „a” ב-[1012.1, 1019.2], ו-4 ו-5 שניהם ב-1019.2). כשהגאומטריה אינה
+ * מראה צמידות לטינית, התו עצמו מכריע.
  */
 export function charDirections(chars: readonly PaintedChar[], lineRtl: boolean): boolean[] {
   const dirs: (boolean | null)[] = new Array(chars.length).fill(null);
@@ -121,7 +168,10 @@ export function charDirections(chars: readonly PaintedChar[], lineRtl: boolean):
     dirs[i + 1] = rtl;
   }
 
-  return dirs.map((value) => value ?? lineRtl);
+  return dirs.map((value, i) => {
+    if (value !== false && LTR_INTRINSIC.test(chars[i]!.ch ?? '')) return false;
+    return value ?? lineRtl;
+  });
 }
 
 /**
@@ -283,6 +333,13 @@ const CARET_SELECTOR = '.sd-v2-local-selection-caret';
 /** ה-fragment של פסקה. */
 const FRAGMENT_SELECTOR = '[data-source-node-id][data-pm-start]';
 
+/** עמוד בגוף המסמך. ה-fragments של הגוף הם ילדיו הישירים (נמדד). */
+const PAGE_CLASS = 'superdoc-page';
+
+/** ה-fragment הוא המשך של פסקה שהתחילה בעמוד קודם. */
+const CONTINUES_FROM_PREV = 'data-continues-from-prev';
+const CONTINUES_ON_NEXT = 'data-continues-on-next';
+
 /**
  * מה שנושא היסטים בתוך שורה. סמן המספור של פריט רשימה אינו אחד מאלה — הוא
  * מצויר בשורה ואינו נושא טווח pm, ולכן נופל מעצמו (נמדד).
@@ -332,7 +389,7 @@ export function readLineChars(line: Element): PaintedChar[] | null {
       range.setStart(text, i);
       range.setEnd(text, i + 1);
       const rect = range.getBoundingClientRect();
-      chars.push({ pm: pmStart + i, left: rect.left, right: rect.right });
+      chars.push({ pm: pmStart + i, left: rect.left, right: rect.right, ch: data[i] });
     }
   }
 
@@ -347,21 +404,122 @@ export function readLineChars(line: Element): PaintedChar[] | null {
   return chars;
 }
 
-/** ה-fragment שהסמן בו, לפי מזהה הבלוק והיסט הסמן. */
-function findFragment(host: HTMLElement, blockId: string, caretOffset: number): HTMLElement | null {
+const flag = (el: Element, name: string): boolean => el.getAttribute(name) === 'true';
+
+/**
+ * ה-pm של תחילת הבלוק: ה-fragment הראשון שלו, זה שאינו המשך — או, לפסקה
+ * בתוך תא שאין לה טווח משלה, השורה הראשונה שלה. `NaN` כשהבלוק אינו מצויר —
+ * ואז אין מיפוי מהיסט ל-pm.
+ */
+function blockStart(host: HTMLElement, blockId: string): number {
+  let bare: Element | null = null;
+  for (const el of Array.from(host.querySelectorAll('[data-source-node-id]'))) {
+    if (el.getAttribute('data-source-node-id') !== blockId) continue;
+    if (!Number.isFinite(attr(el, 'data-pm-start'))) {
+      bare ??= el;
+      continue;
+    }
+    if (flag(el, CONTINUES_FROM_PREV)) continue;
+    return attr(el, 'data-pm-start');
+  }
+  const first = bare ? linesOf(bare)[0] : undefined;
+  return first ? attr(first, 'data-pm-start') : Number.NaN;
+}
+
+/** המרחק האנכי מ-y לשורה הקרובה ביותר ב-fragment שמכילה את ה-pm. */
+function lineDistance(fragment: Element, pm: number, y: number): number {
+  let best = Infinity;
+  for (const line of linesOf(fragment)) {
+    if (pm < attr(line, 'data-pm-start') || pm > attr(line, 'data-pm-end')) continue;
+    const rect = line.getBoundingClientRect();
+    best = Math.min(best, Math.abs((rect.top + rect.bottom) / 2 - y));
+  }
+  return best;
+}
+
+interface CaretHome {
+  fragment: HTMLElement;
+  caretPm: number;
+}
+
+/**
+ * ה-fragment שהסמן בו, וה-pm שלו. פסקה שנחצית בין עמודים היא כמה fragments
+ * עם אותו מזהה, ובגבול ביניהם ה-pm שייך לשניים — ה-y של הסמן מכריע.
+ */
+function findFragment(host: HTMLElement, blockId: string, caretOffset: number, caretY: number): CaretHome | null {
+  const start = blockStart(host, blockId);
+  if (!Number.isFinite(start)) return null;
+  const caretPm = start + caretOffset;
+
+  let best: HTMLElement | null = null;
+  let bestDistance = Infinity;
   for (const fragment of Array.from(host.querySelectorAll<HTMLElement>(FRAGMENT_SELECTOR))) {
     if (fragment.getAttribute('data-source-node-id') !== blockId) continue;
-    const base = attr(fragment, 'data-pm-start');
-    if (!Number.isFinite(base)) continue;
-    // פסקה שנחצית בין עמודים מצוירת כשני fragment עם אותו מזהה; הסמן שייך
-    // לזה שטווחו מכיל אותו.
-    const end = attr(fragment, 'data-pm-end');
-    const caretPm = base + caretOffset;
-    if (Number.isFinite(end) && (caretPm < base || caretPm > end)) continue;
-    return fragment;
+    const from = attr(fragment, 'data-pm-start');
+    const to = attr(fragment, 'data-pm-end');
+    if (!Number.isFinite(from) || caretPm < from || (Number.isFinite(to) && caretPm > to)) continue;
+    const distance = lineDistance(fragment, caretPm, caretY);
+    if (!best || distance < bestDistance) {
+      best = fragment;
+      bestDistance = distance;
+    }
   }
-  return null;
+  return best ? { fragment: best, caretPm } : null;
 }
+
+const isPage = (el: Element | null): boolean => !!el && el.classList.contains(PAGE_CLASS);
+
+/**
+ * שני fragments באותו מכל ציור: אותו הורה, או שניהם בגוף — עמוד אחרי עמוד.
+ * כותרת עליונה ותא טבלה אינם כאלה.
+ */
+function sameFlow(a: Element, b: Element): boolean {
+  if (a.parentElement === b.parentElement) return true;
+  return isPage(a.parentElement) && isPage(b.parentElement);
+}
+
+const hasRange = (el: Element): boolean => Number.isFinite(attr(el, 'data-pm-start'));
+
+/** הבלוקים של הגוף שבעמוד — פסקאות וטבלאות — לפי הסדר. */
+function pageFragments(page: Element): Element[] {
+  return Array.from(page.children).filter(hasRange);
+}
+
+/**
+ * הבלוק הבא (או הקודם) בזרימה: האח הבא שיש לו טווח, ואם אין — הראשון בעמוד
+ * הסמוך. עמוד סמוך שאין בו אף בלוק מצויר אינו „אין שכן” אלא „לא ידוע”, ולכן
+ * `null` — והקצה של המסמך נבדק בנפרד.
+ */
+function neighbourOf(host: HTMLElement, fragment: Element, forward: boolean): Element | null {
+  let el = forward ? fragment.nextElementSibling : fragment.previousElementSibling;
+  while (el && !hasRange(el)) el = forward ? el.nextElementSibling : el.previousElementSibling;
+  if (el) return el;
+
+  const page = fragment.parentElement;
+  if (!page || !isPage(page)) return null;
+  const pages = Array.from(host.getElementsByClassName(PAGE_CLASS));
+  const next = pages[pages.indexOf(page) + (forward ? 1 : -1)];
+  if (!next) return null;
+  const items = pageFragments(next);
+  return items[forward ? 0 : items.length - 1] ?? null;
+}
+
+/**
+ * האם ה-fragment הוא הקצה של המסמך בכיוון הזה: הראשון בעמוד הראשון, או
+ * האחרון בעמוד האחרון — ולא רק האחרון שמצויר.
+ */
+function atDocumentEdge(host: HTMLElement, fragment: Element, forward: boolean): boolean {
+  const page = fragment.parentElement;
+  if (!page || !isPage(page)) return false;
+  const pages = Array.from(host.getElementsByClassName(PAGE_CLASS));
+  if (pages[forward ? pages.length - 1 : 0] !== page) return false;
+  if (flag(fragment, forward ? CONTINUES_ON_NEXT : CONTINUES_FROM_PREV)) return false;
+  const siblings = pageFragments(page);
+  return siblings[forward ? siblings.length - 1 : 0] === fragment;
+}
+
+/** ההקשה שלנו, אבל אין לאן לזוז — נבלעת. */
+export const STAY = 'stay' as const;
 
 /** השורות של ה-fragment — ילדיו הישירים שנושאים טווח pm. */
 function linesOf(fragment: Element): Element[] {
@@ -419,7 +577,7 @@ export function findTarget(
   caretX: number,
   caretY: number,
   toRight: boolean,
-): Target | null {
+): Target | typeof STAY | null {
   const lines = linesOf(fragment);
   const index = lineAt(lines, caretPm, caretY);
   if (index < 0) return null;
@@ -446,12 +604,39 @@ export function findTarget(
     return slot ? { fragment, slot } : null;
   }
 
-  /* קצה הפסקה. רק פסקה שכנה **באותו מכל ציור** — כותרת עליונה או תא טבלה
-     שכנים ב-DOM אינם שכנים של הסמן. */
-  const fragments = Array.from(host.querySelectorAll<HTMLElement>(FRAGMENT_SELECTOR));
-  const at = fragments.indexOf(fragment as HTMLElement);
-  const sibling = fragments[at + (forward ? 1 : -1)];
-  if (!sibling || sibling.parentElement !== fragment.parentElement) return null;
+  /* קצה הפסקה. השכן הוא הבלוק הבא **באותו מכל ציור** — כותרת עליונה או תא
+     טבלה אינם שכנים של הסמן; העמוד הבא בגוף כן. */
+  const sibling = neighbourOf(host, fragment, forward);
+  if (!sibling) return atDocumentEdge(host, fragment, forward) ? STAY : null;
+  if (!sameFlow(fragment, sibling)) return null;
+
+  /* ורק פסקה שצמודה **במסמך**, ולא רק ברשימת הבורר. טבלה מצוירת כ-fragment
+     בלי `data-source-node-id` (נמדד: „לפני” pm 104..114, הטבלה 115..122,
+     „אחרי” 123..133), ולכן הבורר מדלג עליה והפסקה שמעבר לה נראית שכנה —
+     והחץ קפץ מעל הטבלה כולה. פער בטווחים פירושו שיש משהו ביניהן, והמנוע,
+     שנכנס לתא כראוי, הוא שמטפל בהקשה. המשך של אותה פסקה בעמוד הבא מתחיל
+     בדיוק היכן שהקודם נגמר, ובלי הפרש. */
+  const siblingId = sibling.getAttribute('data-source-node-id');
+  const sameBlock = siblingId !== null && siblingId === fragment.getAttribute('data-source-node-id');
+  const gap = sameBlock ? 0 : 1;
+  const contiguous = forward
+    ? attr(sibling, 'data-pm-start') === attr(fragment, 'data-pm-end') + gap
+    : attr(fragment, 'data-pm-start') === attr(sibling, 'data-pm-end') + gap;
+  if (!contiguous) return null;
+
+  /* בלוק בלי מזהה — טבלה: היעד הוא הפסקה הראשונה בה, או האחרונה. */
+  if (siblingId === null) {
+    const inner = Array.from(sibling.querySelectorAll('[data-source-node-id]')).filter((el) => linesOf(el).length > 0);
+    const cell = inner[forward ? 0 : inner.length - 1];
+    if (!cell) return null;
+    const cellLines = linesOf(cell);
+    const cellLine = forward ? cellLines[0] : cellLines[cellLines.length - 1];
+    if (!cellLine) return null;
+    const cellChars = readLineChars(cellLine);
+    if (!cellChars) return null;
+    const slot = edgeSlot(caretSlots(cellChars, cellLine.getAttribute('dir') === 'rtl'), forward, caretPm);
+    return slot ? { fragment: cell, slot } : null;
+  }
 
   const siblingLines = linesOf(sibling);
   const edgeLine = forward ? siblingLines[0] : siblingLines[siblingLines.length - 1];
@@ -491,33 +676,41 @@ export function installRtlVisualArrows({ host, superdoc }: RtlCaretOptions): Rtl
     if (!head || head.kind !== 'text' || typeof head.blockId !== 'string') return;
     if (typeof head.offset !== 'number') return;
 
-    const fragment = findFragment(host, head.blockId, head.offset);
-    if (!fragment) return;
-
     const caretRect = host.querySelector(CARET_SELECTOR)?.getBoundingClientRect();
     if (!caretRect) return;
-
-    const caretPm = attr(fragment, 'data-pm-start') + head.offset;
     const caretY = (caretRect.top + caretRect.bottom) / 2;
+
+    const home = findFragment(host, head.blockId, head.offset, caretY);
+    if (!home) return;
+
     const target = findTarget(
       host,
-      fragment,
-      caretPm,
+      home.fragment,
+      home.caretPm,
       caretRect.left,
       caretY,
       event.key === 'ArrowRight',
     );
     if (!target) return;
 
+    const swallow = (): void => {
+      // מכאן ואילך זה שלנו: המנוע לא יראה את ההקשה.
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+    };
+    if (target === STAY) {
+      swallow();
+      return;
+    }
+
     const blockId = target.fragment.getAttribute('data-source-node-id');
     if (!blockId) return;
-    const offset = target.slot.pm - attr(target.fragment, 'data-pm-start');
+    const offset = target.slot.pm - blockStart(host, blockId);
+    if (!Number.isFinite(offset)) return;
     if (blockId === head.blockId && offset === head.offset) return;
 
-    // מכאן ואילך זה שלנו: המנוע לא יראה את ההקשה.
-    event.preventDefault();
-    event.stopPropagation();
-    event.stopImmediatePropagation();
+    swallow();
 
     const story = selection?.story ?? head.story ?? { kind: 'story', storyType: 'body' };
     const coordinateSpace = selection?.coordinateSpace;
