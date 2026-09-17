@@ -121,6 +121,25 @@ try {
       /* 1. End מגיע לסוף השורה */
       const first = hebrew[0];
       const before = await caretAt(first);
+
+      /* 1א. ה-`story` בתצלום הסינכרוני — זה מה שנכתב בחזרה למנוע.
+         המודול אינו ממציא ברירת מחדל, ולכן נמדד כאן שהשדה אכן מגיע. */
+      const snap = JSON.parse(
+        await app.js(
+          `(function(){
+            var h = window.__otzariaEditor.superdoc.activeEditor.host;
+            var s = h.readLiveSelectionSyncSnapshot();
+            var t = s && s.selectionTarget;
+            return JSON.stringify({
+              onTarget: !!(t && t.story), onEnd: !!(t && t.end && t.end.story),
+              story: t && (t.story || (t.end && t.end.story)) });
+          })()`,
+        ),
+      );
+      if (snap.onTarget || snap.onEnd)
+        report.pass('ה-story בתצלום', `target=${snap.onTarget} end=${snap.onEnd} — ${JSON.stringify(snap.story)}`);
+      else report.fail('ה-story בתצלום', 'התצלום לא נשא story באף אחד מהשניים — הכתיבה תצא בלעדיו');
+
       await app.press('End', 'End', 35);
       await app.sleep(400);
       const after = await selection();

@@ -99,6 +99,11 @@ const BODY = [
   ),
   p1(LONG, RTL),
   p1('plain latin line', '', ''),
+  /* שני קצות השורה: אי לועזי שפותח שורה, ואי לועזי שסוגר אותה. בשניהם
+     ה„תפר” הוא מול **הפסקה** ולא מול ריצה שנייה, וזה המקרה שלא נמדד בסבב
+     הראשון — ובלעדיו אין לדעת אם החריץ הראשון והאחרון חוקיים. */
+  pRuns([{ t: 'ABC', rPr: '' }, { t: ' מילה כאן', rPr: '<w:rtl/>' }], RTL),
+  p1('לפני הטבלה 4', RTL),
 ].join('');
 
 const CASES = [
@@ -106,6 +111,8 @@ const CASES = [
   { key: 'list', label: 'פריט ברשימה ממוספרת', find: 'פריט ראשון ברשימה', truth: true },
   { key: 'digits', label: 'עברית עם ספרות', find: 'פרק 12 בספר', truth: true, seam: true },
   { key: 'latin', label: 'עברית עם אי לטיני', find: 'מילה ABC מילה', truth: true, seam: true },
+  { key: 'startLatin', label: 'שורה שמתחילה באי לטיני', find: 'ABC מילה כאן', truth: true },
+  { key: 'endDigit', label: 'שורה שנגמרת בספרה', find: 'לפני הטבלה 4', truth: true },
   { key: 'long', label: 'שורה עברית ארוכה (מחיר)', find: 'מילה0 מילה1', truth: false },
   { key: 'control', label: 'בקרה: שורה לטינית', find: 'plain latin line', truth: true },
 ];
@@ -294,6 +301,43 @@ const HELPER = `window.__vf = (function () {
       });
     },
 
+    /*
+     * המחיר **המלא** של הקשה, ולא של חילוץ התיבות בלבד.
+     *
+     * (בלי גרשיים אחוריים: כל הפונקציה הזאת יושבת בתוך תבנית מחרוזת.)
+     *
+     * raw מודד רכיב אחד מתוך המסלול; כאן נשלח keydown אמיתי אל ה-DOM, ולכן
+     * נמדד כל מה שהיירוט עושה בפועל: הסמן המצויר ומלבנו, שלוש הסריקות על
+     * המארח (blockStart פעמיים ו-findFragment), lineDistance לכל מועמדת,
+     * readLineChars, ובקצה גם קריאה שנייה שלה — וכתיבת הבחירה. ההקשה נבלעת
+     * בפסקה עברית, ולכן המנוע אינו מוסיף לזמן הזה.
+     *
+     * הסמן זז עם כל הקשה, בדיוק כמו אצל המשתמש; מי שקורא כאן צריך להחזיר
+     * אותו אחר כך.
+     */
+    keypress: function (blockId, caretOffset, key, reps) {
+      var frag = fragmentOf(blockId, caretOffset);
+      if (!frag) return JSON.stringify({ error: 'no fragment' });
+      var times = [];
+      var prevented = 0;
+      var n = reps || 1;
+      for (var i = 0; i < n; i++) {
+        var ev = new KeyboardEvent('keydown', { key: key, bubbles: true, cancelable: true });
+        var t0 = performance.now();
+        frag.el.dispatchEvent(ev);
+        times.push(performance.now() - t0);
+        if (ev.defaultPrevented) prevented++;
+      }
+      times.sort(function (a, b) { return a - b; });
+      return JSON.stringify({
+        median: Math.round(times[Math.floor(times.length / 2)] * 1000) / 1000,
+        min: Math.round(times[0] * 1000) / 1000,
+        max: Math.round(times[times.length - 1] * 1000) / 1000,
+        reps: times.length,
+        prevented: prevented
+      });
+    },
+
     /** מלבן שורת הסמן — כדי לסרוק אותה בלחיצות אמיתיות. */
     lineRect: function (blockId, caretOffset) {
       var frag = fragmentOf(blockId, caretOffset);
@@ -457,7 +501,17 @@ function slotsFromChars(all, lineStart, lineRtl = true) {
     if (rtlAt[i] === null) rtlAt[i] = dir;
     rtlAt[i + 1] = dir;
   }
+  /* אי של תו **אחד** נוגע בשכניו בדיוק כמו תו עברי, ולכן הגאומטריה לבדה
+     מסווגת אותו כעברי. זה נמדד כשגוי: ב„לפני הטבלה 4” הספרה קיבלה כך את שני
+     הקצוות הפוכים מהמנוע (411 ו-412 התחלפו, ‏17.9.2026). המבחן הוא תכונת
+     התו, בדיוק כמו ב-`isLtrIntrinsic` שבמוצר — ספרה או אות שאינה ממערכת כתב
+     ימנית; סימן ניטרלי נשאר בכיוון השורה. */
+  const RTL_SCRIPT =
+    /[\p{Script=Hebrew}\p{Script=Arabic}\p{Script=Syriac}\p{Script=Thaana}\p{Script=Nko}\p{Script=Samaritan}\p{Script=Mandaic}\p{Script=Adlam}]/u;
+  const ltrIntrinsic = (ch) =>
+    !!ch && (/\p{Nd}/u.test(ch) || (/\p{Alphabetic}/u.test(ch) && !RTL_SCRIPT.test(ch)));
   for (let i = 0; i < chars.length; i += 1) {
+    if (rtlAt[i] !== false && ltrIntrinsic(chars[i].ch)) rtlAt[i] = false;
     if (rtlAt[i] === null) rtlAt[i] = chars[i].dir === 'rtl' || lineRtl;
   }
 
@@ -489,6 +543,8 @@ try {
   await app.js(HELPER);
 
   const costs = [];
+  /** אותה שורה, אבל המסלול המלא: keydown אמיתי מקצה לקצה. */
+  const keypresses = [];
 
   for (const c of CASES) {
     console.log(`\n================ ${c.label}`);
@@ -541,6 +597,28 @@ try {
 
     const slots = slotsFromChars(raw.chars, raw.lineStart, raw.lineDir === 'rtl');
     console.log(`   חריצים: ${slots.map((s) => `${s.off}@${s.x}`).join(' ')}`);
+    /* התיבות עצמן — מהן נבנים הקיבועים ב-`tests/unit/rtl-caret.test.ts`,
+       ולכן הן נדפסות ולא רק נגזרות. */
+    if (runChars.length <= 24) {
+      console.log(`   תיבות: ${runChars.map((ch) => `„${ch.ch}”[${ch.left},${ch.right}]`).join(' ')}`);
+    }
+
+    /* -------- 2ב. המחיר המלא של הקשה, ולא של החילוץ בלבד -------- */
+    const e2e = JSON.parse(
+      await app.js(
+        `window.__vf.keypress(${JSON.stringify(caret.blockId)}, ${caret.start}, 'ArrowRight', 40)`,
+      ),
+    );
+    if (e2e.error) {
+      console.log(`   מחיר ההקשה: ${e2e.error}`);
+    } else {
+      console.log(
+        `   מחיר ההקשה המלא: חציון ${e2e.median}ms, מקס ${e2e.max}ms` +
+          ` (${e2e.reps} הקשות, ${e2e.prevented} מהן נבלעו ביירוט)`,
+      );
+      keypresses.push({ label: c.label, chars: raw.chars.length, ...e2e });
+    }
+    await app.caretPara(c.find);
 
     if (!c.truth) {
       report.pass(`${c.label} — מחיר`, `חציון ${raw.ms.median}ms על ${raw.chars.length} תווים`);
@@ -674,6 +752,22 @@ try {
   for (const c of costs) {
     console.log(`   ${c.label}: ${c.chars} תווים → חציון ${c.median}ms, מקס ${c.max}ms`);
   }
+  console.log('\n---- מחיר ההקשה המלא, מרוכז ----');
+  for (const c of keypresses) {
+    console.log(
+      `   ${c.label}: ${c.chars} תווים → חציון ${c.median}ms, מקס ${c.max}ms` +
+        ` (${c.prevented}/${c.reps} נבלעו)`,
+    );
+  }
+  const heaviest = keypresses.reduce((a, b) => (b.median > (a?.median ?? -1) ? b : a), null);
+  if (heaviest) {
+    const worstMax = keypresses.reduce((a, b) => (b.max > a ? b.max : a), 0);
+    report[worstMax < 16 ? 'pass' : 'partial'](
+      'מחיר: הקשה מקצה לקצה',
+      `חציון ${heaviest.median}ms בכבדה ביותר (${heaviest.label}), והגרוע בכל הריצה ${worstMax}ms`,
+    );
+  }
+
   const worst = costs.reduce((a, b) => (b.max > (a?.max ?? -1) ? b : a), null);
   if (worst) {
     if (worst.max < 4) report.pass('מחיר: השורה היקרה ביותר', `${worst.max}ms במקרה הגרוע (${worst.label})`);

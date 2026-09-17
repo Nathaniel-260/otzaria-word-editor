@@ -9,8 +9,10 @@
  * מקש, שתי התנהגויות הפוכות, באותו מסמך. ‏`Shift+חץ` יורש את הסתירה, ובגבול
  * בין פסקה „חזותית” ל„לוגית” הסמן מקפץ בין השתיים ואינו חולף.
  *
- * ‏**`Shift+חץ` נשאר למנוע** — לא כי הוא תקין, אלא כי נמדד שאי אפשר לכתוב
- * בחירה דרך ה-API בלי שתיעלם מהעין. הפירוט ב-`isHorizontalArrow`.
+ * ‏**`Shift+חץ` נשאר למנוע** — לא כי הוא תקין, אלא כי התצלום הסינכרוני אינו
+ * מוסר בחירה שאינה מכווצת, ולכן אין מאיפה להמשיך בהקשה הבאה. הפירוט
+ * ב-`isHorizontalArrow`, ושם גם המדידה שהפריכה את הנימוק שנכתב כאן קודם
+ * („בחירה שנכתבת דרך ה-API אינה מצוירת” — היא כן).
  *
  * מדוד ומתועד ב-`docs/engine-gaps.md` („חצים אופקיים בעברית”), ודווח למעלה
  * כ-[#3996](https://github.com/superdoc/docx-editor/issues/3996). הקוד שמזיז
@@ -33,11 +35,47 @@
  *   | פריט ברשימה ממוספרת          | **18/18** |
  *   | עברית עם ספרות               | **12/12** |
  *   | בקרה: שורה לטינית            | **17/17** |
+ *   | שורה שנגמרת בספרה            | **13/13** |
+ *   | שורה שמתחילה באי לטיני       | 12/13     |
  *   | עברית עם מילה באנגלית        | 12/14     |
  *
- * זהה עד עשירית פיקסל. המחיר נמדד באותה ריצה, 40 חזרות לכל שורה: חציון
- * 0.1–0.5ms, והגרוע ביותר 4.8ms על שורה מלאה ברוחב A4 (88 תווים). פריים הוא
- * 16ms, והחישוב רץ **רק בהקשת חץ**; הקלדה אינה נוגעת בו.
+ * זהה עד עשירית פיקסל, וכל אי-התאמה היא **היסט תפר** — בדיוק אלה שמדולגים
+ * כאן. שתי השורות האחרונות שבטבלה נוספו ב-17.9.2026, כשהוטל ספק בחריץ הראשון
+ * ובחריץ האחרון של שורה; ראו `caretSlots`.
+ *
+ * ## המחיר — מה נמדד, ומה לא
+ *
+ * מה שנכתב כאן קודם („חציון 0.1–0.5ms, הגרוע 4.8ms”) היה מדידה של **רכיב אחד**
+ * מתוך המסלול — חילוץ התיבות של שורה אחת — והוצג כמחיר ההקשה. נמדד מחדש
+ * ב-17.9.2026 בשתי רמות, 40 חזרות לכל שורה:
+ *
+ *   | מה נמדד                                   | חציון      | הגרוע  |
+ *   |-------------------------------------------|------------|--------|
+ *   | חילוץ התיבות של שורה (`charBoxes`)        | 0–0.8ms    | 1.1ms  |
+ *   | הקשה שלמה: `keydown` אמיתי דרך כל המסלול  | 0.1–7.7ms  | 17.8ms |
+ *
+ * ההקשה השלמה כוללת את הסמן המצויר ומלבנו, שלוש הסריקות על המארח,
+ * `lineDistance` לכל מועמדת, `readLineChars` (ובקצה — פעמיים), ואת החלק
+ * הסינכרוני של `setSelectionTarget`. היא **אינה** כוללת את הציור עצמו, שהוא
+ * א-סינכרוני. שתי ריצות על אותו build נתנו לשורה הכבדה (88 תווים, רוחב A4
+ * מלא) חציון 4.7ms והגרוע 11.8ms, ואז חציון 7.7ms והגרוע 17.8ms — כלומר
+ * פריים (16ms) הוא סדר הגודל ולא גבול בטוח, על מכונה עמוסה.
+ *
+ * וזה רץ **רק בהקשת חץ**; הקלדה אינה נוגעת בו. אבל חץ הוא המקש שמחזיקים,
+ * ולכן „רק בהקשה” אינו גבול — ולכן נמדד גם מה עולה חץ **מוחזק**, עם
+ * ‏`PerformanceObserver` על `event` ועל `longtask` ומונה פריימים:
+ *
+ *   | מה                                   | פסקה עברית | פריט רשימה |
+ *   |--------------------------------------|------------|------------|
+ *   | הקשות בשנייה                         | 51         | 46         |
+ *   | עיבוד ה-`keydown` השלם, טיפוסי       | 5–8ms      | 5–6ms      |
+ *   | הגרוע באותה ריצה                     | 17ms       | 11ms       |
+ *   | ‏`longtask` (מעל 50ms)                | 0          | 0          |
+ *   | פריימים ב-1.2 שניות (במנוחה: 74)     | **74**     | **74**     |
+ *
+ * כלומר בהחזקה רצופה, מעל קצב ה-autorepeat של Windows, **לא נפל אף פריים**
+ * ולא נרשמה אף משימה ארוכה. ‎~30% מהחוט הראשי בזמן ההחזקה — וזה **גזירה**
+ * מהמספרים שבטבלה, לא מדידה נפרדת.
  *
  * (אותה מדידה רצה קודם, בטעות, על superdoc 2.14.0-next.5 שנשאר ב-
  * `node_modules` של העץ הראשי, ונתנה את אותן התאמות ואת אותם ערכי x בדיוק.)
@@ -63,6 +101,10 @@
  *    בכל קצה של אי לועזי (עדיין נגישה בלחיצת עכבר), והתמורה היא
  *    **מונוטוניות**: ימין לעולם אינו מזיז שמאלה.
  *
+ *    ‏**שני קצות השורה אינם תפר כזה** — זה נמדד בנפרד, ראו `caretSlots`:
+ *    בשורה שמתחילה או נגמרת באי לועזי המנוע מצייר את ההיסט הראשון והאחרון
+ *    בבית של **התו**, בדיוק במקום שמחושב כאן.
+ *
  * 3. **כל אלמנט מצויר נושא את טווח ה-pm שלו.** ‏`SPAN.superdoc-text-run` וגם
  *    `SPAN.superdoc-tab` — והטאב הוא יחידת pm אחת בלי טקסט (נמדד:
  *    `pm=5..6`, רוחב 24, אפס תווים). לכן ההיסט של כל תו נקרא מהאלמנט שלו
@@ -81,6 +123,21 @@
  * נמדד תקין —
  * ושורה שטווחי ה-pm המצוירים בה אינם רציפים. בכל אלה ההקשה עוברת אליו כפי
  * שהיא. שער: `npm run check:arrows`.
+ *
+ * וגם **`Ctrl/Alt/Meta+חץ`** — קפיצת מילה — נשאר לו, ובמודע: היא דורשת גבולות
+ * מילה, ומפת התיבות כאן אינה יודעת עליהן דבר. המחיר הוא סתירה חדשה: באותו
+ * פריט רשימה `ArrowRight` יזוז ימינה בעוד `Ctrl+ArrowRight` יקפוץ מילה
+ * שמאלה (לפני המודול הזה שניהם זזו שמאלה). מתועד ב-`docs/engine-gaps.md`.
+ * ו-`Shift+חץ` — ההסבר ב-`isHorizontalArrow`.
+ *
+ * ## פסקה ריקה
+ *
+ * אין בה תו מצויר, ולכן אין ממה לגזור חריץ — אבל יש בה בדיוק מקום סמן אחד,
+ * וההקשה שייכת לנו. נמדד בשער שמסירה למנוע כאן אינה ניטרלית: מתחילת הפסקה
+ * שאחרי הריקה `ArrowRight` הזיז אותו **בתוך** אותה פסקה מהיסט 0 להיסט 1,
+ * כלומר שמאלה על המסך, והריקה דולגה. הצורה המצוירת נמדדה: fragment שטווחו
+ * באורך אפס (‏`14..14`) ובתוכו שורה באותו טווח בלי אף נושא היסט — וכן, פסקה
+ * ריקה תופסת מקום pm נוסף אחריה (‏`1..13`, `14..14`, `16..28`).
  *
  * ## תחילת המסמך וסופו — ההקשה נבלעת
  *
@@ -114,9 +171,17 @@ export interface PaintedChar {
   pm: number;
   left: number;
   right: number;
-  /** התו עצמו. חסר בטאב, שאין לו טקסט. */
+  /** אשכול הגרפמה עצמו — אות ואיתה הניקוד והטעמים שלה. חסר בטאב, שאין לו טקסט. */
   ch?: string;
+  /**
+   * כמה יחידות UTF-16 האשכול תופס. חסר = 1; ‏3 ב-„שָׁ”, 2 באימוג'י —
+   * ההסבר ב-`readLineChars`.
+   */
+  units?: number;
 }
+
+/** יחידות ה-UTF-16 של התו. ראו `PaintedChar.units`. */
+const unitsOf = (c: PaintedChar): number => c.units ?? 1;
 
 /** מקום חוקי לסמן: ההיסט וה-x שבו הוא מצויר. */
 export interface CaretSlot {
@@ -199,6 +264,26 @@ export function charDirections(chars: readonly PaintedChar[], lineRtl: boolean):
  * הסמן בהיסט o יושב על ה**קצה המוביל** של התו שבהיסט o — שמאל לתו לטיני,
  * ימין לתו עברי — ובסוף השורה על הקצה הנגרר של האחרון. היסט שהכיוון משתנה
  * בו מושמט; ההסבר בהערת הפתיחה.
+ *
+ * ## ושני קצות השורה **אינם** תפר — נמדד
+ *
+ * הדילוג חל על היסט שיש לו שני בתים, ולכאורה גם קצה של שורה שמתחילה או
+ * נגמרת באי לועזי הוא כזה: מעבר לתו הראשון ולאחרון עומדת הפסקה, שכיוונה
+ * הפוך. נמדד בשער (`check:arrows`, 17.9.2026) שזה **לא** המצב — המנוע מצייר
+ * שם את הבית של **התו**, בדיוק מה שמחושב כאן:
+ *
+ *   • „ABC מילה כאן” (פסקה `w:bidi`, האי בקצה הימני ‏[1010.5 … 1043.3]):
+ *     היסט 0 מצויר ב-**1010.5**, כלומר בקצה השמאלי של `A` — ולא בתחילת
+ *     הפסקה שמימין. ההליכה שלמה: ‏…4@1006.4 → 0@1010.5 → 1@1022, וההפוכה
+ *     ‏3@1043.3 → 2@1032.7 → 1@1022 → 0@1010.5 → 4@1006.4.
+ *   • „לפני הטבלה 4” (הספרה בקצה השמאלי, ‏[967 … 975.4]): היסט הסיום 12
+ *     מצויר ב-**975.4**, הקצה הימני של הספרה — ולא בקצה השמאלי של השורה.
+ *     ‏12@975.4 → 10@979.4 → 9@986.9, בלי צעד לכיוון ההפוך.
+ *
+ * דילוג על החריצים האלה היה **מוחק** מקום נגיש שהמנוע מצייר נכון: לפי אותן
+ * תיבות שנמדדו, בלי החריץ 0@1010.5 ההקשה מ-4@1006.4 הייתה נוחתת על 1@1022 —
+ * כלומר מעל „A” כולו (גזירה מהמדידה, לא ריצה נוספת). לכן התו הראשון אינו
+ * נבדק מול קודמו, וחריץ הסיום נפלט תמיד.
  */
 export function caretSlots(chars: readonly PaintedChar[], lineRtl: boolean): CaretSlot[] {
   if (!chars.length) return [];
@@ -212,7 +297,10 @@ export function caretSlots(chars: readonly PaintedChar[], lineRtl: boolean): Car
   }
 
   const last = chars[chars.length - 1]!;
-  slots.push({ pm: last.pm + 1, x: dirs[chars.length - 1] ? last.left : last.right });
+  slots.push({
+    pm: last.pm + unitsOf(last),
+    x: dirs[chars.length - 1] ? last.left : last.right,
+  });
 
   return slots;
 }
@@ -270,23 +358,41 @@ export function movesForward(toRight: boolean, lineRtl: boolean): boolean {
  * האם ההקשה היא חץ אופקי „נקי” — בלי Ctrl/Meta/Alt, **ובלי Shift**.
  *
  * ‏`Shift+חץ` אינו שלנו, ולא מפני שהוא תקין: הוא יורש בדיוק את אותה סתירה
- * (בפסקה הבחירה מתרחבת אחורה, ברשימה קדימה). הוא אינו שלנו מפני שנמדד
- * שאי אפשר לכתוב אותו בלי להזיק —
+ * (בפסקה הבחירה מתרחבת אחורה, ברשימה קדימה). הוא אינו שלנו מפני ש**אין
+ * מאיפה לקרוא את ראש הבחירה בהקשה הבאה** —
  *
- *   • בחירה שאינה מכווצת **אינה מצוירת כלל** אחרי כתיבה דרך
- *     `authoring.setSelectionTarget`: ‏`doc.selection.current()` מדווח
- *     `{empty:false, range:{start:2,end:6}}`, ובמסך אין ולו מלבן אחד.
  *   • ‏`readLiveSelectionSyncSnapshot()` מחזיר `selectionTarget: null` לכל
- *     בחירה שאינה מכווצת, ולכן אין מאיפה לקרוא את ראש הבחירה בהקשה הבאה.
+ *     בחירה שאינה מכווצת — גם לזו שהמנוע עצמו יצר. זהו מקור הקריאה היחיד
+ *     שרץ **בתוך** ה-keydown; ‏`doc.selection.current()` א-סינכרוני, ולכן
+ *     ההקשה השנייה ברצף לא תדע מאיפה להמשיך.
  *   • המנוע מנרמל `start`/`end` לסדר המסמך, ולכן גם כיוון הבחירה אובד.
  *
- * כלומר יירוט של `Shift+חץ` היה מחליף באג נראה בבחירה בלתי-נראית. נמדד ב-
- * `scripts/qa/shift-arrow-probe.mjs`.
+ * ‏**מה שנכתב כאן קודם היה שגוי, ותוקן ממדידה.** הנימוק הקודם היה „בחירה
+ * שאינה מכווצת אינה מצוירת כלל אחרי כתיבה דרך `setSelectionTarget`”. הוא
+ * נסמך על חיפוש **אלמנט** ששמו מכיל `selection`, וזו אינה שאלה על פיקסלים:
+ * אותו חיפוש מחזיר ריק גם כשהמנוע עצמו מצייר את הבחירה. נמדד מחדש
+ * ב-17.9.2026 (superdoc 2.15.0) בצילום מלבן הפסקה והשוואת בתים —
+ *
+ *   | מה נעשה                              | התמונה |
+ *   |--------------------------------------|--------|
+ *   | בקרת יציבות: אותו מצב פעמיים         | זהה    |
+ *   | ‏`Shift+חץ` של המנוע                  | השתנתה |
+ *   | ‏`Shift+End` — כתיבה דרך ה-API        | השתנתה |
+ *   | כתיבה ידנית של טווח 2..8 דרך ה-API   | השתנתה |
+ *
+ * כלומר טווח שנכתב דרך ה-API **כן** מצויר, ו-`rtl-line-end.ts` אינו כותב
+ * בחירה בלתי-נראית. מה שנשאר חוסם הוא התצלום הסינכרוני שלמעלה.
  */
 export function isHorizontalArrow(
-  event: Pick<KeyboardEvent, 'key' | 'ctrlKey' | 'metaKey' | 'altKey' | 'shiftKey'>,
+  event: Pick<KeyboardEvent, 'key' | 'ctrlKey' | 'metaKey' | 'altKey' | 'shiftKey'> &
+    Partial<Pick<KeyboardEvent, 'isComposing' | 'keyCode'>>,
 ): boolean {
   if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return false;
+  // הרכבה במקלדת (IME): החץ שייך לחלונית ההרכבה, ולא לסמן. `swallow()` כאן
+  // היה בולע אותו לגמרי (הוא עוצר גם את המאזינים האחרים) ומתרגם אותו לתנועת
+  // סמן — כלומר שובר את ההרכבה. התקן של הריפו ב-`src/ui/shortcuts/match.ts`:
+  // דפדפן שאינו מציב `isComposing` מדווח `keyCode === 229`.
+  if (event.isComposing === true || event.keyCode === 229) return false;
   return !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey;
 }
 
@@ -379,10 +485,64 @@ const attr = (el: Element, name: string): number => {
 };
 
 /**
- * התיבה של כל תו בשורה, עם ההיסט שלו.
+ * מה שנצרך מ-`Intl.Segmenter`. הוא אינו בטיפוסי `ES2020` שב-`tsconfig`
+ * (נוסף ב-`es2022.intl`), והצורה מוצהרת כאן ולא כהרחבה גלובלית — כדי שלא
+ * תתנגש בהצהרה של מודול אחר.
+ */
+interface GraphemeSegmenter {
+  segment(input: string): Iterable<{ index: number; segment: string }>;
+}
+
+/**
+ * החלוקה לאשכולות גרפמה, פעם אחת למודול — ההסבר ב-`readLineChars`.
+ *
+ * בלי locale: כללי האשכול ב-UAX-29 אינם תלויים בשפה, והברירה נמדדה נותנת
+ * את אותם גבולות בדיוק ל-`he` ולברירת המחדל על שש השורות בגשש.
+ */
+const GRAPHEMES: GraphemeSegmenter = new (
+  Intl as unknown as {
+    Segmenter: new (
+      locales: undefined,
+      options: { granularity: 'grapheme' },
+    ) => GraphemeSegmenter;
+  }
+).Segmenter(undefined, { granularity: 'grapheme' });
+
+/**
+ * התיבה של כל אשכול גרפמה בשורה, עם ההיסט שלו.
  *
  * מחזירה `null` כשהטווחים המצוירים אינם מכסים את השורה ברצף — אז אין מיפוי
  * מהימן, וההקשה נמסרת למנוע.
+ *
+ * ## אשכול גרפמה, לא נקודת קוד ולא יחידת UTF-16
+ *
+ * ‏`pm` נספר ביחידות UTF-16, אבל היחידה שיש לה מקום על המסך היא **אשכול
+ * הגרפמה**: „שָׁ” הוא שלוש נקודות קוד (ש, קמץ, שין-ימנית) ותיבה אחת, ואין
+ * מקום סמן בין אות לניקוד שלה. הכלל של הדפדפן נמדד ב-Chrome אמיתי
+ * (`node scripts/qa/rtl-caret-cluster-probe.mjs`, 17.9.2026) — הוא מחזיר
+ * ל-`Range` שחותך באמצע אשכול את **תיבת האשכול המלאה**:
+ *
+ *   | האשכול                       | יחידות | רוחב התיבה | כל יחידה בנפרד |
+ *   |------------------------------|--------|------------|----------------|
+ *   | `😀` — זוג תחליף              |   2    |   22.0     | אותה תיבה      |
+ *   | `שָׁ` ב-„מילה abcשָׁלום”        |   3    |    9.8     | אותה תיבה      |
+ *   | `e`+U+0301 ב-„מילה éa מילה”  |   2    |    7.1     | אותה תיבה      |
+ *
+ * (ה-x המוחלט תלוי ברוחב החלון ולכן אינו רשום כאן; מה שקבוע הוא השוויון,
+ * וזה מה שהגשש מוודא.)
+ *
+ * כלומר איטרציה לפי נקודת קוד אינה מספיקה: היא הייתה יוצרת ל-„שָׁ” שלושה
+ * חריצים באותו x, ו**שניים מהם הם היסט בין האות לניקוד שלה**. נמדד מקצה
+ * לקצה על המודול הזה עם התיבות שהגשש החזיר: ב-„מילה abcשָׁלום” שרדו החריצים
+ * ‏`9` ו-`10` באותו x (הבסיס `8` נפל כתפר), וההליכה — לשני הכיוונים — נחתה
+ * על `9`, כלומר בין ש לקמץ שלה. הקשה שם הייתה מכניסה תו בין האות לניקודה.
+ * (‏„12שָׁלום” ו-„בְּ1948 שְנָה” יצאו שלמים במקרה בלבד: חריץ עם pm נמוך יותר
+ * יושב באותו x ומנצח בשוויון של `<`/`>` ב-`visualTarget`.)
+ *
+ * החלוקה לאשכולות גם **מוזילה** את המסלול על הטקסט שהעורך הזה נועד לו: אותה
+ * מדידה על שורה מנוקדת (89 יחידות UTF-16) — 54 קריאות `getBoundingClientRect`
+ * במקום 89, חציון 0.3ms במקום 0.7ms; ועל שורה בלי ניקוד (269 יחידות) 269
+ * קריאות בשני המסלולים, 1.8ms מול 1.9ms.
  */
 export function readLineChars(line: Element): PaintedChar[] | null {
   const chars: PaintedChar[] = [];
@@ -404,26 +564,58 @@ export function readLineChars(line: Element): PaintedChar[] | null {
 
     const data = (text as Text).data;
     if (data.length !== pmEnd - pmStart) return null;
-    for (let i = 0; i < data.length; i += 1) {
-      range.setStart(text, i);
-      range.setEnd(text, i + 1);
+    for (const { index, segment } of GRAPHEMES.segment(data)) {
+      range.setStart(text, index);
+      range.setEnd(text, index + segment.length);
       const rect = range.getBoundingClientRect();
-      chars.push({ pm: pmStart + i, left: rect.left, right: rect.right, ch: data[i] });
+      chars.push({
+        pm: pmStart + index,
+        left: rect.left,
+        right: rect.right,
+        ch: segment,
+        ...(segment.length > 1 ? { units: segment.length } : {}),
+      });
     }
   }
 
   if (!chars.length) return null;
   chars.sort((a, b) => a.pm - b.pm);
   if (chars[0]!.pm !== attr(line, 'data-pm-start')) return null;
-  if (chars[chars.length - 1]!.pm + 1 !== attr(line, 'data-pm-end')) return null;
+  const last = chars[chars.length - 1]!;
+  if (last.pm + unitsOf(last) !== attr(line, 'data-pm-end')) return null;
   for (let i = 1; i < chars.length; i += 1) {
-    if (chars[i]!.pm !== chars[i - 1]!.pm + 1) return null;
+    if (chars[i]!.pm !== chars[i - 1]!.pm + unitsOf(chars[i - 1]!)) return null;
   }
 
   return chars;
 }
 
 const flag = (el: Element, name: string): boolean => el.getAttribute(name) === 'true';
+
+/**
+ * פסקה או שורה בלי תוכן: טווח באורך אפס.
+ *
+ * נמדד (17.9.2026, superdoc 2.15.0): פסקה ריקה מצוירת כ-fragment עם
+ * `data-pm-start` **שווה** ל-`data-pm-end` (14..14), ובתוכו
+ * `DIV.superdoc-line` באותו טווח, עם `dir="rtl"` ובלי אף נושא היסט. יש לה
+ * בדיוק מקום סמן אחד, וזה ההיסט הזה עצמו.
+ */
+function isEmptyRange(el: Element): boolean {
+  const from = attr(el, 'data-pm-start');
+  return Number.isFinite(from) && from === attr(el, 'data-pm-end');
+}
+
+/**
+ * החריץ היחיד של שורה ריקה, או `null` כשאינה ריקה.
+ *
+ * ה-x נלקח ממלבן השורה, והוא אינו נקרא במסלול שמשתמש בחריץ הזה (בקצה נקרא
+ * ה-pm בלבד) — אבל חריץ בלי מיקום היה שקר בטיפוס.
+ */
+function emptyLineSlot(line: Element, rtl: boolean): CaretSlot | null {
+  if (!isEmptyRange(line)) return null;
+  const rect = line.getBoundingClientRect();
+  return { pm: attr(line, 'data-pm-start'), x: rtl ? rect.right : rect.left };
+}
 
 /**
  * ה-pm של תחילת הבלוק: ה-fragment הראשון שלו, זה שאינו המשך — או, לפסקה
@@ -605,10 +797,16 @@ export function findTarget(
   // שורה לטינית — המנוע נמדד תקין בה (17/17), ואין מה לתקן.
   if (line.getAttribute('dir') !== 'rtl') return null;
 
+  /*
+   * פסקה ריקה אינה „אין מיפוי” אלא שורה בלי חריצים פנימיים: אין בה תו לעבור,
+   * והיעד הוא תמיד השכנה. מסירה למנוע כאן אינה ניטרלית — נמדד בשער שההקשה
+   * שנמסרה הזיזה **בתוך** הפסקה שממנה באנו, כלומר לכיוון ההפוך (ימין
+   * מ-0 הגיע ל-1, ושמאל מ-12 הגיע ל-11).
+   */
   const chars = readLineChars(line);
-  if (!chars) return null;
+  if (!chars && !isEmptyRange(line)) return null;
 
-  const inside = visualTarget(caretSlots(chars, true), caretX, toRight);
+  const inside = chars ? visualTarget(caretSlots(chars, true), caretX, toRight) : null;
   if (inside) return { fragment, slot: inside };
 
   /* קצה השורה. „ימינה” בשורה עברית הוא אחורה לוגית, ולכן הוא מוביל לשורה
@@ -637,7 +835,11 @@ export function findTarget(
      בדיוק היכן שהקודם נגמר, ובלי הפרש. */
   const siblingId = sibling.getAttribute('data-source-node-id');
   const sameBlock = siblingId !== null && siblingId === fragment.getAttribute('data-source-node-id');
-  const gap = sameBlock ? 0 : 1;
+  /* פסקה ריקה תופסת מקום pm נוסף **אחריה**. נמדד: „לפני הריקה 4” 1..13,
+     הריקה 14..14, „אחרי הריקה 5” 16..28 — כלומר הפרש 1 אחרי פסקה עם תוכן,
+     והפרש 2 אחרי ריקה. בלי זה הריקה נראית כמו „יש משהו ביניהן”. */
+  const earlier = forward ? fragment : sibling;
+  const gap = sameBlock ? 0 : isEmptyRange(earlier) ? 2 : 1;
   const contiguous = forward
     ? attr(sibling, 'data-pm-start') === attr(fragment, 'data-pm-end') + gap
     : attr(fragment, 'data-pm-start') === attr(sibling, 'data-pm-end') + gap;
@@ -661,9 +863,11 @@ export function findTarget(
   const edgeLine = forward ? siblingLines[0] : siblingLines[siblingLines.length - 1];
   if (!edgeLine) return null;
   const edgeChars = readLineChars(edgeLine);
-  if (!edgeChars) return null;
   const rtl = edgeLine.getAttribute('dir') === 'rtl';
-  const slot = edgeSlot(caretSlots(edgeChars, rtl), forward, caretPm);
+  // שכנה ריקה: החריץ היחיד שלה הוא ההיסט שלה עצמה.
+  const slot = edgeChars
+    ? edgeSlot(caretSlots(edgeChars, rtl), forward, caretPm)
+    : emptyLineSlot(edgeLine, rtl);
   return slot ? { fragment: sibling, slot } : null;
 }
 
@@ -683,12 +887,10 @@ export function installRtlVisualArrows({ host, superdoc }: RtlCaretOptions): Rtl
     const readSnapshot = editor?.host?.readLiveSelectionSyncSnapshot;
     if (typeof setSelectionTarget !== 'function' || typeof readSnapshot !== 'function') return;
 
-    let snapshot: LiveSelectionSnapshot | null | undefined;
-    try {
-      snapshot = readSnapshot.call(editor?.host);
-    } catch {
-      return;
-    }
+    /* בלי try/catch: נמדד (17.9.2026, superdoc 2.15.0) שהקריאה אינה זורקת —
+       מאות קריאות בסמן מכווץ, בבחירה שאינה מכווצת ואחרי כתיבה. מה שהיא כן
+       עושה הוא להחזיר `selectionTarget: null`, וזה מטופל למטה. */
+    const snapshot: LiveSelectionSnapshot | null | undefined = readSnapshot.call(editor?.host);
 
     const selection = snapshot?.selectionTarget;
     const head = selection?.end;
@@ -723,35 +925,76 @@ export function installRtlVisualArrows({ host, superdoc }: RtlCaretOptions): Rtl
       return;
     }
 
+    // צמצום טיפוס: כל ארבעת המסלולים ב-`findTarget` מחזירים fragment שנבחר
+    // **לפי** התכונה הזאת, ולכן היא קיימת; `getAttribute` עדיין מחזיר null.
     const blockId = target.fragment.getAttribute('data-source-node-id');
     if (!blockId) return;
+
+    /* ‏`NaN` כשהחלק הראשון של הפסקה אינו מצויר — היעד הוא המשך של פסקה
+       שהתחילה בעמוד שהמנוע לא צייר (נמדד: 3 עמודים מתוך 25), ואז אין מיפוי
+       מ-pm להיסט. כמו בכל „אין מיפוי” כאן, ההקשה נמסרת למנוע. */
     const offset = target.slot.pm - blockStart(host, blockId);
     if (!Number.isFinite(offset)) return;
-    if (blockId === head.blockId && offset === head.offset) return;
+
+    /*
+     * היעד הוא ההיסט שהסמן כבר עליו — ואז בולעים ולא מוסרים.
+     *
+     * שתי נקודות המוצא של החישוב מתעדכנות בקצב שונה: ההיסט מגיע מהתצלום
+     * הסינכרוני, וה-x מהסמן ה**מצויר**. כשהציור מפגר אחרי התצלום (פער מתועד
+     * — „ציור שמאחר אחרי לחיצה”) החישוב יוצא מ-x ישן ומחזיר את היעד שכבר
+     * נכתב. מסירה למנוע כאן אינה ניטרלית: בפסקה שהוא מזיז בה לוגית הוא זז
+     * לכיוון ההפוך — כלומר החזקת חץ ברשימה הייתה מייצרת קפיצות אחורה
+     * מזדמנות. אותה הכרעה בדיוק ב-`rtl-line-end.ts` („הסמן כבר שם”), שם
+     * ביטול האירוע קודם לבדיקה.
+     *
+     * ## והחשש ההפוך — שהבליעה תאכל הקשות בהחזקה — נמדד ונשלל
+     *
+     * הטענה שנבדקה: תחת autorepeat כל הקשה שמקדימה את הציור תיבלע, והמרחק
+     * שהסמן עובר ייחסם בקצב הציור ולא בקצב המקשים. נמדד ב-17.9.2026 על
+     * ה-dist הארוז, ב-`Input.dispatchKeyEvent` עם `autoRepeat`, בשתי פסקאות
+     * — עברית רגילה ופריט רשימה (שבו המנוע זז לוגית):
+     *
+     *   • **אין חלון.** דגימה בכל פריים אחרי הקשה בודדת: ההיסט וה-x משתנים
+     *     ב**אותה** דגימה (‏48@355.3 → 47@363 אחרי 55ms; ברשימה
+     *     ‏40@349.7 → 39@356.6 אחרי 52ms). לא נצפתה ולו דגימה אחת שבה ההיסט
+     *     כבר חדש וה-x עדיין ישן.
+     *   • **אין בליעה.** 25 הקשות מוחזקות ב-19 וב-32 הקשות/שנייה נתנו
+     *     ‏**25 קריאות `setSelectionTarget`** בכל אחת מארבע הריצות; הענף הזה
+     *     לא ירה אף פעם. במדידה נפרדת 20 הקשות הזיזו את ההיסט ב-20 בדיוק,
+     *     גם ב-39 הקשות/שנייה.
+     *
+     * כלומר הענף נשאר מה שהוא: גידור לפיגור ציור שנמדד בלחיצת עכבר, ולא
+     * חסם על מהירות התנועה.
+     */
+    if (blockId === head.blockId && offset === head.offset) {
+      swallow();
+      return;
+    }
 
     swallow();
 
-    const story = selection?.story ?? head.story ?? { kind: 'story', storyType: 'body' };
+    // ה-`story` מגיע מהתצלום — נמדד שהוא קיים גם על ה-target וגם על הקצה.
+    // ברירת מחדל מומצאת הייתה נכתבת למנוע בלי שנמדד אי פעם שהיא הנכונה.
+    const story = selection?.story ?? head.story;
     const coordinateSpace = selection?.coordinateSpace;
     const point: TextPoint = { kind: 'text', blockId, offset, story };
 
-    try {
-      const written = setSelectionTarget.call(editor?.authoring, {
-        target: {
-          kind: 'selection',
-          start: point,
-          end: point,
-          story,
-          ...(typeof coordinateSpace === 'string' ? { coordinateSpace } : {}),
-        },
-        focus: true,
-      });
-      // הפעולה א-סינכרונית במנוע. כשל מאוחר (למשל אם המסמך התפרק בין
-      // התצלום לכתיבה) אינו צריך לייצר rejection לא מטופלת.
-      void Promise.resolve(written).catch(() => {});
-    } catch {
-      /* בחירה שלא נכתבה אינה סיבה להפיל הקלדה */
-    }
+    /*
+     * בלי try/catch ובלי `.catch`: נמדד מה הכתובת הפסולה ביותר עושה — כתיבה
+     * ל-`blockId` שאינו קיים **אינה זורקת ואינה דוחה**, אלא מחזירה הבטחה
+     * שנפתרת ב-`{ok:false, reason:'target-not-mounted'}`. זה ערוץ הכשל של
+     * המנוע, ואין לו מה לעשות כאן: ההקשה כבר נבלעה, והסמן פשוט נשאר.
+     */
+    void setSelectionTarget.call(editor?.authoring, {
+      target: {
+        kind: 'selection',
+        start: point,
+        end: point,
+        story,
+        ...(typeof coordinateSpace === 'string' ? { coordinateSpace } : {}),
+      },
+      focus: true,
+    });
   };
 
   host.addEventListener('keydown', onKeyDown, true);

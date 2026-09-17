@@ -134,8 +134,128 @@ const DIVISION_SIGN_PAINTED = [
   652.7, 645.1, 637.3, 627.5, 623.5, 614.8, 610.8, 601, 593, 588.7, 584.5, 576.4,
 ];
 
+/**
+ * „ABC מילה כאן” בפסקה `w:bidi`, ‏pm 1..13 — שורה שמ**תחילה** באי לטיני.
+ *
+ * נמדד בשער (`check:arrows`, superdoc 2.15.0, 17.9.2026): ה-x שהמנוע צייר בו
+ * את הסמן בכל היסט, בהליכה מלאה לשני הכיוונים. האי יושב בקצה הימני של השורה
+ * ‏[1010.5 … 1043.3], והעברית ממשיכה שמאלה ממנו.
+ */
+const STARTS_LATIN: PaintedChar[] = [
+  ...lettered(1, 'ABC', [[1010.5, 1022], [1022, 1032.7], [1032.7, 1043.3]]),
+  ...lettered(4, ' מילה כאן', [
+    [1006.4, 1010.5], [998.7, 1006.4], [994.4, 998.7], [987.5, 994.4], [980, 987.5],
+    [976, 980], [969, 976], [961.3, 969], [957, 961.3],
+  ]),
+];
+/** ה-x המצויר לכל היסט 0..12 של אותה שורה, מאותה ריצה. */
+const STARTS_LATIN_PAINTED = [
+  1010.5, 1022, 1032.7, 1043.3, 1006.4, 998.7, 994.4, 987.5, 980, 976, 969, 961.3, 957,
+];
+
+/**
+ * „שלום😀עולם” — אימוג'י הוא נקודת קוד אחת ו**שתי** יחידות UTF-16.
+ *
+ * התיבות נמדדו ב-Chrome (16pt serif, `dir=rtl`): חיתוך `Range` לכל **יחידה**
+ * בנפרד מחזיר לשני חצאי הזוג את **אותה תיבה מלאה** ‏[531.7, 561] ברוחב 29.3 —
+ * ולא מלבן ריק. כלומר בלי איטרציה לפי אשכול נוצר חריץ שני באותו x, שההיסט
+ * שלו יושב בתוך נקודת הקוד.
+ *
+ * המדידה חיה ב-`scripts/qa/rtl-caret-cluster-probe.mjs` וניתן להריץ אותה
+ * שוב (‏`node scripts/qa/rtl-caret-cluster-probe.mjs`); קודם היא צוטטה מקובץ
+ * ‏`scratchpad/surrogate.html` שאינו במאגר, ולכן לא ניתן היה לאמת אותה.
+ */
+const EMOJI_BOXES: [number, number][] = [
+  [587, 600], [577.8, 587], [571.8, 577.8], [561, 571.8],
+  [531.7, 561], [531.7, 561],
+  [522, 531.7], [516.1, 522], [506.9, 516.1], [496, 506.9],
+];
+
+/**
+ * „מילה abcשָׁלום” — אות עברית עם קמץ ושין-ימנית, בשורה שיש בה גם אי לטיני.
+ *
+ * התיבות נמדדו ב-Chrome ב-`scripts/qa/rtl-caret-cluster-probe.mjs`. כל שלוש
+ * היחידות של „שָׁ” (ש, U+05B8, U+05C1) מחזירות את **אותה** תיבה
+ * ‏[637.5, 647.3] — וזו הצורה שבה הדפדפן עונה על חיתוך בתוך אשכול. הרשימה
+ * כאן היא לפי **יחידת UTF-16**, כלומר בדיוק מה ש-`stubRects` יגיש לכל
+ * ‏`startOffset`, וממנה `readLineChars` אמורה להרכיב 12 אשכולות ולא 14.
+ */
+const NIQQUD_BOXES: [number, number][] = [
+  [692.2, 700], [688, 692.2], [681, 688], [673.5, 681.1], [669.5, 673.5],
+  [647.3, 654.4], [654.4, 662.4], [662.4, 669.5],
+  [637.5, 647.3], [637.5, 647.3], [637.5, 647.3],
+  [630.6, 637.5], [626.2, 630.6], [618.1, 626.2],
+];
+const NIQQUD_TEXT = 'מילה abcשָׁלום';
+
+/**
+ * „מילה éa מילה” — אות לטינית מפורקת (e ואחריה U+0301) בתוך שורה עברית.
+ * שתי היחידות שלה מחזירות את אותה תיבה [655.3, 662.4], מאותה מדידה.
+ */
+const DECOMPOSED_BOXES: [number, number][] = [
+  [692.2, 700], [688, 692.2], [681, 688], [673.5, 681.1], [669.5, 673.5],
+  [655.3, 662.4], [655.3, 662.4], [662.4, 669.5],
+  [651.3, 655.3], [643.5, 651.3], [639.3, 643.5], [632.4, 639.3], [624.8, 632.4],
+];
+const DECOMPOSED_TEXT = 'מילה éa מילה';
+
+/**
+ * ההיסטים החוקיים לסמן בשתי השורות: תחילת כל אשכול, ועוד ההיסט שאחרי האחרון.
+ *
+ * הרשימות **אינן** נגזרות מ-`Intl.Segmenter` בזמן הבדיקה, ובכוונה: המימוש
+ * נשען עליו, ובדיקה שתשאל אותו הייתה מאשרת את עצמה. הן הועתקו מפלט הגשש
+ * ‏`scripts/qa/rtl-caret-cluster-probe.mjs` שרץ ב-Chrome — כלומר מהמדידה.
+ * ‏„שָׁ” הוא אשכול אחד בהיסט 8 ולכן 9 ו-10 חסרים; ‏`e`+U+0301 הוא אשכול אחד
+ * בהיסט 5 ולכן 6 חסר.
+ */
+const NIQQUD_LEGAL = [0, 1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13, 14];
+const DECOMPOSED_LEGAL = [0, 1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12, 13];
+
 const pmsOf = (slots: readonly CaretSlot[]) => slots.map((s) => s.pm);
 const xOf = (slots: readonly CaretSlot[], pm: number) => slots.find((s) => s.pm === pm)?.x;
+
+/**
+ * הקשה אחר הקשה, מול מה שהמנוע באמת מצייר: נקודת המוצא של כל הקשה היא ה-x
+ * המצויר של ההיסט הנוכחי, בדיוק כמו ב-`installRtlVisualArrows`.
+ */
+function hold(
+  chars: readonly PaintedChar[],
+  painted: readonly number[],
+  base: number,
+  from: number,
+  toRight: boolean,
+): number[] {
+  const slots = caretSlots(chars, true);
+  const visited = [from];
+  let offset = from;
+  for (let step = 0; step < chars.length + 2; step += 1) {
+    const target = visualTarget(slots, painted[offset]!, toRight);
+    if (!target) break;
+    const next = target.pm - base;
+    if (next === offset) break;
+    visited.push(next);
+    offset = next;
+  }
+  return visited;
+}
+
+/** הליכה מכל היסט, בשני הכיוונים: בלי ביקור חוזר, וכל צעד מתקדם על המסך. */
+function expectWalksForward(
+  chars: readonly PaintedChar[],
+  painted: readonly number[],
+  base: number,
+): void {
+  for (let from = 0; from < painted.length; from += 1) {
+    for (const toRight of [true, false]) {
+      const visited = hold(chars, painted, base, from, toRight);
+      expect(new Set(visited).size, `ביקור חוזר מ-${from}`).toBe(visited.length);
+      for (let i = 1; i < visited.length; i += 1) {
+        const dx = painted[visited[i]!]! - painted[visited[i - 1]!]!;
+        expect(toRight ? dx : -dx, `צעד ${visited[i - 1]}→${visited[i]}`).toBeGreaterThan(0.5);
+      }
+    }
+  }
+}
 
 describe('charDirections', () => {
   it('עברית נקייה — כל התווים ימין-לשמאל', () => {
@@ -195,50 +315,34 @@ describe('caretSlots', () => {
   it('שורה ריקה — אין חריצים', () => {
     expect(caretSlots([], true)).toEqual([]);
   });
+
+  it('אי לטיני שפותח את השורה: ההיסט הראשון הוא חריץ, ובדיוק ב-x שהמנוע צייר', () => {
+    // הקצה **אינו** תפר, וזה נמדד: אילו דילגנו עליו (כאילו הכיוון משתנה מול
+    // הפסקה) היינו מוחקים מקום שהמנוע מצייר נכון, והחץ היה קופץ מעל „A”.
+    const slots = caretSlots(STARTS_LATIN, true);
+    expect(xOf(slots, 1), 'היסט 0 — נמדד 1010.5 במנוע').toBe(1010.5);
+    expect(xOf(slots, 2)).toBe(1022);
+    expect(xOf(slots, 3)).toBe(1032.7);
+    // התפר האמיתי היחיד בשורה הזאת: המעבר מהאי לעברית (היסט 3).
+    expect(pmsOf(slots)).not.toContain(4);
+  });
+
+  it('אי לטיני שסוגר את השורה: חריץ הסיום הוא הקצה הנגרר של הספרה', () => {
+    // אותה שאלה בקצה השני. נמדד על „לפני הטבלה 4”: היסט הסיום מצויר ב-975.4,
+    // שהוא הקצה הימני של הספרה — ולא בקצה השמאלי של השורה.
+    const chars = lettered(1, 'לפני 4', [
+      [1036.5, 1043.4], [1029.4, 1036.5], [1024.5, 1029.4], [1020.3, 1024.5],
+      [975.4, 979.4], [967.8, 975.4],
+    ]);
+    const slots = caretSlots(chars, true);
+    expect(pmsOf(slots), 'התפר שלפני הספרה מדולג').not.toContain(6);
+    expect(xOf(slots, 7), 'חריץ הסיום — הקצה הימני של הספרה').toBe(975.4);
+  });
+
+  it('הליכה מלאה על שורה שמתחילה באי לטיני — כל צעד מתקדם על המסך', () => {
+    expectWalksForward(STARTS_LATIN, STARTS_LATIN_PAINTED, 1);
+  });
 });
-
-/**
- * הקשה אחר הקשה, מול מה שהמנוע באמת מצייר: נקודת המוצא של כל הקשה היא ה-x
- * המצויר של ההיסט הנוכחי, בדיוק כמו ב-`installRtlVisualArrows`.
- */
-function hold(
-  chars: readonly PaintedChar[],
-  painted: readonly number[],
-  base: number,
-  from: number,
-  toRight: boolean,
-): number[] {
-  const slots = caretSlots(chars, true);
-  const visited = [from];
-  let offset = from;
-  for (let step = 0; step < chars.length + 2; step += 1) {
-    const target = visualTarget(slots, painted[offset]!, toRight);
-    if (!target) break;
-    const next = target.pm - base;
-    if (next === offset) break;
-    visited.push(next);
-    offset = next;
-  }
-  return visited;
-}
-
-/** הליכה מכל היסט, בשני הכיוונים: בלי ביקור חוזר, וכל צעד מתקדם על המסך. */
-function expectWalksForward(
-  chars: readonly PaintedChar[],
-  painted: readonly number[],
-  base: number,
-): void {
-  for (let from = 0; from < painted.length; from += 1) {
-    for (const toRight of [true, false]) {
-      const visited = hold(chars, painted, base, from, toRight);
-      expect(new Set(visited).size, `ביקור חוזר מ-${from}`).toBe(visited.length);
-      for (let i = 1; i < visited.length; i += 1) {
-        const dx = painted[visited[i]!]! - painted[visited[i - 1]!]!;
-        expect(toRight ? dx : -dx, `צעד ${visited[i - 1]}→${visited[i]}`).toBeGreaterThan(0.5);
-      }
-    }
-  }
-}
 
 describe('אי של תו אחד', () => {
   const cases = [
@@ -391,10 +495,12 @@ describe('isHorizontalArrow', () => {
     expect(isHorizontalArrow(key({ key: 'ArrowLeft' }))).toBe(true);
   });
 
-  it('Shift+חץ נשאר למנוע — בחירה שנכתבת דרך ה-API אינה מצוירת', () => {
-    // נמדד ב-scripts/qa/shift-arrow-probe.mjs: אחרי כתיבת טווח
-    // `doc.selection.current()` מדווח `{empty:false, range:{2,6}}` ובמסך אין
-    // ולו מלבן אחד. יירוט כאן היה מחליף באג נראה בבחירה בלתי-נראית.
+  it('Shift+חץ נשאר למנוע — אין מאיפה לקרוא את ראש הבחירה בהקשה הבאה', () => {
+    // הנימוק שהיה כאן („בחירה שנכתבת דרך ה-API אינה מצוירת”) נמדד כשגוי:
+    // צילום מלבן הפסקה מראה שהיא כן מצוירת, גם ב-`Shift+End` שעובר דרך
+    // `rtl-line-end.ts`. מה שחוסם הוא `readLiveSelectionSyncSnapshot()`,
+    // שמחזיר `selectionTarget: null` לכל בחירה שאינה מכווצת — גם לזו שהמנוע
+    // עצמו יצר. הפירוט ב-`isHorizontalArrow`.
     expect(isHorizontalArrow(key({ shiftKey: true }))).toBe(false);
   });
 
@@ -458,7 +564,8 @@ function buildLine(
   line.setAttribute('data-pm-start', String(pmStart));
   line.setAttribute('data-pm-end', String(pmEnd));
   if (rtl) line.setAttribute('dir', 'rtl');
-  line.getBoundingClientRect = () => ({ top, bottom: top + 20 }) as DOMRect;
+  line.getBoundingClientRect = () =>
+    ({ top, bottom: top + 20, left: 51, right: 1043.4 }) as DOMRect;
 
   for (const run of runs) {
     const span = document.createElement('span') as HTMLElement & { __chars?: PaintedChar[] };
@@ -544,6 +651,71 @@ describe('readLineChars', () => {
     expect(readLineChars(line)).toEqual(LATIN_ISLAND_READ);
   });
 
+  it("אימוג'י הוא תו אחד ושתי יחידות pm — ולא שני חריצים באותו x", () => {
+    // נמדד ב-Chrome: שני חצאי הזוג מחזירים את אותה תיבה מלאה [531.7, 561].
+    // בלי איטרציה לפי נקודת קוד נוצר כאן חריץ שני, שההיסט שלו (6) יושב
+    // **בתוך** נקודת הקוד — ובאי לועזי, שבו הראשון נופל כתפר, הוא זה שהיה
+    // נכתב למנוע.
+    stubRects();
+    const run = EMOJI_BOXES.map(([left, right], i) => ({ pm: 1 + i, left, right }));
+    const line = buildLine([{ text: 'שלום😀עולם', chars: run }], 1, 11, true);
+    document.body.append(line);
+
+    const chars = readLineChars(line)!;
+    expect(chars).toHaveLength(9);
+    expect(chars[4]).toEqual({ pm: 5, left: 531.7, right: 561, ch: '😀', units: 2 });
+    expect(chars[5]!.pm, 'ההיסט הבא מדלג שתי יחידות').toBe(7);
+
+    const slots = caretSlots(chars, true);
+    expect(pmsOf(slots)).toEqual([1, 2, 3, 4, 5, 7, 8, 9, 10, 11]);
+    expect(charDirections(chars, true).every((rtl) => rtl), "האימוג'י אינו אי לועזי").toBe(true);
+  });
+
+  it('אות עברית עם ניקוד וטעם היא אשכול אחד — ואין חריץ בין האות לניקודה', () => {
+    /*
+     * זה הדבר שמשתמש מרגיש: פירוש עברי נכתב מנוקד, ואילו נשאר חריץ בין „ש”
+     * לקמץ שלה — הקשת חץ הייתה מניחה שם את הסמן, והתו הבא היה נכנס **בין**
+     * האות לניקוד.
+     *
+     * נמדד ב-Chrome (`scripts/qa/rtl-caret-cluster-probe.mjs`): שלוש היחידות
+     * של „שָׁ” מחזירות את אותה תיבה. איטרציה לפי נקודת קוד הייתה יוצרת שלושה
+     * חריצים ב-x זהה, ובשורה הזאת — שיש בה אי לטיני, ולכן הבסיס (8) נופל
+     * כתפר — **9 ו-10 שרדו**, וההליכה בשני הכיוונים נחתה על 9.
+     */
+    stubRects();
+    const run = NIQQUD_BOXES.map(([left, right], i) => ({ pm: i, left, right }));
+    const line = buildLine([{ text: NIQQUD_TEXT, chars: run }], 0, 14, true);
+    document.body.append(line);
+
+    const chars = readLineChars(line)!;
+    expect(chars, '12 אשכולות ולא 14 יחידות').toHaveLength(12);
+    expect(chars[8]).toEqual({ pm: 8, left: 637.5, right: 647.3, ch: 'שָׁ', units: 3 });
+    expect(chars[9]!.pm, 'ההיסט הבא מדלג שלוש יחידות').toBe(11);
+
+    const slots = caretSlots(chars, true);
+    expect(pmsOf(slots)).toEqual([0, 1, 2, 3, 4, 6, 7, 11, 12, 13, 14]);
+    // ‏`expectWalksForward` מוודא מונוטוניות על המסך ואינו רואה חוקיות של
+    // אשכול; זו הטענה שחסרה לו, וכל יעד ש-`visualTarget` מחזירה הוא אחד מאלה.
+    for (const slot of slots) expect(NIQQUD_LEGAL, `חריץ ${slot.pm}`).toContain(slot.pm);
+  });
+
+  it('אות לטינית מפורקת בשורה עברית — אותו כלל, ובלי חריץ בין האות לסימן', () => {
+    // ‏`e` ואחריו U+0301, בתוך אי לטיני. כאן החריץ הפסול (6) לא רק שרד —
+    // ההליכה נחתה עליו בשני הכיוונים, כי הוא אינו חולק x עם אף חריץ אחר.
+    stubRects();
+    const run = DECOMPOSED_BOXES.map(([left, right], i) => ({ pm: i, left, right }));
+    const line = buildLine([{ text: DECOMPOSED_TEXT, chars: run }], 0, 13, true);
+    document.body.append(line);
+
+    const chars = readLineChars(line)!;
+    expect(chars).toHaveLength(12);
+    expect(chars[5]).toEqual({ pm: 5, left: 655.3, right: 662.4, ch: 'é', units: 2 });
+
+    const slots = caretSlots(chars, true);
+    expect(pmsOf(slots)).toEqual([0, 1, 2, 3, 4, 7, 9, 10, 11, 12, 13]);
+    for (const slot of slots) expect(DECOMPOSED_LEGAL, `חריץ ${slot.pm}`).toContain(slot.pm);
+  });
+
   it('טווחים שאינם מכסים את השורה ברצף — `null`', () => {
     stubRects();
     const line = buildLine(mixedRuns(), 51, 70, true);
@@ -557,6 +729,22 @@ interface Setup {
   line: HTMLElement;
   superdoc: RtlCaretHost;
   setSelectionTarget: ReturnType<typeof vi.fn>;
+  /** כמה פעמים היירוט קרא את התצלום — כלומר ראה את ההקשה. */
+  seen: () => number;
+}
+
+/**
+ * „המודול חי”, ולא רק „לא הפריע”.
+ *
+ * בדיקת „נמסר למנוע” שמסתפקת ב-`defaultPrevented === false` ובמרגל שלא נקרא
+ * עוברת ירוק גם על מודול מת: החלפת `installRtlVisualArrows` ב-no-op השאירה
+ * 12 מ-24 בדיקות היירוט ירוקות (נמדד). לכן כל אחת מהן קובעת גם **שהיירוט
+ * רץ** — או שקרא את התצלום, או שהקשה נקייה באותה התקנה כן נבלעת.
+ */
+function expectAlive(setup: Setup, target: HTMLElement): void {
+  const event = press(target, 'ArrowRight');
+  expect(event.defaultPrevented, 'הקשה נקייה באותה התקנה נבלעת — המודול חי').toBe(true);
+  setup.setSelectionTarget.mockClear();
 }
 
 function setup({
@@ -614,23 +802,27 @@ function setup({
 
   const setSelectionTarget = vi.fn();
   const story = { kind: 'story', storyType: 'body' };
+  let seen = 0;
   const superdoc: RtlCaretHost = {
     activeEditor: {
       host: {
-        readLiveSelectionSyncSnapshot: () => ({
-          selectionTarget: {
-            kind: 'selection',
-            start: { kind: 'text', blockId: 'p1', offset: caretOffset, story },
-            end: { kind: 'text', blockId: 'p1', offset: caretOffset, story },
-            story,
-          },
-        }),
+        readLiveSelectionSyncSnapshot: () => {
+          seen += 1;
+          return {
+            selectionTarget: {
+              kind: 'selection',
+              start: { kind: 'text', blockId: 'p1', offset: caretOffset, story },
+              end: { kind: 'text', blockId: 'p1', offset: caretOffset, story },
+              story,
+            },
+          };
+        },
       },
       authoring: { setSelectionTarget },
     },
   };
 
-  return { host, line, superdoc, setSelectionTarget };
+  return { host, line, superdoc, setSelectionTarget, seen: () => seen };
 }
 
 const press = (target: HTMLElement, key: string, init: KeyboardEventInit = {}): KeyboardEvent => {
@@ -660,14 +852,47 @@ describe('installRtlVisualArrows', () => {
     handle.dispose();
   });
 
+  it('היעד הוא ההיסט הנוכחי — ההקשה נבלעת ואינה נמסרת למנוע', () => {
+    // הציור מפגר אחרי התצלום (פער מתועד): התצלום כבר על היסט 9, והסמן עדיין
+    // מצויר ב-x של 10. אז החישוב מחזיר את היסט 9 עצמו — ואילו מסרנו את
+    // ההקשה למנוע הוא היה מזיז לוגית, כלומר שמאלה על המסך.
+    const state = setup({ caretOffset: 9, caretX: 968.2 });
+    const { host, line, superdoc, setSelectionTarget } = state;
+    const handle = installRtlVisualArrows({ host, superdoc });
+
+    const event = press(line, 'ArrowRight');
+
+    expect(event.defaultPrevented, 'אין לאן לזוז — אבל ההקשה שלנו').toBe(true);
+    expect(setSelectionTarget, 'אין מה לכתוב').not.toHaveBeenCalled();
+    handle.dispose();
+  });
+
   it('Shift+חץ אינו נגזל — הבחירה נשארת של המנוע', () => {
-    const { host, line, superdoc, setSelectionTarget } = setup();
+    const state = setup();
+    const { host, line, superdoc, setSelectionTarget } = state;
     const handle = installRtlVisualArrows({ host, superdoc });
 
     const event = press(line, 'ArrowRight', { shiftKey: true });
 
     expect(event.defaultPrevented).toBe(false);
     expect(setSelectionTarget).not.toHaveBeenCalled();
+    expectAlive(state, line);
+    handle.dispose();
+  });
+
+  it('חץ באמצע הרכבת IME אינו נגזל — לא בדגל ולא ב-keyCode 229', () => {
+    // ‏`swallow()` עוצר גם את שאר המאזינים (`stopImmediatePropagation`), ולכן
+    // יירוט כאן היה מוחק מקש שחלונית ההרכבה מחכה לו. התקן של הריפו:
+    // `src/ui/shortcuts/match.ts`.
+    const state = setup();
+    const { host, line, superdoc, setSelectionTarget } = state;
+    const handle = installRtlVisualArrows({ host, superdoc });
+
+    expect(press(line, 'ArrowRight', { isComposing: true }).defaultPrevented).toBe(false);
+    expect(press(line, 'ArrowRight', { keyCode: 229 }).defaultPrevented).toBe(false);
+    expect(setSelectionTarget).not.toHaveBeenCalled();
+    expect(state.seen(), 'היירוט לא טרח אפילו לקרוא את התצלום').toBe(0);
+    expectAlive(state, line);
     handle.dispose();
   });
 
@@ -698,8 +923,8 @@ describe('installRtlVisualArrows', () => {
     handle.dispose();
   });
 
-  it('בקצה הפסקה: היעד הוא הפסקה השכנה באותו מכל ציור', () => {
-    const { host, line, superdoc, setSelectionTarget } = setup({
+  it('ימינה בתחילת הפסקה: אין פסקה קודמת, וההקשה נמסרת למנוע', () => {
+    const state = setup({
       caretOffset: 0, // pm 51 — תחילת הבלוק, הקצה הימני בעברית
       caretX: 1043.4,
       nextFragment: {
@@ -708,13 +933,15 @@ describe('installRtlVisualArrows', () => {
         pmEnd: 69,
       },
     });
+    const { host, line, superdoc, setSelectionTarget } = state;
     const handle = installRtlVisualArrows({ host, superdoc });
 
     // ימינה בתחילת פסקה = אחורה לוגית → הפסקה הקודמת. אין כזו, ולכן ההקשה
-    // חוזרת למנוע; שמאלה, לעומת זאת, הוא קדימה → הפסקה הבאה.
+    // חוזרת למנוע; הכיוון ההפוך — שמאלה — נבדק בבדיקה שאחרי זו.
     const event = press(line, 'ArrowRight');
     expect(event.defaultPrevented, 'אין פסקה קודמת').toBe(false);
     expect(setSelectionTarget).not.toHaveBeenCalled();
+    expect(state.seen(), 'היירוט רץ וקרא את התצלום').toBeGreaterThan(0);
     handle.dispose();
   });
 
@@ -742,7 +969,7 @@ describe('installRtlVisualArrows', () => {
     // נמדד: „לפני” pm 104..114, הטבלה 115..122 (fragment בלי מזהה מקור, ולכן
     // מחוץ לבורר), „אחרי” 123..133. בלי בדיקת הרציפות החץ קפץ לפסקה שמעבר
     // לטבלה; המנוע עצמו נכנס לתא.
-    const { host, line, superdoc, setSelectionTarget } = setup({
+    const state = setup({
       caretOffset: 13, // pm 64 — סוף הבלוק, הקצה השמאלי
       caretX: 949.5,
       nextFragment: {
@@ -751,12 +978,14 @@ describe('installRtlVisualArrows', () => {
         pmEnd: 77,
       },
     });
+    const { host, line, superdoc, setSelectionTarget } = state;
     const handle = installRtlVisualArrows({ host, superdoc });
 
     const event = press(line, 'ArrowLeft');
 
     expect(event.defaultPrevented, 'המנוע הוא שנכנס לטבלה').toBe(false);
     expect(setSelectionTarget).not.toHaveBeenCalled();
+    expect(state.seen(), 'היירוט רץ וקרא את התצלום').toBeGreaterThan(0);
     handle.dispose();
   });
 
@@ -782,40 +1011,49 @@ describe('installRtlVisualArrows', () => {
   });
 
   it('שורה לטינית: ההקשה ממשיכה למנוע כפי שהיא', () => {
-    const { host, line, superdoc, setSelectionTarget } = setup({ rtl: false });
+    const state = setup({ rtl: false });
+    const { host, line, superdoc, setSelectionTarget } = state;
     const handle = installRtlVisualArrows({ host, superdoc });
 
     const event = press(line, 'ArrowRight');
 
     expect(event.defaultPrevented).toBe(false);
     expect(setSelectionTarget).not.toHaveBeenCalled();
+    expect(state.seen(), 'היירוט רץ וקרא את התצלום').toBeGreaterThan(0);
     handle.dispose();
   });
 
   it('טווחים שאינם רציפים — אין מיפוי, ואין יעד', () => {
-    const { host, line, superdoc, setSelectionTarget } = setup({ pmEnd: 70 });
+    const state = setup({ pmEnd: 70 });
+    const { host, line, superdoc, setSelectionTarget } = state;
     const handle = installRtlVisualArrows({ host, superdoc });
 
     const event = press(line, 'ArrowRight');
 
     expect(event.defaultPrevented).toBe(false);
     expect(setSelectionTarget).not.toHaveBeenCalled();
+    expect(state.seen(), 'היירוט רץ וקרא את התצלום').toBeGreaterThan(0);
     handle.dispose();
   });
 
   it('Ctrl+חץ הוא קפיצת מילה של המנוע, ואינו נגזל', () => {
-    const { host, line, superdoc, setSelectionTarget } = setup();
+    // ומכאן גם הסתירה שנשארת: באותו פריט רשימה `ArrowRight` זז ימינה בעוד
+    // `Ctrl+ArrowRight` ממשיך לקפוץ מילה שמאלה. מתועד ב-`docs/engine-gaps.md`.
+    const state = setup();
+    const { host, line, superdoc, setSelectionTarget } = state;
     const handle = installRtlVisualArrows({ host, superdoc });
 
     const event = press(line, 'ArrowRight', { ctrlKey: true });
 
     expect(event.defaultPrevented).toBe(false);
     expect(setSelectionTarget).not.toHaveBeenCalled();
+    expectAlive(state, line);
     handle.dispose();
   });
 
   it('בלי סמן מצויר אין נקודת מוצא, וההקשה נמסרת למנוע', () => {
-    const { host, line, superdoc, setSelectionTarget } = setup();
+    const state = setup();
+    const { host, line, superdoc, setSelectionTarget } = state;
     host.querySelector('.sd-v2-local-selection-caret')?.remove();
     const handle = installRtlVisualArrows({ host, superdoc });
 
@@ -823,12 +1061,17 @@ describe('installRtlVisualArrows', () => {
 
     expect(event.defaultPrevented).toBe(false);
     expect(setSelectionTarget).not.toHaveBeenCalled();
+    expect(state.seen(), 'היירוט רץ וקרא את התצלום — ורק אז לא מצא סמן').toBeGreaterThan(0);
     handle.dispose();
   });
 
   it('אחרי dispose המאזין אינו נוגע עוד', () => {
-    const { host, line, superdoc, setSelectionTarget } = setup();
+    const state = setup();
+    const { host, line, superdoc, setSelectionTarget } = state;
     const handle = installRtlVisualArrows({ host, superdoc });
+
+    // לפני שההסרה נבדקת — שההתקנה עצמה תוכיח שהיא עשתה משהו.
+    expectAlive(state, line);
     handle.dispose();
 
     const event = press(line, 'ArrowRight');
@@ -884,15 +1127,21 @@ function pagesSetup(pages: FragmentSpec[][], caret: { blockId: string; offset: n
   const setSelectionTarget = vi.fn();
   const story = { kind: 'story', storyType: 'body' };
   const point = { kind: 'text', blockId: caret.blockId, offset: caret.offset, story };
+  let seen = 0;
   const superdoc: RtlCaretHost = {
     activeEditor: {
-      host: { readLiveSelectionSyncSnapshot: () => ({ selectionTarget: { kind: 'selection', start: point, end: point, story } }) },
+      host: {
+        readLiveSelectionSyncSnapshot: () => {
+          seen += 1;
+          return { selectionTarget: { kind: 'selection', start: point, end: point, story } };
+        },
+      },
       authoring: { setSelectionTarget },
     },
   };
   const handle = installRtlVisualArrows({ host, superdoc });
   const line = host.querySelector('[dir="rtl"]') as HTMLElement;
-  return { host, line, setSelectionTarget, handle };
+  return { host, line, setSelectionTarget, handle, seen: () => seen };
 }
 
 /** פסקה של שורה אחת, „סעיף 3 בחוק הזה” — הלוגית שבה נמדדה המלכודת בקצוות. */
@@ -928,27 +1177,30 @@ describe('installRtlVisualArrows — קצות המסמך', () => {
   it('ראשון בעמוד שאינו הראשון — עמוד קודם שלא צויר, וההקשה של המנוע', () => {
     // המנוע מצייר רק עמודים קרובים (נמדד: 3 מתוך 25) — „אין פסקה לפני” אינו
     // תחילת המסמך.
-    const { line, setSelectionTarget, handle } = pagesSetup([[], [loneDigitFragment('p9')]], {
+    const { line, setSelectionTarget, handle, seen } = pagesSetup([[], [loneDigitFragment('p9')]], {
       blockId: 'p9', offset: 0, x: 1043.3, y: 10,
     });
     const event = press(line, 'ArrowRight');
     expect(event.defaultPrevented).toBe(false);
     expect(setSelectionTarget).not.toHaveBeenCalled();
+    expect(seen(), 'היירוט רץ וקרא את התצלום').toBeGreaterThan(0);
     handle.dispose();
   });
 
   it('אחרון בעמוד שאינו האחרון — ההקשה של המנוע', () => {
-    const { line, handle } = pagesSetup([[loneDigitFragment('p1')], []], {
+    const { line, handle, seen } = pagesSetup([[loneDigitFragment('p1')], []], {
       blockId: 'p1', offset: 15, x: 950.3, y: 10,
     });
     expect(press(line, 'ArrowLeft').defaultPrevented).toBe(false);
+    expect(seen(), 'היירוט רץ וקרא את התצלום').toBeGreaterThan(0);
     handle.dispose();
   });
 
   it('פסקה שממשיכה בעמוד הבא אינה סוף המסמך', () => {
     const spec = { ...loneDigitFragment('p1'), continuesOnNext: true };
-    const { line, handle } = pagesSetup([[spec]], { blockId: 'p1', offset: 15, x: 950.3, y: 10 });
+    const { line, handle, seen } = pagesSetup([[spec]], { blockId: 'p1', offset: 15, x: 950.3, y: 10 });
     expect(press(line, 'ArrowLeft').defaultPrevented).toBe(false);
+    expect(seen(), 'היירוט רץ וקרא את התצלום').toBeGreaterThan(0);
     handle.dispose();
   });
 });
@@ -1018,12 +1270,13 @@ describe('installRtlVisualArrows — פסקה שנחצית בין עמודים',
   it('החלק הראשון אינו מצויר — אין מיפוי, וההקשה של המנוע', () => {
     // היסט 2 מתחילת הפסקה. אילו הבסיס היה תחילת ההמשך (55), הוא היה ממופה
     // ל-pm 57 שבתוכו — מיפוי שגוי שנראה תקין.
-    const { host, setSelectionTarget, handle } = pagesSetup([[], [rest]], {
+    const { host, setSelectionTarget, handle, seen } = pagesSetup([[], [rest]], {
       blockId: 'p1', offset: 2, x: 1027, y: 510,
     });
     const event = press(host.querySelector('[dir="rtl"]') as HTMLElement, 'ArrowRight');
     expect(event.defaultPrevented).toBe(false);
     expect(setSelectionTarget).not.toHaveBeenCalled();
+    expect(seen(), 'היירוט רץ וקרא את התצלום').toBeGreaterThan(0);
     handle.dispose();
   });
 });
@@ -1103,3 +1356,80 @@ describe('installRtlVisualArrows — טבלה שכנה', () => {
   });
 });
 
+/* ------------------------------------------------------------------ */
+/* פסקה ריקה בין שתי פסקאות                                            */
+/* ------------------------------------------------------------------ */
+
+describe('installRtlVisualArrows — פסקה ריקה', () => {
+  /**
+   * הצורה נמדדה ב-Chrome על ה-`dist` (superdoc 2.15.0, 17.9.2026): פסקה ריקה
+   * היא fragment שטווחו באורך אפס (14..14), ובתוכו `DIV.superdoc-line` באותו
+   * טווח, עם `dir="rtl"` ובלי אף נושא היסט. ובאותה מדידה — הפרשי ה-pm:
+   * „לפני” 1..13, הריקה 14..14, „אחרי” **16**..28, כלומר 2 אחרי ריקה.
+   *
+   * כאן הטווחים מוזזים כדי להשתמש בתיבות שנמדדו („סעיף 3 בחוק הזה”), והמבנה
+   * — אורך אפס, והפרש 1 ואז 2 — נשמר בדיוק.
+   */
+  const shifted = (by: number): PaintedChar[] =>
+    LONE_DIGIT.map((c) => ({ ...c, pm: c.pm + by }));
+
+  const before: FragmentSpec = {
+    id: 'p1',
+    pmStart: 1,
+    pmEnd: 16,
+    lines: [{ runs: [{ text: 'סעיף 3 בחוק הזה', chars: LONE_DIGIT }], pmStart: 1, pmEnd: 16, top: 0 }],
+  };
+  const empty: FragmentSpec = {
+    id: 'p2',
+    pmStart: 17,
+    pmEnd: 17,
+    lines: [{ runs: [], pmStart: 17, pmEnd: 17, top: 30 }],
+  };
+  const after: FragmentSpec = {
+    id: 'p3',
+    pmStart: 19,
+    pmEnd: 34,
+    lines: [{ runs: [{ text: 'סעיף 3 בחוק הזה', chars: shifted(18) }], pmStart: 19, pmEnd: 34, top: 60 }],
+  };
+
+  it('ימינה בתחילת הפסקה שאחריה — היעד הוא הריקה, ולא צעד בתוך הפסקה', () => {
+    // נמדד בשער בלי התיקון: ההקשה נמסרה למנוע, והוא הזיז מהיסט 0 להיסט 1 —
+    // כלומר החץ הימני הזיז את הסמן שמאלה, בדיוק הבאג שהמודול נועד להרוג.
+    const { host, setSelectionTarget, handle } = pagesSetup([[before, empty, after]], {
+      blockId: 'p3', offset: 0, x: 1043.3, y: 70,
+    });
+    const event = press(host.querySelectorAll('[dir="rtl"]')[2] as HTMLElement, 'ArrowRight');
+    expect(event.defaultPrevented).toBe(true);
+    expect(written(setSelectionTarget).target.end).toMatchObject({ blockId: 'p2', offset: 0 });
+    handle.dispose();
+  });
+
+  it('שמאלה בסוף הפסקה שלפניה — היעד הוא הריקה', () => {
+    const { host, setSelectionTarget, handle } = pagesSetup([[before, empty, after]], {
+      blockId: 'p1', offset: 15, x: 950.3, y: 10,
+    });
+    const event = press(host.querySelector('[dir="rtl"]') as HTMLElement, 'ArrowLeft');
+    expect(event.defaultPrevented).toBe(true);
+    expect(written(setSelectionTarget).target.end).toMatchObject({ blockId: 'p2', offset: 0 });
+    handle.dispose();
+  });
+
+  it('מתוך הריקה: ימינה חוזר לסוף הקודמת, ושמאלה לתחילת הבאה', () => {
+    const first = pagesSetup([[before, empty, after]], {
+      blockId: 'p2', offset: 0, x: 1043.3, y: 40,
+    });
+    const emptyLine = first.host.querySelectorAll('[dir="rtl"]')[1] as HTMLElement;
+    expect(press(emptyLine, 'ArrowRight').defaultPrevented).toBe(true);
+    expect(written(first.setSelectionTarget).target.end).toMatchObject({ blockId: 'p1', offset: 15 });
+    first.handle.dispose();
+    document.body.innerHTML = '';
+
+    const second = pagesSetup([[before, empty, after]], {
+      blockId: 'p2', offset: 0, x: 1043.3, y: 40,
+    });
+    const emptyLine2 = second.host.querySelectorAll('[dir="rtl"]')[1] as HTMLElement;
+    expect(press(emptyLine2, 'ArrowLeft').defaultPrevented).toBe(true);
+    expect(written(second.setSelectionTarget).target.end).toMatchObject({ blockId: 'p3', offset: 0 });
+    second.handle.dispose();
+  });
+});

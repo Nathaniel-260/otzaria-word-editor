@@ -116,6 +116,21 @@ const BODY = [
   pRuns([{ t: 'אות ', rPr: '<w:rtl/>' }, { t: 'a', rPr: '' }, { t: ' אחת בלבד', rPr: '<w:rtl/>' }], RTL),
   p1('שלוש × ארבע שווה', RTL),
   p1('חמש ÷ שתיים', RTL),
+  // אות מנוקדת עם טעם בתוך שורה שיש בה גם אי לטיני: „שָׁ” הוא שלוש יחידות
+  // UTF-16 ותיבה אחת, והתפר שמפיל את הבסיס משאיר דווקא את ההיסטים שבתוך
+  // האשכול. זה הטקסט של העורך הזה — פירוש מנוקד — ולא מקרה קצה.
+  pRuns([
+    { t: 'מילה ', rPr: '<w:rtl/>' },
+    { t: 'abc', rPr: '' },
+    { t: 'שָׁלום כאן', rPr: '<w:rtl/>' },
+  ], RTL),
+  // שורה שמ**תחילה** באי לטיני: התפר שבין כיוון הפסקה לריצה הלטינית יושב
+  // על היסט 0, ולכן הוא לא נראה בשורה שמתחילה בעברית.
+  pRuns([{ t: 'ABC', rPr: '' }, { t: ' מילה כאן', rPr: '<w:rtl/>' }], RTL),
+  // פסקה ריקה בין שתי עבריות: אין לה אף תו מצויר, ולכן אין ממה לקרוא חריץ.
+  p1('לפני הריקה 4', RTL),
+  pRuns([], RTL),
+  p1('אחרי הריקה 5', RTL),
   p1('לפני הטבלה 4', RTL),
   table(p1('תוך התא', RTL)),
   p1('אחרי הטבלה 5', RTL),
@@ -134,6 +149,14 @@ const CASES = [
   // מהקצוות ולא מהאמצע, ובעשרה צעדים: כדי לעבור את התו הבודד מכל צד.
   { label: 'ספרה בודדת', find: 'סעיף 3 בחוק הזה', edges: true },
   { label: 'אות לטינית בודדת', find: 'אות a אחת בלבד', edges: true },
+  /*
+   * שני קצות השורה, ושניהם מהקצה: התפר שבין כיוון הפסקה לאי לועזי שמתחיל או
+   * מסיים את השורה נראה **רק** כשמתחילים בקצה ומקישים לשני הכיוונים.
+   * ‏„לפני הטבלה 4” כבר היה ב-fixture ולא נבדק — שם החץ הימני נמסר למנוע.
+   */
+  { label: 'שורה שמתחילה באי לטיני', find: 'ABC מילה כאן', edges: true },
+  { label: 'שורה שנגמרת בספרה', find: 'לפני הטבלה 4', edges: true },
+  { label: 'אות מנוקדת אחרי אי לטיני', find: 'שָׁלום כאן', edges: true },
 ];
 
 const docx = buildDocx(BODY);
@@ -421,6 +444,54 @@ try {
     }
   }
 
+  /* -------- אות מנוקדת: הסמן אינו נכנס בין האות לניקוד שלה -------- */
+  /*
+   * זו האינוריאנטה שהמונוטוניות שלמעלה **אינה** רואה: „שָׁ” הוא אשכול אחד
+   * ושלוש יחידות pm, וחריץ בהיסט 9 או 10 יושב בין ש לקמץ שלה — הקשה שם
+   * מכניסה תו לתוך האות. הגבולות נגזרים כאן מ-`Intl.Segmenter` על הטקסט
+   * שהמנוע צייר, ולא מרשימה קשיחה.
+   */
+  try {
+    const find = 'שָׁלום כאן';
+    const legal = JSON.parse(
+      await app.js(`(function(){
+        var frags = document.querySelectorAll('[data-source-node-id][data-pm-start]');
+        for (var i = 0; i < frags.length; i++) {
+          var text = frags[i].textContent || '';
+          if (text.indexOf(${JSON.stringify(find)}) < 0) continue;
+          var seg = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+          var out = [];
+          var it = seg.segment(text)[Symbol.iterator]();
+          for (var r = it.next(); !r.done; r = it.next()) out.push(r.value.index);
+          out.push(text.length);
+          return JSON.stringify({ nodeId: frags[i].getAttribute('data-source-node-id'), text: text, bounds: out });
+        }
+        return JSON.stringify(null);
+      })()`),
+    );
+    if (!legal) throw new Error('הפסקה המנוקדת אינה מצוירת');
+    const steps = [
+      await caretEdge(find, 'right'),
+      ...(await walk('ArrowLeft', 12)),
+      await caretEdge(find, 'left'),
+      ...(await walk('ArrowRight', 12)),
+    ];
+    console.log(`
+== אות מנוקדת: ${trace(steps)}`);
+    console.log(`   גבולות אשכול: ${legal.bounds.join(',')}`);
+    const inside = steps
+      .filter((t) => t.block === legal.nodeId && typeof t.off === 'number' && !legal.bounds.includes(t.off))
+      .map((t) => t.off);
+    inside.length
+      ? report.fail(
+          'אות מנוקדת — הסמן בתוך אשכול',
+          `היסטים שאינם גבול אשכול: ${[...new Set(inside)].join(', ')} (גבולות: ${legal.bounds.join(',')})`,
+        )
+      : report.pass('אות מנוקדת — כל עצירה על גבול אשכול', `${steps.length} עצירות, ${legal.bounds.length} גבולות`);
+  } catch (error) {
+    report.stuck('אות מנוקדת', String(error.message || error).slice(0, 90));
+  }
+
   /* -------- טבלה בין פסקאות: הכניסה לתא נשארת של המנוע -------- */
   try {
     const before = await caretEdge('לפני הטבלה', 'left');
@@ -446,6 +517,74 @@ try {
       : report.pass('טבלה בין פסקאות', 'שני הכיוונים נכנסים לתא');
   } catch (error) {
     report.stuck('טבלה בין פסקאות', String(error.message || error).slice(0, 90));
+  }
+
+  /* -------- פסקה ריקה: יש לה מקום סמן אחד, והחץ חייב לעצור בו -------- */
+  /*
+   * לפסקה בלי תווים אין אף אלמנט שנושא טווח pm, ולכן אין ממה לגזור חריץ —
+   * והקוד החזיר „לא שלנו”. מסירה למנוע אינה ניטרלית כאן: בפסקה לוגית הוא זז
+   * קדימה, כלומר החץ הימני מדלג **מעל** הריקה ויורד שורה.
+   */
+  try {
+    const empty = JSON.parse(
+      await app.js(`(function(){
+        var frags = document.querySelectorAll('[data-source-node-id][data-pm-start]');
+        for (var i = 0; i < frags.length; i++) {
+          if ((frags[i].textContent || '').indexOf('אחרי הריקה 5') < 0) continue;
+          var prev = frags[i].previousElementSibling;
+          var kids = [];
+          if (prev) for (var k = 0; k < prev.children.length; k++) {
+            var kid = prev.children[k];
+            kids.push({
+              tag: kid.tagName,
+              cls: String(kid.className).slice(0, 40),
+              dir: kid.getAttribute('dir'),
+              pm: kid.getAttribute('data-pm-start') + '..' + kid.getAttribute('data-pm-end'),
+              carriers: kid.querySelectorAll('.superdoc-text-run, .superdoc-tab').length,
+              text: JSON.stringify(kid.textContent || '').slice(0, 24)
+            });
+          }
+          return JSON.stringify({
+            id: prev ? prev.getAttribute('data-source-node-id') : null,
+            pm: prev ? prev.getAttribute('data-pm-start') + '..' + prev.getAttribute('data-pm-end') : null,
+            kids: kids,
+            next: frags[i].getAttribute('data-source-node-id')
+          });
+        }
+        return JSON.stringify(null);
+      })()`),
+    );
+    if (!empty || !empty.id) throw new Error('הפסקה הריקה לא נמצאה ב-DOM');
+    console.log(
+      `\n== פסקה ריקה: id=${empty.id} pm=${empty.pm}\n` +
+        (empty.kids ?? [])
+          .map((k) => `   <${k.tag}.${k.cls}> dir=${k.dir} pm=${k.pm} נושאי-היסט=${k.carriers} ${k.text}`)
+          .join('\n'),
+    );
+
+    await caretEdge('אחרי הריקה 5', 'right');
+    await app.press('Home', 'Home', 36);
+    await app.sleep(300);
+    await app.press('ArrowRight', 'ArrowRight', 39);
+    await app.sleep(500);
+    const up = await caretState();
+
+    await caretEdge('לפני הריקה 4', 'left');
+    await app.press('End', 'End', 35);
+    await app.sleep(300);
+    await app.press('ArrowLeft', 'ArrowLeft', 37);
+    await app.sleep(500);
+    const down = await caretState();
+
+    console.log(`   ימין מתחילת „אחרי” → ${up.block}:${up.off}; שמאל מסוף „לפני” → ${down.block}:${down.off}`);
+    const missed = [];
+    if (up.block !== empty.id) missed.push(`ימין נחת ב-${up.block} ולא בריקה`);
+    if (down.block !== empty.id) missed.push(`שמאל נחת ב-${down.block} ולא בריקה`);
+    missed.length
+      ? report.fail('פסקה ריקה בין שתי עבריות', missed.join('; '))
+      : report.pass('פסקה ריקה בין שתי עבריות', 'שני הכיוונים עוצרים בה');
+  } catch (error) {
+    report.stuck('פסקה ריקה בין שתי עבריות', String(error.message || error).slice(0, 90));
   }
 
   /* -------- קצות המסמך: אין לאן לזוז, והסמן נשאר -------- */
