@@ -5,7 +5,7 @@
  * ## למה מודול משלו
  *
  * שני כיוונים משתמשים באותה שכבה: `docx-preflight.ts` מתקן את מה שנכנס למנוע,
- * ו-`docx-run-direction.ts` מתקן את מה שיוצא ממנו. כשהשכבה ישבה בתוך
+ * ו-`docx-postflight.ts` מתקן את מה שיוצא ממנו. כשהשכבה ישבה בתוך
  * ה-preflight, חיבור התיקון היוצא ל-`export.ts` יצר את שרשרת הייבוא
  * `vite.config.ts` → `blank-document.ts` → `export.ts` → preflight →
  * `vba-import.ts` → חבילת ESM-בלבד, וטעינת קובץ התצורה נשברה עליה. מודול בלי
@@ -69,10 +69,34 @@ export interface ZipEntry {
    * שדה ה-extra של הכותרת המקומית ושל ספריית האינדקס, והערת הרשומה.
    *
    * שני שדות ה-extra נשמרים בנפרד מפני ש-APPNOTE מתיר להם להיות שונים,
-   * ובפועל הם שונים (Info-ZIP כותב UT מלא מקומית ומקוצר במרכז). הם
-   * נכתבים בחזרה כמות שהם: ארכיון ZIP64 נדחה כבר בקריאה, ולכן אין כאן שדה
-   * extra שתלוי בגדלים או בהיסטים שהכתיבה משנה. רשומה שנבנתה כאן מאפס
-   * משאירה אותם ריקים.
+   * ובפועל הם שונים (Info-ZIP כותב UT מלא מקומית ומקוצר במרכז). הם נכתבים
+   * בחזרה כמות שהם, ורשומה שנבנתה כאן מאפס משאירה אותם ריקים.
+   *
+   * **מה שמותר להבטיח על כך, ומה שלא.** `readZip` דוחה את הסימן של ZIP64
+   * בחמשת השדות שהוא **קורא**: `compressedSize`, `uncompressedSize`
+   * ו-`localOffset` שברשומה המרכזית, ו-`entriesTotal` ו-`cdOffset` שב-EOCD.
+   * אלה גם השדות היחידים שהכתיבה כאן מחשבת מחדש, ולכן שדה extra שתלוי
+   * בהם אינו יכול לעבור. מה שאינו נבדק, ונמדד: `diskNumberStart` (היסט 34
+   * ברשומה המרכזית) הוא מקום סימן חוקי לפי APPNOTE 4.5.3 ומתקבל כאן, וכך
+   * גם ארבעת שדות ה-EOCD שאיש אינו קורא (`thisDisk`, `cdStartDisk`,
+   * `entriesThisDisk`, `cdSize`). הארבעה אינם מזיקים; `diskNumberStart` כן
+   * נכתב בחזרה כאפס קבוע בעוד ה-extra שנושא את הערך האמיתי נשמר — כלומר
+   * חבילה מרובת-דיסקים תצא מכאן חסרת עקביות. לא נוסף לו שומר: חבילת OOXML
+   * מרובת-דיסקים אינה מקרה שנמדד, וההבטחה מנוסחת קטנה במקומו.
+   *
+   * ומה שנשאר פתוח בלי מדידה: רשומת extra של ZIP64 (מזהה 0x0001) רשאית
+   * להופיע **בלי שום סימן** — יש כותבים שפולטים אותה תמיד — ואיש כאן אינו
+   * מפרש מזהי רשומות בתוך שדה ה-extra. דחיית הסימן אינה מוכיחה, אם כן,
+   * שאין כאן רשומה כזאת; היא רק מוכיחה שהערכים שהכתיבה משנה אינם יושבים
+   * בה.
+   *
+   * **ולפי שעה זו שמירה רדומה.** נמדד על שלושה-עשר קבצי ה-docx שבעץ
+   * (`tmp/sp3946`): בכל רשומה בכולם אורך שני שדות ה-extra הוא 0, וכך גם
+   * אורך הערת הרשומה והערת הארכיון. **והראיה חלשה מכפי שהמספר נשמע:**
+   * שניים-עשר מהם נוצרו ב-`tmp/sp3946/make-docx.mjs`, שכותב zip מינימלי
+   * משלו ואינו מסוגל לפלוט שדה extra כלל; רק `case.docx` הוא חבילה שיצאה
+   * מ-Word. מה שהשמירה שומרת עליו הוא חבילה שנארזה בכלי אחר — Info-ZIP
+   * כותב UT בכל רשומה — ולא חבילה של Word.
    */
   localExtra?: Bytes;
   centralExtra?: Bytes;
@@ -179,7 +203,7 @@ export const SKIPPED_SPANS = new Map([
  * לא השתנה.
  *
  * זהו אותו שלד ש-`repairEntries` רץ עליו, מיוצא כדי שגם תיקון **בכיוון היוצא**
- * (engine/docx-run-direction.ts) יקבל את קורא ה-zip, את הפורס ואת הכותב בלי
+ * (engine/docx-postflight.ts) יקבל את קורא ה-zip, את הפורס ואת הכותב בלי
  * להעתיק אף אחד מהם. מה ש-`repairEntries` מוסיף מעליו — רשימת ההערות וההודעה
  * למשתמש — שייך לפתיחה בלבד, ולכן אינו כאן.
  *
@@ -199,7 +223,37 @@ export async function rewriteDocxXmlParts(
     if (!matches(entry.name)) continue;
     const original = await readEntryText(entry);
     if (original === null) continue;
-    const next = transform(original, entry.name);
+
+    let next: string | null;
+    try {
+      next = transform(original, entry.name);
+    } catch (error) {
+      // ההבטחה בראש הקובץ היא `null` ולא זריקה, והיא לא הייתה נשמרת:
+      // קריאה חוזרת שזורקת על חלק אחד הייתה דוחה את ההבטחה כולה, כלומר
+      // מפילה את **כל** השמירה בגלל חלק אחד. כאן היא מפילה חלק אחד בלבד:
+      // הוא נכתב כמות שהוא, והשאר ממשיך — בדיוק כמו `original === null`
+      // שורה אחת למעלה. (זה **אינו** מה ש-`preflightSource` עושה סביב
+      // `repairEntries`: שם ה-catch מחזיר את המסמך **כולו** בלי תיקון.)
+      //
+      // ואף `transform` בעץ אינו מגיע לכאן: `markNeutralParagraphEnds`
+      // מחזיר `null` על כל הפרת חזקה, ו-`uniqueNumberingIds` הוא רגקסים
+      // ומחרוזות. אין בשניהם `throw`. השורה נשארת מפני שהיא חוזה של
+      // הפונקציה המיוצאת הזאת כלפי מי שיעביר לה תיקון שלישי.
+      console.warn(`[otzaria-word] תיקון החלק ${entry.name} זרק, והחלק נשאר כמות שהוא`, error);
+      continue;
+    }
+    // וזה הכשל שכן נמדד. `TextEncoder.encode` אינו זורק על מה שאינו
+    // מחרוזת אלא **מקודד את הצורה שלו**: callback שהפך בטעות ל-`async`
+    // מחזיר Promise והחלק יוצא `"[object Promise]"`, ו-`return` שנשמט
+    // מחזיר `undefined` והחלק יוצא **ריק**. בשני המקרים הארכיון תקין
+    // לגמרי — חתימות, CRC וגדלים נכונים — והמסמך של המשתמש הרוס בשקט.
+    // „לתקן, ולא לחסום” פירושו כאן: לא לגעת בחלק שאיננו מבינים את הפלט
+    // עליו. נכונות **התוכן** נשארת של מי שכותב את התיקון; מה שנבדק כאן
+    // הוא רק שקיבלנו טקסט.
+    if (typeof next !== 'string' && next !== null) {
+      console.warn(`[otzaria-word] תיקון החלק ${entry.name} לא החזיר טקסט, והחלק נשאר כמות שהוא`);
+      continue;
+    }
     if (next === null || next === original) continue;
     patched.set(entry, await rewriteEntry(entry, new TextEncoder().encode(next)));
   }
@@ -345,6 +399,22 @@ async function pipeThrough(
  * קריאת הארכיון מהספרייה המרכזית שלו — ולא מסריקת כותרות מקומיות, שהיא ניחוש
  * כשיש בהן data descriptor. `null` פירושו „לא ארכיון שאני מבין”, וזו תשובה
  * חוקית לגמרי: המנוע יקבל את המקור.
+ *
+ * **הרשומות חוזרות בסדר הפיזי שלהן, ולא בסדר הספרייה המרכזית.** APPNOTE אינו
+ * מחייב שהשניים יהיו זהים, ו-OPC כן מחייב ש-`[Content_Types].xml` יהיה הרשומה
+ * הראשונה בארכיון. הכותב כאן מסדר את הכותרות המקומיות לפי הסדר שהוא מקבל,
+ * ולכן קריאה בסדר הספרייה הייתה יכולה להזיז אותו ממקומו — נמדד: ארכיון
+ * שהספרייה שלו מונה את `word/document.xml` ראשון, בעוד `[Content_Types].xml`
+ * הוא הראשון פיזית, יצא מכאן עם `word/document.xml` ככותרת המקומית הראשונה.
+ * בכל שלושה-עשר קבצי ה-docx שבעץ שני הסדרים כבר זהים, ולכן זו שמירה על מה
+ * שעוד לא נשבר — אבל הכותב רץ עכשיו על כל שמירה, ולא רק כשתוקן משהו.
+ * (שניים-עשר מהשלושה-עשר נכתבו באותו כלי מינימלי, ולכן אינם יכולים להראות
+ * סדר חורג ממילא; הראיה היא `case.docx` בלבד. ראו הערת `localExtra`.)
+ *
+ * ולסדר הזה יש קורא שלישי, בלי קשר ל-OPC: `.find()` לפי שם רשומה —
+ * `readDocxPart`/`partText` ב-`docx-preflight.ts` — מכריע מעכשיו כפילות שם
+ * לפי הרשומה הפיזית הראשונה ולא לפי הראשונה שבספרייה. אין מקרה נמדד של שם
+ * כפול בחבילת OOXML, והסדר הפיזי הוא ממילא זה שקוראי ZIP אחרים רואים.
  */
 export function readZip(bytes: Bytes): ZipEntry[] | null {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
@@ -355,9 +425,18 @@ export function readZip(bytes: Bytes): ZipEntry[] | null {
   const centralOffset = view.getUint32(eocd + 16, true);
   if (count === ZIP64_MARKER_16 || centralOffset === ZIP64_MARKER_32) return null;
 
-  const entries: ZipEntry[] = [];
+  const entries: { entry: ZipEntry; localOffset: number }[] = [];
   let at = centralOffset;
   for (let i = 0; i < count; i++) {
+    // מה שהשורה הזאת שומרת עליו הוא ההבטחה „`null` ולא זריקה”, ולא נכונות:
+    // `centralOffset` מגיע מה-EOCD ויכול להצביע לכל מקום, ו-`getUint32`
+    // שחורג **זורק** RangeError. נמדד: היסט ספרייה בשלושת הבייטים האחרונים
+    // של הקובץ, או 0xFFFFFFF0, מפיל את הקריאה בלי השורה.
+    //
+    // והגבול הוא אורך הקובץ ולא ה-EOCD **בכוונה**: הצורה ההדוקה נכתבה כאן
+    // ונמדדה בלתי-ניתנת-להבחנה — כל רשומה שמתחילה אחרי ה-EOCD נדחית ממילא
+    // בבדיקת אורך הרשומה שלמטה. 200,000 ארכיונים פגומים (6,212 מהם נקראו
+    // בהצלחה), אפס הפרשים בין שתי הצורות.
     if (at + ZIP_CENTRAL_HEADER_SIZE > bytes.byteLength) return null;
     if (view.getUint32(at, true) !== ZIP_CENTRAL_SIGNATURE) return null;
 
@@ -370,9 +449,26 @@ export function readZip(bytes: Bytes): ZipEntry[] | null {
     const extraLength = view.getUint16(at + 30, true);
     const commentLength = view.getUint16(at + 32, true);
     const localOffset = view.getUint32(at + 42, true);
-    if (compressedSize === ZIP64_MARKER_32 || localOffset === ZIP64_MARKER_32) return null;
+    // `uncompressedSize` נמצא כאן אחרי מדידה: בלעדיו ארכיון שהסימן יושב בו
+    // דווקא **שם** התקבל, והוא אחד מהגדלים שהכתיבה כאן מחשבת מחדש. שלושת
+    // השדות האלה ושניים ב-EOCD הם כל מה שנבדק — לא „כל מקום שהסימן יכול
+    // לשבת בו”. ראו את הערת `localExtra`.
+    if (
+      compressedSize === ZIP64_MARKER_32 ||
+      uncompressedSize === ZIP64_MARKER_32 ||
+      localOffset === ZIP64_MARKER_32
+    ) {
+      return null;
+    }
 
     const nameAt = at + ZIP_CENTRAL_HEADER_SIZE;
+    // הרשומה חייבת להיכנס שלמה, ולא רק הכותרת שלה. `subarray` שחורג אינו
+    // זורק אלא **מקצר בשקט**, והבדיקה שבראש הלולאה תופסת את החריגה רק
+    // בסיבוב הבא — כלומר הרשומה האחרונה בארכיון קטוע נקראת ויוצאת שגויה.
+    // נמדד על `case.docx` שנחתך: שם הרשומה האחרונה בלע את ה-EOCD ויצא
+    // `"customXml/_rels/itemPK\x05\x06…"`. ארכיון קטוע אינו ארכיון שאנחנו
+    // מבינים, והתשובה עליו היא `null` — כמו כל כשל אחר כאן.
+    if (nameAt + nameLength + extraLength + commentLength > eocd) return null;
     const nameBytes = bytes.subarray(nameAt, nameAt + nameLength);
     const centralExtra = bytes.subarray(nameAt + nameLength, nameAt + nameLength + extraLength);
     const comment = bytes.subarray(
@@ -385,27 +481,30 @@ export function readZip(bytes: Bytes): ZipEntry[] | null {
     if (!localExtra) return null;
 
     entries.push({
-      name: new TextDecoder().decode(nameBytes),
-      nameBytes: nameBytes.slice(),
-      versionMadeBy: view.getUint16(at + 4, true),
-      versionNeeded: view.getUint16(at + 6, true),
-      flags,
-      method: view.getUint16(at + 10, true),
-      modTime: view.getUint16(at + 12, true),
-      modDate: view.getUint16(at + 14, true),
-      crc: view.getUint32(at + 16, true),
-      internalAttrs: view.getUint16(at + 36, true),
-      externalAttrs: view.getUint32(at + 38, true),
-      data,
-      uncompressedSize,
-      localExtra: localExtra.slice(),
-      centralExtra: centralExtra.slice(),
-      comment: comment.slice(),
+      localOffset,
+      entry: {
+        name: new TextDecoder().decode(nameBytes),
+        nameBytes: nameBytes.slice(),
+        versionMadeBy: view.getUint16(at + 4, true),
+        versionNeeded: view.getUint16(at + 6, true),
+        flags,
+        method: view.getUint16(at + 10, true),
+        modTime: view.getUint16(at + 12, true),
+        modDate: view.getUint16(at + 14, true),
+        crc: view.getUint32(at + 16, true),
+        internalAttrs: view.getUint16(at + 36, true),
+        externalAttrs: view.getUint32(at + 38, true),
+        data,
+        uncompressedSize,
+        localExtra: localExtra.slice(),
+        centralExtra: centralExtra.slice(),
+        comment: comment.slice(),
+      },
     });
 
     at += ZIP_CENTRAL_HEADER_SIZE + nameLength + extraLength + commentLength;
   }
-  return entries;
+  return entries.sort((a, b) => a.localOffset - b.localOffset).map((read) => read.entry);
 }
 
 /** הבייטים המאוחסנים של רשומה, לפי הכותרת המקומית שלה. */
@@ -465,10 +564,16 @@ function findEocd(view: DataView): number {
 /**
  * כתיבת הארכיון מחדש.
  *
- * כל מה שאינו התוכן שתוקן נכתב בחזרה כמות שהוא: סדר הרשומות, השמות,
- * שיטת הדחיסה, הבייטים, שדות ה-extra של שתי הכותרות, הערת כל רשומה והערת
- * הארכיון. חבילה שעברה כאן ולא תוקן בה דבר יוצאת זהה למה שנכנס — זו הדרישה,
- * מפני שהכותב רץ על **כל** מסמך שמיוצא, גם כשהתיקון נוגע בחלק אחד בלבד.
+ * כל מה שאינו התוכן שתוקן נכתב בחזרה כמות שהוא: הסדר שהתקבל (`readZip` מוסר
+ * אותו פיזי), השמות, שיטת הדחיסה, הבייטים, שדות ה-extra של שתי הכותרות, הערת
+ * כל רשומה והערת הארכיון. זו הדרישה מפני שהכותב רץ על **כל** מסמך שמיוצא, גם
+ * כשהתיקון נוגע בחלק אחד בלבד: מה שאינו נשמר כאן נעלם מכל שמירה.
+ *
+ * ומה שאין: מסלול „עבר כאן ולא תוקן בו דבר”. גם `rewriteDocxXmlParts` וגם
+ * `repairEntries` מחזירים `null` לפני שהם מגיעים לכאן כששום חלק לא השתנה,
+ * ולכן הזהות נמדדת על חבילה שתוקן בה חלק. נמדד על `tmp/sp3946/case.docx`:
+ * שני חלקים תוקנו, וארבע-עשרה הרשומות האחרות יצאו בייט-בבייט כמו שנכנסו —
+ * אותה שיטת דחיסה, אותו CRC, אותם בייטים מאוחסנים.
  */
 export function writeZip(entries: ZipEntry[], archiveComment?: Bytes): Bytes {
   const comment = archiveComment ?? (new Uint8Array(0) as Bytes);

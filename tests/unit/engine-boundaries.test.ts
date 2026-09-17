@@ -77,6 +77,39 @@ describe('גבולות מול SuperDoc', () => {
       [],
     );
   });
+
+  /**
+   * שכבת החבילה נשארת בלי תלויות. כשהיא ישבה בתוך `docx-preflight.ts`, חיבור
+   * התיקון היוצא ל-`export.ts` יצר את השרשרת `vite.config.ts` →
+   * `blank-document.ts` → `export.ts` → preflight → `vba-import.ts` (ESM
+   * בלבד), וטעינת קובץ התצורה נשברה. import אחד שנוסף שם מחזיר אותה.
+   *
+   * **שלושה ענפים, מפני ש„תלות” אינה רק `import`.** הצורה הקודמת
+   * (`/^\s*import\s|\brequire\s*\(/`) נמדדה על שתים-עשרה צורות: היא תפסה
+   * שש — ‏`import { x } from`, ‏`import type`, ‏`import './x'`,
+   * ‏`import * as`, import מוזח ו-`require(` — והחמיצה שש:
+   * ‏`export { X } from './y'`, ‏`export * from './y'`,
+   * ‏`export type { X } from './y'`, ‏`import('./y')` דינמי (עם `await`
+   * ובלעדיו), ‏`import{x}from'./y'` בלי רווחים, ו-import שנשבר לשתי שורות.
+   *
+   * החמצה ראשונה היא החמורה: ‏`export { Bytes } from './types'` יוצר בדיוק
+   * את קשת התלות שהכלל קיים כדי למנוע, ו-`import()` דינמי הוא בדיוק הדרך
+   * שבה מישהו „יפתור” את שרשרת ה-ESM שלמעלה.
+   *
+   * לכן הענף האמצעי אינו מחפש `import`/`export` אלא את **מפרט המודול**
+   * עצמו (`from '…'`), שקיים בכל צורת ייבוא וייצוא־מחדש ובכל פיצול שורות;
+   * הראשון סוגר ייבוא-לוואי שאין בו `from`, והשלישי את שתי צורות הקריאה.
+   */
+  const DEPENDENCY = /^\s*import\b|\bfrom\s+['"]|\b(?:require|import)\s*\(/;
+
+  it('docx-parts.ts אינו מייבא דבר', () => {
+    const parts = sources.find(({ path }) => path.split(sep).join('/') === 'engine/docx-parts.ts');
+    expect(parts, 'engine/docx-parts.ts').toBeDefined();
+    const imports = (parts?.text ?? '')
+      .split('\n')
+      .flatMap((line, index) => (DEPENDENCY.test(line) ? [`docx-parts.ts:${index + 1}`] : []));
+    expect(imports).toEqual([]);
+  });
 });
 
 /**

@@ -81,6 +81,10 @@ export function uniqueNumberingIds(xml: string): string | null {
 
     if (name === 'nsid' && !closing && depth === 0) {
       const value = valueOf(attributes);
+      // `w:val=""` נופל כאן, וגם היעדר המאפיין: שתי הגדרות עם nsid ריק לא
+      // ייחשבו כפילות. הערך הוא `ST_LongHexNumber` — ארבעה בייטים
+      // הקסדצימליים — ו-Word אינו כותב אותו ריק; בלי מקרה נמדד אין כאן מה
+      // להוסיף, ולתקן ערך שאינו חוקי מלכתחילה זה לנחש מה הוא היה אמור להיות.
       if (value) tags.push({ abstractId, value, at: match.index, end: token.lastIndex, tag: match[0] });
       continue;
     }
@@ -97,6 +101,19 @@ export function uniqueNumberingIds(xml: string): string | null {
       continue;
     }
     let fresh = hex32(`${key}:${tag.abstractId}`);
+    // הלולאה נכנסת כשההאש פוגע בערך שכבר קיים בקובץ, ומה שמגיע לשם אינו
+    // התנגשות של FNV-1a: **שלוש הגדרות שחולקות גם nsid וגם `abstractNumId`**
+    // מקבלות כולן את אותו קלט להאש, `hex32("<nsid>:<abstractNumId>")`, ולכן
+    // השנייה והשלישית נגזרות לאותו ערך בדיוק. בלי הלולאה הן יוצאות מכאן עם
+    // nsid כפול — כלומר בדיוק הבאג שהמודול בא לתקן, ובלי שום סימן. גם זה
+    // OOXML לא חוקי — `abstractNumId` הוא מזהה — אבל הוא רחוק בסדרי גודל
+    // מהתנגשות האש, ולכן הוא הנימוק. המלח משתתף בקלט, ולכן הרביעית ממשיכה
+    // משם הלאה.
+    //
+    // התנגשות אמיתית של ההאש היא אפשרות, ולא מצב שהפלט שלנו מגיע אליו:
+    // אחרי שמירה אחת הערך הפוגע כבר הוחלף, ושמירה חוזרת אינה משחזרת אותו.
+    // שתי הבדיקות עומדות זו לצד זו: אחת שותלת את התנגשות ההאש בידיים,
+    // והשנייה היא שלוש ההגדרות.
     for (let salt = 1; used.has(fresh); salt += 1) fresh = hex32(`${key}:${tag.abstractId}:${salt}`);
     used.add(fresh);
     const text = tag.tag.replace(/(\s(?:[\w.-]+:)?val\s*=\s*["'])[^"']*/, `$1${fresh}`);
