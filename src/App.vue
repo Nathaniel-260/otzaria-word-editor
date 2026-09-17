@@ -5294,6 +5294,10 @@ onUnmounted(() => {
   undoRedoWatcher = null;
   caretFocus?.dispose();
   caretFocus = null;
+  // הוא היחיד כאן שתופס `keydown` בשלב הלכידה וחוסם רווח, ולכן מופע ששרד
+  // אינו „דולף” בשקט אלא ממשיך לחטוף הקשות.
+  listAutoformat?.dispose();
+  listAutoformat = null;
   // חיפוש-בזמן-הקלדה שממתין ירוץ אחרי הפירוק על handle של controller מפורק.
   // בכל הטאבים, לא רק הפעיל — לכולם יש `searchAdapter`/`keeper` משלהם.
   for (const s of sessions.values()) {

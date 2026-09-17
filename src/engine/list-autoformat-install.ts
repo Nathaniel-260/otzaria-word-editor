@@ -62,6 +62,11 @@
  * הקבוצה נזרקת כשההיסטוריה ירדה מתחתיה (בוטלה בדרך אחרת) או התרחקה ממנה
  * יותר מ-`GROUP_HORIZON` צעדים.
  *
+ * ‏Ctrl+Z אינו עריכה, ולכן אינו קוטם את צד ה„חזור” של ההיסטוריה — גם כשהקבוצה
+ * כבר נצרכה והמקש חזר למנוע. בלי ההבחנה הזאת ביטול **שני** מחק את קבוצת
+ * ה„חזור”, ו-Ctrl+Y שאחריו החזיר את מחיקת הסמן בלי הרשימה: פסקה ריקה שאינה
+ * רשימה, שדרשה עוד שני Ctrl+Y כדי להתאושש (נמדד בבדיקת היחידה).
+ *
  * ## הצורות שהמנוע ממיר בעצמו
  *
  * המנוע ממיר בעצמו „- ”, „* ”, „+ ” ו-„N. ” לכל מספר (נמדד, בלי המודול). שני
@@ -76,12 +81,28 @@
  * מכניס אותו במקום הסמן, לפי סדר ההקשות, **בלי** הכלל (נמדד גם בהקשות של
  * 15ms). אם המנוע אינו מטפל בו, נשלח `insertText` רגיל — הרווח לא הולך לאיבוד.
  *
- * הרווח נעצר רק כשמה שלפני הסמן הוא בדיוק אחת הצורות האלה: כשהמתג כבוי —
- * כולן; כשהוא דלוק — רק אלה שיש להן תוכנית כאן, כדי שההמרה תהיה שלנו.
+ * ## הרווח נעצר לפי אותו כלל בשני מצבי המתג
+ *
+ * כל צורה שהמנוע ממיר בעצמה נעצרת — גם כשהמתג דלוק. קודם נעצרו במצב „דלוק”
+ * רק הצורות שיש להן תוכנית כאן, והתוצאה הייתה שהמתג הדלוק נתן **יותר** רשימות
+ * לא-רצויות מהכבוי: „5. ”, „12. ” ו„1948. ” נדחים ב-`list-autoformat.ts`
+ * („פותחי רצף בלבד”) — והמנוע המיר אותם במקומנו. מי שפתח פסקה ב„1948. ” קיבל
+ * רשימה עשרונית. עכשיו מה שאין לו תוכנית כאן נשאר טקסט, ו„רק פותח רצף הופך
+ * לרשימה” הוא התנהגות המוצר ולא רק של המודול הטהור.
+ *
+ * ## ההחלטה לעצור היא סינכרונית
  *
  * „מה שלפני הסמן” אינו רק מה שהוקלד מאז האיפוס: תיקון באמצע הסימן — „1x”,
  * Backspace, „. ” — מאפס את הרצף, והמנוע המשיך להמיר גם כשהמתג כבוי (נמדד).
- * לכן אחרי כל איפוס נקראת תחילת הפסקה מהמנוע, והזנב שהוקלד מאז מצטרף אליה.
+ * הקריאה שנוספה לכך (תחילת הפסקה מהמנוע, והזנב מהמקלדת מצטרף אליה) אינה
+ * יכולה **לשלול** עצירה: היא אינה מגיעה בזמן כשהקריאות חסומות, ונמדד שהיא גם
+ * חוזרת על מצב ישן מהמקש האחרון (Backspace איטי → הקריאה החזירה „1x”, הזנב
+ * „1.” נדבק אחריו, ו„1x1.” אינו סימן — הרווח עבר, והמנוע המיר עם מתג כבוי).
+ *
+ * לכן העצירה נשענת על הזנב לבדו: `ENGINE_MARKER` עוגן ב-`$`, ולכן זנב שאינו
+ * סיומת אפשרית שלו הוא **הוכחה** שאין סימן לפני הסמן, בלי שום קריאה. זנב
+ * שהוא סיומת אפשרית — עוצרים. הקריאה נשארת המקור של ה**המרה** (מה הסימן
+ * במלואו), ושם היא בטוחה: ההחלה עוברת בנתיב המאומת, שקורא שוב ומשווה.
  *
  * ## כשל
  *
@@ -124,11 +145,61 @@ const NAVIGATION_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDow
 
 const EDIT_EVENTS = ['paste', 'cut', 'drop', 'compositionstart'];
 
-/** מה שהמנוע ממיר בעצמו כשבא אחריו רווח (נמדד). */
-const ENGINE_MARKER = /^\s*(?:[-+*]|\d{1,9}\.)$/;
-
 /** כמה תווים נשמרים מאז האיפוס לבדיקת `ENGINE_MARKER`. */
 const ENGINE_MARKER_MAX = 12;
+
+/**
+ * הרווחים שלפני הסימן — חסומים ל-`ENGINE_MARKER_MAX - 1`, ולא `\s*`.
+ *
+ * ‏`\s*` בלתי-חסום סתר את התקרה: `typedSince` הופך ל-`null` אחרי
+ * ‏`ENGINE_MARKER_MAX` תווים, ואז `interceptsSpace` מחזיר `false` — כלומר
+ * הקוד הכריז על כיסוי שהוא אינו יכול לספק. שתי דרכים לפתור, והמדידה
+ * הכריעה: **המנוע עצמו אינו ממיר שם**. נמדד (17.9.2026, superdoc 2.15.0,
+ * המתג כבוי, על ה-dist הארוז) בדיוק בטווח שבו המודול אינו מיירט —
+ * ‏11, 12 ו-16 רווחים מובילים ואז „1. ” — ובכל השלושה הבלוק נשאר
+ * ‏`paragraph`. (`docs/engine-gaps.md` מדד קודם שעם רווח מוביל **אחד** הוא
+ * כן ממיר.) כלומר אין חור לכסות, והחסם כאן רק אומר את האמת על הכיסוי.
+ *
+ * במסלול הזנב החסם אינו משנה דבר — שם התקרה כבר חותכת — והמקום היחיד שבו
+ * הוא נצפה הוא `ENGINE_MARKER.test(known.text)` כשהסמן אינו נקרא (‏`at`
+ * הוא `null`, ואז שומר ההיסט מדולג). גם שם החדש הוא הנכון, מאותה מדידה.
+ *
+ * הוא נבנה מהתקרה ולא נכתב כמספר — כדי ששינוי של אחד מהם לא ישאיר את השני
+ * מאחור.
+ */
+const MARKER_SPACES = `\\s{0,${ENGINE_MARKER_MAX - 1}}`;
+
+/** מה שהמנוע ממיר בעצמו כשבא אחריו רווח (נמדד). */
+const ENGINE_MARKER = new RegExp(`^${MARKER_SPACES}(?:[-+*]|\\d{1,9}\\.)$`);
+
+/**
+ * כל מה שעשוי **להשלים** את `ENGINE_MARKER` — כלומר כל סיומת שלו, כולל הריקה.
+ *
+ * זה השער הסינכרוני היחיד: `ENGINE_MARKER` עוגן ב-`$`, ולכן אם הזנב שהוקלד
+ * מאז האיפוס אינו מתאים כאן, גם המחרוזת המלאה שלפני הסמן אינה סימן — ואין
+ * צורך לדעת מה היה לפניה. הספרות כאן `{0,9}` ולא `{1,9}` בדיוק בשביל „.”
+ * שהוקלד אחרי ש„1” כבר נכתב לפני האיפוס.
+ *
+ * ## הרווח הוא חלק מהסוגריים, ולא סיומת בפני עצמה
+ *
+ * הצורה הקודמת — `/^\s*(?:[-+*]|\d{0,9}\.)?$/` — קיבלה גם זנב שכולו רווחים,
+ * ואין כזה: כל מחרוזת שתואמת את `ENGINE_MARKER` נגמרת ב-`-`, `+`, `*` או
+ * „.”, ולכן אף סיומת לא-ריקה שלה אינה רווח בלבד. הסלחנות הזאת הייתה **נראית
+ * למשתמש**: אחרי `Enter` הרווח הראשון אינו נעצר (זנב ריק, היסט 0), אבל הזנב
+ * הופך ל-„ ” — ומכאן הרווח ה**שני** וכל רווח אחריו נעצרו. שומרי ההיסט וסוג
+ * הבלוק יושבים רק בענף של הזנב הריק, ולכן זה חל בכל היסט ובכל בלוק: רווח
+ * כפול בהיסט 400, בתוך תא טבלה, בכותרת או בתוך פריט רשימה קיים — כולם עברו
+ * דרך `stopImmediatePropagation` ודרך ה-`beforeinput` הסינתטי, מסלול שנמדד
+ * לסימן בתחילת פסקה רגילה בלבד.
+ *
+ * הצורה כאן נבדקה בכוח גס מול ההגדרה שהיא אמורה לכסות: 3991 סימנים (כל
+ * קידומת רווחים באורך ≤3 מעל שישה תווי `\s` שונים, וגם קידומות של תו חוזר
+ * עד קצה החסם, × 13 גופי סימן), 4011 סיומות נבדלות — **0 חורים**, ו-39
+ * התאמות שקר פחות, כולן מהמחלקה
+ * „רווחים בלבד”. מיקום ה-`?` הוא כל ההבדל: הוא עוטף עכשיו את הרווחים יחד
+ * עם הגוף, ולא רק את הגוף. הבדיקה חוזרת ב-`tests/unit/`.
+ */
+const ENGINE_MARKER_TAIL = new RegExp(`^(?:${MARKER_SPACES}(?:[-+*]|\\d{0,9}\\.))?$`);
 
 /** Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z — לפי `code`, כדי שיעבדו גם בפריסה עברית. */
 function historyKey(event: KeyboardEvent): 'undo' | 'redo' | null {
@@ -385,17 +456,14 @@ export function installListAutoformat(options: ListAutoformatOptions): ListAutof
   let applying = false;
   /** הוקלד משהו בזמן ההמרה — ההיסטוריה שלה אינה רצף נקי. */
   let typedWhileApplying = false;
-  /** התווים מאז האיפוס, לזיהוי הצורות שהמנוע ממיר בעצמו. `null` — ארוך מדי. */
-  let sinceReset: string | null = '';
   /**
-   * תחילת הפסקה כמו שנקראה מהמנוע אחרי האיפוס האחרון. `null` — לא נקראה.
-   */
-  /**
-   * כמו `sinceReset`, אלא ש-Backspace מוחק ממנו תו במקום לאפס אותו. תיקון טעות
+   * התווים מאז האיפוס, ‏ש-Backspace מוחק מהם תו במקום לאפס אותם. תיקון טעות
    * באמצע סימן הוא המקרה השכיח של רצף שנקטע, והוא ידוע מהמקלדת בלבד —
-   * בלי להמתין לקריאה מהמנוע (שנמדדה ב-242ms אחרי Backspace).
+   * בלי להמתין לקריאה מהמנוע (שנמדדה ב-242ms אחרי Backspace). `null` — ארוך
+   * מכדי להיות סימן.
    */
   let typedSince: string | null = '';
+  /** תחילת הפסקה כמו שנקראה מהמנוע אחרי האיפוס האחרון. `null` — לא נקראה. */
   let resetPrefix: { blockId: string; text: string } | null = null;
   /** כל איפוס מבטל קריאה שלא חזרה עדיין. בנפרד מ-`generation`, ששייך לסוגי הבלוקים. */
   let prefixToken = 0;
@@ -473,18 +541,17 @@ export function installListAutoformat(options: ListAutoformatOptions): ListAutof
     anchor = null;
     lastTyped = null;
     inheritFrom = null;
-    sinceReset = '';
     typedSince = '';
   }
 
   /**
-   * הסימן שלפני הסמן, כמו שהמנוע רואה אותו. `null` — אין מה לבדוק.
+   * הסימן המלא שלפני הסמן — מה שנקרא מהפסקה אחרי האיפוס, ואחריו הזנב
+   * שהוקלד מאז. `null` — הזנב ארוך מכדי להיות חלק מסימן.
    *
-   * רצף ההקלדה לבדו אינו מספיק: תיקון באמצע הסימן — „1x”, Backspace,
-   * „.” — מאפס את `sinceReset`, והמנוע המיר בכל זאת גם כשהמתג כבוי (נמדד).
-   * לכן מה שנכתב **לפני** האיפוס נקרא מה-DOM — הוא ישן ולכן כבר מצויר —
-   * והזנב שנכתב מאז מצטרף אליו מהמקלדת. כשהסמן אינו זמין או מפגר
-   * אחרי ההקלדה — רצף ההקלדה לבדו, כמו קודם.
+   * זהו המקור של **ההמרה** כשרצף ההקלדה נקטע („1x”, Backspace, „. ” — מה
+   * שלפני הסמן הוא „1.”, והמקלדת לבדה יודעת רק „.”). הוא אינו המקור של
+   * העצירה: הקריאה עשויה לאחר או לחזור על מצב ישן, ולכן `interceptsSpace`
+   * אינו נשען עליה. כל המרה שנשענת עליה עוברת דרך הנתיב המאומת, שקורא שוב.
    */
   function markerBeforeCaret(at: Caret | null): string | null {
     const typed = typedSince;
@@ -497,14 +564,28 @@ export function installListAutoformat(options: ListAutoformatOptions): ListAutof
     return known.text + tail.slice(overlap);
   }
 
-  /** האם לעצור את הרווח הזה — ההסבר בהערת הפתיחה. */
+  /**
+   * האם לעצור את הרווח הזה — ההסבר בהערת הפתיחה. אותו כלל בשני מצבי המתג:
+   * כל צורה שהמנוע ממיר בעצמו נעצרת, וההמרה (אם יש תוכנית) היא שלנו.
+   *
+   * הכול כאן סינכרוני, לפי סדר הוודאות:
+   *
+   * 1. זנב שאינו סיומת אפשרית של `ENGINE_MARKER` — הוכחה שאין סימן.
+   * 2. זנב שהוא סיומת אפשרית ואינו ריק — עוצרים. זה כל מה שהמנוע יראה
+   *    בקצה, ואין צורך לדעת מה קדם לו.
+   * 3. זנב ריק — הסימן, אם ישנו, קדם כולו לאיפוס. סמן בהיסט 0 (אין מה
+   *    שיקדם) או רחוק מכל סימן אפשרי — שולל; קריאה שכבר חזרה מכריעה;
+   *    ובלעדיה עוצרים, כי „1.” שהוקלד לפני לחיצה הוא בדיוק המקרה שבו
+   *    המנוע ממיר (נמדד).
+   */
   function interceptsSpace(at: Caret | null): boolean {
-    const before = markerBeforeCaret(at);
-    if (before === null || !ENGINE_MARKER.test(before)) return false;
-    if (!enabled) return true;
-    // דלוק: עוצרים רק כשהמודול עצמו ימיר במקום המנוע, וההמרה שלו
-    // נשענת על רצף ההקלדה. רצף שנקטע עובר למנוע, כמו קודם.
-    return sinceReset !== null && planListAutoformat(`${sinceReset} `) !== null;
+    const tail = typedSince;
+    if (tail === null || !ENGINE_MARKER_TAIL.test(tail)) return false;
+    if (tail !== '') return true;
+    if (at && (at.offset === 0 || at.offset > ENGINE_MARKER_MAX)) return false;
+    const known = resetPrefix;
+    if (!known || (at && at.blockId !== known.blockId)) return true;
+    return ENGINE_MARKER.test(known.text);
   }
 
   /** ביטולים/חזרות שנשלחו ועוד לא הסתיימו — כדי שהקשות רצופות יסתדרו בתור. */
@@ -816,18 +897,43 @@ export function installListAutoformat(options: ListAutoformatOptions): ListAutof
     inheritFrom = null;
   }
 
-  function onMarker(typedRun: string | null, anchored: Anchor | null, trigger: ' ' | '\t'): void {
-    if (!enabled || typedRun === null || typedRun === '' || applying || pending) return;
+  /**
+   * שני מקורות לסימן, לפי הסדר:
+   *
+   * 1. **רצף ההקלדה.** רק הוא מאפשר את הנתיב המהיר — רק הוא מעיד שהכול הוקלד
+   *    עכשיו, ורק לו יש עוגן.
+   * 2. **מה שלפני הסמן** (`markerBeforeCaret`), כשלרצף אין תוכנית. הרצף נקטע
+   *    (Backspace, חץ, לחיצה) אבל מה שנכתב הוא סימן: „1x”, Backspace, „. ”
+   *    הוא „1. ” לכל דבר. ההחלה שלו עוברת **תמיד** בנתיב המאומת — הרצף אינו
+   *    מכסה את הסימן כולו, ולכן העוגן שלו אינו מעיד עליו — והנתיב הזה קורא
+   *    את הפסקה שוב ומשווה, כך שקריאה ישנה אינה מוחקת דבר.
+   */
+  function onMarker(typedRun: string | null, anchored: Anchor | null, trigger: ' ' | '\t', at: Caret | null): void {
+    if (!enabled || applying || pending) return;
     if (debug) debug.evaluates += 1;
-    const typed = `${typedRun}${trigger}`;
-    const plan = planListAutoformat(typed);
+
+    const fromRun = typedRun ? `${typedRun}${trigger}` : '';
+    let typed = fromRun;
+    let anchor2 = anchored;
+    let plan = fromRun ? planListAutoformat(fromRun) : null;
+    if (!plan) {
+      const before = markerBeforeCaret(at);
+      const fromPrefix = before ? `${before}${trigger}` : '';
+      if (fromPrefix && fromPrefix !== fromRun) {
+        plan = planListAutoformat(fromPrefix);
+        if (plan) {
+          typed = fromPrefix;
+          anchor2 = null;
+        }
+      }
+    }
     if (!plan) {
       note(`no-plan:${JSON.stringify(typed)}`);
       return;
     }
-    const p: Pending = { typed, plan, anchor: anchored, keysAfter: 0, since: now(), verifyOnly: trigger === '\t' };
+    const p: Pending = { typed, plan, anchor: anchor2, keysAfter: 0, since: now(), verifyOnly: trigger === '\t' };
     pending = p;
-    if (p.verifyOnly || !anchored) {
+    if (p.verifyOnly || !p.anchor) {
       note(p.verifyOnly ? 'tab' : `no-anchor:${anchorMiss}`);
       void verify(p);
     } else {
@@ -864,7 +970,7 @@ export function installListAutoformat(options: ListAutoformatOptions): ListAutof
       const anchored = anchor;
       run = null;
       anchor = null;
-      onMarker(typedRun, anchored, ' ');
+      onMarker(typedRun, anchored, ' ', at);
       return;
     }
     if (run !== null) run = run.length < LONGEST_MARKER ? run + key : null;
@@ -926,12 +1032,15 @@ export function installListAutoformat(options: ListAutoformatOptions): ListAutof
     }
     const time = now();
     const at = caretNow();
-    const plain = !event.ctrlKey && !event.metaKey && !event.altKey && !event.isComposing;
+    // ‏`keyCode === 229` הוא החצי השני של התקן בריפו (`src/ui/shortcuts/match.ts`):
+    // דפדפן שאינו מציב `isComposing` מדווח אותו. בלעדיו רווח שנלחץ בתוך הרכבה
+    // היה נעצר ב-`stopImmediatePropagation` ומוחלף בסינתטי — כלומר שבירת ההרכבה.
+    const composing = event.isComposing || event.keyCode === 229;
+    const plain = !event.ctrlKey && !event.metaKey && !event.altKey && !composing;
 
     if (plain && [...key].length === 1) {
       const intercept = key === ' ' && interceptsSpace(at);
       onPrintable(key, at, time);
-      if (sinceReset !== null) sinceReset = sinceReset.length < ENGINE_MARKER_MAX ? sinceReset + key : null;
       if (typedSince !== null) typedSince = typedSince.length < ENGINE_MARKER_MAX ? typedSince + key : null;
       lastInputAt = time;
       if (intercept) {
@@ -948,9 +1057,12 @@ export function installListAutoformat(options: ListAutoformatOptions): ListAutof
     const shrunk = plain && key === 'Backspace' && typedSince ? typedSince.slice(0, -1) : null;
     onReset('key', at, time, plain && key === 'Enter' && !event.shiftKey);
     if (plain && key === 'Backspace') typedSince = shrunk;
-    if (!NAVIGATION_KEYS.has(key)) dropRedoGroup();
+    // ‏Ctrl+Z/Ctrl+Y שהגיעו לכאן הם אלה שהקבוצה שלהם כבר נצרכה, והמקש חזר
+    // למנוע. הם אינם עריכה ואינם קוטמים את צד ה„חזור”, ולכן גם אינם זורקים
+    // את הקבוצה שבו — ראו „‏Ctrl+Z אינו עריכה” בהערת הפתיחה.
+    if (!NAVIGATION_KEYS.has(key) && !history) dropRedoGroup();
     if (!NAVIGATION_KEYS.has(key) && key !== 'Enter') forgetKinds();
-    if (tab) onMarker(typedRun, anchored, '\t');
+    if (tab) onMarker(typedRun, anchored, '\t', at);
   };
 
   const onBeforeInput = (event: Event): void => {
@@ -960,7 +1072,10 @@ export function installListAutoformat(options: ListAutoformatOptions): ListAutof
     if (input.inputType !== 'insertText' || input.data !== ' ' || !event.target) return;
     event.preventDefault();
     event.stopImmediatePropagation();
-    insertPlainSpace(event.target, ours);
+    // שני האירועים הסינתטיים נמדדים נקלטים (השער: „הרווח נכנס במקומו”).
+    // אם שדרוג מנוע יפסיק לקלוט אותם הרווח ילך לאיבוד בשקט — ואין כאן קוד
+    // גיבוי שלא נמדד לו טריגר, אלא רישום בידית האבחון שהשער קורא.
+    if (!insertPlainSpace(event.target, ours)) note('space-lost');
   };
 
   const onKeyUp = (event: KeyboardEvent): void => {

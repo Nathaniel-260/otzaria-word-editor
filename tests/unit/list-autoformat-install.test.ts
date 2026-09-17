@@ -79,10 +79,36 @@ function fakeEditor(options: FakeOptions = {}) {
   };
   let sawKeydown = false;
   const waiting: Array<() => void> = [];
+
+  /**
+   * הקשות שנקלטו ועוד לא הוחלו. „קריאה עונה רק אחרי שההקשות שבדרך נקלטו” הוא
+   * **תנאי**, ולא משך: קודם היה כאן `sleep(lag * 2)`, ניחוש שנשבר ברגע
+   * שהקשה נקלטה לאט מהרגיל (`slowKeys: { Backspace: 40 }`) — הקריאה ענתה על
+   * מצב ישן מהמקש האחרון. המונה הזה הוא התנאי עצמו.
+   */
+  let inFlight = 0;
+  const idle: Array<() => void> = [];
+  function schedule(task: () => void, ms: number): void {
+    inFlight += 1;
+    setTimeout(() => {
+      try {
+        task();
+      } finally {
+        inFlight -= 1;
+        if (inFlight === 0) idle.splice(0).forEach((resolve) => resolve());
+      }
+    }, ms);
+  }
+  function applied(): Promise<void> {
+    return inFlight === 0 ? Promise.resolve() : new Promise<void>((resolve) => idle.push(resolve));
+  }
+
   async function read<T>(name: string, input: unknown, answer: () => T): Promise<T> {
     record(name, input);
-    // כמו במנוע: קריאה עונה רק אחרי שההקשות שבדרך נקלטו.
+    // השהיית הקריאה עצמה, ואחריה התנאי: היא עונה רק כשכל ההקשות שנקלטו כבר
+    // הוחלו — כמו במנוע (סעיף 1 בראש list-autoformat-install.ts).
     await sleep(lag * 2);
+    await applied();
     if (blocked) await new Promise<void>((resolve) => waiting.push(resolve));
     return answer();
   }
@@ -120,7 +146,7 @@ function fakeEditor(options: FakeOptions = {}) {
     event.preventDefault();
     const data = input.data ?? '';
     const rule = input.inputType === 'insertText';
-    setTimeout(() => {
+    schedule(() => {
       for (const ch of data) if (!options.rejectKeys?.includes(ch)) typeText(ch, rule);
     }, options.slowKeys?.[data] ?? lag);
   });
@@ -129,10 +155,10 @@ function fakeEditor(options: FakeOptions = {}) {
     const { key } = event;
     sawKeydown = true;
     if (event.ctrlKey && (event.code === 'KeyZ' || event.code === 'KeyY')) {
-      setTimeout(() => void (event.code === 'KeyZ' && !event.shiftKey ? history.undo() : history.redo()), lag);
+      schedule(() => void (event.code === 'KeyZ' && !event.shiftKey ? history.undo() : history.redo()), lag);
       return;
     }
-    setTimeout(() => {
+    schedule(() => {
       const block = blocks[cur];
       if (options.rejectKeys?.includes(key)) return;
       if ([...key].length === 1 && !event.ctrlKey) {
@@ -310,14 +336,39 @@ const ctrl = (el: HTMLElement, code: 'KeyZ' | 'KeyY', key = code === 'KeyZ' ? 'z
 
 const handles: Array<{ dispose(): void }> = [];
 
+/**
+ * ידית ה-QA של המודול. בלעדיה „לא קרה כלום” אינו ניתן להבחנה מ„המודול לא
+ * הותקן”: בדיקה ששוללת המרה עוברת גם על מודול ריק. המונים גלובליים ומצטברים
+ * בין הבדיקות, ולכן נמדד תמיד ההפרש מרגע ההתקנה.
+ */
+interface Counters {
+  installs: number;
+  evaluates: number;
+  applies: number;
+}
+
+function counters(): Counters {
+  const holder = (window as unknown as { __otzariaListAutoformat?: Counters }).__otzariaListAutoformat;
+  return { installs: holder?.installs ?? 0, evaluates: holder?.evaluates ?? 0, applies: holder?.applies ?? 0 };
+}
+
 /** מתקינה, ומחכה שסוג הבלוק הראשון ייקרא — אלא אם הקריאות חסומות. */
 async function install(options: FakeOptions & { enabled?: boolean } = {}) {
   const fake = fakeEditor(options);
   lastFake = fake;
+  const base = counters();
   const handle = installListAutoformat({ container: fake.container, host: fake.host as never, enabled: options.enabled });
   handles.push(handle);
   await settle(20);
-  return { ...fake, handle };
+  const since = (): Counters => {
+    const at = counters();
+    return {
+      installs: at.installs - base.installs,
+      evaluates: at.evaluates - base.evaluates,
+      applies: at.applies - base.applies,
+    };
+  };
+  return { ...fake, handle, since };
 }
 
 afterEach(() => {
@@ -408,6 +459,7 @@ describe('installListAutoformat — המרה מההקשות', () => {
     await type(app.textarea, `${SHALOM} `);
     await settle();
 
+    expect(app.since().evaluates, 'המודול הגיע לשני הרווחים').toBeGreaterThan(1);
     expect(named(app.calls, 'insert')).toHaveLength(0);
     expect(named(app.calls, 'lists.create')).toHaveLength(0);
   });
@@ -417,6 +469,8 @@ describe('installListAutoformat — המרה מההקשות', () => {
     await type(app.textarea, ALEF);
     await settle();
 
+    // אין כאן תו הפעלה, ולכן אין מה שהמודול יעריך: החיות היחידה היא ההתקנה.
+    expect(app.since().installs, 'המודול הותקן').toBe(1);
     expect(named(app.calls, 'insert')).toHaveLength(0);
   });
 
@@ -437,6 +491,7 @@ describe('installListAutoformat — מה אינו מומר', () => {
     await type(app.textarea, `${ALEF}) `);
     await settle(1500);
 
+    expect(app.since().evaluates, 'המודול הגיע לרווח').toBeGreaterThan(0);
     expect(named(app.calls, 'insert')).toHaveLength(0);
     expect(app.blocks()[0].text).toBe(`abc${ALEF}) `);
   });
@@ -452,6 +507,7 @@ describe('installListAutoformat — מה אינו מומר', () => {
     await type(app.textarea, '- ');
     await settle(1500);
 
+    expect(app.since().evaluates, 'המודול הגיע לרווח').toBeGreaterThan(0);
     expect(named(app.calls, 'insert')).toHaveLength(0);
     expect(app.blocks()[0].text).toBe('x- ');
   });
@@ -461,6 +517,7 @@ describe('installListAutoformat — מה אינו מומר', () => {
     await type(app.textarea, ' ');
     await settle();
 
+    expect(app.since().evaluates, 'המודול הגיע לרווח').toBeGreaterThan(0);
     expect(named(app.calls, 'insert')).toHaveLength(0);
   });
 
@@ -469,6 +526,7 @@ describe('installListAutoformat — מה אינו מומר', () => {
     await type(app.textarea, `${ALEF}) `);
     await settle();
 
+    expect(app.since().evaluates, 'המודול הגיע לרווח').toBeGreaterThan(0);
     expect(named(app.calls, 'lists.create')).toHaveLength(0);
     expect(named(app.calls, 'insert')).toHaveLength(0);
   });
@@ -483,11 +541,17 @@ describe('installListAutoformat — מה אינו מומר', () => {
     await type(app.textarea, 'xy', 10);
     await settle(1500);
 
+    expect(app.since().evaluates, 'המודול הגיע לרווח').toBeGreaterThan(0);
     expect(named(app.calls, 'insert')).toHaveLength(0);
     expect(app.blocks()[0].text).toBe(`${ALEF} xy`);
   });
 
-  it('Backspace באמצע הרצף מבטל', async () => {
+  /*
+   * תיקון טעות באמצע הסימן אינו מבטל: מה שנשאר לפני הסמן הוא „א) ” לכל דבר,
+   * וזה מה שנבדק. הרצף שנקטע אינו מעיד עליו, ולכן ההחלה עוברת בנתיב המאומת —
+   * הוא קורא את הפסקה ומשווה, ואין מחיקה עיוורת.
+   */
+  it('Backspace באמצע הרצף — ההמרה עוברת דרך הנתיב המאומת', async () => {
     const app = await install();
     await type(app.textarea, `${ALEF}x`);
     press(app.textarea, 'Backspace');
@@ -495,7 +559,24 @@ describe('installListAutoformat — מה אינו מומר', () => {
     await type(app.textarea, ') ');
     await settle();
 
+    expect(named(app.calls, 'ranges.resolve').length, 'הפסקה נקראה').toBeGreaterThan(0);
+    expect(named(app.calls, 'lists.create')).toHaveLength(1);
+    expect(app.blocks()[0]).toMatchObject({ text: '', list: true });
+  });
+
+  /* ואותו תיקון כשמה שנשאר אינו סימן — אין המרה, ואין מחיקה. */
+  it('Backspace שמשאיר משהו שאינו סימן', async () => {
+    const app = await install();
+    await type(app.textarea, `${ALEF}x`);
+    press(app.textarea, 'Backspace');
+    await settle(20);
+    await type(app.textarea, 'y) ');
+    await settle();
+
+    expect(app.since().evaluates, 'המודול הגיע לרווח').toBeGreaterThan(0);
     expect(named(app.calls, 'lists.create')).toHaveLength(0);
+    expect(named(app.calls, 'insert')).toHaveLength(0);
+    expect(app.blocks()[0].text).toBe(`${ALEF}y) `);
   });
 });
 
@@ -543,6 +624,7 @@ describe('installListAutoformat — סוג הבלוק', () => {
     await type(app.textarea, `${ALEF}) `, 12);
     await settle();
 
+    expect(app.since().evaluates, 'המודול הגיע לרווח').toBeGreaterThan(0);
     expect(named(app.calls, 'lists.create')).toHaveLength(0);
   });
 
@@ -563,6 +645,7 @@ describe('installListAutoformat — סוג הבלוק', () => {
     await type(app.textarea, `${ALEF}) `);
     await settle();
 
+    expect(app.since().evaluates, 'המודול הגיע לרווח').toBeGreaterThan(0);
     expect(named(app.calls, 'lists.create')).toHaveLength(0);
   });
 
@@ -645,6 +728,9 @@ describe('installListAutoformat — כשל ופירוק', () => {
     await type(app.textarea, '1. ');
     await settle();
 
+    // אחרי dispose אין הערכה כלל, ולכן החיות היא ההתקנה שקדמה לה.
+    expect(app.since().installs, 'המודול הותקן').toBe(1);
+    expect(app.since().evaluates, 'ואחרי הפירוק לא הגיע לרווח').toBe(0);
     expect(named(app.calls, 'insert')).toHaveLength(0);
   });
 
@@ -662,6 +748,7 @@ describe('installListAutoformat — כשל ופירוק', () => {
     const events = [press(app.textarea, 'Backspace'), press(app.textarea, ' '), press(app.textarea, 'Tab')];
     await settle();
 
+    expect(app.since().applies, 'ההמרה שלפני כן הייתה שלנו').toBe(1);
     expect(events.map((e) => e.defaultPrevented)).toEqual([false, false, false]);
     expect(named(app.calls.slice(before), 'insert')).toHaveLength(0);
   });
@@ -699,6 +786,7 @@ describe('installListAutoformat — הצורות שהמנוע ממיר בעצמ�
     const app = await install({ enabled: false });
     await type(app.textarea, `${ALEF}) `);
     await settle();
+    expect(app.since().installs, 'המודול הותקן').toBe(1);
     expect(app.blocks()[0]).toMatchObject({ text: `${ALEF}) `, list: false });
     expect(app.calls.filter((c) => c.name !== 'history.undo')).toEqual([]);
   });
@@ -715,6 +803,78 @@ describe('installListAutoformat — הצורות שהמנוע ממיר בעצמ�
     app.resetSaw();
     await type(app.textarea, 'abc');
     const space = press(app.textarea, ' ');
+    expect(app.since().installs, 'המודול הותקן').toBe(1);
+    expect(app.saw(), 'המנוע ראה את ה-keydown').toBe(true);
+    expect(space.defaultPrevented).toBe(false);
+  });
+
+  /*
+   * זנב שכולו רווחים אינו סיומת של שום סימן: כל מה ש-`ENGINE_MARKER` מקבל
+   * נגמר ב-`-`, `+`, `*` או „.”. הצורה הקודמת של `ENGINE_MARKER_TAIL` קיבלה
+   * אותו בכל זאת, וזה היה נראה למשתמש: אחרי `Enter` הרווח הראשון עובר (זנב
+   * ריק, היסט 0) אבל הופך את הזנב ל-„ ”, ומכאן הרווח ה**שני** וכל אחד
+   * אחריו נעצרו — בכל היסט ובכל בלוק, כי שומרי ההיסט יושבים רק בענף של
+   * הזנב הריק.
+   */
+  it('שני רווחים אחרי Enter — גם השני עובר למנוע', async () => {
+    const app = await install();
+    press(app.textarea, 'Enter');
+    await settle();
+
+    press(app.textarea, ' ');
+    await settle();
+    expect(app.saw(), 'הרווח הראשון').toBe(true);
+
+    const second = press(app.textarea, ' ');
+    await settle();
+    expect(app.saw(), 'הרווח השני — זנב „ ” אינו סיומת של סימן').toBe(true);
+    expect(second.defaultPrevented).toBe(false);
+    expect(app.blocks()[1]).toMatchObject({ text: '  ', list: false });
+  });
+
+  it('רווח כפול הרחק מכל סימן — עובר, ולא בזכות שומר ההיסט', async () => {
+    // שומרי ההיסט (`offset === 0`, `offset > ENGINE_MARKER_MAX`) יושבים רק
+    // בענף של הזנב הריק, ולכן זנב „ ” עקף אותם. כאן ההיסט 40 — הרבה מעבר
+    // לתקרה — והרווח הכפול היה נעצר בכל זאת.
+    const app = await install({ blocks: [{ text: 'א'.repeat(40) }] });
+    await settle();
+    press(app.textarea, ' ');
+    await settle();
+    const second = press(app.textarea, ' ');
+    await settle();
+
+    expect(app.saw(), 'הרווח השני').toBe(true);
+    expect(second.defaultPrevented).toBe(false);
+    expect(app.blocks()[0]!.text.endsWith('  ')).toBe(true);
+  });
+
+  it('רווח כפול בתוך פריט רשימה קיים — עובר', async () => {
+    // בלוק שאינו פסקה רגילה: המסלול שנעצר נמדד לסימן בתחילת פסקה בלבד.
+    const app = await install({ blocks: [{ text: 'פריט', list: true }] });
+    await settle();
+    press(app.textarea, ' ');
+    await settle();
+    const second = press(app.textarea, ' ');
+    await settle();
+
+    expect(app.saw(), 'הרווח השני בתוך פריט הרשימה').toBe(true);
+    expect(second.defaultPrevented).toBe(false);
+    expect(app.blocks()[0]).toMatchObject({ text: 'פריט  ', list: true });
+  });
+
+  it('רווח בתוך הרכבה שמדווחת `keyCode` 229 בלבד — אינו נעצר', async () => {
+    /*
+     * התקן של הריפו הוא שני החצאים (`src/ui/shortcuts/match.ts`): דפדפן
+     * שאינו מציב `isComposing` מדווח `keyCode === 229`. כאן „1.” כבר הוקלד,
+     * כלומר בלי החצי הזה הרווח היה נעצר ומוחלף בסינתטי — באמצע הרכבה.
+     */
+    const app = await install({ enabled: false });
+    await type(app.textarea, '1.');
+    await settle();
+
+    const space = press(app.textarea, ' ', { keyCode: 229 });
+    await settle();
+
     expect(app.saw(), 'המנוע ראה את ה-keydown').toBe(true);
     expect(space.defaultPrevented).toBe(false);
   });
@@ -757,13 +917,12 @@ describe('installListAutoformat — הצורות שהמנוע ממיר בעצמ�
       await type(app.textarea, '. ');
       await settle();
 
-      // בחץ אין מה לזכור — הסמן עשוי לנוח בכל מקום — ולכן שם הקריאה היא המקור היחיד.
-      const expected =
-        c.name === 'Backspace' ? { text: '1. ', list: false } : { text: '', list: true };
-      expect(app.blocks()[0]).toMatchObject(expected);
+      // הזנב שהוקלד מאז האיפוס („1.” אחרי Backspace, „.” אחרי חץ) הוא סיומת
+      // אפשרית של סימן, וזה כל מה שדרוש לעצירה. הקריאה החסומה אינה משנה.
+      expect(app.blocks()[0]).toMatchObject({ text: '1. ', list: false });
     });
 
-    it(`דלוק: ${c.name} באמצע הסימן — ההמרה עדיין קורית`, async () => {
+    it(`דלוק: ${c.name} באמצע הסימן — ההמרה קורית, והיא שלנו`, async () => {
       const app = await install();
       await type(app.textarea, c.name === 'Backspace' ? '1x' : '1');
       await settle(30);
@@ -772,6 +931,10 @@ describe('installListAutoformat — הצורות שהמנוע ממיר בעצמ�
       await type(app.textarea, '. ');
       await settle();
 
+      // בלי הבדיקה הזאת הטענה ריקה: „‏{text:'', list:true}” מסופק גם בידי
+      // ההמרה של המנוע עצמו, וגם על מודול שהוחלף ב„לא-כלום”.
+      expect(named(app.calls, 'lists.create')).toHaveLength(1);
+      expect(app.since().applies, 'ההמרה שלנו').toBe(1);
       expect(app.blocks()[0]).toMatchObject({ text: '', list: true });
     });
   }
@@ -787,12 +950,57 @@ describe('installListAutoformat — הצורות שהמנוע ממיר בעצמ�
     expect(app.blocks()[0]).toMatchObject({ text: '', list: true });
   });
 
-  it('דלוק: „5. ” — אין תוכנית כאן, ולכן המנוע ממיר כמו קודם', async () => {
-    const app = await install();
-    await type(app.textarea, '5. ');
+  /*
+   * „פותחי רצף בלבד” היה נכון על המודול הטהור ולא על המוצר: אין כאן תוכנית
+   * ל-„5. ”, והמנוע המיר אותו במקומנו. עכשיו הרווח נעצר גם כשהמתג דלוק, ומה
+   * שאין לו תוכנית נשאר טקסט. זו ההגנה על „1948. ” בתחילת פסקה.
+   */
+  for (const marker of ['5. ', '12. ', '1948. ']) {
+    it(`דלוק: „${marker}” נשאר טקסט — אין תוכנית, וגם המנוע אינו ממיר`, async () => {
+      const app = await install();
+      await type(app.textarea, marker);
+      await settle();
+      expect(app.since().evaluates, 'המודול הגיע לרווח').toBeGreaterThan(0);
+      expect(named(app.calls, 'lists.create')).toHaveLength(0);
+      expect(app.blocks()[0]).toMatchObject({ text: marker, list: false });
+    });
+  }
+
+  /*
+   * הסמן שהוקלד לפני האיפוס, והרווח אחריו. הזנב ריק, ולכן ההחלטה אינה יכולה
+   * לבוא ממנו — וכל עוד הקריאה לא חזרה עוצרים. בלי זה: לחיצה בתוך „1.” ואז
+   * רווח החזירה רשימה עשרונית גם כשהמתג כבוי.
+   */
+  it('כבוי: „1.”, לחיצה, ורווח — הרווח נעצר גם בלי קריאה', async () => {
+    const app = await install({ enabled: false, readsBlocked: true });
+    await type(app.textarea, '1.');
+    await settle(30);
+    app.textarea.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    await settle(30);
+    await type(app.textarea, ' ');
     await settle();
+
+    expect(app.blocks()[0]).toMatchObject({ text: '1. ', list: false });
+  });
+
+  /*
+   * ‏Backspace שהמנוע קולט לאט מהרגיל. כאן התגלה הכשל שהיה מרצד בריצות מלאות:
+   * הקריאה שממלאת את תחילת הפסקה ענתה לפני שהמנוע החיל את המחיקה, „1x” נדבק
+   * לזנב „1.”, ו„1x1.” אינו סימן — הרווח עבר והמנוע המיר עם מתג כבוי. שני
+   * דברים סוגרים אותו: הדמה מחכה לתנאי („ההקשות שנקלטו הוחלו”) ולא למשך,
+   * והעצירה נשענת על הזנב לבדו ולכן אינה תלויה בקריאה כלל.
+   */
+  it('כבוי: Backspace שהמנוע קולט לאט — „1. ” נשאר טקסט', async () => {
+    const app = await install({ enabled: false, slowKeys: { Backspace: 40 } });
+    await type(app.textarea, '1x');
+    await settle(30);
+    press(app.textarea, 'Backspace');
+    await settle(60);
+    await type(app.textarea, '. ');
+    await settle();
+
+    expect(app.blocks()[0]).toMatchObject({ text: '1. ', list: false });
     expect(named(app.calls, 'lists.create')).toHaveLength(0);
-    expect(app.blocks()[0]).toMatchObject({ text: '', list: true });
   });
 });
 
@@ -824,6 +1032,51 @@ describe('installListAutoformat — Ctrl+Z מיד אחרי ההמרה', () => {
 
     expect(event.defaultPrevented).toBe(true);
     expect(named(app.calls, 'history.redo')).toHaveLength(3);
+    expect(app.blocks()[0]).toMatchObject({ text: '', list: true });
+  });
+
+  /*
+   * ‏Ctrl+Z שני: הקבוצה כבר נצרכה, המקש חוזר למנוע, והוא מבטל את ההקלדה של
+   * „א) ” — אבל ביטול אינו עריכה ואינו קוטם את צד ה„חזור”. בלי זה הקבוצה
+   * נזרקה, ו-Ctrl+Y שאחריו החזיר את מחיקת הסמן **בלי** הרשימה: „‏{text:'',
+   * list:false}”, מצב שדרש עוד שני Ctrl+Y כדי להתאושש, והסמן העשרוני „1.”
+   * הבזיק בדרך — בדיוק מה שהקיבוץ נועד למנוע.
+   */
+  it('שני Ctrl+Z ואז שני Ctrl+Y — חוזרים בדיוק לאותו מצב', async () => {
+    const app = await converted();
+
+    ctrl(app.textarea, 'KeyZ');
+    await settle();
+    expect(app.blocks()[0]).toMatchObject({ text: `${ALEF}) `, list: false });
+
+    ctrl(app.textarea, 'KeyZ');
+    await settle();
+    expect(app.blocks()[0], 'הביטול השני הוא של המנוע — הקלדה אחת').toMatchObject({
+      text: `${ALEF})`,
+      list: false,
+    });
+
+    ctrl(app.textarea, 'KeyY');
+    await settle();
+    expect(app.blocks()[0]).toMatchObject({ text: `${ALEF}) `, list: false });
+
+    const event = ctrl(app.textarea, 'KeyY');
+    await settle();
+    expect(event.defaultPrevented, 'הקבוצה שרדה את הביטול השני').toBe(true);
+    expect(app.blocks()[0]).toMatchObject({ text: '', list: true });
+  });
+
+  it('שני Ctrl+Z ואז „חזור” של פס הכותרת', async () => {
+    const app = await converted();
+    ctrl(app.textarea, 'KeyZ');
+    await settle();
+    ctrl(app.textarea, 'KeyZ');
+    await settle();
+
+    expect(app.handle.redo(), 'הקבוצה עדיין שם').toBe(true);
+    await settle();
+    expect(app.handle.redo()).toBe(true);
+    await settle();
     expect(app.blocks()[0]).toMatchObject({ text: '', list: true });
   });
 
@@ -955,6 +1208,7 @@ describe('installListAutoformat — Ctrl+Z מיד אחרי ההמרה', () => {
     await type(app.textarea, 'abc');
     await settle();
     const event = ctrl(app.textarea, 'KeyZ');
+    expect(app.since().installs, 'המודול הותקן').toBe(1);
     expect(event.defaultPrevented).toBe(false);
     expect(app.handle.undo()).toBe(false);
   });
