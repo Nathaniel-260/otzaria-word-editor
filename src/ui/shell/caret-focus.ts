@@ -63,9 +63,14 @@ export interface CaretFocusOptions {
   readonly view?: Window;
 }
 
+/**
+ * אין כאן `refresh()`.
+ *
+ * הייתה כזאת, ואיש לא קרא לה. ידית שמחזירה פעולה שאיש אינו מפעיל נראית כמו
+ * כיסוי לחור שנשאר פתוח, ובמקרה הזה גם החור עצמו נמדד כסגור — ראו הטבלה
+ * ב-`watchCaretFocus`.
+ */
 export interface CaretFocusHandle {
-  /** מדידה מחדש ביוזמת הקורא. */
-  refresh(): void;
   dispose(): void;
 }
 
@@ -84,6 +89,33 @@ export interface CaretFocusHandle {
  *
  * מקור האמת הוא תמיד `document.hasFocus()` בזמן הקריאה ולא תוכן האירוע, ולכן
  * כל אירוע שנוחת מסנכרן את המצב המלא — גם אם מישהו הגיע מכיוון שלא נצפה.
+ *
+ * ## והמקרה שנראה כמו חור ואינו
+ *
+ * מיקוד יכול להיעלם גם בלי שהמשתמש הזיז אותו: הפאנל שבתוכו יושב משטח ההקלדה
+ * של המנוע יוצא מתחת לרגליו. **ושתי הדרכים שונות**: סגירת טאב מסירה אותו
+ * מה-DOM, אבל החלפת טאב — המסלול השכיח בהרבה — אינה מסירה דבר, אלא מציבה
+ * `display: none` על הפאנל של הקודם (App.vue, `activateTab`). השאלה היא אם
+ * הדפדפן מדווח, ולכן היא נמדדה — Chrome 152, ארבעת המבנים, ב-
+ * `scripts/qa/caret-focus-qa.mjs`:
+ *
+ *   | מה קרה לפאנל | האירועים שנורו | `activeElement` אחרי |
+ *   |---|---|---|
+ *   | האלמנט הממוקד עצמו הוסר | `blur`, `focusout` | `BODY` |
+ *   | **אב** של האלמנט הממוקד הוסר | `blur`, `focusout` | `BODY` |
+ *   | **אב הוסתר ב-`display: none`** | `blur`, `focusout` | `BODY` |
+ *   | אב הוסתר ב-`visibility: hidden` | `blur`, `focusout` | `BODY` |
+ *
+ * כלומר `focusout` מגיע בכל אחד מהם, וארבעת המאזינים מספיקים. אין
+ * `MutationObserver` ואין `refresh()` לקורא — שניהם היו קוד שמכסה על חור
+ * שנמדד כסגור. שימו לב ש-jsdom **אינו** יורה את האירועים האלה, ולכן בדיקת
+ * יחידה שתיבנה על ההתנהגות שלו תמדוד את סביבת הבדיקה ולא את הדפדפן; השורות
+ * שבטבלה נמדדות בשער בלבד.
+ *
+ * ומה שהשער **אינו** מודד: הוא מריץ Chrome עצמאי, בעוד התוסף רץ בתוך ה-WebView
+ * של אוצריא — ושם יש פער מיקוד/מקלדת מתועד (מיזעור והחזרה משאירים את ה-WebView
+ * בלי מקלדת עד לחיצה; Otzaria#1356). כלומר הטבלה תקפה להתנהגות הדפדפן, ולא
+ * הבטחה שכל מסלול מיקוד במארח מתנהג כך.
  */
 export function watchCaretFocus({
   documentArea,
@@ -113,7 +145,6 @@ export function watchCaretFocus({
   refresh();
 
   return {
-    refresh,
     dispose() {
       view.removeEventListener('focus', listener);
       view.removeEventListener('blur', listener);

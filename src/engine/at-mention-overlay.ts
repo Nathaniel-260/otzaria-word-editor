@@ -54,6 +54,7 @@ import {
   suggestionSubtitle,
   type ResolvedRefHit,
 } from './at-mention';
+import { isCaretFollowScroll } from './caret-visibility';
 import { resolveRef } from '../host/otzaria-reader';
 
 /** כתובת טווח טקסט, כפי ש-`hyperlinks.wrap`/`insert` מקבלים אותה. */
@@ -670,7 +671,17 @@ export function installAtMention(
     event.stopPropagation();
   };
 
-  const onScroll = (): void => closeSession();
+  // „המשתמש גלל משם” — אבל גלילה שהסמן גרר אחריו היא המשך של ההקלדה, ולא
+  // ניווט. בלי ההבחנה, ‏`@פסחים` בחלון צר סגר את עצמו באמצע השאילתה ברגע
+  // שהסמן חצה את שולי התצוגה. ראו `isCaretFollowScroll`.
+  //
+  // האירוע עצמו עובר, ולא המיכל: ההבחנה נשענת על ה-`target` שלו. אותו מאזין
+  // רשום גם ל-`resize` (‏`target` = ה-`window`) ושומע גם גלילה של צאצא
+  // (‏`target` = הצאצא) — נמדד, ושתיהן חייבות להמשיך לסגור.
+  const onScroll = (event: Event): void => {
+    if (isCaretFollowScroll(event)) return;
+    closeSession();
+  };
   const onBlur = (): void => {
     // המיקוד עזב את המסמך — אין סמן לעקוב אחריו. חזרה אליו מגיעה דרך
     // `mouseup` או תו חדש, ושניהם מחמשים מחדש.

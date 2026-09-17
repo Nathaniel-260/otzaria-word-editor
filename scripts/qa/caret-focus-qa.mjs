@@ -23,6 +23,13 @@
  * `document.hasFocus()` ומייצר `blur` על ה-`window` — בדיוק כמו מעבר לחלון
  * אחר. אין צורך בחלון שני אמיתי.
  *
+ * ## ושתי שורות שמודדות את הדפדפן, לא אותנו
+ *
+ * השתיים האחרונות מודדות מה קורה כשהאלמנט הממוקד **נמחק** — כלומר מה שסגירת
+ * טאב עושה למשטח ההקלדה של המנוע. הן מה שמתיר ל-`ui/shell/caret-focus.ts`
+ * להסתפק בארבעה מאזיני מיקוד, ו-jsdom אינו יכול להחליף אותן: שם האירועים
+ * האלה אינם נורים כלל.
+ *
  *   CHROME=<נתיב> node scripts/qa/caret-focus-qa.mjs
  */
 import { openApp, createReport, sleep } from './harness.mjs';
@@ -36,6 +43,19 @@ const ROW = {
   back: 'חזרה לחלון — הסמן מהבהב שוב',
   control_focus: 'פקד של הממשק לקח את המיקוד — הסמן נעלם',
   restored: 'בקרה הפוכה: חזרה מהפקד למסמך — מהבהב שוב',
+  removed_self: 'האלמנט הממוקד הוסר — הדפדפן מדווח, והסמן נעלם',
+  removed_ancestor: 'אב של האלמנט הממוקד הוסר — אותו דבר',
+  hidden_display: 'אב הוסתר ב-`display: none` — המסלול שהחלפת טאב באמת עוברת בו',
+  hidden_visibility: 'אב הוסתר ב-`visibility: hidden` — אותו דבר',
+  attribute: 'הסמן החי נושא את `data-v2-local-selection-caret`',
+};
+
+/** שם השורה לכל מבנה שנמדד בבלוק „המיקוד שנעלם מתחת לרגליים”. */
+const REMOVAL_ROW = {
+  self: 'removed_self',
+  ancestor: 'removed_ancestor',
+  display: 'hidden_display',
+  visibility: 'hidden_visibility',
 };
 
 const BLINK = 'sd-v2-local-caret-blink';
@@ -55,11 +75,16 @@ const caret = () =>
     .js(`JSON.stringify((function () {
       var shell = document.querySelector('.word-app-shell');
       var el = document.querySelector('.sd-v2-local-selection-caret');
+      var byAttr = document.querySelector('[data-v2-local-selection-caret]');
       var cs = el ? getComputedStyle(el) : null;
       return {
         hasFocus: document.hasFocus(),
         idleAttr: shell ? shell.getAttribute('data-caret-idle') : null,
         present: !!el,
+        /* shell.css מכבה את ההבהוב דרך שני בוררים, ואת השני המנוע מציב דרך
+           dataset — ההסבר המלא ליד שורת הדיווח. */
+        attr: !!byAttr,
+        attrIsSame: !!byAttr && byAttr === el,
         anim: cs ? cs.animationName : null,
         opacity: cs ? cs.opacity : null,
       };
@@ -108,6 +133,24 @@ try {
   const base = await caret();
   if (blinking(base)) report.pass(ROW.control, describe(base));
   else report.fail(ROW.control, describe(base));
+
+  /*
+   * ‏1ב. הבורר השני של shell.css, על הסמן החי.
+   *
+   * ‏`tests/contract/caret-blink.test.ts` מציב את התכונה בעצמו, ולכן הוא מודד
+   * את המפל ולא את המנוע; והשורות כאן שואלות על המחלקה. כלומר עד עכשיו שום
+   * דבר בעץ לא היה מאדים אילו המנוע היה מפסיק להציב את התכונה — והכלל
+   * ב-shell.css היה הופך לבורר מת בלי שאיש יבחין.
+   */
+  if (!base.present) {
+    report.stuck(ROW.attribute, 'אין אלמנט סמן — אין על מה למדוד');
+  } else if (base.attr && base.attrIsSame) {
+    report.pass(ROW.attribute, 'אותו אלמנט נענה גם למחלקה וגם לתכונה');
+  } else if (base.attr) {
+    report.fail(ROW.attribute, 'התכונה נמצאה על אלמנט אחר מזה שנושא את המחלקה');
+  } else {
+    report.fail(ROW.attribute, 'המנוע הפסיק להציב את התכונה — הבורר השני ב-shell.css מת');
+  }
 
   /* 2. + 3. חלון אחר */
   const comeBack = await leaveWindow();
@@ -167,6 +210,84 @@ try {
       report.skip(ROW.restored, 'אין שורת טקסט לחזור אליה');
     }
   }
+
+  /* 7. המיקוד שנעלם מתחת לרגליים */
+  /*
+   * סגירת טאב או החלפת מסמך מסירות מ-`.editor-stack` את הפאנל שבתוכו יושב
+   * משטח ההקלדה של המנוע. אם הדפדפן אינו מדווח על כך, המודול נשאר על „מהבהב”
+   * בזמן שהמיקוד כבר על `<body>` — אותו שקר בדיוק, והפעם בלי שום אירוע
+   * שיסגיר אותו.
+   *
+   * זו הסיבה שאין ב-`ui/shell/caret-focus.ts` שום משגיח DOM: נמדד כאן שהדפדפן
+   * **כן** מדווח `blur` ו-`focusout`. ‏jsdom אינו יורה את האירועים האלה, ולכן
+   * זו המדידה היחידה שאפשר לסמוך עליה, וזו הסיבה שהיא כאן ולא בבדיקת יחידה.
+   *
+   * ארבעה מבנים ולא שניים: **הסרה** היא מה שסגירת טאב עושה, אבל החלפת טאב
+   * (App.vue, `activateTab`) אינה מסירה דבר — היא מציבה `display: none` על
+   * הפאנל של הקודם. זה המסלול השכיח, והוא נמדד כאן במפורש, לצד
+   * `visibility: hidden` שגם הוא בשימוש (`.editor-stack__host--pending`).
+   *
+   * הכפיל **מוסף** לאזור המסמך ולא נלקח ממנו: הסרת משטח ההקלדה של המנוע
+   * באמצע השער הייתה משאירה את כל מה שאחריה בלי מסמך.
+   */
+  const removals = JSON.parse(
+    await app.js(`(async () => {
+      var stack = document.querySelector('.editor-stack');
+      var shell = document.querySelector('.word-app-shell');
+      if (!stack || !shell) return JSON.stringify({ error: 'אין אזור מסמך' });
+      var wait = function (ms) { return new Promise(function (r) { setTimeout(r, ms); }); };
+      var run = async function (mode) {
+        var pane = document.createElement('div');
+        var probe = document.createElement('textarea');
+        probe.style.cssText = 'position:absolute;left:-9999px;width:10px;height:10px';
+        pane.appendChild(probe);
+        stack.appendChild(pane);
+        var events = [];
+        var note = function (e) { events.push(e.type); };
+        document.addEventListener('focusin', note, true);
+        document.addEventListener('focusout', note, true);
+        probe.addEventListener('blur', note);
+        probe.focus();
+        await wait(200);
+        var idleWhileFocused = shell.getAttribute('data-caret-idle');
+        events.length = 0;
+        if (mode === 'self') probe.remove();
+        else if (mode === 'ancestor') pane.remove();
+        else if (mode === 'display') pane.style.display = 'none';
+        else pane.style.visibility = 'hidden';
+        await wait(300);
+        document.removeEventListener('focusin', note, true);
+        document.removeEventListener('focusout', note, true);
+        pane.remove();
+        return {
+          mode: mode,
+          events: events.slice(),
+          active: document.activeElement ? document.activeElement.tagName : null,
+          idleWhileFocused: idleWhileFocused,
+          idleAfter: shell.getAttribute('data-caret-idle'),
+        };
+      };
+      return JSON.stringify([await run('self'), await run('ancestor'), await run('display'), await run('visibility')]);
+    })()`),
+  );
+
+  if (removals.error) {
+    for (const key of Object.values(REMOVAL_ROW)) report.stuck(ROW[key], removals.error);
+  } else {
+    for (const row of removals) {
+      const name = ROW[REMOVAL_ROW[row.mode]];
+      const detail =
+        `אירועים: ${row.events.join(', ') || 'אין'}, activeElement=${row.active}, ` +
+        `data-caret-idle ${row.idleWhileFocused} → ${row.idleAfter}`;
+      // שתי השורות יחד: הדפדפן דיווח, **וגם** המודול הסיק מזה שאין סמן.
+      if (row.events.includes('focusout') && row.active === 'BODY' && row.idleAfter === 'true') {
+        report.pass(name, detail);
+      } else {
+        report.fail(name, detail);
+      }
+    }
+  }
+
 } finally {
   app.close();
 }

@@ -256,7 +256,15 @@ button:disabled {
 
 /* סמן כתיבה מהבהב: המנוע מכבה את ההבהוב שלו תחת `prefers-reduced-motion`,
    וב-Word הסמן מהבהב תמיד — הוא אינדיקטור מיקום ולא קישוט. ה-keyframes מוגדר
-   כאן שוב כרשת ביטחון, אם המנוע יסיר את שלו. ראו tests/contract/caret-blink. */
+   כאן שוב כרשת ביטחון, אם המנוע יסיר את שלו. ראו tests/contract/caret-blink.
+
+   שני הבוררים, ושניהם חיים. נמדד ב-Chrome על 2.15.0: אלמנט הסמן נושא גם
+   `class="sd-v2-local-selection-caret"` וגם `data-v2-local-selection-caret="true"`,
+   ו-`querySelectorAll('[data-v2-local-selection-caret]')` מחזיר אותו. חיפוש
+   המחרוזת באריזת המנוע **אינו** מוצא את התכונה, מפני שהמנוע מציב אותה דרך
+   `dataset.v2LocalSelectionCaret`; מה שכן נמצא באריזה הוא
+   `data-v2-local-selection-caret-styles`, וזו תכונה על אלמנט ה-`<style>`
+   שהמנוע מזריק — לא על הסמן. */
 .sd-v2-local-selection-caret,
 [data-v2-local-selection-caret] {
   animation: sd-v2-local-caret-blink 1.06s steps(1, end) infinite !important;

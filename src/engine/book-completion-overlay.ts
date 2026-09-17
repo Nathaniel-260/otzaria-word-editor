@@ -53,6 +53,7 @@ import {
   sliceWords,
   type SectionWordCache,
 } from './book-completion';
+import { isCaretFollowScroll } from './caret-visibility';
 import { loadAcronymDictionary } from './acronym-dictionary';
 import { looksLikeAcronym } from './acronyms';
 import { loadStaticSources } from './static-completion-dictionary';
@@ -652,7 +653,13 @@ export function installBookCompletion(
     event.stopPropagation();
     void accept();
   };
-  const onScroll = (): void => hideGhost();
+  // גלילה שהסמן גרר אחריו אינה „המשתמש גלל משם” — ראו `isCaretFollowScroll`.
+  // האירוע עצמו עובר, ולא המיכל: ההבחנה נשענת על ה-`target` שלו, ולכן גלילה
+  // של צאצא (שנשמעת כאן על שלב ה-capture) ממשיכה להסתיר את ה-ghost.
+  const onScroll = (event: Event): void => {
+    if (isCaretFollowScroll(event)) return;
+    hideGhost();
+  };
 
   container.addEventListener('input', onInput);
   container.addEventListener('keyup', onInput);
