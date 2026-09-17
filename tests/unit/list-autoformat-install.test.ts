@@ -719,6 +719,63 @@ describe('installListAutoformat — הצורות שהמנוע ממיר בעצמ�
     expect(space.defaultPrevented).toBe(false);
   });
 
+  /**
+   * רצף ההקלדה נקטע לפני הרווח: Backspace, חץ או לחיצה מאפסים את
+   * הרצף שנשמר מהמקלדת — אבל המנוע קורא את הפסקה, ולכן המיר בכל זאת
+   * (נמדד בסבב ה-QA: „1x”, Backspace, „. ” החזיר listItem עם סמן „1.”).
+   */
+  const interrupted: Array<{ name: string; run: (el: HTMLElement) => void }> = [
+    { name: 'Backspace', run: (el) => void press(el, 'Backspace') },
+    { name: 'חץ שמאלה וימינה', run: (el) => {
+      press(el, 'ArrowLeft');
+      press(el, 'ArrowRight');
+    } },
+  ];
+
+  for (const c of interrupted) {
+    it(`כבוי: ${c.name} באמצע הסימן — „1. ” עדיין נשאר טקסט`, async () => {
+      const app = await install({ enabled: false });
+      await type(app.textarea, c.name === 'Backspace' ? '1x' : '1');
+      await settle(30);
+      c.run(app.textarea);
+      await settle(30);
+      await type(app.textarea, '. ');
+      await settle();
+
+      expect(app.blocks()[0]).toMatchObject({ text: '1. ', list: false });
+      expect(named(app.calls, 'lists.create')).toHaveLength(0);
+    });
+
+    it(`כבוי: ${c.name} עם קריאות חסומות`, async () => {
+      // הקריאה מהמנוע נמדדה ב-242ms אחרי Backspace — לעיתים איטי מההקלדה.
+      // מחיקת תו ידועה מהמקלדת, ולכן אינה מחכה לשום קריאה.
+      const app = await install({ enabled: false, readsBlocked: true });
+      await type(app.textarea, c.name === 'Backspace' ? '1x' : '1');
+      await settle(30);
+      c.run(app.textarea);
+      await settle(30);
+      await type(app.textarea, '. ');
+      await settle();
+
+      // בחץ אין מה לזכור — הסמן עשוי לנוח בכל מקום — ולכן שם הקריאה היא המקור היחיד.
+      const expected =
+        c.name === 'Backspace' ? { text: '1. ', list: false } : { text: '', list: true };
+      expect(app.blocks()[0]).toMatchObject(expected);
+    });
+
+    it(`דלוק: ${c.name} באמצע הסימן — ההמרה עדיין קורית`, async () => {
+      const app = await install();
+      await type(app.textarea, c.name === 'Backspace' ? '1x' : '1');
+      await settle(30);
+      c.run(app.textarea);
+      await settle(30);
+      await type(app.textarea, '. ');
+      await settle();
+
+      expect(app.blocks()[0]).toMatchObject({ text: '', list: true });
+    });
+  }
+
   it('דלוק: „- ” מומר בידי המודול, עם המקף ולא עם תבליט המנוע', async () => {
     const app = await install();
     await type(app.textarea, '- ');
@@ -785,6 +842,38 @@ describe('installListAutoformat — Ctrl+Z מיד אחרי ההמרה', () => {
     await settle();
     expect(event.defaultPrevented).toBe(true);
     expect(app.blocks()[0]).toMatchObject({ text: `${ALEF}) `, list: false });
+  });
+
+  it('כיבוי המתג אחרי ההמרה — Ctrl+Z עדיין מחזיר אותה בהקשה אחת', async () => {
+    // עד כה המתג התקין את המודול מחדש, וקבוצת הביטול נזרקה איתו.
+    const app = await converted();
+    app.handle.setEnabled(false);
+    await settle(20);
+
+    const event = ctrl(app.textarea, 'KeyZ');
+    await settle();
+    expect(event.defaultPrevented).toBe(true);
+    expect(named(app.calls, 'history.undo')).toHaveLength(3);
+    expect(app.blocks()[0]).toMatchObject({ text: `${ALEF}) `, list: false });
+  });
+
+  it('אחרי כיבוי המתג אין המרה חדשה, וגם המנוע חסום', async () => {
+    const app = await install();
+    app.handle.setEnabled(false);
+    await settle(20);
+    await type(app.textarea, '1. ');
+    await settle();
+    expect(app.blocks()[0]).toMatchObject({ text: '1. ', list: false });
+    expect(named(app.calls, 'lists.create')).toHaveLength(0);
+  });
+
+  it('הדלקת המתג מחזירה את ההמרה', async () => {
+    const app = await install({ enabled: false });
+    app.handle.setEnabled(true);
+    await settle(20);
+    await type(app.textarea, `${ALEF}) `);
+    await settle();
+    expect(app.blocks()[0]).toMatchObject({ text: '', list: true });
   });
 
   it('אחרי הקלדה: Ctrl+Z מבטל את ההקלדה, והבא — את ההמרה כולה, כמו ב-Word', async () => {

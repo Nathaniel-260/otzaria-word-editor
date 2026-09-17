@@ -4206,7 +4206,7 @@ function onToggleListAutoformat(): void {
  * עושה בעצמו („1. ”, „- ”) — בלי זה „כבוי” לא כיבה את הצורות הנפוצות ביותר.
  */
 let listAutoformat: ReturnType<typeof installListAutoformat> | null = null;
-watch([activeEditorContainer, activeSuperdoc, listAutoformatEnabled, documentGeneration], () => {
+watch([activeEditorContainer, activeSuperdoc, documentGeneration], () => {
   listAutoformat?.dispose();
   listAutoformat = null;
   if (!activeEditorContainer.value || !activeSuperdoc.value) return;
@@ -4216,6 +4216,9 @@ watch([activeEditorContainer, activeSuperdoc, listAutoformatEnabled, documentGen
     enabled: listAutoformatEnabled.value,
   });
 });
+// המתג אינו מתקין מחדש: התקנה מחדש מאבדת את קבוצת הביטול של ההמרה
+// האחרונה, ו-Ctrl+Z אחרי כיבוי השאיר את הרשימה על המסך (נמדד בסבב ה-QA).
+watch(listAutoformatEnabled, (value) => listAutoformat?.setEnabled(value));
 
 /**
  * עד איפה מגיעים הפסים בפועל — הגובל שמחזיק את החשיפה פתוחה.

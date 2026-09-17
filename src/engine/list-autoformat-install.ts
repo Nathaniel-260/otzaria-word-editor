@@ -76,8 +76,12 @@
  * מכניס אותו במקום הסמן, לפי סדר ההקשות, **בלי** הכלל (נמדד גם בהקשות של
  * 15ms). אם המנוע אינו מטפל בו, נשלח `insertText` רגיל — הרווח לא הולך לאיבוד.
  *
- * הרווח נעצר רק כשמה שהוקלד מאז האיפוס הוא בדיוק אחת הצורות האלה: כשהמתג
- * כבוי — כולן; כשהוא דלוק — רק אלה שיש להן תוכנית כאן, כדי שההמרה תהיה שלנו.
+ * הרווח נעצר רק כשמה שלפני הסמן הוא בדיוק אחת הצורות האלה: כשהמתג כבוי —
+ * כולן; כשהוא דלוק — רק אלה שיש להן תוכנית כאן, כדי שההמרה תהיה שלנו.
+ *
+ * „מה שלפני הסמן” אינו רק מה שהוקלד מאז האיפוס: תיקון באמצע הסימן — „1x”,
+ * Backspace, „. ” — מאפס את הרצף, והמנוע המשיך להמיר גם כשהמתג כבוי (נמדד).
+ * לכן אחרי כל איפוס נקראת תחילת הפסקה מהמנוע, והזנב שהוקלד מאז מצטרף אליה.
  *
  * ## כשל
  *
@@ -215,6 +219,11 @@ export interface ListAutoformatHandle {
   undo(): boolean;
   /** „חזור”, באותו תנאי. */
   redo(): boolean;
+  /**
+   * הזזת המתג בלי להתקין מחדש — ההתקנה מחדש היתה מאבדת את קבוצת
+   * הביטול של ההמרה האחרונה, ו-Ctrl+Z אחרי כיבוי המתג השאיר רשימה על המסך (נמדד).
+   */
+  setEnabled(value: boolean): void;
   dispose(): void;
 }
 
@@ -368,7 +377,7 @@ async function historyDepth(doc: ListAutoformatDoc | null): Promise<{ undo: numb
 
 export function installListAutoformat(options: ListAutoformatOptions): ListAutoformatHandle {
   const { container, host } = options;
-  const enabled = options.enabled !== false;
+  let enabled = options.enabled !== false;
   const debug = debugHandle();
   if (debug) debug.installs += 1;
 
@@ -378,6 +387,18 @@ export function installListAutoformat(options: ListAutoformatOptions): ListAutof
   let typedWhileApplying = false;
   /** התווים מאז האיפוס, לזיהוי הצורות שהמנוע ממיר בעצמו. `null` — ארוך מדי. */
   let sinceReset: string | null = '';
+  /**
+   * תחילת הפסקה כמו שנקראה מהמנוע אחרי האיפוס האחרון. `null` — לא נקראה.
+   */
+  /**
+   * כמו `sinceReset`, אלא ש-Backspace מוחק ממנו תו במקום לאפס אותו. תיקון טעות
+   * באמצע סימן הוא המקרה השכיח של רצף שנקטע, והוא ידוע מהמקלדת בלבד —
+   * בלי להמתין לקריאה מהמנוע (שנמדדה ב-242ms אחרי Backspace).
+   */
+  let typedSince: string | null = '';
+  let resetPrefix: { blockId: string; text: string } | null = null;
+  /** כל איפוס מבטל קריאה שלא חזרה עדיין. בנפרד מ-`generation`, ששייך לסוגי הבלוקים. */
+  let prefixToken = 0;
   /** ה-`keydown` של רווח נעצר, וה-`beforeinput` שלו יוחלף. */
   let spaceArmed = false;
   const ours = new WeakSet<Event>();
@@ -453,12 +474,37 @@ export function installListAutoformat(options: ListAutoformatOptions): ListAutof
     lastTyped = null;
     inheritFrom = null;
     sinceReset = '';
+    typedSince = '';
+  }
+
+  /**
+   * הסימן שלפני הסמן, כמו שהמנוע רואה אותו. `null` — אין מה לבדוק.
+   *
+   * רצף ההקלדה לבדו אינו מספיק: תיקון באמצע הסימן — „1x”, Backspace,
+   * „.” — מאפס את `sinceReset`, והמנוע המיר בכל זאת גם כשהמתג כבוי (נמדד).
+   * לכן מה שנכתב **לפני** האיפוס נקרא מה-DOM — הוא ישן ולכן כבר מצויר —
+   * והזנב שנכתב מאז מצטרף אליו מהמקלדת. כשהסמן אינו זמין או מפגר
+   * אחרי ההקלדה — רצף ההקלדה לבדו, כמו קודם.
+   */
+  function markerBeforeCaret(at: Caret | null): string | null {
+    const typed = typedSince;
+    const known = resetPrefix;
+    if (!known || (at && at.blockId !== known.blockId)) return typed;
+    const tail = typed ?? '';
+    // הקריאה עשויה להכלול חלק מהזנב או את כולו: מחברים רק את מה שחסר.
+    let overlap = Math.min(tail.length, known.text.length);
+    while (overlap > 0 && !known.text.endsWith(tail.slice(0, overlap))) overlap -= 1;
+    return known.text + tail.slice(overlap);
   }
 
   /** האם לעצור את הרווח הזה — ההסבר בהערת הפתיחה. */
-  function interceptsSpace(): boolean {
-    if (sinceReset === null || !ENGINE_MARKER.test(sinceReset)) return false;
-    return !enabled || planListAutoformat(`${sinceReset} `) !== null;
+  function interceptsSpace(at: Caret | null): boolean {
+    const before = markerBeforeCaret(at);
+    if (before === null || !ENGINE_MARKER.test(before)) return false;
+    if (!enabled) return true;
+    // דלוק: עוצרים רק כשהמודול עצמו ימיר במקום המנוע, וההמרה שלו
+    // נשענת על רצף ההקלדה. רצף שנקטע עובר למנוע, כמו קודם.
+    return sinceReset !== null && planListAutoformat(`${sinceReset} `) !== null;
   }
 
   /** ביטולים/חזרות שנשלחו ועוד לא הסתיימו — כדי שהקשות רצופות יסתדרו בתור. */
@@ -570,6 +616,37 @@ export function installListAutoformat(options: ListAutoformatOptions): ListAutof
   function learnWhenSettled(): void {
     void caretSoon().then((at) => {
       if (at && !disposed) learnKind(at);
+    });
+  }
+
+  /**
+   * מה שכתוב בתחילת הפסקה, אחרי שרצף ההקלדה נקטע.
+   *
+   * Backspace, חץ או לחיצה מאפסים את הרצף שנשמר מהמקלדת, אבל המנוע קורא
+   * את הפסקה וממשיך להמיר (נמדד: „1x”, Backspace, „. ” — פריט רשימה עם סמן „1.”,
+   * גם כשהמתג כבוי). לכן קוראים את התחלה מהמנוע כשהוא נרגע, ועד שהיא חוזרת
+   * ההתנהגות היא הקודמת. רק סמוך לתחילת הפסקה — רחוק משם אין סימן אפשרי.
+   */
+  function learnPrefix(): void {
+    resetPrefix = null;
+    const doc = docOf(host);
+    if (!doc) return;
+    const token = (prefixToken += 1);
+    void caretSoon().then(async (first) => {
+      // הסמן זז בהיותר תו אחד באיפוס עצמו, וסימן ארוך מכאן אינו קיים.
+      if (disposed || token !== prefixToken || !first || first.offset > ENGINE_MARKER_MAX + 1) return;
+      // כל קריאה מהמנוע חוזרת רק כשהוא נרגע (סעיף 4.4 בתוכנית), ורק
+      // אחריה הסמן משקף את העריכה שהאיפוס היה חלק ממנה.
+      if ((await readPrefix(doc, first, 0)) === null) return;
+      const at = caretNow();
+      if (disposed || token !== prefixToken || !at || at.offset > ENGINE_MARKER_MAX) return;
+      if (at.offset === 0) {
+        resetPrefix = { blockId: at.blockId, text: '' };
+        return;
+      }
+      const text = await readPrefix(doc, at, at.offset);
+      if (disposed || token !== prefixToken || text === null) return;
+      resetPrefix = { blockId: at.blockId, text };
     });
   }
 
@@ -808,6 +885,7 @@ export function installListAutoformat(options: ListAutoformatOptions): ListAutof
     const waiting = pending;
     pending = null;
     startRun();
+    learnPrefix();
 
     if (!isEnter) return;
     // Enter בפריט רשימה ריק מוציא אותו מהרשימה. מפסקה רגילה — אינו משנה דבר.
@@ -851,9 +929,10 @@ export function installListAutoformat(options: ListAutoformatOptions): ListAutof
     const plain = !event.ctrlKey && !event.metaKey && !event.altKey && !event.isComposing;
 
     if (plain && [...key].length === 1) {
-      const intercept = key === ' ' && interceptsSpace();
+      const intercept = key === ' ' && interceptsSpace(at);
       onPrintable(key, at, time);
       if (sinceReset !== null) sinceReset = sinceReset.length < ENGINE_MARKER_MAX ? sinceReset + key : null;
+      if (typedSince !== null) typedSince = typedSince.length < ENGINE_MARKER_MAX ? typedSince + key : null;
       lastInputAt = time;
       if (intercept) {
         // המנוע לא יראה את ה-keydown; את ה-beforeinput מחליף `onBeforeInput`.
@@ -865,7 +944,10 @@ export function installListAutoformat(options: ListAutoformatOptions): ListAutof
     const tab = plain && key === 'Tab' && !event.shiftKey;
     const typedRun = run;
     const anchored = anchor;
+    // מה שיישאר מהסימן אחרי מחיקה של תו — `null` כשהנמחק אינו מהרצף הזה.
+    const shrunk = plain && key === 'Backspace' && typedSince ? typedSince.slice(0, -1) : null;
     onReset('key', at, time, plain && key === 'Enter' && !event.shiftKey);
+    if (plain && key === 'Backspace') typedSince = shrunk;
     if (!NAVIGATION_KEYS.has(key)) dropRedoGroup();
     if (!NAVIGATION_KEYS.has(key) && key !== 'Enter') forgetKinds();
     if (tab) onMarker(typedRun, anchored, '\t');
@@ -912,6 +994,14 @@ export function installListAutoformat(options: ListAutoformatOptions): ListAutof
   return {
     undo: () => !disposed && takeHistory('undo'),
     redo: () => !disposed && takeHistory('redo'),
+    setEnabled(value: boolean) {
+      if (disposed || value === enabled) return;
+      enabled = value;
+      // הרצף שבאמצע נכתב תחת מצב אחר; קבוצת הביטול נשמרת.
+      startRun();
+      forgetKinds();
+      learnPrefix();
+    },
     dispose() {
       disposed = true;
       if (watchTimer !== undefined) clearTimeout(watchTimer);

@@ -475,6 +475,32 @@ try {
   JSON.stringify(offBlocks) === JSON.stringify([['paragraph', '1. אבג'], ['paragraph', '- ד']])
     ? report.pass('כבוי: „1. ” ו-„- ” נשארים טקסט, והרווח במקומו', JSON.stringify(offBlocks))
     : report.fail('כבוי: „1. ” ו-„- ” נשארים טקסט, והרווח במקומו', JSON.stringify(offBlocks));
+
+  /*
+   * רצף ההקלדה נקטע לפני הרווח: תיקון טעות באמצע הסימן, או הזזת סמן
+   * וחזרה. המנוע קורא את הפסקה ולא את ההקשות, ולכן המיר בכל זאת (נמדד).
+   */
+  for (const [label, prefix, interrupt] of [
+    ['Backspace באמצע הסימן', '1x', [['Backspace', 'Backspace', 8]]],
+    ['חץ וחזרה באמצע הסימן', '1', [['ArrowLeft', 'ArrowLeft', 37], ['ArrowRight', 'ArrowRight', 39]]],
+  ]) {
+    await off.press('Enter', 'Enter', 13, 0, '\r');
+    await off.sleep(300);
+    await off.type(prefix, 90);
+    await off.sleep(400);
+    for (const [key, code, which] of interrupt) {
+      await off.press(key, code, which);
+      await off.sleep(250);
+    }
+    await off.type('. ט', 90);
+    await off.sleep(1800);
+    const blocks = await offParagraph();
+    const last = blocks[blocks.length - 1];
+    console.log(`כבוי — ${label}: ${JSON.stringify(last)}`);
+    JSON.stringify(last) === JSON.stringify(['paragraph', '1. ט'])
+      ? report.pass(`כבוי: ${label} — „1. ” נשאר טקסט`, JSON.stringify(last))
+      : report.fail(`כבוי: ${label} — „1. ” נשאר טקסט`, JSON.stringify(last));
+  }
 } finally {
   off.close();
 }
