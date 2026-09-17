@@ -1,9 +1,10 @@
 /**
- * שער: הריצות העבריות יוצאות לקובץ עם `<w:rtl/>`.
+ * שער: תו ניטרלי שסוגר פסקה עברית יוצא לקובץ עם RLM אחריו.
  *
- * מה שדווח: „הנקודה שבסוף הפסקה מוצגת בתחילת השורה”. המנוע כותב ריצות עבריות
- * בלי ההצהרה, ו-Word — שקובע כיוון לפי ההצהרה ולא לפי התווים — מציב תו ניטרלי
- * בקצה ההתחלה של הפסקה. ראו engine/docx-run-direction.ts, ו-issue 4011 למעלה.
+ * מה שדווח: „הנקודה שבסוף הפסקה מוצגת בתחילת השורה”. תו ניטרלי אינו נושא כיוון
+ * משלו, ובריצה שהמנוע כתב Word פותר אותו כשמאל-לימין ומציב אותו בקצה ההתחלה
+ * של הפסקה. ראו engine/docx-neutral-mark.ts — שם גם המדידה שפסלה את הגישה
+ * הקודמת (`<w:rtl/>`), ו-issue 4011 למעלה.
  *
  * ## למה השער הזה אינו יכול להשתמש ב-`app.docx()`
  *
@@ -13,15 +14,19 @@
  * (`fetch(uploadUrl, {method:'PUT'})`) וקורא את הבייטים שנשלחו — אותם בייטים
  * בדיוק שהמשתמש מקבל בקובץ.
  *
- * וזאת גם הבקרה: אותו מסמך דרך `app.docx()` חייב לצאת **בלי** אף `w:rtl`. שער
+ * וזאת גם הבקרה: אותו מסמך דרך `app.docx()` חייב לצאת **בלי** אף RLM. שער
  * ששתי הקריאות בו נותנות אותו דבר אינו מודד את השלב שלנו אלא את המנוע.
  *
- * ושני דברים נוספים שנכתבים באותה שמירה:
- *   - **ריצה מעורבת מפוצלת.** „מילה Word בעברית.” כריצה אחת יצאה בלי הצהרה,
- *     ו-Word הציג אותה הפוכה. בקובץ שנשמר היא חייבת להיות כמה ריצות: הלטינית
- *     בלי `w:rtl`, והעבריות איתה.
- *   - **nsid ייחודי.** רשימה עברית שנוצרה בהקלדה ירשה את ה-nsid של ההגדרה
- *     העשרונית, ו-Word הציג אותה כ-„1. 2.”.
+ * ## ומה שנמדד כאן הוא גם מה ש**לא** קורה
+ *
+ * שתי שורות בשער אינן על התיקון אלא על גבולותיו, והן החשובות שבו: פסקה
+ * מודגשת חייבת לצאת עם ה-`rPr` שלה **כפי שהייתה** — בלי `w:rtl`, בלי `w:bCs`
+ * ובלי `w:szCs` — ופסקה שיש בה מילה לועזית חייבת לצאת באותו מספר ריצות. שתיהן
+ * נכשלו בגישה הקודמת, ושתיהן הן מה שהפך אותה לאובדן עיצוב. ראו את הטבלה
+ * ב-`docx-neutral-mark.ts`.
+ *
+ * ובאותה שמירה נבדק גם **nsid ייחודי**: רשימה עברית שנוצרה בהקלדה ירשה את
+ * ה-nsid של ההגדרה העשרונית, ו-Word הציג אותה כ-„1. 2.”.
  *
  * הרצה:  node scripts/qa/rtl-run-export-qa.mjs   (QA_PORT דורס 9387)
  */
@@ -30,6 +35,9 @@ import { buildDocx, numberingXml } from './docx-fixtures.mjs';
 
 const RTL = '<w:bidi/>';
 
+/** ‏U+200F, חסר רוחב. */
+const RLM = '‏';
+
 /** פסקה עברית שהנקודה שלה היא ריצה בפני עצמה — הצורה שהמנוע כותב. */
 const HEBREW_PARA =
   `<w:p><w:pPr>${RTL}</w:pPr>` +
@@ -37,10 +45,10 @@ const HEBREW_PARA =
   `<w:r><w:t xml:space="preserve">.</w:t></w:r>` +
   `</w:p>`;
 
-/** פסקה עברית מודגשת — כאן נמדדת מראת הכתב המורכב. */
+/** פסקה עברית מודגשת — כאן נמדד שה-`rPr` יוצאת כמות שהיא. */
 const BOLD_PARA =
   `<w:p><w:pPr>${RTL}</w:pPr>` +
-  `<w:r><w:rPr><w:b/></w:rPr><w:t xml:space="preserve">כותרת מודגשת</w:t></w:r>` +
+  `<w:r><w:rPr><w:b/><w:sz w:val="36"/></w:rPr><w:t xml:space="preserve">כותרת מודגשת.</w:t></w:r>` +
   `</w:p>`;
 
 /** משפט עברי עם מילה לועזית, כריצה אחת — כמו שהעורך כותב אותו. */
@@ -65,7 +73,7 @@ const LATIN_PARA =
   `<w:r><w:t xml:space="preserve">.</w:t></w:r>` +
   `</w:p>`;
 
-const report = createReport('ריצות עבריות יוצאות עם w:rtl', { strict: true });
+const report = createReport('תו ניטרלי סוגר יוצא עם RLM', { strict: true });
 const app = await openApp({ name: 'rtl-run-export', port: Number(process.env.QA_PORT ?? 9387) });
 
 /** מיירט את ההעלאה ושומר את הבייטים שנשלחו. */
@@ -107,19 +115,24 @@ async function openDocx(buffer, name) {
   return app.js("document.querySelector('.doc-title-input')?.value");
 }
 
-/** הפסקאות של `document.xml`: הטקסט, וכמה מריצותיהן נושאות `w:rtl`. */
+/** הפסקאות של `document.xml`, וכל מה שהשער שואל עליהן. */
 function paragraphsOf(xml) {
   const body = xml.slice(xml.indexOf('<w:body'));
   return (body.match(/<w:p[ >][\s\S]*?<\/w:p>/g) ?? []).map((para) => {
     const pPr = (para.match(/<w:pPr>[\s\S]*?<\/w:pPr>/) ?? [''])[0];
     const runs = para.replace(pPr, '').match(/<w:r[ >][\s\S]*?<\/w:r>/g) ?? [];
+    const text = (para.match(/<w:t[^>]*>[\s\S]*?<\/w:t>/g) ?? [])
+      .map((t) => t.replace(/<[^>]+>/g, ''))
+      .join('');
     return {
-      text: (para.match(/<w:t[^>]*>[\s\S]*?<\/w:t>/g) ?? [])
-        .map((t) => t.replace(/<[^>]+>/g, ''))
-        .join(''),
+      text,
+      plain: text.split(RLM).join(''),
+      marks: (text.match(new RegExp(RLM, 'g')) ?? []).length,
+      endsMarked: text.replace(/\s+$/u, '').endsWith(RLM),
       runs: runs.length,
+      // מה שהגישה הקודמת הוסיפה, וכאן חייב להישאר אפס.
       rtl: runs.filter((run) => /<w:rtl\s*\/?>/.test(run)).length,
-      boldCs: /<w:bCs\s*\/?>/.test(para),
+      cs: /<w:bCs\s*\/?>|<w:szCs\b|<w:iCs\s*\/?>|\sw:cs=/.test(para),
     };
   });
 }
@@ -135,13 +148,13 @@ try {
   } else {
     /* בקרה: פלט המנוע עצמו, לפני השלב שלנו. */
     const engine = paragraphsOf((await app.docx())['word/document.xml'] ?? '');
-    const engineRtl = engine.reduce((sum, para) => sum + para.rtl, 0);
-    if (engineRtl === 0) {
-      report.pass('בקרה — המנוע עצמו אינו כותב w:rtl', `${engine.length} פסקאות, 0 ריצות מוצהרות`);
+    const engineMarks = engine.reduce((sum, para) => sum + para.marks, 0);
+    if (engineMarks === 0) {
+      report.pass('בקרה — המנוע עצמו אינו כותב RLM', `${engine.length} פסקאות, 0 סימנים`);
     } else {
       report.fail(
-        'בקרה — המנוע עצמו אינו כותב w:rtl',
-        `${engineRtl} ריצות כבר מוצהרות — השער אינו מודד את השלב שלנו`,
+        'בקרה — המנוע עצמו אינו כותב RLM',
+        `${engineMarks} סימנים כבר בפלט המנוע — השער אינו מודד את השלב שלנו`,
       );
     }
 
@@ -161,6 +174,12 @@ try {
       const { x, y } = JSON.parse(line);
       await app.clickAt(x, y);
       await app.sleep(500);
+      // ‏Home לפני ההקלדה, ובכוונה: הלחיצה נופלת במרכז **תיבת השורה**, ובפסקה
+      // עברית קצרה המרכז הזה יושב בשטח הריק שמשמאל לטקסט — כלומר בקצה הלוגי,
+      // אחרי הנקודה. תו שנכנס שם הופך את התו המכריע האחרון לאות, והפסקה יוצאת
+      // מהכלל שהשער בא למדוד: הוא היה נכשל על מיקום הסמן ולא על התיקון.
+      await app.press('Home', 'Home', 36);
+      await app.sleep(200);
       await app.type('א');
       await app.sleep(900);
       // רשימה עברית מזיהוי ההקלדה, בפסקה חדשה — בשביל בדיקת ה-nsid.
@@ -178,54 +197,58 @@ try {
       } else {
         const parts = unzip(Buffer.from(saved, 'base64'));
         const paragraphs = paragraphsOf(parts['word/document.xml'] ?? '');
-        const hebrew = paragraphs.find((para) => para.text.startsWith('שלום עולם'));
-        const bold = paragraphs.find((para) => para.text.startsWith('כותרת'));
-        const latin = paragraphs.find((para) => para.text.startsWith('hello'));
+        const hebrew = paragraphs.find((para) => para.plain.includes('שלום עולם'));
+        const bold = paragraphs.find((para) => para.plain.startsWith('כותרת'));
+        const mixed = paragraphs.find((para) => para.plain.includes('Word'));
+        const latin = paragraphs.find((para) => para.plain.startsWith('hello'));
 
-        if (!hebrew) report.fail('הפסקה העברית', 'לא נמצאה בקובץ שנשמר');
-        else if (hebrew.rtl === hebrew.runs)
-          report.pass('כל ריצות הפסקה העברית מוצהרות', `${hebrew.rtl}/${hebrew.runs}`);
+        /* התיקון עצמו — הבאג שדווח. */
+        if (!hebrew) report.fail('הנקודה הסוגרת', 'הפסקה העברית לא נמצאה בקובץ שנשמר');
+        else if (hebrew.endsMarked && hebrew.marks === 1)
+          report.pass('הנקודה הסוגרת קיבלה RLM', JSON.stringify(hebrew.text));
         else
           report.fail(
-            'כל ריצות הפסקה העברית מוצהרות',
-            `${hebrew.rtl}/${hebrew.runs} — הריצה שנשארה היא זו שהנקודה בתוכה`,
+            'הנקודה הסוגרת קיבלה RLM',
+            `סימנים=${hebrew.marks}, בסוף=${hebrew.endsMarked} — ${JSON.stringify(hebrew.text)}`,
           );
 
-        if (!bold) report.fail('מראת ההדגשה', 'הפסקה המודגשת לא נמצאה');
-        else if (bold.rtl > 0 && bold.boldCs)
-          report.pass('מראת ההדגשה', 'ריצה מודגשת קיבלה w:rtl וגם w:bCs');
+        /* הגבול: העיצוב יוצא כמות שהוא. זו השורה שהגישה הקודמת נכשלה בה. */
+        if (!bold) report.fail('העיצוב אינו נגע', 'הפסקה המודגשת לא נמצאה');
+        else if (bold.endsMarked && bold.rtl === 0 && !bold.cs)
+          report.pass('העיצוב אינו נגע', 'ריצה מודגשת קיבלה RLM, וה-rPr שלה כמות שהיא');
         else
           report.fail(
-            'מראת ההדגשה',
-            `rtl=${bold.rtl}, bCs=${bold.boldCs} — בלי bCs ההדגשה נעלמת ב-Word`,
+            'העיצוב אינו נגע',
+            `בסוף=${bold.endsMarked}, rtl=${bold.rtl}, כתב-מורכב=${bold.cs} — סימון w:rtl או מראה מוחקים עיצוב ב-Word`,
           );
 
-        const documentXml = parts['word/document.xml'] ?? '';
-        const mixed = (documentXml.match(/<w:p[ >][\s\S]*?<\/w:p>/g) ?? []).find((para) => para.includes('Word'));
-        const mixedRuns = (mixed?.match(/<w:r[ >][\s\S]*?<\/w:r>/g) ?? []).map((run) => ({
-          text: (run.match(/<w:t[^>]*>([^<]*)<\/w:t>/) ?? [])[1] ?? '',
-          rtl: /<w:rtl\s*\/>/.test(run),
-        }));
-        console.log('הפסקה המעורבת:', JSON.stringify(mixedRuns));
-        const latinRun = mixedRuns.find((run) => run.text.includes('Word'));
-        const hebrewRuns = mixedRuns.filter((run) => /[א-ת]/.test(run.text));
-        if (!mixed) report.fail('ריצה מעורבת', 'הפסקה לא נמצאה בקובץ שנשמר');
-        else if (latinRun && !latinRun.rtl && latinRun.text.trim() === 'Word' && hebrewRuns.length >= 2 && hebrewRuns.every((run) => run.rtl))
-          report.pass('ריצה מעורבת מפוצלת לפי כיוון', mixedRuns.map((run) => `${run.rtl ? 'R' : 'L'}:${run.text}`).join(' | '));
-        else report.fail('ריצה מעורבת מפוצלת לפי כיוון', JSON.stringify(mixedRuns));
+        /* הגבול השני: מבנה הריצות אינו משתנה. */
+        if (!mixed) report.fail('הריצה אינה מפוצלת', 'הפסקה המעורבת לא נמצאה');
+        else if (mixed.runs === 1 && mixed.endsMarked && mixed.rtl === 0)
+          report.pass('הריצה אינה מפוצלת', `ריצה אחת, RLM בסופה: ${JSON.stringify(mixed.text)}`);
+        else
+          report.fail(
+            'הריצה אינה מפוצלת',
+            `ריצות=${mixed.runs}, בסוף=${mixed.endsMarked}, rtl=${mixed.rtl}`,
+          );
 
         const numbering = parts['word/numbering.xml'] ?? '';
-        const nsids = [...numbering.matchAll(/<w:abstractNum\b[\s\S]*?<w:nsid w:val="([^"]+)"/g)].map((m) => m[1].toUpperCase());
+        const nsids = [...numbering.matchAll(/<w:abstractNum\b[\s\S]*?<w:nsid w:val="([^"]+)"/g)].map((m) =>
+          m[1].toUpperCase(),
+        );
         const hebrewList = /<w:numFmt w:val="hebrew1"/.test(numbering);
         console.log('nsid:', JSON.stringify(nsids), 'hebrew1:', hebrewList);
         if (!hebrewList) report.fail('nsid ייחודי', 'הרשימה העברית לא נכתבה — אין מה לבדוק');
-        else if (nsids.length < 2) report.fail('nsid ייחודי', `פחות משתי הגדרות עם nsid (${nsids.length}) — הבדיקה אינה מודדת דבר`);
-        else if (new Set(nsids).size === nsids.length) report.pass('nsid ייחודי לכל הגדרת מספור', nsids.join(','));
+        else if (nsids.length < 2)
+          report.fail('nsid ייחודי', `פחות משתי הגדרות עם nsid (${nsids.length}) — הבדיקה אינה מודדת דבר`);
+        else if (new Set(nsids).size === nsids.length)
+          report.pass('nsid ייחודי לכל הגדרת מספור', nsids.join(','));
         else report.fail('nsid ייחודי לכל הגדרת מספור', `כפולים: ${nsids.join(',')}`);
 
-        if (!latin) report.fail('הפסקה הלטינית', 'לא נמצאה בקובץ שנשמר');
-        else if (latin.rtl === 0) report.pass('הפסקה הלטינית לא נגעה', `${latin.runs} ריצות, 0 מוצהרות`);
-        else report.fail('הפסקה הלטינית לא נגעה', `${latin.rtl} ריצות סומנו בטעות`);
+        if (!latin) report.fail('הפסקה הלטינית לא נגעה', 'לא נמצאה בקובץ שנשמר');
+        else if (latin.marks === 0 && latin.rtl === 0)
+          report.pass('הפסקה הלטינית לא נגעה', `${latin.runs} ריצות, 0 סימנים`);
+        else report.fail('הפסקה הלטינית לא נגעה', `סימנים=${latin.marks}, rtl=${latin.rtl}`);
       }
     }
   }
