@@ -105,6 +105,35 @@ const LONE_LETTER_PAINTED = [
   952.6,
 ];
 
+/**
+ * „שלוש × ארבע שווה”, ‏pm 1..17, ו„חמש ÷ שתיים”, ‏pm 18..29 — סימן **בודד**
+ * בין שני רווחים, כמו האי של תו אחד שלמעלה, אבל מסוג אחר: `×` ו-`÷` הם
+ * ניטרליים (ON) ב-UBA, ולכן הדפדפן מצייר אותם בכיוון הפסקה. התיבה של הסימן
+ * נוגעת בשכנותיה **בצד הימני** משני הצדדים, שני התפרים שלו מצוירים ב-x שונה
+ * (617.8 ו-608.8), ואין כאן שום נקודה עיוורת שצריך לעקוף.
+ *
+ * נמדד ב-Chrome על ה-dist (superdoc 2.15.0) ב-`scratchpad/measure-neutral.mjs`,
+ * באותה שיטה: התיבות מ-`Range.getBoundingClientRect`, וה-x המצויר מהצבת
+ * `setSelectionTarget` בכל היסט בתורו.
+ */
+const TIMES_SIGN = lettered(1, 'שלוש × ארבע שווה', [
+  [642.9, 652.7], [636, 643], [631.6, 636], [621.8, 631.6], [617.8, 621.8],
+  [608.8, 617.8], [604.8, 608.8], [597.1, 604.8], [589.6, 597.1], [582.3, 589.6],
+  [575, 582.3], [571, 575], [561.3, 571], [556.8, 561.3], [552.3, 556.8], [544.8, 552.4],
+]);
+const TIMES_SIGN_PAINTED = [
+  652.7, 642.9, 636, 631.6, 621.8, 617.8, 608.8, 604.8, 597.1, 589.6, 582.3, 575, 571, 561.3,
+  556.8, 552.3, 544.8,
+];
+
+const DIVISION_SIGN = lettered(18, 'חמש ÷ שתיים', [
+  [645.1, 652.7], [637.3, 645.1], [627.5, 637.3], [623.5, 627.6], [614.8, 623.6],
+  [610.8, 614.8], [601, 610.8], [593, 601], [588.7, 593], [584.5, 588.8], [576.4, 584.5],
+]);
+const DIVISION_SIGN_PAINTED = [
+  652.7, 645.1, 637.3, 627.5, 623.5, 614.8, 610.8, 601, 593, 588.7, 584.5, 576.4,
+];
+
 const pmsOf = (slots: readonly CaretSlot[]) => slots.map((s) => s.pm);
 const xOf = (slots: readonly CaretSlot[], pm: number) => slots.find((s) => s.pm === pm)?.x;
 
@@ -168,32 +197,50 @@ describe('caretSlots', () => {
   });
 });
 
-describe('אי של תו אחד', () => {
-  /**
-   * הקשה אחר הקשה, מול מה שהמנוע באמת מצייר: נקודת המוצא של כל הקשה היא ה-x
-   * המצויר של ההיסט הנוכחי, בדיוק כמו ב-`installRtlVisualArrows`.
-   */
-  function hold(
-    chars: readonly PaintedChar[],
-    painted: readonly number[],
-    base: number,
-    from: number,
-    toRight: boolean,
-  ): number[] {
-    const slots = caretSlots(chars, true);
-    const visited = [from];
-    let offset = from;
-    for (let step = 0; step < chars.length + 2; step += 1) {
-      const target = visualTarget(slots, painted[offset]!, toRight);
-      if (!target) break;
-      const next = target.pm - base;
-      if (next === offset) break;
-      visited.push(next);
-      offset = next;
-    }
-    return visited;
+/**
+ * הקשה אחר הקשה, מול מה שהמנוע באמת מצייר: נקודת המוצא של כל הקשה היא ה-x
+ * המצויר של ההיסט הנוכחי, בדיוק כמו ב-`installRtlVisualArrows`.
+ */
+function hold(
+  chars: readonly PaintedChar[],
+  painted: readonly number[],
+  base: number,
+  from: number,
+  toRight: boolean,
+): number[] {
+  const slots = caretSlots(chars, true);
+  const visited = [from];
+  let offset = from;
+  for (let step = 0; step < chars.length + 2; step += 1) {
+    const target = visualTarget(slots, painted[offset]!, toRight);
+    if (!target) break;
+    const next = target.pm - base;
+    if (next === offset) break;
+    visited.push(next);
+    offset = next;
   }
+  return visited;
+}
 
+/** הליכה מכל היסט, בשני הכיוונים: בלי ביקור חוזר, וכל צעד מתקדם על המסך. */
+function expectWalksForward(
+  chars: readonly PaintedChar[],
+  painted: readonly number[],
+  base: number,
+): void {
+  for (let from = 0; from < painted.length; from += 1) {
+    for (const toRight of [true, false]) {
+      const visited = hold(chars, painted, base, from, toRight);
+      expect(new Set(visited).size, `ביקור חוזר מ-${from}`).toBe(visited.length);
+      for (let i = 1; i < visited.length; i += 1) {
+        const dx = painted[visited[i]!]! - painted[visited[i - 1]!]!;
+        expect(toRight ? dx : -dx, `צעד ${visited[i - 1]}→${visited[i]}`).toBeGreaterThan(0.5);
+      }
+    }
+  }
+}
+
+describe('אי של תו אחד', () => {
   const cases = [
     { name: 'ספרה', chars: LONE_DIGIT, painted: LONE_DIGIT_PAINTED, base: 1, island: 5 },
     { name: 'אות לטינית', chars: LONE_LETTER, painted: LONE_LETTER_PAINTED, base: 36, island: 4 },
@@ -216,16 +263,42 @@ describe('אי של תו אחד', () => {
     it(`${c.name} בודדת: החזקת חץ מכל היסט מתקדמת על המסך בכל הקשה, בלי לחזור`, () => {
       // זה ה„נתקע” שנמדד: שני התפרים מצוירים באותו x, והקשה אחת החזירה את
       // הסמן לתפר השני במקום לעבור את התו.
-      for (let from = 0; from < c.painted.length; from += 1) {
-        for (const toRight of [true, false]) {
-          const visited = hold(c.chars, c.painted, c.base, from, toRight);
-          expect(new Set(visited).size, `ביקור חוזר מ-${from}`).toBe(visited.length);
-          for (let i = 1; i < visited.length; i += 1) {
-            const dx = c.painted[visited[i]!]! - c.painted[visited[i - 1]!]!;
-            expect(toRight ? dx : -dx, `צעד ${visited[i - 1]}→${visited[i]}`).toBeGreaterThan(0.5);
-          }
-        }
-      }
+      expectWalksForward(c.chars, c.painted, c.base);
+    });
+  }
+});
+
+describe('סימן ניטרלי אינו אי לועזי', () => {
+  const cases = [
+    { name: '×', chars: TIMES_SIGN, painted: TIMES_SIGN_PAINTED, base: 1, sign: 5 },
+    { name: '÷', chars: DIVISION_SIGN, painted: DIVISION_SIGN_PAINTED, base: 18, sign: 4 },
+  ];
+
+  for (const c of cases) {
+    it(`${c.name} נשאר בכיוון השורה — הגאומטריה כבר הכריעה`, () => {
+      expect(charDirections(c.chars, true).every((rtl) => rtl), 'כל השורה ימנית').toBe(true);
+    });
+
+    it(`שני התפרים של ${c.name} נשארים יעד, כל אחד ב-x שלו`, () => {
+      const slots = caretSlots(c.chars, true);
+      const before = c.base + c.sign;
+      expect(pmsOf(slots)).toContain(before);
+      expect(pmsOf(slots)).toContain(before + 1);
+      // עיגול תת-פיקסל מפריד את קצה התיבה מה-x המצויר ב-0.1, כמו בקיבועים שלמעלה.
+      expect(xOf(slots, before)!).toBeCloseTo(c.painted[c.sign]!, 0);
+      expect(xOf(slots, before + 1)!).toBeCloseTo(c.painted[c.sign + 1]!, 0);
+      expect(
+        Math.abs(xOf(slots, before)! - xOf(slots, before + 1)!),
+        'שני תפרים נפרדים, ולא שניהם באותו x כמו באי של תו אחד',
+      ).toBeGreaterThan(0.5);
+    });
+
+    it(`החזקת חץ עוברת דרך ${c.name} תו-תו, בלי לדלג`, () => {
+      expectWalksForward(c.chars, c.painted, c.base);
+      // דילוג היה נראה כצעד יחיד שחוצה שני היסטים; כאן כל היסט הוא תחנה.
+      expect(hold(c.chars, c.painted, c.base, c.sign - 1, false).slice(0, 3)).toEqual([
+        c.sign - 1, c.sign, c.sign + 1,
+      ]);
     });
   }
 });

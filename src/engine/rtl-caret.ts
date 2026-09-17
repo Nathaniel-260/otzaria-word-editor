@@ -131,10 +131,29 @@ export interface CaretSlot {
 const TOUCH = 0.6;
 
 /**
- * תווים שהדפדפן מסדר תמיד משמאל לימין: אותיות לטיניות, יווניות וקיריליות,
- * וספרות (גם הערביות-הודיות). זו תכונה של התו ב-UBA, ולא הצהרה של המסמך.
+ * מערכות כתב שנקראות מימין לשמאל. אות שלהן היא R או AL ב-UBA.
  */
-const LTR_INTRINSIC = /[0-9A-Za-zÀ-ɏͰ-ϿЀ-ӿ٠-٩۰-۹]/;
+const RTL_SCRIPT =
+  /[\p{Script=Hebrew}\p{Script=Arabic}\p{Script=Syriac}\p{Script=Thaana}\p{Script=Nko}\p{Script=Samaritan}\p{Script=Mandaic}\p{Script=Adlam}]/u;
+
+/** ספרה — EN או AN ב-UBA, ובשני המקרים נקראת משמאל לימין גם בשורה עברית. */
+const DIGIT = /\p{Nd}/u;
+
+/** אות — כולל סימני ניקוד שמצטרפים לאות (Other_Alphabetic). */
+const LETTER = /\p{Alphabetic}/u;
+
+/**
+ * האם הדפדפן מסדר את התו הזה משמאל לימין גם בתוך שורה עברית.
+ *
+ * ספרה, או אות שאינה ממערכת כתב ימנית — כן. סימן — לא: ב-UBA הוא ניטרלי (ON),
+ * הדפדפן מצייר אותו בכיוון הפסקה, ושני התפרים שלו נמצאים ב-x שונה — זו
+ * אינה הנקודה העיוורת שלמטה, וקיפול שלהם מוחק מקום נגיש. נמדד: ב-„שלוש × ארבע” ההיסטים
+ * 5 ו-6 מצוירים ב-1008.5 ו-999.4, וסיווג של × כלועזי הקפיץ את החץ מ-4 ישר ל-7.
+ */
+function isLtrIntrinsic(ch: string): boolean {
+  if (ch === '') return false;
+  return DIGIT.test(ch) || (LETTER.test(ch) && !RTL_SCRIPT.test(ch));
+}
 
 /**
  * הכיוון של כל תו.
@@ -169,7 +188,7 @@ export function charDirections(chars: readonly PaintedChar[], lineRtl: boolean):
   }
 
   return dirs.map((value, i) => {
-    if (value !== false && LTR_INTRINSIC.test(chars[i]!.ch ?? '')) return false;
+    if (value !== false && isLtrIntrinsic(chars[i]!.ch ?? '')) return false;
     return value ?? lineRtl;
   });
 }

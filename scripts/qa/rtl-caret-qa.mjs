@@ -114,6 +114,8 @@ const BODY = [
   p1('plain latin paragraph', '', ''),
   p1('סעיף 3 בחוק הזה', RTL),
   pRuns([{ t: 'אות ', rPr: '<w:rtl/>' }, { t: 'a', rPr: '' }, { t: ' אחת בלבד', rPr: '<w:rtl/>' }], RTL),
+  p1('שלוש × ארבע שווה', RTL),
+  p1('חמש ÷ שתיים', RTL),
   p1('לפני הטבלה 4', RTL),
   table(p1('תוך התא', RTL)),
   p1('אחרי הטבלה 5', RTL),
@@ -389,6 +391,33 @@ try {
       report.fail(c.label, `מלכודת גבול: ${loops} חזרות לאותו היסט`);
     } else {
       report.pass(c.label, `${r.moved} צעדים ימינה, ${l.moved} שמאלה, אף אחד לכיוון ההפוך`);
+    }
+  }
+
+  /* -------- סימן ניטרלי: החץ עובר דרכו תו-תו, בלי לדלג -------- */
+  /*
+   * `×` ו-`÷` הם ON ב-UBA — הדפדפן מצייר אותם בכיוון הפסקה, ולכן שני
+   * התפרים שלהם נמצאים ב-x שונה ושניהם יעדים. זו אינה הנקודה העיוורת של אי
+   * של תו אחד, וקיפול שלהם מוחק מקום נגיש: כל הצעדים חייבים להיות של היסט אחד.
+   */
+  for (const [label, find] of [
+    ['סימן כפל', 'שלוש × ארבע שווה'],
+    ['סימן חלוק', 'חמש ÷ שתיים'],
+  ]) {
+    try {
+      const steps = [await caretEdge(find, 'right'), ...(await walk('ArrowLeft', 8))];
+      console.log(`\n== ${label}: ${trace(steps)}`);
+      const jumps = [];
+      for (let i = 1; i < steps.length; i += 1) {
+        if (steps[i].block !== steps[i - 1].block) continue;
+        const delta = steps[i].off - steps[i - 1].off;
+        if (delta !== 1) jumps.push(`${steps[i - 1].off}→${steps[i].off}`);
+      }
+      jumps.length
+        ? report.fail(`${label} — החץ דילג`, `צעדים שאינם היסט אחד: ${jumps.join(', ')}`)
+        : report.pass(`${label} — תו-תו`, `${steps.length - 1} הקשות, כל אחת היסט אחד`);
+    } catch (error) {
+      report.stuck(label, String(error.message || error).slice(0, 90));
     }
   }
 
