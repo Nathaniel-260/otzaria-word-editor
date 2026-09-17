@@ -3723,11 +3723,14 @@ async function onExportOtzaria(): Promise<void> {
  */
 function onUndo(): void {
   pageBreakTracker.forgetAllKeepingSnapshot();
+  // מיד אחרי זיהוי רשימה — הביטול שלה הוא צעד אחד, כמו ב-Ctrl+Z.
+  if (listAutoformat?.undo()) return;
   void runShortcutCommand('undo');
 }
 
 function onRedo(): void {
   if (!pageBreakTracker.restoreSnapshot()) pageBreakTracker.forgetAll();
+  if (listAutoformat?.redo()) return;
   void runShortcutCommand('redo');
 }
 
@@ -4198,15 +4201,19 @@ function onToggleListAutoformat(): void {
  *
  * בלי `CommandAdapter`, בשונה מתפריט המספור: המודול קורא ל-`lists.create`
  * ישירות, וזו פעולה מכוונת ולא טוגל — ראו ההנמקה ב-`apply` שם.
+ *
+ * מותקן **גם כשהמתג כבוי**: אז הוא אינו ממיר דבר, ורק חוסם את ההמרות שהמנוע
+ * עושה בעצמו („1. ”, „- ”) — בלי זה „כבוי” לא כיבה את הצורות הנפוצות ביותר.
  */
 let listAutoformat: ReturnType<typeof installListAutoformat> | null = null;
 watch([activeEditorContainer, activeSuperdoc, listAutoformatEnabled, documentGeneration], () => {
   listAutoformat?.dispose();
   listAutoformat = null;
-  if (!listAutoformatEnabled.value || !activeEditorContainer.value || !activeSuperdoc.value) return;
+  if (!activeEditorContainer.value || !activeSuperdoc.value) return;
   listAutoformat = installListAutoformat({
     container: activeEditorContainer.value,
     host: activeSuperdoc.value,
+    enabled: listAutoformatEnabled.value,
   });
 });
 

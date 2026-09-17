@@ -41,11 +41,43 @@
  * `lists.create` יוצר ישר בסגנון המבוקש, ואינו טוגל — ולכן גם אינו מסרב על
  * פריט רשימה קיים: נמדד שהוא מנתק אותו לרשימה חדשה. מכאן בדיקת סוג הבלוק.
  *
- * ## הביטול שייך למנוע
+ * ## Backspace שייך למנוע
  *
  * Backspace בתחילת פריט מסיר את הרשימה ומשאיר את הטקסט
- * (`scripts/qa/list-backspace-owner-probe.mjs`). המודול **צופה** ב-`keydown`
- * ואינו מונע, עוצר או מטפל באף מקש.
+ * (`scripts/qa/list-backspace-owner-probe.mjs`), ולכן המודול אינו נוגע בו.
+ *
+ * ## Ctrl+Z מיד אחרי ההמרה — צעד אחד, כמו ב-Word
+ *
+ * ההמרה היא שלושה צעדי היסטוריה (נמדד, לכל סוג: המחיקה, יצירת הרשימה, והסגנון).
+ * בלי קיבוץ, Ctrl+Z הראשון הציג רשימה **עשרונית** „1.”, השני פסקה ריקה, ורק
+ * השלישי החזיר את „א) ”. ב-Word הקשה אחת מחזירה את הטקסט. לכן העומק נמדד
+ * לפני ההמרה ואחריה (`history.get` עונה תוך ‎~1ms גם באמצע הקלדה — נמדד),
+ * וכשהביטול מגיע לאותו עומק — מיד, או אחרי שבוטלה ההקלדה שבאה אחריה — שלושת
+ * הצעדים מתבטלים יחד. שלוש קריאות `undo` שנשלחות יחד מסתיימות ב-‎~85ms בלי
+ * שהסמן העשרוני יצויר בדרך (נמדד). ‏Ctrl+Y מחזיר את ההמרה באותה צורה.
+ *
+ * כל עוד יש המרה כזו בהיסטוריה, Ctrl+Z/Ctrl+Y עוברים כאן: ההחלטה אם לקבץ
+ * תלויה בעומק, והעומק נקרא רק בקריאה א-סינכרונית — מאוחר מכדי להחליט אם לתת
+ * למקש להמשיך. ביטול שאינו מגיע לעומק הזה הוא צעד אחד, דרך אותה היסטוריה.
+ * הקבוצה נזרקת כשההיסטוריה ירדה מתחתיה (בוטלה בדרך אחרת) או התרחקה ממנה
+ * יותר מ-`GROUP_HORIZON` צעדים.
+ *
+ * ## הצורות שהמנוע ממיר בעצמו
+ *
+ * המנוע ממיר בעצמו „- ”, „* ”, „+ ” ו-„N. ” לכל מספר (נמדד, בלי המודול). שני
+ * דברים יוצאים מזה: המתג „כבוי” לא כיבה אותן — מי שכותב „1. ” כטקסט לא קיבל את
+ * מה שהמתג הבטיח — ובמצב „פעיל” „- ” יצא `•` של המנוע ולא ה-`-` המתועד כאן.
+ *
+ * אין הגדרה במנוע שמכבה את זה, והכלל שלו יושב במסלול הכנסת הטקסט: עצירת
+ * `keydown` לבדה אינה עוזרת (נמדד), וגם הכנסת הרווח דרך ה-API אינה פתרון —
+ * הסמן החי נשאר **לפני** הרווח, וההקלדה שאחריו נכנסת לפניו (נמדד, בשלושה
+ * מסלולים). מה שכן עובד: עצירת `keydown` של הרווח, ובמקום ה-`beforeinput`
+ * שנוצר ממנו — `beforeinput` מסוג `insertReplacementText` עם אותו רווח. המנוע
+ * מכניס אותו במקום הסמן, לפי סדר ההקשות, **בלי** הכלל (נמדד גם בהקשות של
+ * 15ms). אם המנוע אינו מטפל בו, נשלח `insertText` רגיל — הרווח לא הולך לאיבוד.
+ *
+ * הרווח נעצר רק כשמה שהוקלד מאז האיפוס הוא בדיוק אחת הצורות האלה: כשהמתג
+ * כבוי — כולן; כשהוא דלוק — רק אלה שיש להן תוכנית כאן, כדי שההמרה תהיה שלנו.
  *
  * ## כשל
  *
@@ -88,6 +120,46 @@ const NAVIGATION_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDow
 
 const EDIT_EVENTS = ['paste', 'cut', 'drop', 'compositionstart'];
 
+/** מה שהמנוע ממיר בעצמו כשבא אחריו רווח (נמדד). */
+const ENGINE_MARKER = /^\s*(?:[-+*]|\d{1,9}\.)$/;
+
+/** כמה תווים נשמרים מאז האיפוס לבדיקת `ENGINE_MARKER`. */
+const ENGINE_MARKER_MAX = 12;
+
+/** Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z — לפי `code`, כדי שיעבדו גם בפריסה עברית. */
+function historyKey(event: KeyboardEvent): 'undo' | 'redo' | null {
+  if (!(event.ctrlKey || event.metaKey) || event.altKey) return null;
+  // `code` ולא `key`: בפריסה עברית `key` של Ctrl+Z הוא „ז” (ראו
+  // tests/contract/shortcut-registry.test.ts).
+  const letter = event.code === 'KeyZ' ? 'z' : event.code === 'KeyY' ? 'y' : null;
+  if (letter === 'z') return event.shiftKey ? 'redo' : 'undo';
+  if (letter === 'y' && !event.shiftKey) return 'redo';
+  return null;
+}
+
+/** הרווח, כהכנסה שהמנוע מבצע בלי כללי ההקלדה שלו. `false` — לא טופל. */
+function insertPlainSpace(target: EventTarget, ours: WeakSet<Event>): boolean {
+  const send = (inputType: string, withData: boolean): boolean => {
+    const init: InputEventInit = { bubbles: true, cancelable: true, composed: true, inputType, data: ' ' };
+    if (withData && typeof DataTransfer === 'function') {
+      try {
+        const transfer = new DataTransfer();
+        transfer.setData('text/plain', ' ');
+        init.dataTransfer = transfer;
+      } catch {
+        /* בלי העברה — המנוע קורא גם את `data` */
+      }
+    }
+    const event = new InputEvent('beforeinput', init);
+    ours.add(event);
+    // `dispatchEvent` מחזיר `false` כשמישהו ביטל את ברירת המחדל — כלומר המנוע
+    // קלט את ההכנסה.
+    return !target.dispatchEvent(event);
+  };
+  if (send('insertReplacementText', true)) return true;
+  return send('insertText', false);
+}
+
 /** `paragraph` — פסקה רגילה, בלי מספור. כל השאר אינו מומר. */
 type BlockKind = 'paragraph' | 'other';
 
@@ -107,6 +179,11 @@ export interface ListAutoformatDoc {
   lists?: {
     create?: (input: Record<string, unknown>) => MaybePromise<DocReceipt>;
   } | null;
+  history?: {
+    get?: () => MaybePromise<{ undoDepth?: unknown; redoDepth?: unknown } | null | undefined>;
+    undo?: () => MaybePromise<unknown>;
+    redo?: () => MaybePromise<unknown>;
+  } | null;
 }
 
 export interface UiSelectionLike {
@@ -123,9 +200,21 @@ export interface ListAutoformatOptions {
   /** ה-container של המסמך — ראו create-editor.ts:EditorSession.container. */
   container: HTMLElement;
   host: SuperDoc | ListAutoformatHost | null | undefined;
+  /**
+   * המתג. `false` — אין המרה, ורק ההמרות של המנוע עצמו נחסמות. ברירת המחדל
+   * דלוקה, כמו ב-host/settings.ts.
+   */
+  enabled?: boolean;
 }
 
 export interface ListAutoformatHandle {
+  /**
+   * „בטל” שאינו עובר במקלדת (פס הכותרת). `true` — יש המרה בהיסטוריה, והביטול
+   * יצא לדרך כאן (מקובץ או צעד אחד); אין להריץ עוד ביטול.
+   */
+  undo(): boolean;
+  /** „חזור”, באותו תנאי. */
+  redo(): boolean;
   dispose(): void;
 }
 
@@ -255,13 +344,45 @@ interface ResetMark {
   enter: boolean;
 }
 
+/** המרה שאפשר לבטל בהקשה אחת: כמה צעדים, ובאיזה עומק היסטוריה. */
+interface HistoryGroup {
+  steps: number;
+  depth: number;
+}
+
+/** כמה צעדים מעל ההמרה עוד שווה לחכות לה. מעבר לזה — המקש שוב של המנוע. */
+const GROUP_HORIZON = 200;
+
+async function historyDepth(doc: ListAutoformatDoc | null): Promise<{ undo: number; redo: number } | null> {
+  const get = doc?.history?.get;
+  if (typeof get !== 'function') return null;
+  try {
+    const state = await get.call(doc!.history);
+    const undo = state?.undoDepth;
+    const redo = state?.redoDepth;
+    return typeof undo === 'number' && typeof redo === 'number' ? { undo, redo } : null;
+  } catch {
+    return null;
+  }
+}
+
 export function installListAutoformat(options: ListAutoformatOptions): ListAutoformatHandle {
   const { container, host } = options;
+  const enabled = options.enabled !== false;
   const debug = debugHandle();
   if (debug) debug.installs += 1;
 
   let disposed = false;
   let applying = false;
+  /** הוקלד משהו בזמן ההמרה — ההיסטוריה שלה אינה רצף נקי. */
+  let typedWhileApplying = false;
+  /** התווים מאז האיפוס, לזיהוי הצורות שהמנוע ממיר בעצמו. `null` — ארוך מדי. */
+  let sinceReset: string | null = '';
+  /** ה-`keydown` של רווח נעצר, וה-`beforeinput` שלו יוחלף. */
+  let spaceArmed = false;
+  const ours = new WeakSet<Event>();
+  let undoGroup: HistoryGroup | null = null;
+  let redoGroup: HistoryGroup | null = null;
   /** התווים מאז האיפוס. `null` — הוקלד משהו שאינו יכול להיות סמן. */
   let run: string | null = '';
   let anchor: Anchor | null = null;
@@ -331,6 +452,83 @@ export function installListAutoformat(options: ListAutoformatOptions): ListAutof
     anchor = null;
     lastTyped = null;
     inheritFrom = null;
+    sinceReset = '';
+  }
+
+  /** האם לעצור את הרווח הזה — ההסבר בהערת הפתיחה. */
+  function interceptsSpace(): boolean {
+    if (sinceReset === null || !ENGINE_MARKER.test(sinceReset)) return false;
+    return !enabled || planListAutoformat(`${sinceReset} `) !== null;
+  }
+
+  /** ביטולים/חזרות שנשלחו ועוד לא הסתיימו — כדי שהקשות רצופות יסתדרו בתור. */
+  let replaying: Promise<void> = Promise.resolve();
+
+  /**
+   * ביטול או חזרה כשיש המרה בהיסטוריה: כל הקבוצה, כשהעומק הוא שלה; אחרת צעד
+   * אחד. `null` אחרי זה — הקבוצה אינה רלוונטית עוד.
+   */
+  async function replay(kind: 'undo' | 'redo'): Promise<void> {
+    const doc = docOf(host);
+    const history = doc?.history;
+    const step = kind === 'undo' ? history?.undo : history?.redo;
+    if (typeof step !== 'function') return;
+    const group = kind === 'undo' ? undoGroup : redoGroup;
+    const before = await historyDepth(doc);
+    const depth = before && (kind === 'undo' ? before.undo : before.redo);
+    const whole = group !== null && depth === group.depth;
+
+    const calls: Promise<unknown>[] = [];
+    for (let i = 0; i < (whole ? group.steps : 1); i += 1) {
+      try {
+        calls.push(Promise.resolve(step.call(history)));
+      } catch {
+        break;
+      }
+    }
+    await Promise.allSettled(calls);
+    forgetKinds();
+    if (disposed) return;
+
+    const after = await historyDepth(doc);
+    if (disposed) return;
+    if (whole && group && after) {
+      // הקבוצה עברה לצד השני של ההיסטוריה.
+      const moved = { steps: group.steps, depth: kind === 'undo' ? after.redo : after.undo };
+      if (kind === 'undo') {
+        undoGroup = null;
+        redoGroup = moved;
+      } else {
+        redoGroup = null;
+        undoGroup = moved;
+      }
+      note(`${kind}:grouped`);
+      return;
+    }
+    note(`${kind}:single`);
+    if (after) pruneGroups(after);
+  }
+
+  /** קבוצה שההיסטוריה עברה אותה, או התרחקה ממנה, אינה רלוונטית עוד. */
+  function pruneGroups(depth: { undo: number; redo: number }): void {
+    if (undoGroup && (depth.undo < undoGroup.depth || depth.undo - undoGroup.depth > GROUP_HORIZON)) {
+      undoGroup = null;
+    }
+    if (redoGroup && (depth.redo < redoGroup.depth || depth.redo - redoGroup.depth > GROUP_HORIZON)) {
+      redoGroup = null;
+    }
+  }
+
+  /** `true` — המקש שלנו: יש המרה בצד הזה של ההיסטוריה. */
+  function takeHistory(kind: 'undo' | 'redo'): boolean {
+    if (!(kind === 'undo' ? undoGroup : redoGroup)) return false;
+    replaying = replaying.then(() => replay(kind)).catch(() => {});
+    return true;
+  }
+
+  /** עריכה חדשה מוחקת את צד ה„חזור” של ההיסטוריה, ואיתו את הקבוצה שבו. */
+  function dropRedoGroup(): void {
+    redoGroup = null;
   }
 
   async function readKind(doc: ListAutoformatDoc, at: Caret): Promise<BlockKind | null> {
@@ -356,7 +554,8 @@ export function installListAutoformat(options: ListAutoformatOptions): ListAutof
   }
 
   function learnKind(at: Caret): void {
-    if (kinds.has(at.blockId) || reading.has(at.blockId)) return;
+    // כשהמתג כבוי אין המרה, ולכן גם אין בשביל מה לקרוא את סוג הבלוק.
+    if (!enabled || kinds.has(at.blockId) || reading.has(at.blockId)) return;
     const doc = docOf(host);
     if (!doc) return;
     const asked = generation;
@@ -400,11 +599,14 @@ export function installListAutoformat(options: ListAutoformatOptions): ListAutof
     if (disposed || applying || typeof insert !== 'function' || typeof create !== 'function') return;
 
     applying = true;
+    typedWhileApplying = false;
+    dropRedoGroup();
     // לפני המוטציה: Enter שנלחץ עכשיו יוצר פריט רשימה, לא פסקה רגילה.
     kinds.set(at.blockId, 'other');
     // המחיקה מזיזה את ההיסט בין שתי הקשות — לא אי-התאמה של המנוע.
     lastTyped = null;
     try {
+      const before = await historyDepth(doc!);
       const erased = await call(() =>
         insert({ value: '', type: 'text', target: textTarget(at, 0, p.plan.markerLength) }),
       );
@@ -433,6 +635,11 @@ export function installListAutoformat(options: ListAutoformatOptions): ListAutof
 
       if (debug) debug.applies += 1;
       note(`applied:${p.plan.kind}:${how}`);
+
+      const after = await historyDepth(doc!);
+      if (before && after && after.undo > before.undo && !typedWhileApplying && !disposed) {
+        undoGroup = { steps: after.undo - before.undo, depth: after.undo };
+      }
     } finally {
       applying = false;
       lastTyped = null;
@@ -533,7 +740,7 @@ export function installListAutoformat(options: ListAutoformatOptions): ListAutof
   }
 
   function onMarker(typedRun: string | null, anchored: Anchor | null, trigger: ' ' | '\t'): void {
-    if (typedRun === null || typedRun === '' || applying || pending) return;
+    if (!enabled || typedRun === null || typedRun === '' || applying || pending) return;
     if (debug) debug.evaluates += 1;
     const typed = `${typedRun}${trigger}`;
     const plan = planListAutoformat(typed);
@@ -552,6 +759,8 @@ export function installListAutoformat(options: ListAutoformatOptions): ListAutof
   }
 
   function onPrintable(key: string, at: Caret | null, time: number): void {
+    if (applying) typedWhileApplying = true;
+    dropRedoGroup();
     if (lastTyped && (!at || at.blockId !== lastTyped.blockId || at.offset !== lastTyped.offset + 1)) {
       cautiousUntil = time + CAUTIOUS_MS;
     }
@@ -622,8 +831,18 @@ export function installListAutoformat(options: ListAutoformatOptions): ListAutof
     if (disposed) return;
     const { key } = event;
     if (MODIFIER_KEYS.has(key)) return;
+    const inside = container.contains(event.target as Node | null);
+    const history = historyKey(event);
+
+    if (history && inside && takeHistory(history)) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      onReset('key', caretNow(), now(), false);
+      return;
+    }
+
     // מקש ברצועה, בתפריט או בדיאלוג עשוי להפעיל פקודת רשימות.
-    if (!container.contains(event.target as Node | null)) {
+    if (!inside) {
       onEdit();
       return;
     }
@@ -632,19 +851,38 @@ export function installListAutoformat(options: ListAutoformatOptions): ListAutof
     const plain = !event.ctrlKey && !event.metaKey && !event.altKey && !event.isComposing;
 
     if (plain && [...key].length === 1) {
+      const intercept = key === ' ' && interceptsSpace();
       onPrintable(key, at, time);
+      if (sinceReset !== null) sinceReset = sinceReset.length < ENGINE_MARKER_MAX ? sinceReset + key : null;
       lastInputAt = time;
+      if (intercept) {
+        // המנוע לא יראה את ה-keydown; את ה-beforeinput מחליף `onBeforeInput`.
+        event.stopImmediatePropagation();
+        spaceArmed = true;
+      }
       return;
     }
     const tab = plain && key === 'Tab' && !event.shiftKey;
     const typedRun = run;
     const anchored = anchor;
     onReset('key', at, time, plain && key === 'Enter' && !event.shiftKey);
+    if (!NAVIGATION_KEYS.has(key)) dropRedoGroup();
     if (!NAVIGATION_KEYS.has(key) && key !== 'Enter') forgetKinds();
     if (tab) onMarker(typedRun, anchored, '\t');
   };
 
+  const onBeforeInput = (event: Event): void => {
+    if (disposed || !spaceArmed || ours.has(event)) return;
+    spaceArmed = false;
+    const input = event as InputEvent;
+    if (input.inputType !== 'insertText' || input.data !== ' ' || !event.target) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    insertPlainSpace(event.target, ours);
+  };
+
   const onKeyUp = (event: KeyboardEvent): void => {
+    if (event.key === ' ') spaceArmed = false;
     if (disposed || !container.contains(event.target as Node | null)) return;
     const at = caretNow();
     if (at) learnKind(at);
@@ -658,10 +896,12 @@ export function installListAutoformat(options: ListAutoformatOptions): ListAutof
 
   const onEdit = (): void => {
     onReset('key', null, now(), false);
+    dropRedoGroup();
     forgetKinds();
   };
 
   document.addEventListener('keydown', onKeyDown, true);
+  document.addEventListener('beforeinput', onBeforeInput, true);
   document.addEventListener('keyup', onKeyUp, true);
   document.addEventListener('pointerdown', onPointerDown, true);
   container.addEventListener('pointerup', learnWhenSettled);
@@ -670,12 +910,15 @@ export function installListAutoformat(options: ListAutoformatOptions): ListAutof
   learnWhenSettled();
 
   return {
+    undo: () => !disposed && takeHistory('undo'),
+    redo: () => !disposed && takeHistory('redo'),
     dispose() {
       disposed = true;
       if (watchTimer !== undefined) clearTimeout(watchTimer);
       for (const timer of timers) clearTimeout(timer);
       timers.clear();
       document.removeEventListener('keydown', onKeyDown, true);
+      document.removeEventListener('beforeinput', onBeforeInput, true);
       document.removeEventListener('keyup', onKeyUp, true);
       document.removeEventListener('pointerdown', onPointerDown, true);
       container.removeEventListener('pointerup', learnWhenSettled);

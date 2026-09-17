@@ -3,6 +3,12 @@
  * לחסום קריאות — כמו המנוע האמיתי בזמן הקלדה רציפה (ראו ההערה בראש
  * list-autoformat-install.ts). הסמן שמצטייר וה-OOXML נמדדים בשער
  * scripts/qa/list-autoformat-qa.mjs.
+ *
+ * ועוד שלוש התנהגויות של המנוע האמיתי, כולן נמדדו:
+ *   - הקשה שה-keydown שלה לא הגיע אליו מגיעה כ-`beforeinput`, כמו בדפדפן.
+ *   - הוא ממיר בעצמו „1. ”, „- ” וכדומה כשהרווח מגיע כ-`insertText` — ולא
+ *     כשהוא מגיע כ-`insertReplacementText`.
+ *   - יש לו היסטוריה, ויצירת רשימה בסגנון היא בה שני צעדים.
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import { installListAutoformat } from '../../src/engine/list-autoformat-install';
@@ -39,6 +45,9 @@ interface FakeOptions {
   readsBlocked?: boolean;
 }
 
+/** מה שהמנוע האמיתי ממיר בעצמו כשבא אחריו רווח. */
+const ENGINE_RULE = /^\s*(?:[-+*]|\d+\.)$/;
+
 function fakeEditor(options: FakeOptions = {}) {
   const calls: Array<{ name: string; input: unknown }> = [];
   const record = (name: string, input: unknown) => calls.push({ name, input });
@@ -53,6 +62,22 @@ function fakeEditor(options: FakeOptions = {}) {
   const lag = options.lagMs ?? 4;
 
   let blocked = options.readsBlocked ?? false;
+
+  // היסטוריה: תמונת מצב לפני כל צעד.
+  type Snapshot = { blocks: FakeBlock[]; cur: number; offset: number };
+  const snap = (): Snapshot => ({ blocks: blocks.map((b) => ({ ...b })), cur, offset });
+  const restore = (state: Snapshot) => {
+    blocks.splice(0, blocks.length, ...state.blocks.map((b) => ({ ...b })));
+    cur = state.cur;
+    offset = state.offset;
+  };
+  const undoStack: Snapshot[] = [];
+  const redoStack: Snapshot[] = [];
+  const step = () => {
+    undoStack.push(snap());
+    redoStack.length = 0;
+  };
+  let sawKeydown = false;
   const waiting: Array<() => void> = [];
   async function read<T>(name: string, input: unknown, answer: () => T): Promise<T> {
     record(name, input);
@@ -74,16 +99,46 @@ function fakeEditor(options: FakeOptions = {}) {
   container.appendChild(textarea);
   document.body.appendChild(container);
 
+  /** הכנסת טקסט, עם הכלל של המנוע — אלא אם הרווח הגיע כהחלפה. */
+  function typeText(key: string, rule: boolean): void {
+    const block = blocks[cur];
+    step();
+    if (rule && key === ' ' && !block.list && ENGINE_RULE.test(block.text.slice(0, offset))) {
+      block.text = block.text.slice(offset);
+      block.list = true;
+      offset = 0;
+      return;
+    }
+    block.text = block.text.slice(0, offset) + key + block.text.slice(offset);
+    offset += 1;
+  }
+
   // „המנוע”: מטפל בהקשה על המטרה, אחרי המאזין שלנו ב-capture, ובאיחור.
+  textarea.addEventListener('beforeinput', (event) => {
+    const input = event as InputEvent;
+    if (input.inputType !== 'insertText' && input.inputType !== 'insertReplacementText') return;
+    event.preventDefault();
+    const data = input.data ?? '';
+    const rule = input.inputType === 'insertText';
+    setTimeout(() => {
+      for (const ch of data) if (!options.rejectKeys?.includes(ch)) typeText(ch, rule);
+    }, options.slowKeys?.[data] ?? lag);
+  });
+
   textarea.addEventListener('keydown', (event) => {
     const { key } = event;
+    sawKeydown = true;
+    if (event.ctrlKey && (event.code === 'KeyZ' || event.code === 'KeyY')) {
+      setTimeout(() => void (event.code === 'KeyZ' && !event.shiftKey ? history.undo() : history.redo()), lag);
+      return;
+    }
     setTimeout(() => {
       const block = blocks[cur];
       if (options.rejectKeys?.includes(key)) return;
       if ([...key].length === 1 && !event.ctrlKey) {
-        block.text = block.text.slice(0, offset) + key + block.text.slice(offset);
-        offset += 1;
+        typeText(key, true);
       } else if (key === 'Enter') {
+        step();
         const tail = block.text.slice(offset);
         const exitsList = block.list && block.text === '';
         block.text = block.text.slice(0, offset);
@@ -92,6 +147,7 @@ function fakeEditor(options: FakeOptions = {}) {
         cur += 1;
         offset = 0;
       } else if (key === 'Tab') {
+        step();
         block.text = `${block.text.slice(0, offset)}\t${block.text.slice(offset)}`;
         offset += 1;
       } else if (key === 'Home') {
@@ -99,13 +155,35 @@ function fakeEditor(options: FakeOptions = {}) {
       } else if (key === 'End') {
         offset = block.text.length;
       } else if (key === 'Backspace' && offset > 0) {
+        step();
         block.text = block.text.slice(0, offset - 1) + block.text.slice(offset);
         offset -= 1;
       }
     }, options.slowKeys?.[key] ?? lag);
   });
 
+  const history = {
+    get: async () => ({ undoDepth: undoStack.length, redoDepth: redoStack.length }),
+    undo: async () => {
+      record('history.undo', null);
+      const state = undoStack.pop();
+      if (!state) return { noop: true };
+      redoStack.push(snap());
+      restore(state);
+      return { noop: false };
+    },
+    redo: async () => {
+      record('history.redo', null);
+      const state = redoStack.pop();
+      if (!state) return { noop: true };
+      undoStack.push(snap());
+      restore(state);
+      return { noop: false };
+    },
+  };
+
   const doc = {
+    history,
     selection: { current: () => read('selection.current', null, () => ({ selectionTarget: target() })) },
     ranges: {
       resolve: (input: unknown) =>
@@ -138,6 +216,7 @@ function fakeEditor(options: FakeOptions = {}) {
       };
       const block = byId(at.start.blockId);
       if (!block) return { success: false, failure: { code: 'TARGET_NOT_FOUND' } };
+      step();
       const { offset: from } = at.start;
       const to = at.end.offset;
       block.text = block.text.slice(0, from) + value + block.text.slice(to);
@@ -158,7 +237,12 @@ function fakeEditor(options: FakeOptions = {}) {
         if (options.createOk === false) return { success: false, failure: { code: 'INVALID_TARGET' } };
         const id = (input as { target: { nodeId: string } }).target.nodeId;
         const block = byId(id);
-        if (block) block.list = true;
+        if (block) {
+          // שני צעדים, כמו במנוע: הרשימה, ואחריה הסגנון.
+          step();
+          block.list = true;
+          step();
+        }
         return { success: true };
       },
     },
@@ -175,6 +259,13 @@ function fakeEditor(options: FakeOptions = {}) {
     calls,
     blocks: () => blocks.map((b) => ({ ...b })),
     caret: () => ({ blockId: blocks[cur].id, offset }),
+    depth: () => ({ undo: undoStack.length, redo: redoStack.length }),
+    /** צעד היסטוריה שאינו שלנו — עריכה ממקור אחר. */
+    foreignStep: step,
+    resetSaw: () => {
+      sawKeydown = false;
+    },
+    saw: () => sawKeydown,
     blockReads: () => {
       blocked = true;
     },
@@ -189,9 +280,20 @@ function named(calls: Array<{ name: string; input: unknown }>, name: string): un
   return calls.filter((c) => c.name === name).map((c) => c.input);
 }
 
+/**
+ * הקשה, כמו בדפדפן: אם ה-keydown לא הגיע למנוע ואיש לא ביטל אותו, התו מגיע
+ * אליו כ-`beforeinput`. `saw` — האם המנוע ראה את ה-keydown.
+ */
+let lastFake: { resetSaw(): void; saw(): boolean } | null = null;
+
 function press(el: HTMLElement, key: string, init: KeyboardEventInit = {}): KeyboardEvent {
+  lastFake?.resetSaw();
   const down = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init });
   el.dispatchEvent(down);
+  const printable = [...key].length === 1 && !init.ctrlKey && !init.metaKey && !init.altKey;
+  if (printable && lastFake && !lastFake.saw() && !down.defaultPrevented) {
+    el.dispatchEvent(new InputEvent('beforeinput', { bubbles: true, cancelable: true, inputType: 'insertText', data: key }));
+  }
   el.dispatchEvent(new KeyboardEvent('keyup', { key, bubbles: true, ...init }));
   return down;
 }
@@ -203,12 +305,16 @@ async function type(el: HTMLElement, text: string, gapMs = 0): Promise<void> {
   }
 }
 
+const ctrl = (el: HTMLElement, code: 'KeyZ' | 'KeyY', key = code === 'KeyZ' ? 'z' : 'y', shiftKey = false) =>
+  press(el, key, { ctrlKey: true, code, shiftKey });
+
 const handles: Array<{ dispose(): void }> = [];
 
 /** מתקינה, ומחכה שסוג הבלוק הראשון ייקרא — אלא אם הקריאות חסומות. */
-async function install(options: FakeOptions = {}) {
+async function install(options: FakeOptions & { enabled?: boolean } = {}) {
   const fake = fakeEditor(options);
-  const handle = installListAutoformat({ container: fake.container, host: fake.host as never });
+  lastFake = fake;
+  const handle = installListAutoformat({ container: fake.container, host: fake.host as never, enabled: options.enabled });
   handles.push(handle);
   await settle(20);
   return { ...fake, handle };
@@ -216,6 +322,7 @@ async function install(options: FakeOptions = {}) {
 
 afterEach(() => {
   while (handles.length > 0) handles.pop()?.dispose();
+  lastFake = null;
   document.body.innerHTML = '';
 });
 
@@ -542,8 +649,9 @@ describe('installListAutoformat — כשל ופירוק', () => {
   });
 
   /*
-   * הביטול שייך למנוע (scripts/qa/list-backspace-owner-probe.mjs). המודול
-   * צופה ב-keydown בלבד: אינו מונע אף מקש, ו-Backspace אינו מפעיל אותו.
+   * Backspace שייך למנוע (scripts/qa/list-backspace-owner-probe.mjs). המודול
+   * אינו מונע מקש רגיל, ו-Backspace אינו מפעיל אותו. (Ctrl+Z מיד אחרי
+   * ההמרה הוא החריג היחיד — למטה.)
    */
   it('אף מקש אינו נמנע, ו-Backspace אינו קורא למסמך', async () => {
     const app = await install();
@@ -556,5 +664,209 @@ describe('installListAutoformat — כשל ופירוק', () => {
 
     expect(events.map((e) => e.defaultPrevented)).toEqual([false, false, false]);
     expect(named(app.calls.slice(before), 'insert')).toHaveLength(0);
+  });
+});
+
+describe('installListAutoformat — הצורות שהמנוע ממיר בעצמו', () => {
+  it('בקרה: בלי המודול המנוע המזויף ממיר „1. ”, כמו האמיתי', async () => {
+    const fake = fakeEditor();
+    lastFake = fake;
+    await type(fake.textarea, '1. ');
+    await settle();
+    expect(fake.blocks()[0]).toMatchObject({ text: '', list: true });
+  });
+
+  it('כבוי: „1. ” נשאר טקסט — הרווח עובר כהחלפה', async () => {
+    const app = await install({ enabled: false });
+    await type(app.textarea, '1. אבג');
+    await settle();
+
+    expect(app.blocks()[0]).toMatchObject({ text: '1. אבג', list: false });
+    expect(named(app.calls, 'lists.create')).toHaveLength(0);
+    expect(named(app.calls, 'insert')).toHaveLength(0);
+  });
+
+  for (const marker of ['- ', '* ', '+ ', '12. ', ' - ']) {
+    it(`כבוי: „${marker}” נשאר טקסט`, async () => {
+      const app = await install({ enabled: false });
+      await type(app.textarea, marker);
+      await settle();
+      expect(app.blocks()[0]).toMatchObject({ text: marker, list: false });
+    });
+  }
+
+  it('כבוי: „א) ” — המנוע אינו ממיר אותו, והמודול אינו ממיר דבר', async () => {
+    const app = await install({ enabled: false });
+    await type(app.textarea, `${ALEF}) `);
+    await settle();
+    expect(app.blocks()[0]).toMatchObject({ text: `${ALEF}) `, list: false });
+    expect(app.calls.filter((c) => c.name !== 'history.undo')).toEqual([]);
+  });
+
+  it('כבוי: הקלדה מהירה שומרת על סדר התווים', async () => {
+    const app = await install({ enabled: false });
+    await type(app.textarea, '1. מהיר מאוד', 0);
+    await settle(200);
+    expect(app.blocks()[0]).toMatchObject({ text: '1. מהיר מאוד', list: false });
+  });
+
+  it('כבוי: רווח באמצע פסקה אינו נעצר', async () => {
+    const app = await install({ enabled: false });
+    app.resetSaw();
+    await type(app.textarea, 'abc');
+    const space = press(app.textarea, ' ');
+    expect(app.saw(), 'המנוע ראה את ה-keydown').toBe(true);
+    expect(space.defaultPrevented).toBe(false);
+  });
+
+  it('דלוק: „- ” מומר בידי המודול, עם המקף ולא עם תבליט המנוע', async () => {
+    const app = await install();
+    await type(app.textarea, '- ');
+    await settle();
+    expect(named(app.calls, 'lists.create')[0]).toMatchObject({
+      kind: 'bullet',
+      style: { levels: [{ level: 0, numFmt: 'bullet', lvlText: '-', markerFont: 'Arial' }] },
+    });
+    expect(app.blocks()[0]).toMatchObject({ text: '', list: true });
+  });
+
+  it('דלוק: „5. ” — אין תוכנית כאן, ולכן המנוע ממיר כמו קודם', async () => {
+    const app = await install();
+    await type(app.textarea, '5. ');
+    await settle();
+    expect(named(app.calls, 'lists.create')).toHaveLength(0);
+    expect(app.blocks()[0]).toMatchObject({ text: '', list: true });
+  });
+});
+
+describe('installListAutoformat — Ctrl+Z מיד אחרי ההמרה', () => {
+  async function converted() {
+    const app = await install();
+    await type(app.textarea, `${ALEF}) `);
+    await settle();
+    expect(app.blocks()[0]).toMatchObject({ text: '', list: true });
+    return app;
+  }
+
+  it('הקשה אחת מחזירה את „א) ” כטקסט — שלושה צעדים יחד', async () => {
+    const app = await converted();
+    const event = ctrl(app.textarea, 'KeyZ');
+    await settle();
+
+    expect(event.defaultPrevented, 'המנוע לא יבטל צעד נוסף').toBe(true);
+    expect(named(app.calls, 'history.undo')).toHaveLength(3);
+    expect(app.blocks()[0]).toMatchObject({ text: `${ALEF}) `, list: false });
+  });
+
+  it('Ctrl+Y שאחריו מחזיר את ההמרה, שוב בהקשה אחת', async () => {
+    const app = await converted();
+    ctrl(app.textarea, 'KeyZ');
+    await settle();
+    const event = ctrl(app.textarea, 'KeyY');
+    await settle();
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(named(app.calls, 'history.redo')).toHaveLength(3);
+    expect(app.blocks()[0]).toMatchObject({ text: '', list: true });
+  });
+
+  it('Ctrl+Shift+Z הוא „חזור” גם כן', async () => {
+    const app = await converted();
+    ctrl(app.textarea, 'KeyZ');
+    await settle();
+    ctrl(app.textarea, 'KeyZ', 'Z', true);
+    await settle();
+    expect(named(app.calls, 'history.redo')).toHaveLength(3);
+  });
+
+  it('בפריסה עברית (ז) — לפי `code`', async () => {
+    const app = await converted();
+    const event = ctrl(app.textarea, 'KeyZ', 'ז');
+    await settle();
+    expect(event.defaultPrevented).toBe(true);
+    expect(app.blocks()[0]).toMatchObject({ text: `${ALEF}) `, list: false });
+  });
+
+  it('אחרי הקלדה: Ctrl+Z מבטל את ההקלדה, והבא — את ההמרה כולה, כמו ב-Word', async () => {
+    const app = await converted();
+    await type(app.textarea, 'x');
+    await settle();
+
+    ctrl(app.textarea, 'KeyZ');
+    await settle();
+    expect(named(app.calls, 'history.undo'), 'צעד אחד — ההקלדה').toHaveLength(1);
+    expect(app.blocks()[0]).toMatchObject({ text: '', list: true });
+
+    ctrl(app.textarea, 'KeyZ');
+    await settle();
+    expect(named(app.calls, 'history.undo'), 'ועכשיו שלושת הצעדים של ההמרה').toHaveLength(4);
+    expect(app.blocks()[0]).toMatchObject({ text: `${ALEF}) `, list: false });
+  });
+
+  it('שתי הקשות רצופות בלי המתנה מסתדרות בתור', async () => {
+    const app = await converted();
+    await type(app.textarea, 'x');
+    await settle();
+    ctrl(app.textarea, 'KeyZ');
+    ctrl(app.textarea, 'KeyZ');
+    await settle(200);
+    expect(named(app.calls, 'history.undo')).toHaveLength(4);
+    expect(app.blocks()[0]).toMatchObject({ text: `${ALEF}) `, list: false });
+  });
+
+  it('לחיצה בעכבר אינה מבטלת את הקבוצה — „בטל” בפס הכותרת', async () => {
+    const app = await converted();
+    document.body.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    expect(app.handle.undo()).toBe(true);
+    await settle();
+    expect(named(app.calls, 'history.undo')).toHaveLength(3);
+    expect(app.handle.undo(), 'הקבוצה נצרכה').toBe(false);
+    expect(app.handle.redo()).toBe(true);
+    await settle();
+    expect(app.blocks()[0]).toMatchObject({ text: '', list: true });
+  });
+
+  it('צעד זר מעל ההמרה — קודם הוא, ואז ההמרה', async () => {
+    const app = await converted();
+    app.foreignStep();
+    ctrl(app.textarea, 'KeyZ');
+    await settle();
+    expect(named(app.calls, 'history.undo')).toHaveLength(1);
+    ctrl(app.textarea, 'KeyZ');
+    await settle();
+    expect(named(app.calls, 'history.undo')).toHaveLength(4);
+  });
+
+  it('ההמרה בוטלה בדרך אחרת — הקבוצה נזרקת, והמקש חוזר למנוע', async () => {
+    const app = await converted();
+    // ביטול שלא עבר כאן (למשל מ„ספר לי”): העומק יורד מתחת להמרה.
+    await (app.host.activeEditor.doc as unknown as { history: { undo(): Promise<unknown> } }).history.undo();
+    ctrl(app.textarea, 'KeyZ');
+    await settle();
+    expect(named(app.calls, 'history.undo'), 'אחד זר ואחד שלנו').toHaveLength(2);
+
+    const event = ctrl(app.textarea, 'KeyZ');
+    await settle();
+    expect(event.defaultPrevented, 'הקבוצה נזרקה').toBe(false);
+  });
+
+  it('עריכה אחרי הביטול מוחקת את „חזור”', async () => {
+    const app = await converted();
+    ctrl(app.textarea, 'KeyZ');
+    await settle();
+    await type(app.textarea, 'q');
+    await settle();
+    const event = ctrl(app.textarea, 'KeyY');
+    expect(event.defaultPrevented).toBe(false);
+    expect(app.handle.redo()).toBe(false);
+  });
+
+  it('בלי המרה — Ctrl+Z אינו נגזל', async () => {
+    const app = await install();
+    await type(app.textarea, 'abc');
+    await settle();
+    const event = ctrl(app.textarea, 'KeyZ');
+    expect(event.defaultPrevented).toBe(false);
+    expect(app.handle.undo()).toBe(false);
   });
 });

@@ -1506,6 +1506,8 @@ const numberMenuItems = computed(() => [
   convertItem.value,
   {
     id: 'autoformat',
+    // הגדרה ולא פעולה על הרשימה — ולכן מופרדת מהפעולות שמעליה.
+    separatorBefore: true,
     label: props.listAutoformatEnabled
       ? 'זיהוי רשימות בהקלדה: פעיל'
       : 'זיהוי רשימות בהקלדה: כבוי',

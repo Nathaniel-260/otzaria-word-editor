@@ -14,6 +14,11 @@
  *   6. „‏`ב.`” אינו מומר — ההגנה מפני „ב׳ בניסן”.
  *   7. הקלדה רציפה: הסמן מצויר **לפני** שההקלדה נגמרת, ו-Enter ואז סמן
  *      ממיר רק את הפסקה החדשה. סמן באמצע פסקה אינו מומר.
+ *   8. Ctrl+Z מיד אחרי ההמרה מחזיר את „א) ” בהקשה אחת, בלי שסמן עשרוני
+ *      יצויר בדרך; אחרי הקלדה — הקשה אחת להקלדה ואחת להמרה. Ctrl+Y מחזיר.
+ *   9. „- ” מצייר מקף — ההמרה שלנו, ולא התבליט של המנוע.
+ *  10. המתג כבוי: גם הצורות שהמנוע ממיר בעצמו („1. ”, „- ”) נשארות טקסט,
+ *      והרווח נכנס במקומו גם בהקלדה.
  *
  *   node scripts/qa/list-autoformat-qa.mjs
  */
@@ -108,7 +113,24 @@ async function clearDoc() {
     await app.sleep(300);
     const state = await levelZero();
     const text = await paragraph();
-    if (state.isListItem !== true && text.text === '') return;
+    if (state.isListItem !== true && text.text === '') {
+      /*
+       * הניקוי שלמעלה עובר דרך ה-API, ולכן המודול אינו יודע שהרשימה הוסרה:
+       * הבלוק שומר את אותו מזהה, והזיכרון שלו עדיין אומר „רשימה”. במקרה
+       * הבא ההמרה יצאה בנתיב המאומת, שמחכה לסוף ההקלדה — ושורת „הקלדה
+       * רציפה” נפלה 3/3 על מכונה אחת בגלל השער ולא בגלל המוצר. משתמש מסיר
+       * רשימה במקש, בתפריט או ב-Ctrl+Z, וכל אחד מהם מאפס את הזיכרון; Delete
+       * על פסקה ריקה הוא אותו איפוס בלי שינוי. הלחיצה שאחריו — כי המודול
+       * מעגן רצף רק אחרי איפוס שהזיז את הסמן או לחיצה שהתייצבה. ההמתנה
+       * ארוכה מ-`IDLE_MS` (300ms): לחיצה צמודה ל-Delete נספרת כאיפוס כפול,
+       * ורצף אחרי איפוס כפול אינו מעוגן (נמדד — השורה נפלה ב-300ms בדיוק).
+       */
+      await app.press('Delete', 'Delete', 46);
+      await app.sleep(800);
+      await app.caret(0);
+      await app.sleep(700);
+      return;
+    }
   }
   throw new Error('הניקוי בין המקרים לא הצליח להחזיר פסקה ריקה שאינה רשימה');
 }
@@ -324,6 +346,76 @@ try {
         JSON.stringify({ before: beforeBack.isListItem, after: afterBack.isListItem, text: paraBack.text }),
       );
 
+  // ── 5א. Ctrl+Z מיד אחרי ההמרה — הקשה אחת ─────────────────────────────
+  const ctrlKey = (key, code, vk) => app.press(key, code, vk, 2);
+  const seenMarkers = () => app.js('JSON.stringify(window.__laSeen || [])').then(JSON.parse);
+  await app.js(`(function(){
+    window.__laSeen = [];
+    if (!window.__laSeenObs) {
+      window.__laSeenObs = new MutationObserver(function(){
+        Array.prototype.forEach.call(document.querySelectorAll('[class*="list-marker"]'), function(n){
+          if (!n.getBoundingClientRect().width) return;
+          var t = n.textContent.replace(/\u200f/g, '').trim();
+          if (window.__laSeen.indexOf(t) < 0) window.__laSeen.push(t);
+        });
+      });
+      window.__laSeenObs.observe(document.body, { subtree: true, childList: true, characterData: true });
+    }
+    return 1;
+  })()`);
+
+  await clearDoc();
+  await app.type('א) ', 90);
+  await app.sleep(1200);
+  await app.js('window.__laSeen = []');
+  await ctrlKey('z', 'KeyZ', 90);
+  await app.sleep(1200);
+  const undone = await paragraph();
+  const undoneState = await levelZero();
+  const flashed = (await seenMarkers()).filter((m) => /^\d/.test(m));
+  console.log('Ctrl+Z אחרי ההמרה:', JSON.stringify({ undone, list: undoneState.isListItem, flashed }));
+  undone.text === 'א) ' && undoneState.isListItem !== true
+    ? report.pass('Ctrl+Z אחד מחזיר את „א) ” כטקסט', JSON.stringify(undone.text))
+    : report.fail('Ctrl+Z אחד מחזיר את „א) ” כטקסט', JSON.stringify({ undone, undoneState }));
+  flashed.length === 0
+    ? report.pass('בדרך לא צויר סמן עשרוני')
+    : report.fail('בדרך לא צויר סמן עשרוני', flashed.join(' '));
+
+  await ctrlKey('y', 'KeyY', 89);
+  await app.sleep(1200);
+  const redone = await levelZero();
+  redone.isListItem === true && redone.level0 && redone.level0.numFmt === 'hebrew1'
+    ? report.pass('Ctrl+Y מחזיר את הרשימה העברית')
+    : report.fail('Ctrl+Y מחזיר את הרשימה העברית', JSON.stringify(redone));
+
+  // ── 5ב. אחרי הקלדה: הקשה להקלדה, והקשה להמרה ─────────────────────────
+  await clearDoc();
+  await app.type('א) ', 90);
+  await app.sleep(1000);
+  await app.type('טקסט', 90);
+  await app.sleep(1000);
+  await ctrlKey('z', 'KeyZ', 90);
+  await app.sleep(1000);
+  const firstUndo = await paragraph();
+  await ctrlKey('z', 'KeyZ', 90);
+  await app.sleep(1200);
+  const secondUndo = await paragraph();
+  const secondState = await levelZero();
+  console.log('הקלדה ואז Ctrl+Z פעמיים:', JSON.stringify({ firstUndo, secondUndo, list: secondState.isListItem }));
+  secondUndo.text === 'א) ' && secondState.isListItem !== true && firstUndo.text !== 'א) טקסט'
+    ? report.pass('אחרי הקלדה: שני Ctrl+Z מחזירים את „א) ”', `${JSON.stringify(firstUndo.text)} → ${JSON.stringify(secondUndo.text)}`)
+    : report.fail('אחרי הקלדה: שני Ctrl+Z מחזירים את „א) ”', JSON.stringify({ firstUndo, secondUndo, secondState }));
+
+  // ── 5ג. „- ” — מקף, ולא התבליט של המנוע ──────────────────────────────
+  await clearDoc();
+  await app.type('- ', 90);
+  await app.sleep(1500);
+  const dash = await levelZero();
+  const dashMarkers = await markers();
+  dash.isListItem === true && dashMarkers.includes('-')
+    ? report.pass('„- ” מצייר מקף', dashMarkers.join(' '))
+    : report.fail('„- ” מצייר מקף', JSON.stringify({ dash, dashMarkers }));
+
   // ── 6. מה שנכתב ל-docx ───────────────────────────────────────────────────
   await clearDoc();
   await app.type('א', 60);
@@ -352,6 +444,39 @@ try {
   console.log('לוג:', JSON.stringify(await app.log()));
 } finally {
   app.close();
+}
+
+// ── 7. המתג כבוי — מהפעלה קודמת ───────────────────────────────────────────
+/*
+ * יציאה אחרת בכוונה: פתיחה שנייה על אותה יציאה באותו תהליך נמדדה מפילה את
+ * node במכונה הזאת (replace-race-probe, גם ב-main).
+ */
+const off = await openApp({
+  name: 'list-autoformat-off',
+  port: Number(process.env.QA_PORT ?? 9623) + 1,
+  extra: `<script>window.__qaHost.storage['list-autoformat-enabled'] = false;</script>`,
+});
+try {
+  const offParagraph = () =>
+    off.js(`(async function(){
+      var l = await window.__otzariaEditor.superdoc.activeEditor.doc.blocks.list({ includeText: true });
+      return JSON.stringify((l.blocks || []).map(function(b){ return [b.nodeType, b.text]; }));
+    })()`).then(JSON.parse);
+
+  await off.caret(0);
+  await off.sleep(400);
+  await off.type('1. אבג', 90);
+  await off.press('Enter', 'Enter', 13, 0, '\r');
+  await off.sleep(300);
+  await off.type('- ד', 40);
+  await off.sleep(1800);
+  const offBlocks = await offParagraph();
+  console.log('כבוי:', JSON.stringify(offBlocks));
+  JSON.stringify(offBlocks) === JSON.stringify([['paragraph', '1. אבג'], ['paragraph', '- ד']])
+    ? report.pass('כבוי: „1. ” ו-„- ” נשארים טקסט, והרווח במקומו', JSON.stringify(offBlocks))
+    : report.fail('כבוי: „1. ” ו-„- ” נשארים טקסט, והרווח במקומו', JSON.stringify(offBlocks));
+} finally {
+  off.close();
 }
 
 process.exit(report.print() > 0 ? 1 : 0);
