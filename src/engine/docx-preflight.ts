@@ -98,6 +98,7 @@ import {
   isOn,
   readEntryText,
   readZip,
+  readZipComment,
   rewriteEntry,
   valueOf,
   writeZip,
@@ -473,7 +474,7 @@ export async function preflightSource(
 
   let repaired: DocxRepair | null;
   try {
-    repaired = await repairEntries(entries);
+    repaired = await repairEntries(entries, readZipComment(bytes));
   } catch (error) {
     // „לתקן, ולא לחסום” גם כאן: הזריקה היחידה שנשארה בפנים היא הקצאה של
     // ארכיון גדול מדי, ומסמך שהיה נפתח בלי השלב הזה ייפתח בלעדיו.
@@ -533,11 +534,14 @@ export interface DocxRepair {
  * את השני שבור.
  */
 export async function preflightDocx(bytes: Bytes): Promise<DocxRepair | null> {
-  return repairEntries(readZip(bytes));
+  return repairEntries(readZip(bytes), readZipComment(bytes));
 }
 
 /** התיקונים עצמם, על ספרייה שכבר נקראה. ראו `preflightSource`. */
-async function repairEntries(entries: readonly ZipEntry[] | null): Promise<DocxRepair | null> {
+async function repairEntries(
+  entries: readonly ZipEntry[] | null,
+  archiveComment: Bytes,
+): Promise<DocxRepair | null> {
   if (!entries) return null;
 
   const notes: string[] = [];
@@ -565,6 +569,5 @@ async function repairEntries(entries: readonly ZipEntry[] | null): Promise<DocxR
   if (patched.size === 0) return null;
 
   const rewritten = entries.map((entry) => patched.get(entry) ?? entry);
-  return { bytes: writeZip(rewritten), notes, notice };
+  return { bytes: writeZip(rewritten, archiveComment), notes, notice };
 }
-

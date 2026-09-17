@@ -65,6 +65,18 @@ export interface ZipEntry {
   /** התוכן כפי שהוא מאוחסן — דחוס או לא, לפי `method`. */
   data: Bytes;
   uncompressedSize: number;
+  /**
+   * שדה ה-extra של הכותרת המקומית ושל ספריית האינדקס, והערת הרשומה.
+   *
+   * שני שדות ה-extra נשמרים בנפרד מפני ש-APPNOTE מתיר להם להיות שונים,
+   * ובפועל הם שונים (Info-ZIP כותב UT מלא מקומית ומקוצר במרכז). הם
+   * נכתבים בחזרה כמות שהם: ארכיון ZIP64 נדחה כבר בקריאה, ולכן אין כאן שדה
+   * extra שתלוי בגדלים או בהיסטים שהכתיבה משנה. רשומה שנבנתה כאן מאפס
+   * משאירה אותם ריקים.
+   */
+  localExtra?: Bytes;
+  centralExtra?: Bytes;
+  comment?: Bytes;
 }
 
 /**
@@ -193,7 +205,7 @@ export async function rewriteDocxXmlParts(
   }
 
   if (patched.size === 0) return null;
-  return writeZip(entries.map((entry) => patched.get(entry) ?? entry));
+  return writeZip(entries.map((entry) => patched.get(entry) ?? entry), readZipComment(bytes));
 }
 
 /**
@@ -360,9 +372,17 @@ export function readZip(bytes: Bytes): ZipEntry[] | null {
     const localOffset = view.getUint32(at + 42, true);
     if (compressedSize === ZIP64_MARKER_32 || localOffset === ZIP64_MARKER_32) return null;
 
-    const nameBytes = bytes.subarray(at + ZIP_CENTRAL_HEADER_SIZE, at + ZIP_CENTRAL_HEADER_SIZE + nameLength);
+    const nameAt = at + ZIP_CENTRAL_HEADER_SIZE;
+    const nameBytes = bytes.subarray(nameAt, nameAt + nameLength);
+    const centralExtra = bytes.subarray(nameAt + nameLength, nameAt + nameLength + extraLength);
+    const comment = bytes.subarray(
+      nameAt + nameLength + extraLength,
+      nameAt + nameLength + extraLength + commentLength,
+    );
     const data = entryData(bytes, view, localOffset, compressedSize);
     if (!data) return null;
+    const localExtra = entryLocalExtra(bytes, view, localOffset);
+    if (!localExtra) return null;
 
     entries.push({
       name: new TextDecoder().decode(nameBytes),
@@ -378,6 +398,9 @@ export function readZip(bytes: Bytes): ZipEntry[] | null {
       externalAttrs: view.getUint32(at + 38, true),
       data,
       uncompressedSize,
+      localExtra: localExtra.slice(),
+      centralExtra: centralExtra.slice(),
+      comment: comment.slice(),
     });
 
     at += ZIP_CENTRAL_HEADER_SIZE + nameLength + extraLength + commentLength;
@@ -403,6 +426,30 @@ function entryData(
   return bytes.subarray(start, start + compressedSize);
 }
 
+/** שדה ה-extra שבכותרת המקומית של רשומה. */
+function entryLocalExtra(bytes: Bytes, view: DataView, localOffset: number): Bytes | null {
+  if (localOffset + ZIP_LOCAL_HEADER_SIZE > bytes.byteLength) return null;
+  const nameLength = view.getUint16(localOffset + 26, true);
+  const extraLength = view.getUint16(localOffset + 28, true);
+  const start = localOffset + ZIP_LOCAL_HEADER_SIZE + nameLength;
+  if (start + extraLength > bytes.byteLength) return null;
+  return bytes.subarray(start, start + extraLength);
+}
+
+/**
+ * הערת הארכיון שאחרי ה-EOCD, כדי שכתיבה מחדש תחזיר אותה במקומה.
+ * ריק — אין הערה, או שהארכיון אינו נקרא.
+ */
+export function readZipComment(bytes: Bytes): Bytes {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const eocd = findEocd(view);
+  if (eocd < 0) return new Uint8Array(0) as Bytes;
+  const length = view.getUint16(eocd + 20, true);
+  const start = eocd + ZIP_EOCD_SIZE;
+  if (start + length > bytes.byteLength) return new Uint8Array(0) as Bytes;
+  return bytes.subarray(start, start + length).slice();
+}
+
 /**
  * מיקום ה-EOCD. נסרק מהסוף, כי לארכיון מותרת הערה בת עד 64KB אחריו.
  */
@@ -418,15 +465,19 @@ function findEocd(view: DataView): number {
 /**
  * כתיבת הארכיון מחדש.
  *
- * שדות ה-extra וההערות אינם נכתבים: הם נושאים חותמות זמן ומידע של מערכת
- * הקבצים, ואינם חלק ממה ש-DOCX הוא. מה שכן נשמר בדיוק הוא סדר הרשומות,
- * השמות, שיטת הדחיסה והבייטים עצמם.
+ * כל מה שאינו התוכן שתוקן נכתב בחזרה כמות שהוא: סדר הרשומות, השמות,
+ * שיטת הדחיסה, הבייטים, שדות ה-extra של שתי הכותרות, הערת כל רשומה והערת
+ * הארכיון. חבילה שעברה כאן ולא תוקן בה דבר יוצאת זהה למה שנכנס — זו הדרישה,
+ * מפני שהכותב רץ על **כל** מסמך שמיוצא, גם כשהתיקון נוגע בחלק אחד בלבד.
  */
-export function writeZip(entries: ZipEntry[]): Bytes {
-  let size = ZIP_EOCD_SIZE;
+export function writeZip(entries: ZipEntry[], archiveComment?: Bytes): Bytes {
+  const comment = archiveComment ?? (new Uint8Array(0) as Bytes);
+  let size = ZIP_EOCD_SIZE + comment.byteLength;
   for (const entry of entries) {
     size += ZIP_LOCAL_HEADER_SIZE + entry.nameBytes.byteLength + entry.data.byteLength;
+    size += entry.localExtra?.byteLength ?? 0;
     size += ZIP_CENTRAL_HEADER_SIZE + entry.nameBytes.byteLength;
+    size += (entry.centralExtra?.byteLength ?? 0) + (entry.comment?.byteLength ?? 0);
   }
 
   const out = new Uint8Array(size);
@@ -446,10 +497,14 @@ export function writeZip(entries: ZipEntry[]): Bytes {
     view.setUint32(at + 18, entry.data.byteLength, true);
     view.setUint32(at + 22, entry.uncompressedSize, true);
     view.setUint16(at + 26, entry.nameBytes.byteLength, true);
-    view.setUint16(at + 28, 0, true);
+    view.setUint16(at + 28, entry.localExtra?.byteLength ?? 0, true);
     at += ZIP_LOCAL_HEADER_SIZE;
     out.set(entry.nameBytes, at);
     at += entry.nameBytes.byteLength;
+    if (entry.localExtra) {
+      out.set(entry.localExtra, at);
+      at += entry.localExtra.byteLength;
+    }
     out.set(entry.data, at);
     at += entry.data.byteLength;
   }
@@ -467,8 +522,8 @@ export function writeZip(entries: ZipEntry[]): Bytes {
     view.setUint32(at + 20, entry.data.byteLength, true);
     view.setUint32(at + 24, entry.uncompressedSize, true);
     view.setUint16(at + 28, entry.nameBytes.byteLength, true);
-    view.setUint16(at + 30, 0, true);
-    view.setUint16(at + 32, 0, true);
+    view.setUint16(at + 30, entry.centralExtra?.byteLength ?? 0, true);
+    view.setUint16(at + 32, entry.comment?.byteLength ?? 0, true);
     view.setUint16(at + 34, 0, true);
     view.setUint16(at + 36, entry.internalAttrs, true);
     view.setUint32(at + 38, entry.externalAttrs, true);
@@ -476,6 +531,14 @@ export function writeZip(entries: ZipEntry[]): Bytes {
     at += ZIP_CENTRAL_HEADER_SIZE;
     out.set(entry.nameBytes, at);
     at += entry.nameBytes.byteLength;
+    if (entry.centralExtra) {
+      out.set(entry.centralExtra, at);
+      at += entry.centralExtra.byteLength;
+    }
+    if (entry.comment) {
+      out.set(entry.comment, at);
+      at += entry.comment.byteLength;
+    }
   });
 
   view.setUint32(at, ZIP_EOCD_SIGNATURE, true);
@@ -485,7 +548,8 @@ export function writeZip(entries: ZipEntry[]): Bytes {
   view.setUint16(at + 10, entries.length, true);
   view.setUint32(at + 12, at - centralOffset, true);
   view.setUint32(at + 16, centralOffset, true);
-  view.setUint16(at + 20, 0, true);
+  view.setUint16(at + 20, comment.byteLength, true);
+  out.set(comment, at + ZIP_EOCD_SIZE);
 
   return out;
 }
