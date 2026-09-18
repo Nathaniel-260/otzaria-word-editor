@@ -25,6 +25,10 @@
  * נכשלו בגישה הקודמת, ושתיהן הן מה שהפך אותה לאובדן עיצוב. ראו את הטבלה
  * ב-`docx-neutral-mark.ts`.
  *
+ * ושורה שלישית מודדת את **מראת הכתב המורכב**: ריצה שכבר מצהירה `w:rtl` —
+ * הצורה של כל קובץ שנוצר ב-Word — חייבת לצאת עם `bCs`/`szCs`/`rFonts@cs`,
+ * אחרת Word מצייר אותה Arial 12 לא-מודגש. נמדד.
+ *
  * ובאותה שמירה נבדק גם **nsid ייחודי**: רשימה עברית שנוצרה בהקלדה ירשה את
  * ה-nsid של ההגדרה העשרונית, ו-Word הציג אותה כ-„1. 2.”.
  *
@@ -50,6 +54,15 @@ const BOLD_PARA =
   `<w:p><w:pPr>${RTL}</w:pPr>` +
   `<w:r><w:rPr><w:b/><w:sz w:val="36"/></w:rPr><w:t xml:space="preserve">כותרת מודגשת.</w:t></w:r>` +
   `</w:p>`;
+
+/**
+ * ריצה שכבר **מצהירה** `w:rtl`, כמו בכל קובץ שנוצר ב-Word, עם הצד הלטיני
+ * בלבד — בדיוק מה שנמדד יוצא מהמנוע ב-Ctrl+B. כאן נמדדת המראה.
+ */
+const DECLARED_PARA =
+  `<w:p><w:pPr>${RTL}</w:pPr>` +
+  `<w:r><w:rPr><w:rFonts w:ascii="David" w:hAnsi="David"/><w:b/><w:sz w:val="36"/><w:rtl/></w:rPr>` +
+  `<w:t xml:space="preserve">כותרת מוצהרת</w:t></w:r></w:p>`;
 
 /** משפט עברי עם מילה לועזית, כריצה אחת — כמו שהעורך כותב אותו. */
 const MIXED_PARA =
@@ -140,7 +153,7 @@ function paragraphsOf(xml) {
 try {
   await captureUpload();
   const opened = await openDocx(
-    buildDocx({ body: HEBREW_PARA + BOLD_PARA + MIXED_PARA + LATIN_PARA, numbering: NUMBERING }),
+    buildDocx({ body: HEBREW_PARA + BOLD_PARA + DECLARED_PARA + MIXED_PARA + LATIN_PARA, numbering: NUMBERING }),
     'rtl-run-export',
   );
   if (opened !== 'rtl-run-export') {
@@ -201,6 +214,7 @@ try {
         const bold = paragraphs.find((para) => para.plain.startsWith('כותרת'));
         const mixed = paragraphs.find((para) => para.plain.includes('Word'));
         const latin = paragraphs.find((para) => para.plain.startsWith('hello'));
+        const declared = paragraphs.find((para) => para.plain.includes('כותרת מוצהרת'));
 
         /* התיקון עצמו — הבאג שדווח. */
         if (!hebrew) report.fail('הנקודה הסוגרת', 'הפסקה העברית לא נמצאה בקובץ שנשמר');
@@ -230,6 +244,15 @@ try {
           report.fail(
             'הריצה אינה מפוצלת',
             `ריצות=${mixed.runs}, בסוף=${mixed.endsMarked}, rtl=${mixed.rtl}`,
+          );
+
+        /* המראה: ריצה שכבר מצהירה rtl מקבלת את מחסנית הכתב המורכב. */
+        if (!declared) report.fail('מראת הכתב המורכב', 'הפסקה המוצהרת לא נמצאה');
+        else if (declared.cs) report.pass('מראת הכתב המורכב', 'ריצה מוצהרת קיבלה את התאומים');
+        else
+          report.fail(
+            'מראת הכתב המורכב',
+            'ריצה שמצהירה w:rtl יצאה בלי bCs/szCs/cs — ‏Word יצייר אותה Arial 12 לא-מודגש',
           );
 
         const numbering = parts['word/numbering.xml'] ?? '';

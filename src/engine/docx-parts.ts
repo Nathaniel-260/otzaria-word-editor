@@ -124,6 +124,54 @@ export const CONTENT_PARTS =
   /^word\/(?:document|styles|stylesWithEffects|numbering|footnotes|endnotes|comments|header|footer)\d*\.xml$/i;
 
 /**
+ * הכנסה אחת לתוך XML: ההיסט, הטקסט, והטווח שההכנסה חייבת ליפול בתוכו.
+ *
+ * הטווח נישא על ההכנסה ואינו מחושב מחדש — חיפוש שלו בזמן ההחלה היה סריקה על
+ * כל הטווחים לכל הכנסה, כלומר ריבועי במספר הפסקאות (נמדד: 2,229ms על 40,000
+ * פסקאות מול 171ms בלעדיו).
+ */
+export interface XmlInsert {
+  at: number;
+  text: string;
+  span: { from: number; to: number };
+}
+
+/**
+ * מחילה הכנסות על XML, או `null` כשהן מפרות את האינווריאנטה.
+ *
+ * **הפלט הוא הקלט ועוד הטקסטים שהוכנסו, או שאין פלט.** שום בייט של הקלט אינו
+ * נמחק ואינו מוזז, וזה נאכף ולא מונח: כל היסט חייב להיות שלם, ממוין, בתוך
+ * גבולות המחרוזת, ובתוך הטווח שההכנסה הצהירה עליו — והפלט נבנה מחיתוכים
+ * רציפים שאורכם הכולל חייב להיות אורך הקלט.
+ *
+ * זו אינווריאנטה ולא נפילה-לאחור, ואין קלט שמגיע אליה דרך הקוראים של היום.
+ * היא כאן מפני שמצב הכשל של הגישה שנפסלה (סימון `w:rtl`) לא היה זריקה אלא
+ * פלט שגוי בשקט — `slice` על היסט שלילי שהחזיר מסמך משוסע בלי שאיש ישים לב.
+ * נמדד שהטריגר הוא עריכה אחת מכאן: מסמך עם טקסט ואחריו תיבת טקסט מעוגנת סוגר
+ * את הפסקה הפנימית ראשונה ודוחף את ההיסט הגדול לפני הקטן, ובלי המיון ובלי
+ * הבדיקות אותו קלט מייצר פסקה משוכפלת וטקסט שנעלם.
+ */
+export function applyXmlInserts(xml: string, inserts: readonly XmlInsert[]): string | null {
+  const sorted = [...inserts].sort((first, second) => first.at - second.at);
+  const parts: string[] = [];
+  let at = 0;
+  let kept = 0;
+  for (const { at: offset, text, span } of sorted) {
+    if (!Number.isInteger(offset) || offset < at || offset > xml.length) return null;
+    if (offset < span.from || offset > span.to) return null;
+    const slice = xml.slice(at, offset);
+    kept += slice.length;
+    parts.push(slice, text);
+    at = offset;
+  }
+  const rest = xml.slice(at);
+  kept += rest.length;
+  if (kept !== xml.length) return null;
+  parts.push(rest);
+  return parts.join('');
+}
+
+/**
  * ערכי `ST_OnOff` שמשמעותם „כבוי”. כל ערך אחר — ובכלל זה היעדר `w:val` — דולק,
  * וזה מה שהתקן אומר: `<w:bCs/>` בלי מאפיין היא הדגשה פעילה.
  */

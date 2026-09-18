@@ -109,7 +109,7 @@
  * שהמשתמש רואה ואינו מזיז לו את ה-undo. זו גם אותה נקודה שבה `docx-preflight.ts`
  * מתקן את הכיוון הנכנס, ואותו קורא zip משרת את שניהם.
  */
-import { SKIPPED_SPANS, TOKEN_SOURCE } from './docx-parts';
+import { SKIPPED_SPANS, TOKEN_SOURCE, applyXmlInserts, type XmlInsert } from './docx-parts';
 
 /** ‏U+200F. חסר רוחב, ולכן אינו נראה לא בעורך ולא ב-Word. */
 const RLM = '‏';
@@ -166,12 +166,6 @@ interface DecodedChar {
    * הטווח בזמן ההחלה היה סריקה על כל הטווחים לכל הכנסה, כלומר ריבועי במספר
    * הפסקאות — נמדד 2,229ms על 40,000 פסקאות מול 387ms בלעדיו.
    */
-  span: { from: number; to: number };
-}
-
-/** הכנסה אחת: ההיסט, והטווח שהיא חייבת ליפול בתוכו. */
-interface Insert {
-  at: number;
   span: { from: number; to: number };
 }
 
@@ -238,7 +232,7 @@ interface ParagraphRecord {
  * דורשים שמה שנשאר ייגמר בתו ניטרלי, ושהתו המכריע האחרון לפניו יהיה תו ממערכת
  * כתב ימנית.
  */
-function insertionFor(paragraph: ParagraphRecord): Insert | null {
+function insertionFor(paragraph: ParagraphRecord): XmlInsert | null {
   const chars = paragraph.chars;
   // הזנב הרווחי יורד: ההכנסה נכנסת לפניו, וכך הרווח נשאר סופי ונמחק כמו קודם.
   let last = chars.length - 1;
@@ -257,7 +251,7 @@ function insertionFor(paragraph: ParagraphRecord): Insert | null {
     const kind = classOf(chars[i]!.ch);
     if (kind === 'N' || kind === 'M') continue;
     // המכריע הראשון שנמצא: ימני מתקן, כל דבר אחר יוצא מהתחום הצר.
-    return kind === 'R' ? { at: tail.end, span: tail.span } : null;
+    return kind === 'R' ? { at: tail.end, text: RLM, span: tail.span } : null;
   }
   // פסקה שכולה ניטרלית — אין בה שום עדות לכיוון, וניחוש כאן היה נוגע במסמכים
   // לטיניים.
@@ -307,7 +301,7 @@ export function markNeutralParagraphEnds(xml: string): string | null {
   if (prefix === null) return null;
 
   /** ההכנסה, והטווח של ה-`<w:t>` שהיא נופלת בתוכה. ראו `applyInserts`. */
-  const inserts: Insert[] = [];
+  const inserts: XmlInsert[] = [];
   /** מחסנית הפסקאות — פסקה בתוך תיבת טקסט היא פסקה בתוך ריצה. */
   const paragraphs: ParagraphRecord[] = [];
   /**
@@ -374,39 +368,5 @@ export function markNeutralParagraphEnds(xml: string): string | null {
   }
 
   if (inserts.length === 0) return null;
-  return applyInserts(xml, inserts);
-}
-
-/**
- * הכנסת RLM בכל אחד מההיסטים.
- *
- * הבדיקות כאן אוכפות את ההבטחה שבראש הקובץ **במלואה**, ולא רק את גבולות
- * המחרוזת: כל היסט חייב ליפול בתוך טווח תוכן של `<w:t>` שנסרקה בפועל. בלי
- * התנאי הזה ההבטחה הייתה רחבה ממה שנאכף — היסט כלשהו בתוך תג היה עובר.
- *
- * ואין זה קוד הגנתי בלי טריגר. הטריגר **נמדד**, והוא עריכה אחת מכאן: מסמך
- * ששגרתי ב-Word — פסקה עם טקסט ואחריו תיבת טקסט מעוגנת — סוגר את הפסקה
- * הפנימית **ראשונה**, ולכן דוחף את ההיסט הגדול לפני הקטן. עם המיון שתי
- * ההכנסות תקינות; בלעדיו, ובלי הבדיקות, אותו קלט מייצר פסקה משוכפלת, RLM
- * כפול וטקסט שנעלם — בלי לזרוק. זה בדיוק מצב הכשל של הגישה הקודמת, שלא
- * הייתה זריקה אלא פלט שגוי בשקט.
- */
-function applyInserts(xml: string, inserts: readonly Insert[]): string | null {
-  const sorted = [...inserts].sort((first, second) => first.at - second.at);
-  const parts: string[] = [];
-  let at = 0;
-  let kept = 0;
-  for (const { at: offset, span } of sorted) {
-    if (!Number.isInteger(offset) || offset < at || offset > xml.length) return null;
-    if (offset <= span.from || offset > span.to) return null;
-    const slice = xml.slice(at, offset);
-    kept += slice.length;
-    parts.push(slice, RLM);
-    at = offset;
-  }
-  const rest = xml.slice(at);
-  kept += rest.length;
-  if (kept !== xml.length) return null;
-  parts.push(rest);
-  return parts.join('');
+  return applyXmlInserts(xml, inserts);
 }
