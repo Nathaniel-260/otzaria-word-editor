@@ -85,6 +85,61 @@ describe('mirrorComplexScript — מה שממורה', () => {
   });
 });
 
+/**
+ * ‏`w:b` ו-`w:i` הם `ST_OnOff`, ולכן מה שנמרה אינו נוכחות הדגל אלא הערך שהוא
+ * נושא. תאום שנכתב דלוק ליד שותף מכובה הופך „לא מודגש” מפורש למודגש — היפוך,
+ * ולא השלמה. נמדד שזה מה ש-Word עצמו כותב: מכל 115 ה-`rPr` שבקורפוס שיש בהן
+ * `b` מכובה לצד `bCs`, ב-115 גם ה-`bCs` מכובה.
+ */
+describe('mirrorComplexScript — מצב ההדלקה עובר אל התאום', () => {
+  it('‏`w:b` מכובה מוליד `bCs` מכובה', () => {
+    expect(propsOf(doc(run(`<w:b w:val="0"/>${RTL}`)))).toBe(
+      `<w:rPr><w:b w:val="0"/><w:bCs w:val="0"/>${RTL}</w:rPr>`,
+    );
+  });
+
+  it('שלוש הצורות של „כבוי” — `0`, `false`, `off`', () => {
+    for (const off of ['0', 'false', 'off']) {
+      expect(propsOf(doc(run(`<w:b w:val="${off}"/>${RTL}`)))).toBe(
+        `<w:rPr><w:b w:val="${off}"/><w:bCs w:val="${off}"/>${RTL}</w:rPr>`,
+      );
+    }
+  });
+
+  it('נטייה מכובה', () => {
+    expect(propsOf(doc(run(`<w:i w:val="false"/>${RTL}`)))).toBe(
+      `<w:rPr><w:i w:val="false"/><w:iCs w:val="false"/>${RTL}</w:rPr>`,
+    );
+  });
+
+  it('ערך דלוק מפורש עובר גם הוא כמות שהוא', () => {
+    expect(propsOf(doc(run(`<w:b w:val="1"/>${RTL}`)))).toBe(
+      `<w:rPr><w:b w:val="1"/><w:bCs w:val="1"/>${RTL}</w:rPr>`,
+    );
+  });
+
+  it('מרכאות בודדות במקור — התאום נכתב בכפולות', () => {
+    expect(propsOf(doc(run(`<w:b w:val='0'/>${RTL}`)))).toBe(
+      `<w:rPr><w:b w:val='0'/><w:bCs w:val="0"/>${RTL}</w:rPr>`,
+    );
+  });
+
+  /** הצורה שנמדדה בשלושה מסמכים אמיתיים: ביטול הדגשה על ריצה עברית מוצהרת. */
+  it('הצורה שנמדדה בקורפוס — ביטול הדגשה לצד גודל וגופן', () => {
+    const measured = `<w:b w:val="0"/><w:rFonts w:cs="Carizma"/><w:sz w:val="28"/><w:szCs w:val="28"/>${RTL}`;
+    expect(propsOf(doc(run(measured)))).toBe(
+      `<w:rPr><w:b w:val="0"/><w:bCs w:val="0"/><w:rFonts w:cs="Carizma"/>` +
+        `<w:sz w:val="28"/><w:szCs w:val="28"/>${RTL}</w:rPr>`,
+    );
+  });
+
+  it('הרצה שנייה על מכובה אינה מוסיפה דבר', () => {
+    const once = mirrorComplexScript(doc(run(`<w:b w:val="0"/><w:i w:val="off"/>${RTL}`)));
+    expect(once).not.toBeNull();
+    expect(mirrorComplexScript(once!)).toBeNull();
+  });
+});
+
 describe('mirrorComplexScript — מה שאינו נגע', () => {
   it('ריצה בלי הצהרת rtl', () => {
     expect(mirrorComplexScript(doc(run('<w:b/>')))).toBeNull();

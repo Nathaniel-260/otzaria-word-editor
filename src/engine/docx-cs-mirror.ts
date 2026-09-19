@@ -43,14 +43,41 @@
  *    נופל היום, לפני הקובץ הזה ובלי קשר אליו. המראה ברמת הריצה אינה מתקנת
  *    אותו ואינה מחמירה אותו.
  * 2. **התכונות סופיות:** ארבע.
- * 3. **הפעולה מוסיפה בלבד.** היא אינה יכולה למחוק עיצוב, כי היא כותבת רק
- *    לאיבר שאינו קיים, ורק כשהתאום הלטיני שלו כן קיים. הגרוע שיכול לקרות
- *    הוא שהדגשה שהמשתמש ביקש **תיראה**.
+ * 3. **הפעולה מוסיפה בלבד, והתאום נושא את ערך השותף.** היא כותבת רק לאיבר
+ *    שאינו קיים, רק כשהתאום הלטיני שלו כן קיים, ועם אותו `w:val` בדיוק.
+ *    הגרוע שיכול לקרות הוא שמה שהמסמך אומר במפורש ברמת הריצה **ייראה** — גם
+ *    „מודגש” וגם „לא מודגש”.
+ *
+ * ## הדגל נושא ערך, ולא רק נוכחות
+ *
+ * ‏`w:b` ו-`w:i` הם `ST_OnOff`: נוכחות בלי `w:val` היא „דלוק”, ו-`w:val="0"`
+ * (או `false`, או `off`) היא „כבוי” — אמירה מפורשת שמבטלת עיצוב שיורש מסגנון.
+ * לכן התאום נכתב עם **אותו `w:val` של השותף**, בדיוק כפי ש-`szCs` נושא את ערך
+ * ה-`sz`: ‏`<w:b/>` מוליד `<w:bCs/>`, ו-`<w:b w:val="0"/>` מוליד
+ * `<w:bCs w:val="0"/>`.
+ *
+ * תאום ש**מתעלם** מהערך אינו „פחות תיקון” אלא היפוך: הוא מדליק את המחסנית
+ * שהמסמך כיבה. נמדד על 132 המסמכים שעל המכונה: 24 ריצות בשלושה מהם מצהירות
+ * `w:rtl` דלוק, נושאות `<w:b w:val="0"/>` ואין בהן `bCs` — כלומר נופלות בדיוק
+ * כאן. ובאותו קורפוס, מכל 115 ה-`rPr` שיש בהן `b` מכובה לצד `bCs`, ב-**115**
+ * גם ה-`bCs` מכובה ובאף אחת אינה דלוקה: העתקת הערך היא מה ש-Word עצמו כותב.
+ *
+ * ‏`sz` ו-`rFonts` מעולם לא סבלו מזה, והם אינם צריכים תיקון: הם נושאים ערך ולא
+ * דגל, והקוד העתיק אותו מתחילתו. ל-`ST_HpsMeasure` אין „כבוי” שאפשר לאבד,
+ * ו-`<w:sz/>` בלי `w:val` אינה נגעת בכלל, כי אין מה להעתיק.
  *
  * ## מה שנשאר בחוץ, ולמה
  *
  * ריצה ש-`w:rtl` שלה מוצהר **מכובה** (`w:val="0"`) אינה נגעת: מי שכתב את
  * הקובץ אמר „זו אינה עברית”, ו-Word קורא שם את הצד הלטיני ממילא.
+ *
+ * ‏**אבל לא ריצה ש-`w:b` שלה מכובה.** ההבחנה אינה „דגל מכובה” אלא איזו מחסנית
+ * ‏Word קורא: ‏`w:rtl` מכובה מפנה אותו לצד הלטיני, ולכן אין שם מה למלא; ‏`w:b`
+ * מכובה משאיר אותו קורא את המחסנית המורכבת, והשארתה ריקה פירושה שההדגשה
+ * תיפתר מהסגנון — כלומר דווקא אי-כתיבה היא שמתעלמת מהאמירה המפורשת. וזה עולה
+ * בקנה אחד עם מה שהמודול האח כבר קבע בדרך פנימה: ‏`docx-preflight.ts` אינו
+ * הופך `<w:b w:val="0"/>` ל„מודגש”, מפני שדגל מכובה הוא אמירה של מי שכתב את
+ * הקובץ. אותה אמירה עצמה, בדרך החוצה, היא שנכתבת כאן לתאום.
  *
  * ‏`rPrChange` — ההיסטוריה של שינוי מסומן — אינה העיצוב החי, ואינה נגעת.
  *
@@ -113,8 +140,11 @@ interface RunProps {
   hasChange: boolean;
   /** סוף התג של `b`, כדי ש-`bCs` ייכתב מיד אחריו לפי סדר הסכמה. */
   boldEnd: number | null;
+  /** ה-`w:val` של `b` כפי שנקרא, או `null` כשאינו שם — כלומר „דלוק”. */
+  boldVal: string | null;
   hasBoldCs: boolean;
   italicEnd: number | null;
+  italicVal: string | null;
   hasItalicCs: boolean;
   sizeEnd: number | null;
   sizeVal: string | null;
@@ -131,8 +161,10 @@ function newProps(from: number): RunProps {
     declaredRtl: null,
     hasChange: false,
     boldEnd: null,
+    boldVal: null,
     hasBoldCs: false,
     italicEnd: null,
+    italicVal: null,
     hasItalicCs: false,
     sizeEnd: null,
     sizeVal: null,
@@ -144,18 +176,30 @@ function newProps(from: number): RunProps {
 }
 
 /**
+ * ה-`w:val` שהתאום נושא: זה של השותף, מילה במילה. השותף בלי `w:val` — ‏`<w:b/>`
+ * — מוליד תאום בלי `w:val`, ושניהם „דלוק” לפי `ST_OnOff`.
+ */
+function sameValue(raw: string | null, prefix: string): string {
+  return raw === null ? '' : ` ${prefix}:val="${quoteAttribute(raw)}"`;
+}
+
+/**
  * ההכנסות שריצה אחת דורשת. ריק = אין מה לעשות בה.
  *
  * רק ריצה שמצהירה `w:rtl` **דלוק**, ורק איבר שהתאום הלטיני שלו קיים והוא
- * עצמו חסר.
+ * עצמו חסר. מצב ההדלקה של הדגל אינו תנאי אלא **תוכן**: הוא עובר אל התאום.
  */
 function mirrorFor(props: RunProps, prefix: string): XmlInsert[] {
   if (props.declaredRtl !== true || props.hasChange) return [];
   const out: XmlInsert[] = [];
   const add = (at: number, text: string) => out.push({ at, text, span: props.span });
 
-  if (props.boldEnd !== null && !props.hasBoldCs) add(props.boldEnd, `<${prefix}:bCs/>`);
-  if (props.italicEnd !== null && !props.hasItalicCs) add(props.italicEnd, `<${prefix}:iCs/>`);
+  if (props.boldEnd !== null && !props.hasBoldCs) {
+    add(props.boldEnd, `<${prefix}:bCs${sameValue(props.boldVal, prefix)}/>`);
+  }
+  if (props.italicEnd !== null && !props.hasItalicCs) {
+    add(props.italicEnd, `<${prefix}:iCs${sameValue(props.italicVal, prefix)}/>`);
+  }
   if (props.sizeEnd !== null && props.sizeVal !== null && !props.hasSizeCs) {
     add(props.sizeEnd, `<${prefix}:szCs ${prefix}:val="${quoteAttribute(props.sizeVal)}"/>`);
   }
@@ -267,10 +311,14 @@ export function mirrorComplexScript(xml: string): string | null {
     if (depth !== 1 || !props || closing) continue;
     const tagEnd = match.index + match[0].length;
 
-    if (name === 'b') props.boldEnd = tagEnd;
-    else if (name === 'bCs') props.hasBoldCs = true;
-    else if (name === 'i') props.italicEnd = tagEnd;
-    else if (name === 'iCs') props.hasItalicCs = true;
+    if (name === 'b') {
+      props.boldEnd = tagEnd;
+      props.boldVal = valueOf(attributes);
+    } else if (name === 'bCs') props.hasBoldCs = true;
+    else if (name === 'i') {
+      props.italicEnd = tagEnd;
+      props.italicVal = valueOf(attributes);
+    } else if (name === 'iCs') props.hasItalicCs = true;
     else if (name === 'sz') {
       props.sizeEnd = tagEnd;
       props.sizeVal = valueOf(attributes);
