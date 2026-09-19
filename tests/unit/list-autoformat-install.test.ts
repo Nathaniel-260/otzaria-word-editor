@@ -188,8 +188,27 @@ function fakeEditor(options: FakeOptions = {}) {
     }, options.slowKeys?.[key] ?? lag);
   });
 
+  /**
+   * שער על `history.get`. ‏`apply` ממתינה לה בין ההחלטה למחיקה, וזה החלון
+   * שבו הקלט יכול להשתנות תחת ידיה. בלי שער אין דרך לעמוד בתוכו בלי להישען
+   * על זמן קיר — והחלון הזה קצר מכל `sleep` שאפשר לכתוב.
+   */
+  let historyHeld = false;
+  let parked = 0;
+  const historyGate: Array<() => void> = [];
+  const historyParked: Array<() => void> = [];
+
   const history = {
-    get: async () => ({ undoDepth: undoStack.length, redoDepth: redoStack.length }),
+    get: async () => {
+      if (historyHeld) {
+        await new Promise<void>((resolve) => {
+          historyGate.push(resolve);
+          parked += 1;
+          historyParked.splice(0).forEach((notify) => notify());
+        });
+      }
+      return { undoDepth: undoStack.length, redoDepth: redoStack.length };
+    },
     undo: async () => {
       record('history.undo', null);
       const state = undoStack.pop();
@@ -299,6 +318,24 @@ function fakeEditor(options: FakeOptions = {}) {
       blocked = false;
       waiting.splice(0).forEach((resolve) => resolve());
     },
+    holdHistory: () => {
+      historyHeld = true;
+    },
+    /** נפתרת כש-`history.get` עומדת בשער — תנאי, ולא משך. */
+    whenHistoryParked: (): Promise<void> =>
+      parked > 0 ? Promise.resolve() : new Promise<void>((resolve) => historyParked.push(resolve)),
+    releaseHistory: () => {
+      historyHeld = false;
+      parked = 0;
+      historyGate.splice(0).forEach((resolve) => resolve());
+    },
+    /** מעבר סמן שאינו מהמקלדת ואינו מהעכבר: המנוע השלים פיגור. */
+    moveCaret: (block: number, at: number) => {
+      cur = block;
+      offset = at;
+    },
+    /** כל ההקשות שנקלטו כבר הוחלו. תנאי, ולא משך. */
+    idle: applied,
   };
 }
 
@@ -707,6 +744,83 @@ describe('installListAutoformat — סוג הבלוק', () => {
     await settle(80);
 
     expect(named(app.calls, 'ranges.resolve').length).toBeGreaterThan(0);
+    expect(named(app.calls, 'lists.create')).toHaveLength(1);
+  });
+});
+
+/**
+ * ‏`apply` מחליטה על המחיקה מסמן שנקרא **לפני** שהיא ממתינה ל-`history.get`,
+ * והמחיקה עצמה חותכת היסטים קבועים (0 עד אורך הסימן) בבלוק ידוע. בין השניים
+ * החלון פתוח: לחיצה או הקשה מאפסות את המצב אבל אינן יכולות לבטל קריאה שכבר
+ * רצה. כאן השער `holdHistory` מחזיק את החלון פתוח — תנאי ולא `sleep`, כי
+ * במנוע האמיתי הוא נמדד ב-~1ms.
+ */
+describe('installListAutoformat — קלט בזמן ההמתנה שלפני המחיקה', () => {
+  it('לחיצה בזמן ההמתנה — אין מחיקה, גם כשהסמן לא זז', async () => {
+    const app = await install();
+    app.holdHistory();
+    await type(app.textarea, `${ALEF}) `);
+    await app.whenHistoryParked();
+
+    // הסמן עומד בדיוק במקום שממנו הוחלט; רק האיפוס יכול לתפוס את זה.
+    expect(app.caret()).toEqual({ blockId: 'b1', offset: 3 });
+    app.textarea.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    app.releaseHistory();
+    await settle();
+
+    expect(app.blocks()[0]).toMatchObject({ text: `${ALEF}) `, list: false });
+    expect(named(app.calls, 'insert')).toHaveLength(0);
+    expect(named(app.calls, 'lists.create')).toHaveLength(0);
+  });
+
+  it('Backspace ותו אחר בזמן ההמתנה — ההיסט חוזר, והתוכן לא', async () => {
+    const app = await install();
+    app.holdHistory();
+    await type(app.textarea, `${ALEF}) `);
+    await app.whenHistoryParked();
+
+    press(app.textarea, 'Backspace');
+    press(app.textarea, BET);
+    await app.idle();
+    // אותו היסט שממנו הוחלט, תוכן אחר: שומר סמן לבדו היה מוחק „א)ב”.
+    expect(app.caret()).toEqual({ blockId: 'b1', offset: 3 });
+    app.releaseHistory();
+    await settle();
+
+    expect(app.blocks()[0]).toMatchObject({ text: `${ALEF})${BET}`, list: false });
+    expect(named(app.calls, 'insert')).toHaveLength(0);
+  });
+
+  it('המנוע השלים פיגור והסמן בבלוק אחר — אין מחיקה', async () => {
+    const app = await install({ blocks: [{ text: '' }, { text: SHALOM }] });
+    app.holdHistory();
+    await type(app.textarea, `${ALEF}) `);
+    await app.whenHistoryParked();
+
+    // בלי הקשה ובלי לחיצה — ולכן בלי איפוס. רק שומר הסמן תופס את זה.
+    app.moveCaret(1, 0);
+    app.releaseHistory();
+    await settle();
+
+    expect(app.blocks()[0]).toMatchObject({ text: `${ALEF}) `, list: false });
+    expect(app.blocks()[1]).toMatchObject({ text: SHALOM, list: false });
+    expect(named(app.calls, 'insert')).toHaveLength(0);
+  });
+
+  it('הקלדה רציפה בזמן ההמתנה — ההמרה עוברת, וההיסט רק גדל', async () => {
+    const app = await install();
+    app.holdHistory();
+    await type(app.textarea, `${ALEF}) `);
+    await app.whenHistoryParked();
+
+    await type(app.textarea, SHALOM);
+    await app.idle();
+    expect(app.caret().offset).toBeGreaterThan(3);
+    app.releaseHistory();
+    await settle();
+
+    // שומר סמן של שוויון היה מבטל כאן בדיוק את מה שהמודול נבנה בשבילו.
+    expect(app.blocks()[0]).toMatchObject({ text: SHALOM, list: true });
     expect(named(app.calls, 'lists.create')).toHaveLength(1);
   });
 });

@@ -104,6 +104,17 @@
  * שהוא סיומת אפשרית — עוצרים. הקריאה נשארת המקור של ה**המרה** (מה הסימן
  * במלואו), ושם היא בטוחה: ההחלה עוברת בנתיב המאומת, שקורא שוב ומשווה.
  *
+ * ## החלון שבין ההחלטה למחיקה
+ *
+ * ‏`apply` מחליטה מסמן שנקרא לפניה, וממתינה ל-`history.get` (‎~1ms) לפני
+ * שהיא מוחקת. המחיקה חותכת **היסטים קבועים** — 0 עד אורך הסימן — בבלוק ידוע,
+ * ולכן היא אינה מתגוננת בעצמה: לחיצה או הקשה בתוך החלון מאפסות את המצב אבל
+ * אינן יכולות לבטל קריאה שכבר רצה, ומה שיימחק יהיה טקסט אחר. `markerHolds`
+ * הוא ההוכחה שנלקחת שוב רגע לפני המחיקה, והיא **סינכרונית בהכרח**: כל קריאה
+ * מהמסמך כאן מחזירה את „ממיר רק אחרי שמפסיקים להקליד” (סעיף 1 למעלה).
+ *
+ * כל `await` שיתווסף ל-`apply` לפני המחיקה מרחיב את החלון הזה.
+ *
  * ## כשל
  *
  * המשתמש לא ביקש רשימה — הוא הקליד. כשל בין מחיקת הסמן ליצירת הרשימה מחזיר
@@ -467,6 +478,11 @@ export function installListAutoformat(options: ListAutoformatOptions): ListAutof
   let resetPrefix: { blockId: string; text: string } | null = null;
   /** כל איפוס מבטל קריאה שלא חזרה עדיין. בנפרד מ-`generation`, ששייך לסוגי הבלוקים. */
   let prefixToken = 0;
+  /**
+   * כל איפוס מבטל גם המרה שכבר החלה. `apply` לוקחת אותו בכניסה ובודקת אותו
+   * שוב רגע לפני המחיקה — ראו `markerHolds`.
+   */
+  let resetToken = 0;
   /** ה-`keydown` של רווח נעצר, וה-`beforeinput` שלו יוחלף. */
   let spaceArmed = false;
   const ours = new WeakSet<Event>();
@@ -750,12 +766,40 @@ export function installListAutoformat(options: ListAutoformatOptions): ListAutof
     }
   }
 
-  async function apply(p: Pending, at: Caret, how: string): Promise<void> {
+  /**
+   * ההוכחה, רגע לפני המחיקה, שהיא עדיין חותכת את מה שהוקלד. `''` — מחזיקה.
+   *
+   * ‏`apply` ממתינה ל-`history.get` לפני שהיא מוחקת, והחלון הזה פתוח לקלט:
+   * לחיצה, Backspace או Ctrl+Z מאפסים את המצב אבל אינם יכולים לבטל קריאה
+   * שכבר רצה. המחיקה חותכת **היסטים קבועים** (0 עד אורך הסימן) בבלוק ידוע,
+   * ולכן מה שהיה שם כשהוחלט אינו בהכרח מה שיש שם כשהיא מגיעה.
+   *
+   * - **האסימון** סופר כל איפוס, והוא זה שתופס „הסמן חזר לאותו מקום והתוכן
+   *   השתנה”: Backspace ואחריו תו אחר משאירים את ההיסט כפי שהיה.
+   * - **הסמן** תופס את מה שאינו עובר באיפוס. הקלדה רגילה אינה מאפסת — ובה
+   *   ההיסט רק גדל ותחילת הפסקה אינה זזה, ולכן החסם הוא „לא אחורה” ולא
+   *   שוויון: שוויון היה מבטל בדיוק את ההמרה שבאמצע הקלדה רציפה.
+   * - **אחרי Enter** הסמן כבר בבלוק החדש ואינו מעיד על הישן; שם האסימון הוא
+   *   כל ההוכחה, והוא נלקח אחרי האיפוס של אותו Enter.
+   */
+  function markerHolds(at: Caret, token: number, afterEnter: boolean): string {
+    if (disposed) return 'disposed';
+    if (token !== resetToken) return 'reset';
+    if (afterEnter) return '';
+    const still = caretNow();
+    if (!still) return 'stale';
+    if (still.blockId !== at.blockId) return 'block';
+    if (still.offset < at.offset) return 'back';
+    return '';
+  }
+
+  async function apply(p: Pending, at: Caret, how: string, afterEnter = false): Promise<void> {
     const doc = docOf(host);
     const insert = doc?.insert;
     const create = doc?.lists?.create;
     if (disposed || applying || typeof insert !== 'function' || typeof create !== 'function') return;
 
+    const token = resetToken;
     applying = true;
     typedWhileApplying = false;
     dropRedoGroup();
@@ -765,6 +809,12 @@ export function installListAutoformat(options: ListAutoformatOptions): ListAutof
     lastTyped = null;
     try {
       const before = await historyDepth(doc!);
+      const moved = markerHolds(at, token, afterEnter);
+      if (moved) {
+        kinds.delete(at.blockId);
+        note(`cancelled:${moved}`);
+        return;
+      }
       const erased = await call(() =>
         insert({ value: '', type: 'text', target: textTarget(at, 0, p.plan.markerLength) }),
       );
@@ -990,6 +1040,9 @@ export function installListAutoformat(options: ListAutoformatOptions): ListAutof
 
     const waiting = pending;
     pending = null;
+    // המרה שכבר החלה אינה נעצרת מעצמה: `pending` כבר אופס כשהיא יצאה לדרך.
+    // האסימון הוא מה שעוצר אותה, רגע לפני המחיקה (`markerHolds`).
+    resetToken += 1;
     startRun();
     learnPrefix();
 
@@ -1004,7 +1057,8 @@ export function installListAutoformat(options: ListAutoformatOptions): ListAutof
         ready.offset === waiting.typed.length + waiting.keysAfter &&
         kinds.get(ready.blockId) === 'paragraph'
       ) {
-        void apply(waiting, ready, 'typed');
+        // ‏Enter מעביר את הסמן לבלוק החדש; העדות על הישן היא האסימון בלבד.
+        void apply(waiting, ready, 'typed', true);
       }
       return;
     }
