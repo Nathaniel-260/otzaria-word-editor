@@ -146,6 +146,14 @@
         :dictionary="spellcheckDictionary"
         :revision="spellcheckRevision"
       />
+      <PageMarkingOverlay
+        ref="pageMarkingOverlayRef"
+        :host="rulerHost"
+        :viewport-source="rulerViewport"
+        :enabled="pageMarkingEnabled"
+        :changed-pages="pageMarkingChanged"
+        :revision="spellcheckRevision"
+      />
     </div>
 
     <!--
@@ -338,6 +346,7 @@ import PageBorderOverlay from './ui/shell/PageBorderOverlay.vue';
 import LineNumberOverlay from './ui/shell/LineNumberOverlay.vue';
 import PilcrowOverlay from './ui/shell/PilcrowOverlay.vue';
 import SpellingOverlay from './ui/shell/SpellingOverlay.vue';
+import PageMarkingOverlay from './ui/shell/PageMarkingOverlay.vue';
 import FindReplaceDialog from './ui/panels/FindReplaceDialog.vue';
 import AboutDialog from './ui/panels/AboutDialog.vue';
 import LinkDialog from './ui/panels/LinkDialog.vue';
@@ -363,9 +372,11 @@ import {
   COMMAND_REPORTER,
   STATUS_NOTIFIER,
   DOCUMENT_GENERATION,
+  DRAFT_OPENER,
   FONT_MEMORY,
   HEAVY_ACTION_GUARD,
   FONT_OPTIONS,
+  PAGE_MARKING,
   READOUT_SELECTION,
   SPELLCHECK,
   STYLE_GALLERY,
@@ -478,6 +489,7 @@ import {
   createRulerModel,
   paintedHost,
   readRulerUnit,
+  type PageEdgeWords,
   type RulerModel,
   type RulerReading,
   type ViewportSource,
@@ -1237,6 +1249,46 @@ async function toggleSpellcheck(): Promise<void> {
     spellcheckBusy.value = false;
   }
 }
+
+/**
+ * „סימון עמודים” של שולחן העורך (ui/shell/PageMarkingOverlay.vue). כמו
+ * המילון, השכבה שייכת למעטפת ולא לטאב; הלשונית מדליקה אותה ומבקשת מדידה.
+ * `revision` של בדיקת האיות משמש גם כאן — אותה „עריכה קרתה” בדיוק.
+ *
+ * השכבה מורכבת תמיד, גם כבויה (‏`enabled: false` = אפס מדידה): „סמן” מדליק
+ * אותה ומודד דרכה מיד, ורכיב שנוצר באותו רגע עדיין לא היה מחזיק `rootRef`
+ * למדוד ביחס אליו.
+ */
+const pageMarkingEnabled = ref(false);
+const pageMarkingChanged = shallowRef<ReadonlySet<number>>(new Set());
+const pageMarkingOverlayRef = shallowRef<{ measure: () => readonly PageEdgeWords[] } | null>(null);
+provide(PAGE_MARKING, {
+  enabled: pageMarkingEnabled,
+  changedPages: pageMarkingChanged,
+  setEnabled: (enabled) => {
+    pageMarkingEnabled.value = enabled;
+    if (!enabled) pageMarkingChanged.value = new Set();
+  },
+  setChangedPages: (pages) => {
+    pageMarkingChanged.value = pages;
+  },
+  measure: () => pageMarkingOverlayRef.value?.measure() ?? [],
+});
+
+/**
+ * „פירוק מסמך” של שולחן העורך: מסמך ההערות נפתח בטאב חדש מ-Blob, במסלול
+ * של שחזור טיוטה — לא שמור, ו„שמור” בו פותח „שמור בשם”.
+ *
+ * הטאב נפתח תמיד ואינו עובר דרך `ensureOpenTargetTab`: הטאב הפעיל הוא
+ * **המסמך שמפרקים**, ואין מצב שבו נכון לדרוס אותו. השאלה היא `isOpenBusy()`
+ * ולא `isOpening` לבדו, כי מי שמחליף את הטאב הפעיל חייב לכסות גם את שלב
+ * ההכנה של `openPendingTab`.
+ */
+provide(DRAFT_OPENER, async (blob: Blob) => {
+  if (isOpenBusy()) return false;
+  activateTab(createNewDocumentSession());
+  return openDocument(undefined, { draft: blob });
+});
 
 provide(SPELLCHECK, {
   enabled: computed(() => spellcheckDictionary.value !== null),
