@@ -212,11 +212,23 @@ function stylesXml() {
   );
 }
 
+/**
+ * ‏`nsid` **ייחודי** לכל הגדרה, וזה תיקון של הבנצ'מרק ולא קישוט.
+ *
+ * הגרסה הראשונה נתנה לכל 24 ההגדרות את אותו `587013BA`, ולכן
+ * `uniqueNumberingIds` שכתב 23 מהן בכל ריצה — כולל במקרה שהוצג כ„יציאה
+ * מוקדמת”. כלומר השורה הלטינית מדדה תרחיש **כתיבה** והוצגה כ-no-op, והמספר
+ * שדווח בעקבותיה היה גדול מהאמת. נתפס בסקירה של המתחזק.
+ *
+ * מי שרוצה למדוד דווקא את מסלול הכתיבה של המספור — להחזיר כאן ערך קבוע,
+ * ולקרוא לשורה בשמה.
+ */
 function numberingXml() {
   const defs = [];
   for (let i = 0; i < 24; i += 1) {
+    const nsid = (0x587013ba + i).toString(16).toUpperCase().padStart(8, '0');
     defs.push(
-      `<w:abstractNum w:abstractNumId="${i}"><w:nsid w:val="587013BA"/>` +
+      `<w:abstractNum w:abstractNumId="${i}"><w:nsid w:val="${nsid}"/>` +
         '<w:multiLevelType w:val="hybridMultilevel"/>' +
         '<w:lvl w:ilvl="0"><w:start w:val="1"/><w:numFmt w:val="decimal"/><w:lvlText w:val="%1."/></w:lvl></w:abstractNum>',
     );
