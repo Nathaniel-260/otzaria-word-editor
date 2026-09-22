@@ -23,8 +23,6 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { deflateRawSync } from 'node:zlib';
 import {
   COMPLEX_SCRIPT_BOLD_NOTICE,
-  CONTENT_PARTS,
-  crc32 as moduleCrc32,
   DEFAULT_TAB_STOP_TWIPS,
   FONT_TABLE_PART,
   preflightDocx,
@@ -34,6 +32,8 @@ import {
   repairSettings,
   SETTINGS_PART,
 } from '../../src/engine/docx-preflight';
+import { readZip, readZipComment } from '../../src/engine/docx-parts';
+import { CONTENT_PARTS, crc32 as moduleCrc32 } from '../../src/engine/docx-parts';
 import { NO_VBA } from '../../src/engine/vba-import';
 
 const SETTINGS_WITH_ZERO =
@@ -48,6 +48,10 @@ interface Part {
   content: string;
   /** `false` מאחסן את החלק כמות שהוא — כמו ש-DOCX אמיתי עושה לחלקים קטנים. */
   deflate?: boolean;
+  /** שדות ה-extra והערה, כמו שכלי אריזה אחרים כותבים אותם. */
+  localExtra?: Uint8Array;
+  centralExtra?: Uint8Array;
+  comment?: Uint8Array;
 }
 
 function crc32(bytes: Uint8Array): number {
@@ -63,7 +67,9 @@ function crc32(bytes: Uint8Array): number {
 }
 
 /** ארכיון ZIP מינימלי אך אמיתי: כותרות מקומיות, ספרייה מרכזית ו-EOCD. */
-function buildZip(parts: Part[]): Uint8Array<ArrayBuffer> {
+const NO_BYTES = new Uint8Array(0);
+
+function buildZip(parts: Part[], archiveComment: Uint8Array = NO_BYTES): Uint8Array<ArrayBuffer> {
   const encoder = new TextEncoder();
   const records = parts.map((part) => {
     const raw = encoder.encode(part.content);
@@ -74,13 +80,23 @@ function buildZip(parts: Part[]): Uint8Array<ArrayBuffer> {
       stored,
       method: part.deflate === false ? 0 : 8,
       crc: crc32(raw),
+      localExtra: part.localExtra ?? NO_BYTES,
+      centralExtra: part.centralExtra ?? NO_BYTES,
+      comment: part.comment ?? NO_BYTES,
     };
   });
 
   const size =
-    records.reduce((total, r) => total + 30 + r.nameBytes.byteLength + r.stored.byteLength, 0) +
-    records.reduce((total, r) => total + 46 + r.nameBytes.byteLength, 0) +
-    22;
+    records.reduce(
+      (total, r) => total + 30 + r.nameBytes.byteLength + r.localExtra.byteLength + r.stored.byteLength,
+      0,
+    ) +
+    records.reduce(
+      (total, r) => total + 46 + r.nameBytes.byteLength + r.centralExtra.byteLength + r.comment.byteLength,
+      0,
+    ) +
+    22 +
+    archiveComment.byteLength;
 
   const out = new Uint8Array(size);
   const view = new DataView(out.buffer);
@@ -96,9 +112,12 @@ function buildZip(parts: Part[]): Uint8Array<ArrayBuffer> {
     view.setUint32(at + 18, record.stored.byteLength, true);
     view.setUint32(at + 22, record.raw.byteLength, true);
     view.setUint16(at + 26, record.nameBytes.byteLength, true);
+    view.setUint16(at + 28, record.localExtra.byteLength, true);
     at += 30;
     out.set(record.nameBytes, at);
     at += record.nameBytes.byteLength;
+    out.set(record.localExtra, at);
+    at += record.localExtra.byteLength;
     out.set(record.stored, at);
     at += record.stored.byteLength;
   }
@@ -113,10 +132,16 @@ function buildZip(parts: Part[]): Uint8Array<ArrayBuffer> {
     view.setUint32(at + 20, record.stored.byteLength, true);
     view.setUint32(at + 24, record.raw.byteLength, true);
     view.setUint16(at + 28, record.nameBytes.byteLength, true);
+    view.setUint16(at + 30, record.centralExtra.byteLength, true);
+    view.setUint16(at + 32, record.comment.byteLength, true);
     view.setUint32(at + 42, offsets[index], true);
     at += 46;
     out.set(record.nameBytes, at);
     at += record.nameBytes.byteLength;
+    out.set(record.centralExtra, at);
+    at += record.centralExtra.byteLength;
+    out.set(record.comment, at);
+    at += record.comment.byteLength;
   });
 
   view.setUint32(at, 0x06054b50, true);
@@ -124,6 +149,8 @@ function buildZip(parts: Part[]): Uint8Array<ArrayBuffer> {
   view.setUint16(at + 10, records.length, true);
   view.setUint32(at + 12, at - centralOffset, true);
   view.setUint32(at + 16, centralOffset, true);
+  view.setUint16(at + 20, archiveComment.byteLength, true);
+  out.set(archiveComment, at + 22);
   return out;
 }
 
@@ -685,6 +712,50 @@ describe('preflightDocx', () => {
 
     // היומן מדווח מה שונה, ולא רק שנגענו.
     expect(repaired!.notes).toEqual([expect.stringContaining('defaultTabStop')]);
+  });
+
+  it('שדות ה-extra, הערות הרשומות והערת הארכיון שורדים את הכתיבה', async () => {
+    // הכותב רץ על **כל** הרשומות, גם על אלה שלא נגענו בהן, ולכן מה
+    // שהוא משמיט אובד מהמסמך. Info-ZIP, 7-Zip וכלים אחרים כותבים שם
+    // חותמות זמן והרשאות, וחבילות OPC מיוחדות נושאות שם מידע משלן.
+    const localExtra = new Uint8Array([0x55, 0x54, 0x05, 0x00, 0x03, 0x11, 0x22, 0x33, 0x44]);
+    const centralExtra = new Uint8Array([0x55, 0x54, 0x01, 0x00, 0x03]);
+    const entryComment = bytesOf('הערה על הרשומה');
+    const archiveComment = bytesOf('הערת הארכיון');
+
+    const repaired = await preflightDocx(
+      buildZip(
+        [
+          { name: SETTINGS_PART, content: SETTINGS_WITH_ZERO, localExtra, centralExtra, comment: entryComment },
+          { name: 'word/document.xml', content: DOCUMENT_XML, localExtra, centralExtra, comment: entryComment },
+        ],
+        archiveComment,
+      ),
+    );
+    expect(repaired).not.toBeNull();
+
+    const entries = readZip(repaired!.bytes as Uint8Array<ArrayBuffer>);
+    expect(entries, 'הארכיון נקרא בחזרה').not.toBeNull();
+    expect(entries).toHaveLength(2);
+    for (const entry of entries!) {
+      expect(Array.from(entry.localExtra ?? []), `extra מקומי של ${entry.name}`).toEqual(
+        Array.from(localExtra),
+      );
+      expect(Array.from(entry.centralExtra ?? []), `extra מרכזי של ${entry.name}`).toEqual(
+        Array.from(centralExtra),
+      );
+      expect(Array.from(entry.comment ?? []), `הערה של ${entry.name}`).toEqual(
+        Array.from(entryComment),
+      );
+    }
+    expect(
+      Array.from(readZipComment(repaired!.bytes as Uint8Array<ArrayBuffer>)),
+      'הערת הארכיון',
+    ).toEqual(Array.from(archiveComment));
+
+    // והתיקון עצמו עדיין קרה.
+    const settings = await partText(repaired!.bytes, SETTINGS_PART);
+    expect(settings).toContain(`<w:defaultTabStop w:val="${DEFAULT_TAB_STOP_TWIPS}"/>`);
   });
 
   it('הארכיון שנכתב נקרא בחזרה, ואין בו יותר מה לתקן', async () => {

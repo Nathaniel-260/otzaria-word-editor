@@ -18,6 +18,8 @@
  * החבילה נושאת חלק מאקרו בפועל.
  */
 import type { SuperDoc } from 'superdoc';
+import type { Bytes } from './docx-parts';
+import { postflightDocx } from './docx-postflight';
 
 /** הסיומות של חבילות OOXML לעיבוד תמלילים שהתוסף מכיר. */
 export const WORD_EXTENSIONS = ['docx', 'docm', 'dotx', 'dotm'] as const;
@@ -48,11 +50,86 @@ const EXTENSION_PATTERN = new RegExp(`\\.(${WORD_EXTENSIONS.join('|')})$`, 'i');
 /**
  * ייצוא המסמך. `exportType: ['docx']` הוא משפחת הפורמט של המנוע ואינו נוגע
  * לסיומת: חבילה עם מאקרו יוצאת מכאן עם המאקרו שלה בפנים.
+ *
+ * זו נקודת החנק היחידה של הכתיבה — שמירה, „שמור בשם” והחלפת הקובץ כולן עוברות
+ * כאן — ולכן זה גם המקום שבו הבייטים עוברים את התיקונים של הדרך החוצה (סימון
+ * התו הניטרלי הסוגר, מזהי מספור) לפני שהם נכתבים. ראו engine/docx-postflight.ts.
  */
-export async function exportDocx(superdoc: SuperDoc): Promise<Blob> {
+export async function exportDocx(superdoc: SuperDoc, options: ExportDocxOptions = {}): Promise<Blob> {
   const blob = await superdoc.export({ exportType: ['docx'], triggerDownload: false });
   if (!(blob instanceof Blob)) throw new Error('הייצוא לא החזיר קובץ');
-  return blob;
+  return options.postflight === false ? blob : applyPostflight(blob);
+}
+
+export interface ExportDocxOptions {
+  /**
+   * `false` — הבייטים כפי שהמנוע כתב אותם. לטיוטת השחזור בלבד: היא נטענת
+   * חזרה **לעורך**, שאינו צריך את התיקונים של Word, והיא נכתבת עשר שניות
+   * אחרי כל שינוי.
+   *
+   * נמדד על `postflightDocx` **מקצה לקצה** — כלומר כולל את שכבת החבילה:
+   * פריסת ה-zip, סריקת החלקים, הדחיסה מחדש והפריסה שמאמתת אותה.
+   *
+   * **והקלט הוא ארכיון דחוס**, כמו שהמנוע כותב אותו. זה אינו פרט טכני:
+   * הטבלה הקודמת נמדדה על ארכיון `STORED`, שאין בו פריסה בכניסה, בעוד
+   * המשפט שמעליה הבטיח שהמספר כולל אותה. הפריסה הנכנסת נמדדה בנפרד, והיא
+   * 42ms ל-8.4MB מול 11ms לאותו חלק לא-דחוס.
+   *
+   * מסמך עברי סינתטי שנכתב לתוך חבילת Word אמיתית, Node 24, מכונה של ארבע
+   * ליבות ו-16GB **שרצים עליה דברים אחרים**; מינימום מתוך תשע הרצות:
+   *
+   *     פסקאות   document.xml   מקצה לקצה
+   *      1,000      0.09MB          17ms
+   *     10,000      0.87MB          89ms
+   *     40,000      3.50MB         346ms
+   *
+   * כתיבת הארכיון עצמה זניחה, והשאר מתחלק בין סריקת
+   * `docx-neutral-mark.ts` (‏6 / 40 / 171ms — ליניארית במסמך), ה-deflate,
+   * הפריסה שמאמתת אותו ו**שלוש** מעבירות crc32: `deflateVerified` עושה
+   * שתיים (על המשוחזר ועל המקור) ו-`rewriteEntry` שלישית, ביחד 3.04× גודל
+   * החלק לפי ספירה, בקצב של ‎27ms למעבירה.
+   *
+   * (הטבלה נמדדה מחדש אחרי שבדיקת הטווח ב-`docx-neutral-mark.ts` תוקנה
+   * מריבועית לליניארית — לפניה אותה סריקה לקחה 2,229ms ב-40,000.)
+   *
+   * לצורך ההחלטה שהיא מתעדת אין בכך הבדל: גם 89ms בטיוטה שנכתבת כל עשר
+   * שניות הם עצירה של ההקלדה, ולכן `false`.
+   */
+  postflight?: boolean;
+}
+
+/**
+ * הבייטים של ה-Blob, או `null` כשאי אפשר לקרוא אותם.
+ *
+ * `arrayBuffer` נבדק ולא מונח: ב-jsdom הוא אינו קיים, ובלי הבדיקה כל בדיקת
+ * יחידה שנוגעת בייצוא הייתה זורקת `TypeError` במקום לרוץ.
+ */
+async function blobBytes(blob: Blob): Promise<Bytes | null> {
+  if (typeof blob.arrayBuffer !== 'function') return null;
+  return new Uint8Array(await blob.arrayBuffer()) as Bytes;
+}
+
+/**
+ * התיקונים של הדרך החוצה על הבייטים שיוצאים.
+ *
+ * אותו כלל כמו בכיוון הנכנס (`docx-preflight.ts`): **לתקן, ולא לחסום.** כל כשל
+ * — Blob שאינו נקרא, zip שאינו נפרס, דוחס שאינו קיים — מחזיר את המקור כמות
+ * שהוא. נקודה בצד הלא נכון היא באג; שמירה שנכשלת היא אובדן עבודה.
+ */
+async function applyPostflight(blob: Blob): Promise<Blob> {
+  try {
+    const bytes = await blobBytes(blob);
+    const marked = bytes && (await postflightDocx(bytes));
+    return marked ? new Blob([marked], { type: blob.type || DOCX_MIME }) : blob;
+  } catch (error) {
+    // **ומיומן.** בלי השורה הזאת, מקרה קצה שמפיל את התיקון על מסמך אחד
+    // מוריד אותו מ**כל** שמירה של המשתמש ההוא בשקט: הסימפטום שדווח חוזר,
+    // ואין שום שורה ביומן להתחיל ממנה — בעוד שער ה-QA, שרץ על קובץ משלו,
+    // נשאר ירוק. כל כשל אחר בשכבה הזאת מיומן (docx-parts.ts,
+    // docx-preflight.ts), וזה היה היחיד שלא.
+    console.warn('[otzaria-word] התיקון של הדרך החוצה נכשל, והמסמך נשמר כמות שהוא', error);
+    return blob;
+  }
 }
 
 /** הסיומת שבשם הקובץ, או `null` כשאינה אחת מהמוכרות. */

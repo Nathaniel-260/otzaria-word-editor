@@ -147,6 +147,34 @@ describe('כפתורי הרשימה בלשונית „בית"', () => {
     expect(labels.indexOf('1, 2, 3')).toBeGreaterThan(1);
   });
 
+  it('המתג של זיהוי הרשימות בסוף התפריט, מופרד, ומשקף את המצב', async () => {
+    for (const [enabled, label] of [
+      [true, 'זיהוי רשימות בהקלדה: פעיל'],
+      [false, 'זיהוי רשימות בהקלדה: כבוי'],
+    ] as const) {
+      const harness = mountUi(HomeTab, { superdoc: withSelection(), props: { listAutoformatEnabled: enabled } });
+      await settle();
+      const labels = await openMenu(harness.wrapper, NUMBER);
+      expect(labels[labels.length - 1]).toBe(label);
+      const items = harness.wrapper.findAll('.ribbon-menu__popover > *');
+      const toggleAt = items.findIndex((node) => node.text() === label);
+      expect(items[toggleAt - 1]?.classes(), 'אין קו הפרדה לפני המתג').toContain('ribbon-menu__separator');
+      harness.wrapper.unmount();
+    }
+  });
+
+  it('לחיצה על המתג מודיעה למעטפת, ואינה נוגעת במסמך', async () => {
+    const harness = mountUi(HomeTab, { superdoc: withSelection() });
+    await settle();
+    await openMenu(harness.wrapper, NUMBER);
+    const before = harness.superdoc.calls.length;
+    await clickItem(harness.wrapper, 'זיהוי רשימות בהקלדה: פעיל');
+
+    expect(harness.wrapper.emitted('toggle-list-autoformat')).toHaveLength(1);
+    expect(harness.superdoc.calls.length).toBe(before);
+    expect(harness.adapter.calls).toEqual([]);
+  });
+
   it('כל סגנון מספור שהמנוע מכיר נמצא בתפריט', async () => {
     // הסדר נכתב ביד כדי לא לרשת את סדר ה-numFmt, וזה עלה במחיר: הרשימה
     // הידנית אינה נגזרת מהמפה, ולכן סגנון שיתווסף ל-`NUMBER_STYLE_LABELS`

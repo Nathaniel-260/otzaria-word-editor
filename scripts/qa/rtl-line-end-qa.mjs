@@ -96,6 +96,28 @@ async function paragraphText(index) {
   return (paragraphs[index] || '').replace(/<[^>]+>/g, '');
 }
 
+/**
+ * הגאומטריה המצוירת, מחדש.
+ *
+ * **למה זה קיים.** השער לכד את השורות פעם אחת והשתמש בקואורדינטות שלהן גם
+ * אחרי ש-`app.type('.')` שינה את המסמך. שלוש הטענות שנשענו על לכידה ישנה הן
+ * בדיוק שלוש הטענות שהמתחזק מדד אדומות — `Home→End` בשורה השנייה, `Shift+End`
+ * ו-`End` בשורה אנגלית — בעוד שש הטענות שלכדו מחדש עברו אצלו. ההתאמה היא
+ * שלוש מתוך שלוש, ולכן זו אינה השערה על מהירות המכונה אלא על מה שהשער עושה.
+ *
+ * תו שנוסף יכול להזיז פריסה, ואז `clickAt(line.x, line.y)` נוחת על שורה אחרת
+ * ו-`line.endOffset` שייך לשורה שכבר אינה שם. אצלנו הפסקה הקצרה אינה גולשת
+ * מהוספת נקודה ולכן הפריסה אינה זזה, וזו הסיבה שכל התשעה עוברים כאן על אותו
+ * קומיט שאצלו אדום: ההבדל הוא במטריקות הגופן, לא בקוד.
+ *
+ * **נמדד שזה ולא תזמון:** הרצה עם המתנה אפס — קריאת הסמן מיד אחרי ההקשה, בלי
+ * שום `sleep` — נתנה כאן 9 מתוך 9. לו התזמון היה הגורם, היא הייתה מאדימה.
+ * לכן לא נוספה כאן המתנה-על-תנאי: אין לה טריגר נמדד.
+ */
+async function rtlLinesNow() {
+  return (await paintedLines()).filter((l) => l.rtl);
+}
+
 async function caretAt(line) {
   await app.clickAt(line.x, line.y);
   await app.sleep(500);
@@ -121,6 +143,25 @@ try {
       /* 1. End מגיע לסוף השורה */
       const first = hebrew[0];
       const before = await caretAt(first);
+
+      /* 1א. ה-`story` בתצלום הסינכרוני — זה מה שנכתב בחזרה למנוע.
+         המודול אינו ממציא ברירת מחדל, ולכן נמדד כאן שהשדה אכן מגיע. */
+      const snap = JSON.parse(
+        await app.js(
+          `(function(){
+            var h = window.__otzariaEditor.superdoc.activeEditor.host;
+            var s = h.readLiveSelectionSyncSnapshot();
+            var t = s && s.selectionTarget;
+            return JSON.stringify({
+              onTarget: !!(t && t.story), onEnd: !!(t && t.end && t.end.story),
+              story: t && (t.story || (t.end && t.end.story)) });
+          })()`,
+        ),
+      );
+      if (snap.onTarget || snap.onEnd)
+        report.pass('ה-story בתצלום', `target=${snap.onTarget} end=${snap.onEnd} — ${JSON.stringify(snap.story)}`);
+      else report.fail('ה-story בתצלום', 'התצלום לא נשא story באף אחד מהשניים — הכתיבה תצא בלעדיו');
+
       await app.press('End', 'End', 35);
       await app.sleep(400);
       const after = await selection();
@@ -154,8 +195,18 @@ try {
       /* 4. המסלול שדווח, מקצה לקצה, על פסקה קצרה בת שורה אחת */
       const fresh = (await paintedLines()).filter((l) => l.rtl);
       const short = fresh.find((l) => l.blockId !== first.blockId);
+      // התרחיש מניח פסקה בת שורה אחת: `End` בפסקה גולשת מגיע לסוף השורה ולא
+      // לסוף הפסקה, ואז הנקודה נוחתת באמצע בצדק. ההנחה נאמרת כאן במפורש, כדי
+      // שמכונה שמטריקות הגופן שלה מגלישות את הפסקה תקבל אבחנה ולא „שבור” סתום.
+      const shortLines = fresh.filter((l) => short && l.blockId === short.blockId).length;
       if (!short) {
         report.fail('המסלול שדווח', 'לא נמצאה פסקה עברית קצרה');
+      } else if (shortLines !== 1) {
+        report.fail(
+          'המסלול שדווח',
+          `הפסקה הקצרה גולשת ל-${shortLines} שורות על המכונה הזאת, והתרחיש מניח אחת — ` +
+            'הפיקסטורה צריכה להתקצר, לא הקוד להשתנות',
+        );
       } else {
         await caretAt(short);
         await app.press('Home', 'Home', 36);
@@ -171,7 +222,9 @@ try {
       }
 
       /* 4א. Home בתחילת שורה גולשת שנייה, ואז End, מגיע לסופה. */
-      const wrapped = fresh.filter((l) => l.blockId === first.blockId);
+      // לכידה מחדש: הנקודה שהוקלדה למעלה יכולה להזיז את הפריסה. ראו rtlLinesNow.
+      const afterDot = await rtlLinesNow();
+      const wrapped = afterDot.filter((l) => l.blockId === first.blockId);
       const second = wrapped[1];
       if (!second) {
         report.fail('Home ואז End בשורה שנייה', 'לא נמצאה שורה גולשת שנייה');
@@ -188,16 +241,18 @@ try {
       }
 
       /* 5. Shift+End בוחר קדימה */
-      const anchor = await caretAt(fresh[0]);
+      // לכידה מחדש מאותו טעם — הטענה משווה ל-endOffset של השורה שנלחצה.
+      const forShift = (await rtlLinesNow())[0];
+      const anchor = await caretAt(forShift);
       await app.press('End', 'End', 35, 8);
       await app.sleep(400);
       const range = await selection();
-      if (!range.empty && range.start === anchor.start && range.end === fresh[0].endOffset)
+      if (!range.empty && range.start === anchor.start && range.end === forShift.endOffset)
         report.pass('Shift+End', `${range.start}..${range.end}`);
       else
         report.fail(
           'Shift+End',
-          `${range.start}..${range.end}, והעוגן היה ${anchor.start} וסוף השורה ${fresh[0].endOffset}`,
+          `${range.start}..${range.end}, והעוגן היה ${anchor.start} וסוף השורה ${forShift.endOffset}`,
         );
     }
 
@@ -205,7 +260,9 @@ try {
     if (!latin.length) {
       report.fail('End בשורה אנגלית', 'לא נמצאה שורה שאינה עברית');
     } else {
-      const line = latin[0];
+      // הלכידה הראשונית קדמה לשתי ההקלדות, ולכן נלכדת מחדש.
+      const line = (await paintedLines()).filter((l) => !l.rtl)[0];
+      if (!line) throw new Error('שורה לטינית נעלמה אחרי ההקלדות');
       await caretAt(line);
       await app.press('End', 'End', 35);
       await app.sleep(400);

@@ -77,6 +77,39 @@ describe('גבולות מול SuperDoc', () => {
       [],
     );
   });
+
+  /**
+   * שכבת החבילה נשארת בלי תלויות. כשהיא ישבה בתוך `docx-preflight.ts`, חיבור
+   * התיקון היוצא ל-`export.ts` יצר את השרשרת `vite.config.ts` →
+   * `blank-document.ts` → `export.ts` → preflight → `vba-import.ts` (ESM
+   * בלבד), וטעינת קובץ התצורה נשברה. import אחד שנוסף שם מחזיר אותה.
+   *
+   * **שלושה ענפים, מפני ש„תלות” אינה רק `import`.** הצורה הקודמת
+   * (`/^\s*import\s|\brequire\s*\(/`) נמדדה על שתים-עשרה צורות: היא תפסה
+   * שש — ‏`import { x } from`, ‏`import type`, ‏`import './x'`,
+   * ‏`import * as`, import מוזח ו-`require(` — והחמיצה שש:
+   * ‏`export { X } from './y'`, ‏`export * from './y'`,
+   * ‏`export type { X } from './y'`, ‏`import('./y')` דינמי (עם `await`
+   * ובלעדיו), ‏`import{x}from'./y'` בלי רווחים, ו-import שנשבר לשתי שורות.
+   *
+   * החמצה ראשונה היא החמורה: ‏`export { Bytes } from './types'` יוצר בדיוק
+   * את קשת התלות שהכלל קיים כדי למנוע, ו-`import()` דינמי הוא בדיוק הדרך
+   * שבה מישהו „יפתור” את שרשרת ה-ESM שלמעלה.
+   *
+   * לכן הענף האמצעי אינו מחפש `import`/`export` אלא את **מפרט המודול**
+   * עצמו (`from '…'`), שקיים בכל צורת ייבוא וייצוא־מחדש ובכל פיצול שורות;
+   * הראשון סוגר ייבוא-לוואי שאין בו `from`, והשלישי את שתי צורות הקריאה.
+   */
+  const DEPENDENCY = /^\s*import\b|\bfrom\s+['"]|\b(?:require|import)\s*\(/;
+
+  it('docx-parts.ts אינו מייבא דבר', () => {
+    const parts = sources.find(({ path }) => path.split(sep).join('/') === 'engine/docx-parts.ts');
+    expect(parts, 'engine/docx-parts.ts').toBeDefined();
+    const imports = (parts?.text ?? '')
+      .split('\n')
+      .flatMap((line, index) => (DEPENDENCY.test(line) ? [`docx-parts.ts:${index + 1}`] : []));
+    expect(imports).toEqual([]);
+  });
 });
 
 /**
@@ -172,28 +205,36 @@ describe('מדידת העמוד המצויר', () => {
  * ציבורי: `readMountedLayoutData` מתאר שורות ב-`fromRun`/`toChar` ואינו נותן
  * את אורכי הריצות, כלומר אי אפשר להמיר אותם להיסט בלי לנחש.
  *
- * מה שהחריגה **אינה** מתירה, וזה מה שנמדד כאן: מקום שני שנוגע באותם עיגונים,
- * וכל דבר שאינו קריאת תכונה. הזזת הסמן עצמה נעשית דרך ה-API של המנוע
+ * קורא שני, מאותו טעם בדיוק: engine/rtl-caret.ts. חצים אופקיים בשורה עברית
+ * זזים לכיוון ההפוך מהמקש בכל פסקה שיש בה רשימה, טאב, ספרות או לטינית, וכדי
+ * לתקן צריך לדעת איפה **מצויר** כל תו — גם זו תוצאה של פריסה בלי API. שם
+ * העיגונים נקראים משלושה מקומות: ה-fragment, השורה, ו**הריצה** (`SPAN.
+ * superdoc-text-run` / `.superdoc-tab`), שנושאת טווח pm משלה. ההצדקה והמדידה
+ * (התאמה 20/20, 18/18, 12/12, 17/17 מול מקום הסמן שהמנוע עצמו מצייר) בהערת
+ * הפתיחה שם.
+ *
+ * מה שהחריגה **אינה** מתירה, וזה מה שנמדד כאן: מקום שלישי שנוגע באותם
+ * עיגונים, וכל דבר שאינו קריאה. הזזת הסמן עצמה נעשית דרך ה-API של המנוע
  * (`authoring.setSelectionTarget`) ולא דרך ה-DOM.
  */
 describe('טווח ה-pm של השורה המצוירת', () => {
-  const READER = 'engine/rtl-line-end.ts';
+  const READERS = ['engine/rtl-line-end.ts', 'engine/rtl-caret.ts'];
 
   function normalize(path: string): string {
     return path.split(sep).join('/');
   }
 
-  it('רק rtl-line-end.ts נוגע בעיגונים של השורה', () => {
+  it('רק rtl-line-end.ts ו-rtl-caret.ts נוגעים בעיגונים של השורה', () => {
     const offenders = hits(/data-pm-(?:start|end)|data-source-node-id/).filter(
-      (hit) => !normalize(hit).startsWith(READER),
+      (hit) => !READERS.some((reader) => normalize(hit).startsWith(reader)),
     );
 
     expect(offenders).toEqual([]);
   });
 
-  it('הקריאה היא תכונות בלבד — אינה בונה, מוחקת או כותבת', () => {
-    const reader = sources.find(({ path }) => normalize(path) === READER);
-    expect(reader, READER).toBeDefined();
+  it.each(READERS)('%s קורא בלבד — אינו בונה, מוחק או כותב', (path) => {
+    const reader = sources.find((file) => normalize(file.path) === path);
+    expect(reader, path).toBeDefined();
 
     const source = reader?.text ?? '';
     expect(source).toMatch(/getAttribute/);

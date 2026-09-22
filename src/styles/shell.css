@@ -256,7 +256,15 @@ button:disabled {
 
 /* סמן כתיבה מהבהב: המנוע מכבה את ההבהוב שלו תחת `prefers-reduced-motion`,
    וב-Word הסמן מהבהב תמיד — הוא אינדיקטור מיקום ולא קישוט. ה-keyframes מוגדר
-   כאן שוב כרשת ביטחון, אם המנוע יסיר את שלו. ראו tests/contract/caret-blink. */
+   כאן שוב כרשת ביטחון, אם המנוע יסיר את שלו. ראו tests/contract/caret-blink.
+
+   שני הבוררים, ושניהם חיים. נמדד ב-Chrome על 2.15.0: אלמנט הסמן נושא גם
+   `class="sd-v2-local-selection-caret"` וגם `data-v2-local-selection-caret="true"`,
+   ו-`querySelectorAll('[data-v2-local-selection-caret]')` מחזיר אותו. חיפוש
+   המחרוזת באריזת המנוע **אינו** מוצא את התכונה, מפני שהמנוע מציב אותה דרך
+   `dataset.v2LocalSelectionCaret`; מה שכן נמצא באריזה הוא
+   `data-v2-local-selection-caret-styles`, וזו תכונה על אלמנט ה-`<style>`
+   שהמנוע מזריק — לא על הסמן. */
 .sd-v2-local-selection-caret,
 [data-v2-local-selection-caret] {
   animation: sd-v2-local-caret-blink 1.06s steps(1, end) infinite !important;
@@ -272,6 +280,22 @@ button:disabled {
   100% {
     opacity: 0;
   }
+}
+
+/* וכשאין מיקוד — אין סמן.
+   סמן מהבהב אומר „ההקלדה תיכנס לכאן”, ולכן כשהמיקוד אינו במסמך — החלון עבר
+   לחלון אחר, או שפקד של הממשק לקח אותו — הוא אומר דבר שאינו נכון. זו התנהגות
+   Word, וגם של כל שדה טקסט בדפדפן. מי שמחליט זה ui/shell/caret-focus.ts, ושם
+   גם המדידה שממנה זה בא.
+
+   `opacity` ולא `display`: הקופסה נשארת, ומי שמודד את **מקום** הסמן ולא את
+   נראותו (scripts/qa/click-snap-qa.mjs, scripts/qa/rtl-caret-probe.mjs)
+   ממשיך לקבל את אותו מלבן. שתי ההצהרות יחד ולא רק כיבוי האנימציה — אנימציה
+   שנעצרת משאירה את מה שהיה בפריים האחרון, כלומר סמן גלוי בחצי מהמקרים. */
+.word-app-shell[data-caret-idle='true'] .sd-v2-local-selection-caret,
+.word-app-shell[data-caret-idle='true'] [data-v2-local-selection-caret] {
+  animation: none !important;
+  opacity: 0 !important;
 }
 
 .status {

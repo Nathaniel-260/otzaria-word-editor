@@ -90,6 +90,21 @@
  * נכתב מחדש בכלל.
  */
 import { DOCX_MIME } from './export';
+import {
+  CONTENT_PARTS,
+  SKIPPED_SPANS,
+  TOKEN_SOURCE,
+  VAL_ATTRIBUTE,
+  isOn,
+  readEntryText,
+  readZip,
+  readZipComment,
+  rewriteEntry,
+  valueOf,
+  writeZip,
+  type Bytes,
+  type ZipEntry,
+} from './docx-parts';
 import { NO_VBA, readDocumentVba, type DocumentVba } from './vba-import';
 
 /** החלק שבו יושבות הגדרות המסמך. */
@@ -110,56 +125,6 @@ export const FONT_TABLE_PART = 'word/fontTable.xml';
  * למחיקת המאפיין — ומפורשת יותר למי שיפתח את הקובץ אחר כך.
  */
 export const DEFAULT_TAB_STOP_TWIPS = 720;
-
-/**
- * בייטים שגובים מ-`ArrayBuffer` רגיל.
- *
- * הכינוי מפורש מפני ש-TypeScript מבדיל מאז 5.7 בין `ArrayBuffer` ל-
- * `SharedArrayBuffer`, ו-`Uint8Array` סתם כולל את שניהם — צורה ש-`Blob`
- * ו-`DecompressionStream` אינם מקבלים.
- */
-type Bytes = Uint8Array<ArrayBuffer>;
-
-const ZIP_LOCAL_SIGNATURE = 0x04034b50;
-const ZIP_CENTRAL_SIGNATURE = 0x02014b50;
-const ZIP_EOCD_SIGNATURE = 0x06054b50;
-const ZIP_LOCAL_HEADER_SIZE = 30;
-const ZIP_CENTRAL_HEADER_SIZE = 46;
-const ZIP_EOCD_SIZE = 22;
-
-/** דגל „הגדלים מגיעים אחרי הנתונים”. הכתיבה כאן תמיד יודעת אותם מראש. */
-const ZIP_FLAG_DATA_DESCRIPTOR = 0x0008;
-/** דגל הצפנה. ארכיון מוצפן אינו משהו שיש כאן מה לעשות איתו. */
-const ZIP_FLAG_ENCRYPTED = 0x0001;
-
-const METHOD_STORED = 0;
-const METHOD_DEFLATE = 8;
-
-/** „גרסה נדרשת” 2.0 — המינימום שרשומת deflate מצהירה עליו (APPNOTE 4.4.3.2). */
-const ZIP_VERSION_DEFLATE = 20;
-
-/** הסימן שהארכיון הוא ZIP64. אין כאלה ב-DOCX ריאלי, ולכן פשוט לא נוגעים בהם. */
-const ZIP64_MARKER_32 = 0xffffffff;
-const ZIP64_MARKER_16 = 0xffff;
-
-interface ZipEntry {
-  /** שם החלק, לזיהוי. */
-  name: string;
-  /** בייטי השם כפי שהיו — כדי לא לקודד מחדש שם שאינו UTF-8. */
-  nameBytes: Bytes;
-  versionMadeBy: number;
-  versionNeeded: number;
-  flags: number;
-  method: number;
-  modTime: number;
-  modDate: number;
-  crc: number;
-  internalAttrs: number;
-  externalAttrs: number;
-  /** התוכן כפי שהוא מאוחסן — דחוס או לא, לפי `method`. */
-  data: Bytes;
-  uncompressedSize: number;
-}
 
 /** שם האלמנט שהערך שבו מקפיא את המנוע. */
 const DEFAULT_TAB_STOP_ELEMENT = 'defaultTabStop';
@@ -244,101 +209,6 @@ export function repairSettings(xml: string): string | null {
 
   return null;
 }
-
-/**
- * החלקים שבהם יושבות תכונות ריצה, וכולם באותה סכימה של WordprocessingML.
- *
- * `styles.xml` הוא הרוב המעשי — כותרת מודגשת היא כמעט תמיד סגנון ולא עיצוב
- * ישיר — אבל עיצוב ישיר קיים, וכך גם כותרת עליונה, הערת שוליים ומספור רשימה.
- * כולם עוברים באותו כלל אחד, מפני שזה **אותו** כלל: `rPr` היא `rPr`.
- *
- * מה שאינו כאן ובכוונה: `word/glossary/*` (בלוקים לשימוש חוזר; אינם מרונדרים)
- * ו-`word/settings.xml`, שיש לו תיקון משלו.
- *
- * `stylesWithEffects.xml` **כן** כאן: זה חלק אמיתי של Word 2010 ובו גיליון
- * סגנונות שלם. Word 2010 קורא מ-`bCs` בעצמו ולכן אינו נפגע, אבל להשאיר גיליון
- * סגנונות שלם מחוץ לכלל „`rPr` היא `rPr`” הוא חוסר עקביות, לא החלטה.
- *
- * הספרה אופציונלית בכל השמות שיכולים לשאת אותה, ולא רק בארבעה מהם — הצורה
- * הקודמת התירה `document2` ולא `footnotes2`, וזו הייתה השמטה ולא כלל.
- */
-export const CONTENT_PARTS =
-  /^word\/(?:document|styles|stylesWithEffects|numbering|footnotes|endnotes|comments|header|footer)\d*\.xml$/i;
-
-/**
- * ערכי `ST_OnOff` שמשמעותם „כבוי”. כל ערך אחר — ובכלל זה היעדר `w:val` — דולק,
- * וזה מה שהתקן אומר: `<w:bCs/>` בלי מאפיין היא הדגשה פעילה.
- */
-const OFF_VALUES = new Set(['0', 'false', 'off']);
-
-/**
- * מאפיין `w:val`, לשני התיקונים כאחד.
- *
- * שני סוגי המרכאות, ולא רק כפולות: XML מתיר את שניהם, ו-`w:val='0'` שנקרא
- * כדולק היה הופך „לא מודגש” שנכתב במפורש למודגש — כלומר שינוי במסמך, בדיוק מה
- * שהמודול הזה מבטיח לא לעשות. הקידומת אופציונלית מאותו טעם שהסורק אינו נעול
- * על `w:` (ראו TOKEN_SOURCE).
- *
- * התחילית היא `\s` ולא `\b`, כדי שהמאפיין יתחיל במקום שבו מאפיין באמת מתחיל:
- * `\b` היה מתאים גם ל-`val='0'` **בתוך ערך** של מאפיין אחר. (`\s` אינו סוגר
- * את המקרה של רווח בתוך ערך כזה, למשל `w:foo="a val='0'"`, ולשם צריך פרסר
- * ולא רגקס. לאף אחד משני האלמנטים שכאן אין מאפיין מלבד `val`.)
- *
- * מה שנשאר לא-מטופל: ישות מספרית (`w:val="&#48;"`). היא חוקית, ואף כלי
- * מציאותי אינו כותב אותה.
- *
- * קבוצה 1 — ערך במרכאות כפולות; קבוצה 2 — בבודדות.
- */
-const VAL_ATTRIBUTE = /\s(?:[\w.-]+:)?val\s*=\s*(?:"([^"]*)"|'([^']*)')/;
-
-/** הערך שב-`w:val`, או `null` כשאינו שם. */
-function valueOf(attributes: string): string | null {
-  const match = VAL_ATTRIBUTE.exec(attributes);
-  return match ? (match[1] ?? match[2]) : null;
-}
-
-/** האם דגל `ST_OnOff` דולק, לפי מאפייני התג. */
-function isOn(attributes: string): boolean {
-  const value = valueOf(attributes);
-  return value === null || !OFF_VALUES.has(value.trim().toLowerCase());
-}
-
-/**
- * הסורק: תג, פתיחת הערה, או פתיחת CDATA — לפי סדר הופעתם.
- *
- * **המאפיינים מודעים למרכאות** (`[^>"']` או מחרוזת מצוטטת), ולא `[^>]*`. זה
- * אינו הידור: `<w:rPrChange w:author="a>b">` הוא XML חוקי לגמרי, ורגקס שנעצר
- * על ה-`>` הראשון היה קורא אותו כתג אחר לגמרי.
- *
- * הקידומת נלכדת ואינה נעולה על `w`: החבילה רשאית לקשור את מרחב השמות של
- * WordprocessingML לכל קידומת. מי שנעול על `w:` גם מפספס מסמך כזה לגמרי, וגם —
- * גרוע יותר — אינו רואה `ns0:b` קיימת ומוסיף `w:b` שנייה לצדה.
- *
- * **אבל קידומת היא חובה כאן, וזו מגבלה:** חבילה שקושרת את מרחב השמות
- * כברירת מחדל (`<document xmlns="…/wordprocessingml/2006/main">` ואז `<bCs/>`
- * בלי קידומת) אינה מותאמת כלל, ושני התיקונים פשוט אינם קורים — בשקט. Word
- * כותב קידומת תמיד; מחולל צד-שלישי אינו חייב. הכיוון שמרני (לא לתקן, ולא
- * לתקן לא נכון), ולכן זה מתועד ולא נסגר: לזהות „האם התג הזה בכלל
- * WordprocessingML” בלי קידומת דורש מעקב אחר הכרזות מרחב שמות, כלומר פרסר.
- *
- * הערות, CDATA והוראות עיבוד נבלעות שלמות. שלושתן נראות לרגקס בדיוק כמו תגים
- * (`<!-- <w:rPr><w:bCs/></w:rPr> -->`), והתיקון בתוכן היה עריכה של טקסט
- * המשתמש — או של הצהרה — ולא של העיצוב. הצהרת ה-XML עצמה (`<?xml … ?>`) לא
- * הותאמה גם קודם, מפני ש-`?` אינו ב-`[\w.-]`; מה שנסגר כאן הוא הוראת עיבוד
- * שיש **בתוכה** משהו שנראה כמו תג.
- */
-const TOKEN_SOURCE =
-  /<!--|<!\[CDATA\[|<\?|<(\/?)([\w.-]+):([\w.-]+)((?:[^>"']|"[^"]*"|'[^']*')*)>/;
-
-/**
- * לכל פותח כזה — הסוגר שלו. מה שביניהם אינו XML שיש בו מה לתקן, וכל מה
- * שהסורק צריך לעשות איתו הוא לדלג עליו שלם.
- */
-const SKIPPED_SPANS = new Map([
-  ['<!--', '-->'],
-  ['<![CDATA[', ']]>'],
-  ['<?', '?>'],
-]);
 
 /** הכנסה אחת: המקום, והקידומת שבה לכתוב. */
 interface BoldInsert {
@@ -604,7 +474,7 @@ export async function preflightSource(
 
   let repaired: DocxRepair | null;
   try {
-    repaired = await repairEntries(entries);
+    repaired = await repairEntries(entries, readZipComment(bytes));
   } catch (error) {
     // „לתקן, ולא לחסום” גם כאן: הזריקה היחידה שנשארה בפנים היא הקצאה של
     // ארכיון גדול מדי, ומסמך שהיה נפתח בלי השלב הזה ייפתח בלעדיו.
@@ -664,11 +534,14 @@ export interface DocxRepair {
  * את השני שבור.
  */
 export async function preflightDocx(bytes: Bytes): Promise<DocxRepair | null> {
-  return repairEntries(readZip(bytes));
+  return repairEntries(readZip(bytes), readZipComment(bytes));
 }
 
 /** התיקונים עצמם, על ספרייה שכבר נקראה. ראו `preflightSource`. */
-async function repairEntries(entries: readonly ZipEntry[] | null): Promise<DocxRepair | null> {
+async function repairEntries(
+  entries: readonly ZipEntry[] | null,
+  archiveComment: Bytes,
+): Promise<DocxRepair | null> {
   if (!entries) return null;
 
   const notes: string[] = [];
@@ -696,340 +569,5 @@ async function repairEntries(entries: readonly ZipEntry[] | null): Promise<DocxR
   if (patched.size === 0) return null;
 
   const rewritten = entries.map((entry) => patched.get(entry) ?? entry);
-  return { bytes: writeZip(rewritten), notes, notice };
-}
-
-/**
- * הרשומה של חלק שתוקן: דחוסה כשאפשר, ו-`STORED` כשלא.
- *
- * ה-CRC והגודל הלא-דחוס נמדדים על התוכן, ולא על מה שנכתב — כך ZIP מגדיר אותם,
- * וכך גם קורא שפורס את הרשומה יודע לאמת אותה. הדחיסה היא **בונוס**, לא תנאי:
- * אם `CompressionStream` חסר או נכשל, הרשומה נכתבת גלויה, ובשני המקרים הקורא
- * מקבל בדיוק את אותם בייטים אחרי הפריסה.
- *
- * `versionNeeded` מורם ל-2.0 כשנכתב deflate: רשומה שהמקור שלה היה `STORED`
- * (1.0) ועכשיו דחוסה מצהירה על מה שהיא. מקור שכבר היה 2.0 ומעלה נשאר כפי שהוא.
- */
-async function rewriteEntry(entry: ZipEntry, content: Bytes): Promise<ZipEntry> {
-  const deflated = await deflateVerified(content);
-  return {
-    ...entry,
-    flags: entry.flags & ~ZIP_FLAG_DATA_DESCRIPTOR,
-    method: deflated ? METHOD_DEFLATE : METHOD_STORED,
-    versionNeeded: deflated ? Math.max(entry.versionNeeded, ZIP_VERSION_DEFLATE) : entry.versionNeeded,
-    crc: crc32(content),
-    data: deflated ?? content,
-    uncompressedSize: content.byteLength,
-  };
-}
-
-/**
- * פענוח XML של חלק, **בלי לפשוט את ה-BOM**.
- *
- * ברירת המחדל של `TextDecoder` מוחקת U+FEFF, ו-`TextEncoder` אינו מחזיר אותו,
- * ולכן חלק שהתחיל ב-BOM היה נכתב מחדש בלעדיו. אין לזה נזק תפקודי — ההצהרה
- * אומרת UTF-8 — אבל ההבטחה בכותרת הקובץ היא „זהה למקור בכל מה שאינו התיקון
- * עצמו”, וזה חלק ממנה.
- */
-function decodeXml(bytes: Bytes): string {
-  return new TextDecoder('utf-8', { ignoreBOM: true }).decode(bytes);
-}
-
-/** תוכן החלק כטקסט, או `null` כשאי אפשר לפרוס אותו. */
-async function readEntryText(entry: ZipEntry): Promise<string | null> {
-  if (entry.method === METHOD_STORED) return decodeXml(entry.data);
-  if (entry.method !== METHOD_DEFLATE) return null;
-
-  const inflated = await inflateRaw(entry.data);
-  return inflated && decodeXml(inflated);
-}
-
-/**
- * פריסת deflate גולמי דרך `DecompressionStream`.
- *
- * `null` כשהסביבה אינה מכירה אותו או כשהנתונים אינם נפרסים — שני מקרים שבהם
- * אין לנו מה לומר על המסמך, ולכן הוא נמסר למנוע כמות שהוא.
- */
-function inflateRaw(data: Bytes): Promise<Bytes | null> {
-  const Decompression = (globalThis as { DecompressionStream?: typeof DecompressionStream })
-    .DecompressionStream;
-  if (!Decompression) return Promise.resolve(null);
-  return pipeThrough(data, () => new Decompression('deflate-raw'), 'פריסת חלק מהמסמך נכשלה');
-}
-
-/**
- * דחיסת deflate גולמי דרך `CompressionStream` — ההופכי של `inflateRaw`, באותו
- * API ובאותה נפילה-חזרה.
- *
- * `null` כשהסביבה אינה מכירה אותו או כשהדחיסה נכשלה. בשני המקרים החלק נכתב
- * `STORED`, ולכן זה אינו כשל של התיקון אלא רק ויתור על החיסכון בזיכרון.
- */
-function deflateRaw(data: Bytes): Promise<Bytes | null> {
-  const Compression = (globalThis as { CompressionStream?: typeof CompressionStream })
-    .CompressionStream;
-  if (!Compression) return Promise.resolve(null);
-  return pipeThrough(data, () => new Compression('deflate-raw'), 'דחיסת חלק מהמסמך נכשלה');
-}
-
-/**
- * דחיסה שאומתה: הפלט נפרס בחזרה ומושווה למקור לפני שהוא נכתב.
- *
- * זה מה שעונה על החשש שבגללו לא הייתה כאן דחיסה עד עכשיו — „דוחס שמתנהג אחרת
- * מהצפוי הוא באג שקט במסמך של המשתמש”. אחרי סבב מלא של דחיסה-ופריסה עם
- * השוואת CRC, דוחס שגוי אינו יכול להיות שקט: הוא נופל כאן ל-`STORED`. המחיר
- * הוא פריסה נוספת של החלק, ובשביל `document.xml` של ספר זה עשרות מילישניות
- * על פתיחה שממילא נמדדת במאות.
- *
- * `null` גם כשהדחיסה אינה קטנה מהמקור: רשומה גלויה קצרה יותר היא פשוט
- * הרשומה הנכונה.
- */
-async function deflateVerified(content: Bytes): Promise<Bytes | null> {
-  const deflated = await deflateRaw(content);
-  if (!deflated || deflated.byteLength >= content.byteLength) return null;
-
-  const restored = await inflateRaw(deflated);
-  if (!restored || restored.byteLength !== content.byteLength || crc32(restored) !== crc32(content)) {
-    console.warn('[otzaria-word] הדחיסה לא שחזרה את החלק בדיוק — נכתב לא-דחוס');
-    return null;
-  }
-  return deflated;
-}
-
-/** מעבירה בייטים דרך זרם-טרנספורמציה ואוספת את הפלט. `null` ומיומן על כשל. */
-async function pipeThrough(
-  data: Bytes,
-  transform: () => ReadableWritablePair<Uint8Array, BufferSource>,
-  failure: string,
-): Promise<Bytes | null> {
-  try {
-    const source = new ReadableStream<BufferSource>({
-      start(controller) {
-        controller.enqueue(data);
-        controller.close();
-      },
-    });
-    const reader = source.pipeThrough(transform()).getReader();
-
-    const chunks: Uint8Array[] = [];
-    let total = 0;
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      chunks.push(value);
-      total += value.byteLength;
-    }
-
-    const out = new Uint8Array(total);
-    let at = 0;
-    for (const chunk of chunks) {
-      out.set(chunk, at);
-      at += chunk.byteLength;
-    }
-    return out;
-  } catch (error) {
-    console.warn(`[otzaria-word] ${failure}`, error);
-    return null;
-  }
-}
-
-/**
- * קריאת הארכיון מהספרייה המרכזית שלו — ולא מסריקת כותרות מקומיות, שהיא ניחוש
- * כשיש בהן data descriptor. `null` פירושו „לא ארכיון שאני מבין”, וזו תשובה
- * חוקית לגמרי: המנוע יקבל את המקור.
- */
-function readZip(bytes: Bytes): ZipEntry[] | null {
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  const eocd = findEocd(view);
-  if (eocd < 0) return null;
-
-  const count = view.getUint16(eocd + 10, true);
-  const centralOffset = view.getUint32(eocd + 16, true);
-  if (count === ZIP64_MARKER_16 || centralOffset === ZIP64_MARKER_32) return null;
-
-  const entries: ZipEntry[] = [];
-  let at = centralOffset;
-  for (let i = 0; i < count; i++) {
-    if (at + ZIP_CENTRAL_HEADER_SIZE > bytes.byteLength) return null;
-    if (view.getUint32(at, true) !== ZIP_CENTRAL_SIGNATURE) return null;
-
-    const flags = view.getUint16(at + 8, true);
-    if (flags & ZIP_FLAG_ENCRYPTED) return null;
-
-    const compressedSize = view.getUint32(at + 20, true);
-    const uncompressedSize = view.getUint32(at + 24, true);
-    const nameLength = view.getUint16(at + 28, true);
-    const extraLength = view.getUint16(at + 30, true);
-    const commentLength = view.getUint16(at + 32, true);
-    const localOffset = view.getUint32(at + 42, true);
-    if (compressedSize === ZIP64_MARKER_32 || localOffset === ZIP64_MARKER_32) return null;
-
-    const nameBytes = bytes.subarray(at + ZIP_CENTRAL_HEADER_SIZE, at + ZIP_CENTRAL_HEADER_SIZE + nameLength);
-    const data = entryData(bytes, view, localOffset, compressedSize);
-    if (!data) return null;
-
-    entries.push({
-      name: new TextDecoder().decode(nameBytes),
-      nameBytes: nameBytes.slice(),
-      versionMadeBy: view.getUint16(at + 4, true),
-      versionNeeded: view.getUint16(at + 6, true),
-      flags,
-      method: view.getUint16(at + 10, true),
-      modTime: view.getUint16(at + 12, true),
-      modDate: view.getUint16(at + 14, true),
-      crc: view.getUint32(at + 16, true),
-      internalAttrs: view.getUint16(at + 36, true),
-      externalAttrs: view.getUint32(at + 38, true),
-      data,
-      uncompressedSize,
-    });
-
-    at += ZIP_CENTRAL_HEADER_SIZE + nameLength + extraLength + commentLength;
-  }
-  return entries;
-}
-
-/** הבייטים המאוחסנים של רשומה, לפי הכותרת המקומית שלה. */
-function entryData(
-  bytes: Bytes,
-  view: DataView,
-  localOffset: number,
-  compressedSize: number,
-): Bytes | null {
-  if (localOffset + ZIP_LOCAL_HEADER_SIZE > bytes.byteLength) return null;
-  if (view.getUint32(localOffset, true) !== ZIP_LOCAL_SIGNATURE) return null;
-
-  const nameLength = view.getUint16(localOffset + 26, true);
-  const extraLength = view.getUint16(localOffset + 28, true);
-  const start = localOffset + ZIP_LOCAL_HEADER_SIZE + nameLength + extraLength;
-  if (start + compressedSize > bytes.byteLength) return null;
-
-  return bytes.subarray(start, start + compressedSize);
-}
-
-/**
- * מיקום ה-EOCD. נסרק מהסוף, כי לארכיון מותרת הערה בת עד 64KB אחריו.
- */
-function findEocd(view: DataView): number {
-  const last = view.byteLength - ZIP_EOCD_SIZE;
-  const first = Math.max(0, view.byteLength - ZIP_EOCD_SIZE - 0xffff);
-  for (let at = last; at >= first; at--) {
-    if (view.getUint32(at, true) === ZIP_EOCD_SIGNATURE) return at;
-  }
-  return -1;
-}
-
-/**
- * כתיבת הארכיון מחדש.
- *
- * שדות ה-extra וההערות אינם נכתבים: הם נושאים חותמות זמן ומידע של מערכת
- * הקבצים, ואינם חלק ממה ש-DOCX הוא. מה שכן נשמר בדיוק הוא סדר הרשומות,
- * השמות, שיטת הדחיסה והבייטים עצמם.
- */
-function writeZip(entries: ZipEntry[]): Bytes {
-  let size = ZIP_EOCD_SIZE;
-  for (const entry of entries) {
-    size += ZIP_LOCAL_HEADER_SIZE + entry.nameBytes.byteLength + entry.data.byteLength;
-    size += ZIP_CENTRAL_HEADER_SIZE + entry.nameBytes.byteLength;
-  }
-
-  const out = new Uint8Array(size);
-  const view = new DataView(out.buffer);
-  const offsets: number[] = [];
-  let at = 0;
-
-  for (const entry of entries) {
-    offsets.push(at);
-    view.setUint32(at, ZIP_LOCAL_SIGNATURE, true);
-    view.setUint16(at + 4, entry.versionNeeded, true);
-    view.setUint16(at + 6, entry.flags & ~ZIP_FLAG_DATA_DESCRIPTOR, true);
-    view.setUint16(at + 8, entry.method, true);
-    view.setUint16(at + 10, entry.modTime, true);
-    view.setUint16(at + 12, entry.modDate, true);
-    view.setUint32(at + 14, entry.crc, true);
-    view.setUint32(at + 18, entry.data.byteLength, true);
-    view.setUint32(at + 22, entry.uncompressedSize, true);
-    view.setUint16(at + 26, entry.nameBytes.byteLength, true);
-    view.setUint16(at + 28, 0, true);
-    at += ZIP_LOCAL_HEADER_SIZE;
-    out.set(entry.nameBytes, at);
-    at += entry.nameBytes.byteLength;
-    out.set(entry.data, at);
-    at += entry.data.byteLength;
-  }
-
-  const centralOffset = at;
-  entries.forEach((entry, index) => {
-    view.setUint32(at, ZIP_CENTRAL_SIGNATURE, true);
-    view.setUint16(at + 4, entry.versionMadeBy, true);
-    view.setUint16(at + 6, entry.versionNeeded, true);
-    view.setUint16(at + 8, entry.flags & ~ZIP_FLAG_DATA_DESCRIPTOR, true);
-    view.setUint16(at + 10, entry.method, true);
-    view.setUint16(at + 12, entry.modTime, true);
-    view.setUint16(at + 14, entry.modDate, true);
-    view.setUint32(at + 16, entry.crc, true);
-    view.setUint32(at + 20, entry.data.byteLength, true);
-    view.setUint32(at + 24, entry.uncompressedSize, true);
-    view.setUint16(at + 28, entry.nameBytes.byteLength, true);
-    view.setUint16(at + 30, 0, true);
-    view.setUint16(at + 32, 0, true);
-    view.setUint16(at + 34, 0, true);
-    view.setUint16(at + 36, entry.internalAttrs, true);
-    view.setUint32(at + 38, entry.externalAttrs, true);
-    view.setUint32(at + 42, offsets[index], true);
-    at += ZIP_CENTRAL_HEADER_SIZE;
-    out.set(entry.nameBytes, at);
-    at += entry.nameBytes.byteLength;
-  });
-
-  view.setUint32(at, ZIP_EOCD_SIGNATURE, true);
-  view.setUint16(at + 4, 0, true);
-  view.setUint16(at + 6, 0, true);
-  view.setUint16(at + 8, entries.length, true);
-  view.setUint16(at + 10, entries.length, true);
-  view.setUint32(at + 12, at - centralOffset, true);
-  view.setUint32(at + 16, centralOffset, true);
-  view.setUint16(at + 20, 0, true);
-
-  return out;
-}
-
-let crcTable: Uint32Array | null = null;
-
-/**
- * CRC32 כפי ש-ZIP מגדיר אותו. טבלה אחת, בייט אחר בייט.
- *
- * מיוצאת בשביל הבדיקה בלבד — אין לה קורא אחר מחוץ למודול. מה שהבדיקה שומרת
- * עליו הוא שוויון עם מימוש ייחוס: CRC שגוי הוא ארכיון שבור, וזה כשל שקט.
- *
- * **„slice-by-4” נכתב כאן ונמדד איטי יותר, ולכן הוסר.** מאז שהתיקון השני
- * נכנס החלק שנכתב מחדש עשוי להיות `document.xml` של ספר שלם, ולכן נראה
- * שכדאי. נמדד ב-Node 24, שלוש הרצות, מינימום מתוך חמש חזרות בכל אחת:
- *
- *     גודל     בייט-בבייט     slice-by-4
- *     5.6MB    33–50ms        77–127ms
- *     64KB     0.31–0.63ms    0.81–1.05ms
- *     512B     0.002ms        0.018–0.024ms
- *
- * גם הווריאנט בלי `>>> 0` בתוך הלולאה — כלומר בלי לייצר uint32 שיוצא מטווח
- * ה-Smi בכל איטרציה — נשאר איטי מהפשוט בכל הגדלים. V8 מהדר את הלולאה הצרה
- * הזאת טוב יותר ממה שארבע טבלאות (4KB במקום 1KB) מרוויחות. **לא לכתוב את
- * זה שוב בלי למדוד.**
- */
-export function crc32(bytes: Bytes): number {
-  if (!crcTable) {
-    crcTable = new Uint32Array(256);
-    for (let i = 0; i < 256; i++) {
-      let value = i;
-      for (let bit = 0; bit < 8; bit++) {
-        value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
-      }
-      crcTable[i] = value >>> 0;
-    }
-  }
-
-  let crc = 0xffffffff;
-  for (let i = 0; i < bytes.byteLength; i++) {
-    crc = crcTable[(crc ^ bytes[i]) & 0xff] ^ (crc >>> 8);
-  }
-  return (crc ^ 0xffffffff) >>> 0;
+  return { bytes: writeZip(rewritten, archiveComment), notes, notice };
 }

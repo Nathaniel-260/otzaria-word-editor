@@ -143,13 +143,33 @@ export interface RtlLineEndOptions {
   superdoc: LineEndHost | null | undefined;
 }
 
+/** מה שנקרא מהאירוע. `isComposing`/`keyCode` חסרים בדמויות של הבדיקות. */
+type LineEndKeyEvent = Pick<KeyboardEvent, 'key' | 'ctrlKey' | 'metaKey' | 'altKey'> &
+  Partial<Pick<KeyboardEvent, 'isComposing' | 'keyCode'>>;
+
+/**
+ * הרכבה במקלדת (IME). התקן של הריפו ב-`src/ui/shortcuts/match.ts`: דפדפן
+ * שאינו מציב `isComposing` מדווח `keyCode === 229`.
+ *
+ * ‏`Home` ו-`End` הם מקשי חלונית הרכבה בדיוק כמו החצים — הם מזיזים בתוך
+ * המועמד ולא בתוך המסמך. כאן זה חוסם, ולא רק לא-רצוי: המסלול שלמטה בולע
+ * את האירוע ב-`stopImmediatePropagation`, כלומר חלונית ההרכבה לא הייתה
+ * רואה אותו כלל. אותו שיקול בדיוק ב-`isHorizontalArrow` שב-`rtl-caret.ts`,
+ * ואותו מתקין מרכיב את שני המודולים זה לצד זה.
+ */
+function isComposingEvent(event: LineEndKeyEvent): boolean {
+  return event.isComposing === true || event.keyCode === 229;
+}
+
 /** האם ההקשה היא `End` „נקי” — עם Shift או בלעדיו, ובלי Ctrl/Meta/Alt. */
-export function isLineEndKey(event: Pick<KeyboardEvent, 'key' | 'ctrlKey' | 'metaKey' | 'altKey'>): boolean {
+export function isLineEndKey(event: LineEndKeyEvent): boolean {
+  if (isComposingEvent(event)) return false;
   return event.key === 'End' && !event.ctrlKey && !event.metaKey && !event.altKey;
 }
 
 /** `Home` רגיל הוא הרמז היחיד שמסיר את העמימות של תפר שורות. */
-function isPlainHomeKey(event: Pick<KeyboardEvent, 'key' | 'ctrlKey' | 'metaKey' | 'altKey'>): boolean {
+function isPlainHomeKey(event: LineEndKeyEvent): boolean {
+  if (isComposingEvent(event)) return false;
   return event.key === 'Home' && !event.ctrlKey && !event.metaKey && !event.altKey;
 }
 
@@ -263,7 +283,12 @@ export function installRtlLineEnd({ host, superdoc }: RtlLineEndOptions): RtlLin
     event.stopPropagation();
     event.stopImmediatePropagation();
 
-    const story = selection?.story ?? head.story ?? { kind: 'story', storyType: 'body' };
+    // ה-`story` מגיע מהתצלום. ברירת המחדל שהייתה כאן — `{kind:'story',
+    // storyType:'body'}` — מעולם לא נמדדה כנכונה, והייתה נכתבת למנוע דווקא
+    // במצב שבו הוא עצמו לא דיווח story (הערת שוליים? כותרת?). נמדד בשער
+    // (`check:line-end`, „ה-story בתצלום”) שהתצלום נושא אותו גם על העוגן וגם
+    // על הקצה, ולכן אין מקרה שבו הברירה הזאת מגיעה. אותה הכרעה ב-`rtl-caret.ts`.
+    const story = selection?.story ?? head.story;
     const coordinateSpace = selection?.coordinateSpace;
     const point: TextPoint = { kind: 'text', blockId: head.blockId, offset: target, story };
     const start = event.shiftKey && anchor && anchor.kind === 'text' ? anchor : point;

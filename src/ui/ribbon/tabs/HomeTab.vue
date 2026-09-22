@@ -602,10 +602,21 @@ import {
   type ParagraphAlignment,
 } from '../../../engine/payloads';
 
-defineEmits<{
+const emit = defineEmits<{
   (e: 'open-find'): void;
   (e: 'open-replace'): void;
+  (e: 'toggle-list-autoformat'): void;
 }>();
+
+/**
+ * המתג של „זיהוי רשימות בהקלדה”. הוא יושב בתפריט המספור ולא בדיאלוג הגדרות
+ * (שאין) מסיבה אחת: מי שרוצה לכבות אותו הוא מי שהמנגנון הרגיז אותו זה עתה,
+ * והוא מסתכל בדיוק על הפקד הזה. ב-Word הוא נמצא ב„אפשרויות תיקון שגיאות”,
+ * שהוא שלושה מסכים משם.
+ */
+const props = withDefaults(defineProps<{ listAutoformatEnabled?: boolean }>(), {
+  listAutoformatEnabled: true,
+});
 
 const SPACING_OPTIONS: SelectOption[] = [
   { value: '1.0', label: '1.0' },
@@ -1493,6 +1504,14 @@ const numberMenuItems = computed(() => [
   { id: 'restart', label: 'התחל מחדש מ-1' },
   { id: 'continue', label: 'המשך מספור קודם' },
   convertItem.value,
+  {
+    id: 'autoformat',
+    // הגדרה ולא פעולה על הרשימה — ולכן מופרדת מהפעולות שמעליה.
+    separatorBefore: true,
+    label: props.listAutoformatEnabled
+      ? 'זיהוי רשימות בהקלדה: פעיל'
+      : 'זיהוי רשימות בהקלדה: כבוי',
+  },
 ]);
 
 /**
@@ -1536,6 +1555,12 @@ async function runList(action: () => Promise<CommandOutcome>): Promise<void> {
 }
 
 function onListMenuSelect(id: string): void {
+  if (id === 'autoformat') {
+    convertArmed.value = false;
+    emit('toggle-list-autoformat');
+    return;
+  }
+
   // כל פעולה שאינה „המר לטקסט” מנטרלת את החימוש שלו: המשתמש עשה משהו אחר
   // בינתיים, ולחיצה הבאה על „המר” חייבת להיות שוב לחיצה ראשונה.
   if (id !== 'convert') convertArmed.value = false;

@@ -45,6 +45,18 @@ describe('isLineEndKey', () => {
   it('Home נמדד תקין, ואינו נוגע', () => {
     expect(isLineEndKey(key({ key: 'Home' }))).toBe(false);
   });
+
+  it('הרכבה במקלדת (IME): `End` שייך לחלונית ההרכבה ולא לסמן', () => {
+    /*
+     * ‏`End` בתוך הרכבה מזיז בתוך המועמד, לא במסמך — והמסלול כאן בולע את
+     * האירוע ב-`stopImmediatePropagation`, כלומר חלונית ההרכבה לא הייתה רואה
+     * אותו כלל. שני החצאים של התקן בריפו (`src/ui/shortcuts/match.ts`):
+     * דפדפן שאינו מציב `isComposing` מדווח `keyCode === 229`.
+     */
+    expect(isLineEndKey(key({ isComposing: true }))).toBe(false);
+    expect(isLineEndKey(key({ keyCode: 229 }))).toBe(false);
+    expect(isLineEndKey(key({ isComposing: false, keyCode: 35 })), 'בלי הרכבה — שלנו').toBe(true);
+  });
 });
 
 describe('lineEndOffset', () => {
@@ -184,6 +196,70 @@ describe('installRtlLineEnd', () => {
     };
     expect(input.target.end.offset).toBe(98);
     expect(input.target.start.offset, 'בלי Shift הבחירה מתכווצת').toBe(98);
+    handle.dispose();
+  });
+
+  it('בתוך הרכבה: ההקשה אינה נבלעת ואינה מתורגמת לתנועת סמן', () => {
+    // בלי זה `End` באמצע הרכבה נעצר כאן ב-`stopImmediatePropagation`, וחלונית
+    // ההרכבה — שמקש זה שייך לה — לא רואה אותו. אותה הגנה כבר קיימת בחצים.
+    for (const composing of [{ isComposing: true }, { keyCode: 229 }]) {
+      const { host, line, superdoc, setSelectionTarget } = setup();
+      const handle = installRtlLineEnd({ host, superdoc });
+
+      const event = pressEnd(line, composing);
+
+      expect(event.defaultPrevented, JSON.stringify(composing)).toBe(false);
+      expect(setSelectionTarget).not.toHaveBeenCalled();
+      handle.dispose();
+      document.body.innerHTML = '';
+    }
+  });
+
+  it('‏`Home` של הרכבה אינו מזיז את רמז התפר', () => {
+    /*
+     * הרמז שייך ל-`Home` **של המשתמש**. הסמן כאן יושב בתפר (98), ושם ורק שם
+     * הרמז משנה: בלי רמז ה-`End` חוזר לסוף השורה הראשונה (98), ועם רמז הוא
+     * הולך לסוף השנייה (191). ‏`Home` שנשלח בתוך הרכבה שייך לחלונית ההרכבה,
+     * ואם היה מציב את הרמז — ה-`End` שאחריו היה קופץ שורה.
+     */
+    const { host, line, superdoc, setSelectionTarget, snapshot } = setup();
+    snapshot.start = 98;
+    snapshot.end = 98;
+    const handle = installRtlLineEnd({ host, superdoc });
+
+    pressKey(line, 'Home', { isComposing: true });
+    const event = pressEnd(line);
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(setSelectionTarget, 'הסמן כבר בסוף השורה הראשונה — אין מה לכתוב').not.toHaveBeenCalled();
+    handle.dispose();
+  });
+
+  it('ה-`story` נלקח מהתצלום, ואין ברירת מחדל מומצאת', () => {
+    /*
+     * הערך שהיה כאן — `{kind:'story',storyType:'body'}` — מעולם לא נמדד
+     * כנכון, והיה נכתב למנוע דווקא במצב שבו המנוע עצמו לא דיווח story
+     * (הערת שוליים? כותרת?). השער (`check:line-end`, „ה-story בתצלום”) מודד
+     * שהשדה כן מגיע; כאן נמדד מה קורה בתצלום ההיפותטי שאין בו — המודול מעביר
+     * ‏`undefined` הלאה, ואינו ממציא גוף מסמך.
+     */
+    const { host, line, superdoc, setSelectionTarget } = setup();
+    superdoc.activeEditor!.host!.readLiveSelectionSyncSnapshot = () => ({
+      selectionTarget: {
+        kind: 'selection',
+        start: { kind: 'text', blockId: 'p1', offset: 48 },
+        end: { kind: 'text', blockId: 'p1', offset: 48 },
+      },
+    });
+    const handle = installRtlLineEnd({ host, superdoc });
+
+    pressEnd(line);
+
+    const input = setSelectionTarget.mock.calls[0]![0] as {
+      target: { story: unknown; end: { story: unknown } };
+    };
+    expect(input.target.story).toBeUndefined();
+    expect(input.target.end.story).toBeUndefined();
     handle.dispose();
   });
 
