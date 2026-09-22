@@ -137,6 +137,27 @@ describe('removeBlankHyperlinks', () => {
     expect(await removeBlankHyperlinks(doc)).toBe(0);
   });
 
+  /**
+   * ‏`remove` שזורק אינו „הצומת הזה נשאר” אלא „הניקוי נעצר”: בלי ה-catch
+   * הראשון שנכשל מפיל את כל הלולאה, והצומת שבאמת חוסם את הכתיבה — זה שבפסקה
+   * שמתייגים בה — נשאר במקומו. הענף הזה שרד סבב מוטציה בלי הבדיקה הזאת.
+   */
+  it('זריקה של remove אינה עוצרת את הניקוי ואינה נספרת', async () => {
+    let call = 0;
+    const remove = vi.fn(() => {
+      if (++call === 1) throw new Error('busy');
+      return { success: true } as never;
+    });
+    const links = [
+      { text: '', address: address('b1', 0, 0) },
+      { text: '', address: address('b2', 4, 4) },
+    ];
+    const doc = { hyperlinks: { list: () => listReply(links), remove } };
+
+    expect(await removeBlankHyperlinks(doc)).toBe(1);
+    expect(remove).toHaveBeenCalledTimes(2);
+  });
+
   it('זריקה של list נבלעת — היא לא החמירה את המצב', async () => {
     const doc = {
       hyperlinks: {

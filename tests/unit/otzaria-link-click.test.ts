@@ -255,6 +255,48 @@ describe('installOtzariaLinkClicks', () => {
     expect(list).not.toHaveBeenCalled();
   });
 
+  /**
+   * ה-handler קורא ל-`activate` כ-`void`, ולכן `list` שזורק אינו „לחיצה
+   * שנכשלה” אלא **דחייה שאין לה תופס** — ובדפדפן זה `unhandledrejection` על
+   * כל לחיצה. הענף הזה שרד סבב מוטציה בלי הבדיקה הזאת.
+   */
+  it('זריקה של list נבלעת, ואינה מנווטת לניחוש', async () => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const navigate = vi.fn();
+    const onStatus = vi.fn();
+    // ‏`unhandledrejection` אינו אמין ב-jsdom, ולכן הסימן הנמדד הוא העקבה
+    // שהענף משאיר: בלי ה-catch אין אזהרה והדחייה נשארת בלי תופס.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    installOtzariaLinkClicks(
+      container,
+      {
+        activeEditor: {
+          doc: {
+            hyperlinks: {
+              list: () => {
+                throw new Error('busy');
+              },
+            },
+          },
+        },
+      },
+      { navigate, onStatus },
+    );
+    container.appendChild(blockedRun('rId7'));
+
+    container.querySelector('span')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await flush();
+
+    expect(navigate).not.toHaveBeenCalled();
+    expect(onStatus).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(
+      '[otzaria-word] קריאת הקישורים במסמך נכשלה',
+      expect.any(Error),
+    );
+    warn.mockRestore();
+  });
+
   it('מנוע בלי hyperlinks.list אינו מפיל את הלחיצה', async () => {
     const container = document.createElement('div');
     document.body.appendChild(container);
