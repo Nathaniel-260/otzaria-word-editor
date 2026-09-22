@@ -1243,8 +1243,10 @@ const formattingMarksVisible = ref(false);
 const spellcheckDictionary = shallowRef<Dictionary | null>(null);
 const spellcheckBusy = ref(false);
 /**
- * מונה שעולה אחרי עריכה. השכבה מודדת מחדש עליו — עריכה בתוך פסקה אינה מזיזה
- * שום מלבן עמוד, ולכן מעקב הגיאומטריה לבדו אינו יורה עליה.
+ * מונה שעולה אחרי עריכה. **שתי** השכבות מודדות מחדש עליו — בדיקת האיות
+ * וסימון העמודים — מפני שעריכה בתוך פסקה אינה מזיזה שום מלבן עמוד, ולכן
+ * מעקב הגיאומטריה לבדו אינו יורה עליה. מי שמעלה אותו: `noteSpellcheckChanged`,
+ * והגארד שם מונה את שני הצרכנים.
  */
 const spellcheckRevision = ref(0);
 /** רק מה שנצרך מהשכבה — ראו `defineExpose` ב-SpellingOverlay.vue. */
@@ -1258,8 +1260,21 @@ const spellingOverlayRef = shallowRef<{ wordAt: (x: number, y: number) => string
 const SPELLCHECK_DEBOUNCE_MS = 400;
 let spellcheckTimer: ReturnType<typeof setTimeout> | undefined;
 
+/**
+ * „עריכה קרתה” — המונה שעליו **שתי** השכבות מודדות מחדש. הגארד הוא רשימת
+ * הצרכנים ולא בדיקת איות לבדה: הוא נכתב כשהמונה שירת רק את `SpellingOverlay`,
+ * ומאז `PageMarkingOverlay` נקשר לאותו `revision`. בדיקת האיות כבויה בברירת
+ * המחדל (‏`loadSpellcheckEnabled`), ולכן אצל מי שהדליק „סימון עמודים” בלבד
+ * המונה לא עלה מעולם — נמדד בדפדפן: Enter בפסקה הראשונה הזיז את המילה
+ * האחרונה מ-332px ל-351px, והמלבן נשאר ב-332px גם אחרי 2500ms. ‏`revision`
+ * הוא הטריגר היחיד לעריכה שאינה מזיזה מלבן עמוד — מעקב מלבני העמודים אינו
+ * יורה עליה.
+ *
+ * הגארד עצמו נשאר: כששתי התכונות כבויות אין צרכן, ואין טעם להריץ טיימר על
+ * כל הקשה.
+ */
 function noteSpellcheckChanged(): void {
-  if (!spellcheckDictionary.value) return;
+  if (!spellcheckDictionary.value && !pageMarkingEnabled.value) return;
   clearTimeout(spellcheckTimer);
   spellcheckTimer = setTimeout(() => {
     spellcheckRevision.value += 1;
@@ -1278,7 +1293,10 @@ async function toggleSpellcheck(): Promise<void> {
 
   if (spellcheckDictionary.value) {
     spellcheckDictionary.value = null;
-    clearTimeout(spellcheckTimer);
+    // הטיימר משותף עם „סימון עמודים”, ולכן הוא נעצר רק כשלא נשאר לו צרכן:
+    // כיבוי בדיקת האיות בתוך 400ms מהקשה היה מבטל מדידה שהסימון ממתין לה,
+    // והמלבנים היו נשארים על הטקסט הישן עד העריכה הבאה.
+    if (!pageMarkingEnabled.value) clearTimeout(spellcheckTimer);
     await saveSpellcheckEnabled(false);
     return;
   }
@@ -2171,6 +2189,12 @@ function activateTab(session: DocumentSession): void {
   // ובטאב ב' הטקסט הוא ממילא „דוד 12” — הקריאה מתאימה לערכה, הלחיצה
   // נקראת כ„חזרה”, והיא מחילה על טאב ב' את „אריאל 10” של טאב א'.
   presetToggles.forgetAll();
+  // מאותו טעם בדיוק: „אילו עמודים זזו” הוא תוצאה של „בדוק עמודים” על המסמך
+  // **שיוצא**, והוא נשמר במעטפת ולא ב-session. בלי השכחה הזאת עמוד 3 שזז
+  // בטאב א' נצבע בצבע המשני על עמוד 3 של טאב ב', שאיש לא בדק אותו. הסימון
+  // עצמו (`enabled`) נשאר — הוא מודד את ה-DOM החי ולכן נכון לכל טאב; מי
+  // שרוצה את ההשוואה בטאב החדש לוחץ „בדוק עמודים”, והתצלום שמור לפי מסמך.
+  pageMarkingChanged.value = new Set();
   void trimLiveDocuments();
 
   // „מי היה פעיל” הוא חלק מהרשומה, והוא משתנה בדיוק כאן. בלי הכתיבה הזאת
