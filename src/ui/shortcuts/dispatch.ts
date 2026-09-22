@@ -4,10 +4,64 @@
  * הוא מחזיק את שלוש ההכרעות שקודם היו פזורות ב-`App.vue`, ולכן לא היו נבדקות:
  * מה קורה כשהפוקוס בשדה טקסט, מה קורה כשדיאלוג פתוח, ומתי מותר לבלוע את
  * ההתנהגות של הדפדפן.
+ *
+ * ## שני שלבים, ולא אחד
+ *
+ * ברירת המחדל היא **bubble**, אחרי המנוע, וזה מכוון: צירוף שהמנוע קושר בעצמו
+ * (Ctrl+B) חייב להיות שלו, ו-`event.defaultPrevented` הוא מה שמונע הרצה
+ * כפולה.
+ *
+ * היוצא מן הכלל הוא `Alt` בלי `Ctrl`, והוא רץ ב-**capture**, לפני המנוע.
+ * המדידה: המנוע מחזיק מאזין `keydown` בשלב ה-capture על
+ * `.v2-super-editor__stage`, והוא מטפל בצירוף כזה כ**הקלדת תו** — מכניס את
+ * התו לבחירה וקורא `preventDefault`. כלומר המנתב שלנו, שיושב ב-bubble, נטש
+ * על `defaultPrevented` בלי שהמשתמש ידע למה, ובמקום הפעולה נכתב תו במסמך.
+ * מדידה: `scripts/qa/custom-shortcut-owner-probe.mjs`.
+ *
+ * זה פגע בשני מקומות: בקיצור אישי על `Alt+X` (שהקליד „ס” בפריסה עברית),
+ * ו**גם** ב-10 רשומות מובנות — `Alt+1`…`Alt+9` למעבר בין המסמכים הפתוחים
+ * ו-`Alt+Q` ל„ספר לי”. כולן לא עבדו כשהסמן במסמך.
+ * ההכרעה עצמה יושבת ב-`runsBeforeEngine`, ולא בדגל על כל רשומה: דגל שצריך
+ * לזכור להצמיד לרשומה חדשה הוא דגל ששוכחים.
+ *
+ * ולכן גם `stopPropagation` ולא רק `preventDefault`: המאזין ההוא אינו בודק
+ * `defaultPrevented` לפני שהוא מקליד, ובליעה בלעדיו הייתה משאירה את התו
+ * במסמך. אירוע שקיצור שלנו טיפל בו אינו אמור להגיע למנוע בכלל.
+ *
+ * מה **לא** משתנה: „מובנה זוכה”. גם במסלול ה-capture די בכך שהצירוף הותאם
+ * לרשומה ברג'יסטרי כדי שהרשימה האישית לא תיבחן — אחרת קיצור אישי על `Ctrl+V`
+ * היה בולע את ההדבקה עצמה, וזה בדיוק המסלול שהבדיקה שומרת עליו.
  */
 import type { CommandId } from '../../engine/capabilities';
 import { matchAny } from './match';
 import { SHORTCUTS, type ShellAction, type Shortcut } from './registry';
+
+/**
+ * האם המנוע יבלע את הצירוף לפני שהוא יגיע ל-bubble.
+ *
+ * הכלל נמדד ולא נוחש: המאזין של המנוע מטפל ב-`Alt` **בלי** `Ctrl` כהקלדת
+ * תו — נמדד על `Alt+X`, `Alt+Q` ו-`Alt+7`, ובכל השלושה התו נכנס למסמך
+ * וה-`preventDefault` שלו הרג את המסלול שלנו. עם `Ctrl` הוא אינו נוגע
+ * (נמדד על `Ctrl+Alt+M`), ולכן הכלל הוא בדיוק „Alt בלי Ctrl”.
+ *
+ * הנפגעות ברג'יסטרי הן 10 רשומות: `Alt+1`…`Alt+9` (מעבר בין המסמכים
+ * הפתוחים) ו-`Alt+Q` („ספר לי”). כולן לא עבדו כשהסמן במסמך — כלומר במצב
+ * הרגיל — ובמקומן נכתבה הספרה או האות במסמך.
+ *
+ * `Alt+F8` (ניהול מאקרו) שייך לשלב הזה אבל **לא** היה שבור, וזו מדידה ולא
+ * הנחה: בעטיפת כל מאזיני ה-`keydown` בדף ונטרול המאזין שלנו, `Alt+7`
+ * ו-`Alt+Q` נבלעו בידי המאזין של המנוע על `.v2-super-editor__stage` והתו
+ * נכתב במסמך, ואילו `Alt+F8` עבר את כל המאזינים בלי שאיש קרא `preventDefault`
+ * ובלי שנכתב דבר — מקש פונקציה אינו מפיק תו, ואין מה להקליד. הכלל כאן הוא על
+ * צורת הצירוף ולא על רשומה-רשומה, ולכן הוא לוקח גם אותו; הוא נמדד בשער
+ * (`custom-shortcut-focus-qa.mjs`) כדי שהמעבר שלו ל-capture לא יישאר בלי עדות.
+ *
+ * מיוצאת לבדיקות: זו ההכרעה שקובעת באיזה שלב רשומה רצה, והיא צריכה להיבדק
+ * כקלט-פלט ולא דרך מאזין.
+ */
+export function runsBeforeEngine(shortcut: Shortcut): boolean {
+  return shortcut.alt === true && shortcut.ctrl !== true;
+}
 
 /**
  * האם היעד הוא שדה טקסט — לפי `tagName` ולפי `role`, ולא לפי מאפיין העריכה
@@ -63,9 +117,18 @@ export interface ShortcutDispatcherDeps {
 }
 
 export interface ShortcutDispatcher {
-  /** מטפל באירוע. `true` פירושו „הקיצור רץ, וההתנהגות של הדפדפן נבלעה”. */
+  /**
+   * הרשומות המובנות, בשלב ה-bubble. `true` פירושו „הקיצור רץ, וההתנהגות של
+   * הדפדפן נבלעה”.
+   */
   handle: (event: KeyboardEvent) => boolean;
-  /** מנתק את המאזין. אידמפוטנטי. */
+  /**
+   * שלב ה-capture: הרשומות שהמנוע היה בולע (`runsBeforeEngine`) והקיצורים
+   * האישיים. ראו „שני שלבים” בראש הקובץ — זה המסלול היחיד שלהם, והם אינם
+   * נבחנים ב-`handle`.
+   */
+  handleCapture: (event: KeyboardEvent) => boolean;
+  /** מנתק את המאזינים. אידמפוטנטי. */
   dispose: () => void;
 }
 
@@ -93,6 +156,8 @@ export function createShortcutDispatcher(deps: ShortcutDispatcherDeps): Shortcut
    * שאר ההכרעות זהות לאלה של הרשומות המובנות ואינן משוכפלות: דיאלוג פתוח חוסם
    * (לקיצור אישי אין „מותר במודאל”), ושדה טקסט של הממשק חוסם — הצמדת עיצוב
    * אינה שייכת לשדה שם המסמך.
+   *
+   * רץ ב-capture, לפני המנוע. ההנמקה והמדידה בראש הקובץ.
    */
   function handleCustom(event: KeyboardEvent): boolean {
     const runCustom = deps.runCustom;
@@ -105,20 +170,31 @@ export function createShortcutDispatcher(deps: ShortcutDispatcherDeps): Shortcut
     if (inUiTextEntry(event.target)) return false;
 
     const handled = runCustom(match.id);
-    if (handled) event.preventDefault();
+    if (handled) swallow(event);
     return handled;
   }
 
-  function handle(event: KeyboardEvent): boolean {
-    // מישהו כבר טיפל. המאזין שלנו יושב על `window` בשלב ה-bubble, כלומר
-    // **אחרי** ה-keymap של מנוע העריכה שיושב על אזור המסמך; בלי הבדיקה הזאת
-    // צירוף שהמנוע קושר בעצמו (Ctrl+B, למשל) היה מופעל פעמיים — הדגשה
-    // וביטולה — והמשתמש היה רואה „הקיצור לא עובד” בלי שום שגיאה.
-    if (event.defaultPrevented) return false;
+  /**
+   * בליעה מלאה: גם ברירת המחדל של הדפדפן וגם המשך המסע אל המנוע.
+   *
+   * `stopPropagation` ולא `preventDefault` לבדו, מפני שהמאזין של המנוע אינו
+   * בודק `defaultPrevented` לפני שהוא מקליד את התו — ראו את ראש הקובץ. הוא
+   * נקרא גם במסלול ה-bubble, שם אין למי להפסיק את המסע, וזה בסדר: אירוע
+   * שהקיצור שלנו טיפל בו אינו אמור להמשיך לאיש.
+   */
+  function swallow(event: KeyboardEvent): void {
+    event.preventDefault();
+    event.stopPropagation();
+  }
 
-    const shortcut = matchAny(event, shortcuts);
-    if (!shortcut) return handleCustom(event);
-
+  /**
+   * ההרצה של רשומה שכבר הותאמה — משותפת לשני השלבים.
+   *
+   * ההכרעות כאן אינן תלויות בשלב, ושכפולן היה מאפשר לשני המסלולים להיפרד
+   * בשקט: רשומה שנחסמה במודאל בשלב אחד ורצה בשני היא בדיוק סוג הפער שאיש
+   * אינו מגלה עד שמשתמש מדווח עליו.
+   */
+  function runMatched(shortcut: Shortcut, event: KeyboardEvent): boolean {
     // כיווניות פסקה מזוהה בשחרור ה-Shift, ב-`direction.ts`. כאן היא הייתה
     // נורית ברגע שהמשתמש לוחץ Shift — כלומר גם באמצע `Ctrl+Shift+X`.
     if (shortcut.onKeyUp) return false;
@@ -144,22 +220,67 @@ export function createShortcutDispatcher(deps: ShortcutDispatcherDeps): Shortcut
     // הבליעה אחרי ההרצה, ובכוונה: `Ctrl+S` שאינו מריץ שמירה (כי שמירה כבר
     // רצה) עדיין נחשב מטופל, וחייב למנוע מה-WebView לפתוח את דיאלוג „שמירת
     // דף” שלו.
-    if (handled) event.preventDefault();
+    if (handled) swallow(event);
     return handled;
+  }
+
+  /**
+   * שלב ה-capture: הרשומות שהמנוע היה בולע, ואחריהן הרשימה האישית.
+   *
+   * הסדר הוא „מובנה זוכה”, בדיוק כמו ב-bubble: די בכך שהצירוף **הותאם**
+   * לרשומה ברג'יסטרי כדי שהרשימה האישית לא תיבחן. רשומה מובנית שאינה שייכת
+   * לשלב הזה (`runsBeforeEngine` שלילי) אינה רצה כאן ואינה מפנה את המקום
+   * לרשימה האישית — היא תרוץ ב-bubble, וה-`return false` הוא מה ששומר על
+   * שתי ההבטחות יחד.
+   */
+  function handleCapture(event: KeyboardEvent): boolean {
+    // מאזין capture מוקדם משלנו שכבר טיפל. אותה הכרעה של `handle`.
+    if (event.defaultPrevented) return false;
+
+    const shortcut = matchAny(event, shortcuts);
+    if (shortcut) return runsBeforeEngine(shortcut) ? runMatched(shortcut, event) : false;
+
+    return handleCustom(event);
+  }
+
+  function handle(event: KeyboardEvent): boolean {
+    // מישהו כבר טיפל. המאזין שלנו יושב על `window` בשלב ה-bubble, כלומר
+    // **אחרי** ה-keymap של מנוע העריכה שיושב על אזור המסמך; בלי הבדיקה הזאת
+    // צירוף שהמנוע קושר בעצמו (Ctrl+B, למשל) היה מופעל פעמיים — הדגשה
+    // וביטולה — והמשתמש היה רואה „הקיצור לא עובד” בלי שום שגיאה.
+    if (event.defaultPrevented) return false;
+
+    const shortcut = matchAny(event, shortcuts);
+    // הרשימה האישית אינה נבחנת כאן: היא רצה ב-capture, ובשלב הזה הצירוף שלה
+    // כבר נבלע. ראו „שני שלבים” בראש הקובץ.
+    if (!shortcut) return false;
+
+    // רשומה של שלב ה-capture כבר קיבלה את ההזדמנות שלה. הרצה נוספת כאן
+    // הייתה מריצה אותה פעמיים במסלול שבו `stopPropagation` אינו עוצר
+    // (בדיקה שקוראת לשתי הפונקציות), ובמסלול האמיתי היא ממילא לא מגיעה.
+    if (runsBeforeEngine(shortcut)) return false;
+
+    return runMatched(shortcut, event);
   }
 
   const target = deps.target ?? (typeof window === 'undefined' ? undefined : window);
   const listener = (event: Event) => {
     handle(event as KeyboardEvent);
   };
+  const captureListener = (event: Event) => {
+    handleCapture(event as KeyboardEvent);
+  };
+  target?.addEventListener('keydown', captureListener, true);
   target?.addEventListener('keydown', listener);
 
   let disposed = false;
   return {
     handle,
+    handleCapture,
     dispose() {
       if (disposed) return;
       disposed = true;
+      target?.removeEventListener('keydown', captureListener, true);
       target?.removeEventListener('keydown', listener);
     },
   };

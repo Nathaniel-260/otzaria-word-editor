@@ -262,24 +262,45 @@ function isResolvedRefHit(value: unknown): value is ResolvedRefHit {
  *
  * `detection` מועבר כשאילתה למסך „איתור מקורות” של אוצריא — זה היעד שנכתב
  * כשלא היה מזהה חד-משמעי, והפתירה שם היא של אוצריא עצמה.
+ *
+ * ## „לא קרה כלום ולא הופיעה שגיאה”
+ *
+ * `reader.openBook` **אינו זורק** כשהספר אינו נמצא: הוא מחזיר `false`. וכך
+ * הוא עונה גם כשה-`id` עמום — המאחז מחפש לפי `id`+`type`, ושתי התאמות (ספר
+ * אישי וספר רשמי שקיבלו את אותו מספר סידורי) מחזירות `null` אצלו. שתי
+ * הצורות האלה נראו כהצלחה שקטה, ולכן לחיצה על קישור לא עשתה דבר **ולא
+ * אמרה דבר**. `false` הוא כשל כאן, עם הודעה שאומרת מה קרה.
+ *
+ * `bookUid` נשלח כשהוא קיים בקישור: הוא המזהה היציב, והמאחז פותר לפיו
+ * ישירות — לפני כל ניחוש לפי `id`. ראו at-mention.ts:buildRefHref.
  */
 export async function openOtzariaLink(target: OtzariaLinkTarget): Promise<ReaderResult> {
+  const failedAction = 'פתיחת הקישור נכשלה';
+  if (target.kind === 'detection') {
+    return callAck('reader.openSearchTab', failedAction, { query: target.query });
+  }
+
+  let data: unknown;
   try {
-    if (target.kind === 'detection') {
-      await call('reader.openSearchTab', { query: target.query });
-      return { ok: true, value: undefined };
-    }
-    await call('reader.openBook', {
+    data = await call<unknown>('reader.openBook', {
+      ...(target.uid ? { bookUid: target.uid } : {}),
       id: target.id,
       index: target.index,
       type: target.kind === 'pdf' ? 'pdf' : 'text',
       navigateToPositionIfReused: true,
     });
-    return { ok: true, value: undefined };
   } catch (error) {
-    const method = target.kind === 'detection' ? 'reader.openSearchTab' : 'reader.openBook';
-    return hostFailure(method, 'פתיחת הקישור נכשלה', error);
+    return hostFailure('reader.openBook', failedAction, error);
   }
+
+  if (data === false) {
+    return {
+      ok: false,
+      reason: 'book-not-found',
+      message: `${failedAction}: הספר אינו נמצא בספרייה של אוצריא`,
+    };
+  }
+  return { ok: true, value: undefined };
 }
 
 /** הראשון מבין המועמדים שיש בו טקסט. `''` אינו „קיים” — הוא בחירה ריקה. */

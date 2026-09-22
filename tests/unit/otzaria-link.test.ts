@@ -80,9 +80,56 @@ describe('parseOtzariaLink', () => {
       id: 42,
       index: 3,
     });
+    // ההפניה שנפתרה ולא מה שהוקלד — ראו at-mention.ts:buildRefHref.
     expect(parseOtzariaLink(buildRefHref({ ...hit, id: null }, 'פסחים לד'))).toEqual({
       kind: 'detection',
-      query: 'פסחים לד',
+      query: 'פסחים דף לד',
+    });
+  });
+
+  it('קורא את המזהה היציב, וסוגר עליו מעגל מול buildRefHref', () => {
+    const hit: ResolvedRefHit = {
+      id: 42,
+      bookId: 'פסחים',
+      bookUid: 'id:42',
+      title: 'פסחים',
+      reference: 'פסחים דף לד',
+      index: 1234,
+      isPdf: false,
+      isSourceLine: true,
+      isUserBook: false,
+      bookPath: '',
+    };
+    expect(parseOtzariaLink(buildRefHref(hit, 'פסחים לד'))).toEqual({
+      kind: 'book',
+      id: 42,
+      index: 1234,
+      uid: 'id:42',
+    });
+  });
+
+  it('uid עם תווים שדורשים קידוד חוזר כפי שנכתב', () => {
+    expect(parseOtzariaLink('otzaria://open/book/5?index=0&uid=uid%3A5')).toEqual({
+      kind: 'book',
+      id: 5,
+      index: 0,
+      uid: 'uid:5',
+    });
+  });
+
+  it('קישור ישן בלי uid נשאר תקף — השדה אינו תנאי', () => {
+    expect(parseOtzariaLink('otzaria://open/book/42?index=7')).toEqual({
+      kind: 'book',
+      id: 42,
+      index: 7,
+    });
+  });
+
+  it('uid ריק אינו נספר', () => {
+    expect(parseOtzariaLink('otzaria://open/pdf/3?index=2&uid=%20%20')).toEqual({
+      kind: 'pdf',
+      id: 3,
+      index: 2,
     });
   });
 });

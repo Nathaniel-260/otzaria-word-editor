@@ -6,8 +6,8 @@
  */
 
 export type OtzariaLinkTarget =
-  | { kind: 'book'; id: number; index: number }
-  | { kind: 'pdf'; id: number; index: number }
+  | { kind: 'book'; id: number; index: number; uid?: string }
+  | { kind: 'pdf'; id: number; index: number; uid?: string }
   | { kind: 'detection'; query: string };
 
 /** `null` = לא קישור אוצריא, או צורה שאיננו מכירים. */
@@ -41,5 +41,9 @@ export function parseOtzariaLink(href: string): OtzariaLinkTarget | null {
   const fallback = kind === 'pdf' ? 1 : 0;
   const index = Number.isInteger(rawIndex) && rawIndex >= fallback ? rawIndex : fallback;
 
-  return { kind, id, index };
+  // `uid` הוא המזהה היציב של הספר (ראו at-mention.ts:buildRefHref). קישור
+  // ישן נכתב בלעדיו, ולכן הוא אופציונלי ולא תנאי לפענוח.
+  const uid = url.searchParams.get('uid')?.trim();
+
+  return uid ? { kind, id, index, uid } : { kind, id, index };
 }

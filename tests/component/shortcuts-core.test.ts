@@ -1146,12 +1146,32 @@ describe('קיצורים אישיים', () => {
     preset: { fontFamily: 'David', fontSizePt: 14 },
   };
 
+  /**
+   * בחירת טווח חיה במסמך — הזרימה שהפיצ'ר נועד לה: מסמנים טקסט, ומקישים.
+   *
+   * חייבת להיאמר במפורש, כי המנוע אינו מפריד בין „אין סמן במסמך” לבין „סמן
+   * מכווץ” — שניהם `empty: true` — ולכן המעטפת מסרבת להכריז „הוחל” כשאין
+   * בחירה **וגם** המיקוד מחוץ למסמך (ב-jsdom המיקוד על `body`). הכפיל
+   * הרגיל מחזיר `empty: true`, ובלעדי השורה הזאת הבדיקה הייתה נופלת על
+   * הסירוב במקום למדוד את החיווט.
+   */
+  function withRangeSelection(): void {
+    superdoc = createSuperdocDouble({ selection: { hasRange: true, text: 'abcd' } });
+    stub.session = {
+      superdoc: superdoc.host,
+      ui: { selection: { observe: () => () => {} } },
+      onDispose: () => {},
+      destroy: () => {},
+    };
+  }
+
   it('הצירוף מחיל את הערכה, ולחיצה נוספת מחזירה את מה שהיה', async () => {
     stub.storedCustomShortcuts = [RECORD];
     adapter = createCommandDouble({
       states: { 'font-family': { value: 'Arial' }, 'font-size': { value: 10 } },
     });
     stub.adapter = adapter;
+    withRangeSelection();
 
     await mountShell();
 
@@ -1186,6 +1206,7 @@ describe('קיצורים אישיים', () => {
       states: { 'font-family': { value: 'Arial' }, 'font-size': { value: 10 } },
     });
     stub.adapter = adapter;
+    withRangeSelection();
 
     await mountShell();
     press({ code: 'KeyK', ctrlKey: true, altKey: true });
@@ -1224,5 +1245,48 @@ describe('קיצורים אישיים', () => {
 
     expect(event.defaultPrevented).toBe(false);
     expect(adapter.calls).toEqual([]);
+  });
+
+  it('**אין סמן במסמך — נאמר מה חסר, ולא „הוחל”**', async () => {
+    /*
+     * הדיווח: שורת המצב הכריזה שהעיצוב הוחל, והמסמך לא השתנה. השורש הוא
+     * שהמנוע אינו מסרב — הוא מדווח `enabled: true`, מצליח, ומכניס את הערכה
+     * ל-stored marks שהמשתמש לא יגיע אליהם. המדידה על מנוע אמיתי (אין `w:sz`
+     * ואין `w:b` ב-OOXML) ב-scripts/qa/custom-shortcut-focus-qa.mjs.
+     *
+     * ב-jsdom המיקוד על `body` והמנוי אינו יורה, כלומר בדיוק המצב הזה.
+     */
+    stub.storedCustomShortcuts = [RECORD];
+
+    const wrapper = await mountShell();
+    const event = press({ code: 'KeyK', ctrlKey: true, altKey: true });
+    await settle();
+
+    expect(wrapper.find('.status-message').text()).toContain('יש למקם את הסמן במסמך');
+    expect(adapter.applied).toEqual([]);
+    // הצירוף עדיין שלנו: בליעתו מונעת מהמנוע להקליד את התו במקומה.
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it('סמן מכווץ במסמך כן מחיל — הערכה נכנסת להקלדה הבאה', async () => {
+    // הגבול השני של אותה הכרעה: בחירה ריקה **אינה** סיבה לסרב כשהמיקוד
+    // במסמך, אחרת „הקלדה בעיצוב הזה מכאן ואילך” הייתה מתה.
+    stub.storedCustomShortcuts = [RECORD];
+    adapter = createCommandDouble({
+      states: { 'font-family': { value: 'Arial' }, 'font-size': { value: 10 } },
+    });
+    stub.adapter = adapter;
+
+    const wrapper = await mountShell();
+    const surface = composingSurface(wrapper);
+    surface.focus();
+
+    typeInDocument(surface, { code: 'KeyK', ctrlKey: true, altKey: true });
+    await settle();
+
+    expect(adapter.applied).toEqual([
+      { id: 'font-family', payload: 'David' },
+      { id: 'font-size', payload: 14 },
+    ]);
   });
 });

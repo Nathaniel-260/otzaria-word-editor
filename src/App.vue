@@ -146,6 +146,14 @@
         :dictionary="spellcheckDictionary"
         :revision="spellcheckRevision"
       />
+      <PageMarkingOverlay
+        ref="pageMarkingOverlayRef"
+        :host="rulerHost"
+        :viewport-source="rulerViewport"
+        :enabled="pageMarkingEnabled"
+        :changed-pages="pageMarkingChanged"
+        :revision="spellcheckRevision"
+      />
     </div>
 
     <!--
@@ -338,6 +346,7 @@ import PageBorderOverlay from './ui/shell/PageBorderOverlay.vue';
 import LineNumberOverlay from './ui/shell/LineNumberOverlay.vue';
 import PilcrowOverlay from './ui/shell/PilcrowOverlay.vue';
 import SpellingOverlay from './ui/shell/SpellingOverlay.vue';
+import PageMarkingOverlay from './ui/shell/PageMarkingOverlay.vue';
 import FindReplaceDialog from './ui/panels/FindReplaceDialog.vue';
 import AboutDialog from './ui/panels/AboutDialog.vue';
 import LinkDialog from './ui/panels/LinkDialog.vue';
@@ -363,9 +372,11 @@ import {
   COMMAND_REPORTER,
   STATUS_NOTIFIER,
   DOCUMENT_GENERATION,
+  DRAFT_OPENER,
   FONT_MEMORY,
   HEAVY_ACTION_GUARD,
   FONT_OPTIONS,
+  PAGE_MARKING,
   READOUT_SELECTION,
   SPELLCHECK,
   STYLE_GALLERY,
@@ -381,6 +392,7 @@ import {
   insertCitation,
   normalizeSelectedText,
   openLibrary,
+  openOtzariaLink,
   openSearchTab,
   registerSendToDocumentItem,
   handleSendToDocument,
@@ -462,6 +474,7 @@ import MacrosDialog from './ui/panels/MacrosDialog.vue';
 import { installBookCompletion } from './engine/book-completion-overlay';
 import { installAtMention } from './engine/at-mention-overlay';
 import { installListAutoformat } from './engine/list-autoformat-install';
+import { installOtzariaLinkClicks } from './engine/otzaria-link-click';
 import { preflightSource } from './engine/docx-preflight';
 import { installDocumentFontAliases } from './engine/docx-fonts';
 import {
@@ -478,6 +491,7 @@ import {
   createRulerModel,
   paintedHost,
   readRulerUnit,
+  type PageEdgeWords,
   type RulerModel,
   type RulerReading,
   type ViewportSource,
@@ -1012,6 +1026,53 @@ function runCustomShortcut(id: string): boolean {
     return true;
   }
 
+  /*
+   * המיקוד במסמך = יש לאן להחיל, בלי לשאול את המנוע.
+   *
+   * גם בחירה ריקה היא יעד לגיטימי כאן: הערכה נכנסת ל-stored marks ומוחלת על
+   * ההקלדה הבאה, וזה הפיצ'ר עצמו (ראו „סמן מכווץ” ב-shortcut-manager-qa).
+   * המסלול הזה גם נשאר סינכרוני בכוונה — קריאת בחירה מה-Document API בזמן
+   * הקלדה רציפה אינה חוזרת עד שהמנוע נרגע, ואין שום סיבה לשלם אותה כשהסמן
+   * ממילא במסמך.
+   */
+  if (isDocumentSurface(document.activeElement)) {
+    applyCustomPreset(entry, adapter);
+    return true;
+  }
+
+  void applyCustomPresetOutsideDocument(entry, adapter);
+  return true;
+}
+
+/**
+ * החלה כשהמיקוד **מחוץ** למסמך — ורק אחרי שנמדד שיש בחירה להחיל עליה.
+ *
+ * זה הדיווח שהתיקון נכתב בשבילו: שורת המצב הכריזה „הוחל”, והמסמך לא השתנה.
+ * המנוע אינו מסרב במצב הזה — `bold` מדווח `enabled: true`, הריצה מצליחה,
+ * והערכה נכנסת ל-stored marks שהמשתמש לא יגיע אליהם, כי הוא אינו מקליד
+ * במסמך. נמדד: אין `w:sz` ואין `w:b` ב-`word/document.xml`.
+ *
+ * ומדוע `readDocSelection` ולא `readoutSelection` שכבר ביד: הקריאה החיה
+ * **מפגרת**. מיד אחרי בחירה במקלדת `ui.selection.get()` מדווח
+ * `{status:'stale', empty:true}` בעוד `doc.selection.current()` מחזיר את
+ * „abcd” — נמדד ב-scripts/qa/custom-shortcut-selection-probe.mjs. הישענות על
+ * המפגר הייתה מסרבת למי שסימן טקסט ולחץ על פקד ברצועה, וזה בדיוק המסלול
+ * ש-engine/doc-selection.ts נכתב בשבילו.
+ */
+async function applyCustomPresetOutsideDocument(
+  entry: CustomShortcut,
+  adapter: CommandAdapter,
+): Promise<void> {
+  const selection = await readDocSelection(activeSuperdoc.value);
+  if (selection.empty) {
+    setStatus('יש למקם את הסמן במסמך', true);
+    return;
+  }
+  applyCustomPreset(entry, adapter);
+}
+
+/** ההכרעה וההרצה עצמן. משותפות לשני המסלולים כדי שלא ייפרדו בשקט. */
+function applyCustomPreset(entry: CustomShortcut, adapter: CommandAdapter): void {
   const decision = presetToggles.decide({
     id: entry.id,
     name: entry.name,
@@ -1024,7 +1085,6 @@ function runCustomShortcut(id: string): boolean {
   // ולכן הוא דורס אותה — וזו הקדימות הנכונה.
   setStatus(decision.status);
   void applyPreset(adapter, decision.apply, reportCommand);
-  return true;
 }
 
 
@@ -1183,8 +1243,10 @@ const formattingMarksVisible = ref(false);
 const spellcheckDictionary = shallowRef<Dictionary | null>(null);
 const spellcheckBusy = ref(false);
 /**
- * מונה שעולה אחרי עריכה. השכבה מודדת מחדש עליו — עריכה בתוך פסקה אינה מזיזה
- * שום מלבן עמוד, ולכן מעקב הגיאומטריה לבדו אינו יורה עליה.
+ * מונה שעולה אחרי עריכה. **שתי** השכבות מודדות מחדש עליו — בדיקת האיות
+ * וסימון העמודים — מפני שעריכה בתוך פסקה אינה מזיזה שום מלבן עמוד, ולכן
+ * מעקב הגיאומטריה לבדו אינו יורה עליה. מי שמעלה אותו: `noteSpellcheckChanged`,
+ * והגארד שם מונה את שני הצרכנים.
  */
 const spellcheckRevision = ref(0);
 /** רק מה שנצרך מהשכבה — ראו `defineExpose` ב-SpellingOverlay.vue. */
@@ -1198,8 +1260,21 @@ const spellingOverlayRef = shallowRef<{ wordAt: (x: number, y: number) => string
 const SPELLCHECK_DEBOUNCE_MS = 400;
 let spellcheckTimer: ReturnType<typeof setTimeout> | undefined;
 
+/**
+ * „עריכה קרתה” — המונה שעליו **שתי** השכבות מודדות מחדש. הגארד הוא רשימת
+ * הצרכנים ולא בדיקת איות לבדה: הוא נכתב כשהמונה שירת רק את `SpellingOverlay`,
+ * ומאז `PageMarkingOverlay` נקשר לאותו `revision`. בדיקת האיות כבויה בברירת
+ * המחדל (‏`loadSpellcheckEnabled`), ולכן אצל מי שהדליק „סימון עמודים” בלבד
+ * המונה לא עלה מעולם — נמדד בדפדפן: Enter בפסקה הראשונה הזיז את המילה
+ * האחרונה מ-332px ל-351px, והמלבן נשאר ב-332px גם אחרי 2500ms. ‏`revision`
+ * הוא הטריגר היחיד לעריכה שאינה מזיזה מלבן עמוד — מעקב מלבני העמודים אינו
+ * יורה עליה.
+ *
+ * הגארד עצמו נשאר: כששתי התכונות כבויות אין צרכן, ואין טעם להריץ טיימר על
+ * כל הקשה.
+ */
 function noteSpellcheckChanged(): void {
-  if (!spellcheckDictionary.value) return;
+  if (!spellcheckDictionary.value && !pageMarkingEnabled.value) return;
   clearTimeout(spellcheckTimer);
   spellcheckTimer = setTimeout(() => {
     spellcheckRevision.value += 1;
@@ -1218,7 +1293,10 @@ async function toggleSpellcheck(): Promise<void> {
 
   if (spellcheckDictionary.value) {
     spellcheckDictionary.value = null;
-    clearTimeout(spellcheckTimer);
+    // הטיימר משותף עם „סימון עמודים”, ולכן הוא נעצר רק כשלא נשאר לו צרכן:
+    // כיבוי בדיקת האיות בתוך 400ms מהקשה היה מבטל מדידה שהסימון ממתין לה,
+    // והמלבנים היו נשארים על הטקסט הישן עד העריכה הבאה.
+    if (!pageMarkingEnabled.value) clearTimeout(spellcheckTimer);
     await saveSpellcheckEnabled(false);
     return;
   }
@@ -1237,6 +1315,46 @@ async function toggleSpellcheck(): Promise<void> {
     spellcheckBusy.value = false;
   }
 }
+
+/**
+ * „סימון עמודים” של שולחן העורך (ui/shell/PageMarkingOverlay.vue). כמו
+ * המילון, השכבה שייכת למעטפת ולא לטאב; הלשונית מדליקה אותה ומבקשת מדידה.
+ * `revision` של בדיקת האיות משמש גם כאן — אותה „עריכה קרתה” בדיוק.
+ *
+ * השכבה מורכבת תמיד, גם כבויה (‏`enabled: false` = אפס מדידה): „סמן” מדליק
+ * אותה ומודד דרכה מיד, ורכיב שנוצר באותו רגע עדיין לא היה מחזיק `rootRef`
+ * למדוד ביחס אליו.
+ */
+const pageMarkingEnabled = ref(false);
+const pageMarkingChanged = shallowRef<ReadonlySet<number>>(new Set());
+const pageMarkingOverlayRef = shallowRef<{ measure: () => readonly PageEdgeWords[] } | null>(null);
+provide(PAGE_MARKING, {
+  enabled: pageMarkingEnabled,
+  changedPages: pageMarkingChanged,
+  setEnabled: (enabled) => {
+    pageMarkingEnabled.value = enabled;
+    if (!enabled) pageMarkingChanged.value = new Set();
+  },
+  setChangedPages: (pages) => {
+    pageMarkingChanged.value = pages;
+  },
+  measure: () => pageMarkingOverlayRef.value?.measure() ?? [],
+});
+
+/**
+ * „פירוק מסמך” של שולחן העורך: מסמך ההערות נפתח בטאב חדש מ-Blob, במסלול
+ * של שחזור טיוטה — לא שמור, ו„שמור” בו פותח „שמור בשם”.
+ *
+ * הטאב נפתח תמיד ואינו עובר דרך `ensureOpenTargetTab`: הטאב הפעיל הוא
+ * **המסמך שמפרקים**, ואין מצב שבו נכון לדרוס אותו. השאלה היא `isOpenBusy()`
+ * ולא `isOpening` לבדו, כי מי שמחליף את הטאב הפעיל חייב לכסות גם את שלב
+ * ההכנה של `openPendingTab`.
+ */
+provide(DRAFT_OPENER, async (blob: Blob) => {
+  if (isOpenBusy()) return false;
+  activateTab(createNewDocumentSession());
+  return openDocument(undefined, { draft: blob });
+});
 
 provide(SPELLCHECK, {
   enabled: computed(() => spellcheckDictionary.value !== null),
@@ -1832,6 +1950,7 @@ function createOpenEditorForSession(session: DocumentSession): OpenEditor {
       source,
       signal,
       onError: (err) => console.error('[otzaria-word] שגיאת מנוע:', err),
+      onStatus: (message, isError) => setStatus(message, isError),
       onUpdate: () => {
         session.save.markDirty();
         session.metrics?.noteDocumentChanged();
@@ -2070,6 +2189,12 @@ function activateTab(session: DocumentSession): void {
   // ובטאב ב' הטקסט הוא ממילא „דוד 12” — הקריאה מתאימה לערכה, הלחיצה
   // נקראת כ„חזרה”, והיא מחילה על טאב ב' את „אריאל 10” של טאב א'.
   presetToggles.forgetAll();
+  // מאותו טעם בדיוק: „אילו עמודים זזו” הוא תוצאה של „בדוק עמודים” על המסמך
+  // **שיוצא**, והוא נשמר במעטפת ולא ב-session. בלי השכחה הזאת עמוד 3 שזז
+  // בטאב א' נצבע בצבע המשני על עמוד 3 של טאב ב', שאיש לא בדק אותו. הסימון
+  // עצמו (`enabled`) נשאר — הוא מודד את ה-DOM החי ולכן נכון לכל טאב; מי
+  // שרוצה את ההשוואה בטאב החדש לוחץ „בדוק עמודים”, והתצלום שמור לפי מסמך.
+  pageMarkingChanged.value = new Set();
   void trimLiveDocuments();
 
   // „מי היה פעיל” הוא חלק מהרשומה, והוא משתנה בדיוק כאן. בלי הכתיבה הזאת
@@ -4221,6 +4346,25 @@ watch([activeEditorContainer, activeSuperdoc, documentGeneration], () => {
 watch(listAutoformatEnabled, (value) => listAutoformat?.setEnabled(value));
 
 /**
+ * לחיצה על קישור `otzaria://` במסמך (engine/otzaria-link-click.ts).
+ *
+ * אותו container ואותו תנאי כמו שתי השכבות שמעליו. זה אינו כפל של
+ * `hyperlinks.onActivate` שב-create-editor.ts: נמדד שהמנוע אינו מצייר קישור
+ * בסכימה שהוא חוסם כ-`<a>` כלל, ולכן ה-handler שלו אינו נקרא — והגשר כאן
+ * מדלג בעצמו על כל `<a>` אמיתי, כך שגם אם הסכימה תעבור לא תהיה פתיחה כפולה.
+ */
+let linkClicks: ReturnType<typeof installOtzariaLinkClicks> | null = null;
+watch([activeEditorContainer, activeSuperdoc, documentGeneration], () => {
+  linkClicks?.dispose();
+  linkClicks = null;
+  if (!activeEditorContainer.value || !activeSuperdoc.value) return;
+  linkClicks = installOtzariaLinkClicks(activeEditorContainer.value, activeSuperdoc.value, {
+    navigate: (target) => openOtzariaLink(target),
+    onStatus: (message, isError) => setStatus(message, isError),
+  });
+});
+
+/**
  * עד איפה מגיעים הפסים בפועל — הגובל שמחזיק את החשיפה פתוחה.
  *
  * נמדד ולא קבוע: הגובה תלוי במה שמוצג — רצועה מכונסת, סרגל מידות כבוי, שורת
@@ -5286,6 +5430,8 @@ onUnmounted(() => {
   bookCompletion = null;
   atMention?.dispose();
   atMention = null;
+  linkClicks?.dispose();
+  linkClicks = null;
   zoomCenter?.dispose();
   zoomCenter = null;
   shortcuts?.dispose();

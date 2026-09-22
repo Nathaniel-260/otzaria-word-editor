@@ -30,7 +30,7 @@ function press(init: Partial<KeyboardEvent> & { code?: string; key?: string }): 
     target: { addEventListener: () => {}, removeEventListener: () => {} },
   });
 
-  dispatcher.handle({
+  const keyEvent = {
     key: '',
     code: '',
     ctrlKey: false,
@@ -39,11 +39,60 @@ function press(init: Partial<KeyboardEvent> & { code?: string; key?: string }): 
     altKey: false,
     target: null,
     preventDefault: vi.fn(),
+    // הבליעה עוצרת גם את המסע אל המנוע — ראו `swallow` ב-dispatch.ts.
+    stopPropagation: vi.fn(),
     ...init,
-  } as unknown as KeyboardEvent);
+  } as unknown as KeyboardEvent;
+
+  /*
+   * שני השלבים, בסדר שבו הדפדפן מעביר אותם: capture ואז bubble. רשומות
+   * `Alt` בלי `Ctrl` רצות בראשון (ראו `runsBeforeEngine`), וכל השאר בשני —
+   * ובדיקה שקוראת רק ל-`handle` הייתה מדווחת על 11 רשומות חיות כמתות.
+   */
+  if (!dispatcher.handleCapture(keyEvent)) dispatcher.handle(keyEvent);
 
   dispatcher.dispose();
   return ran;
+}
+
+/**
+ * באיזה שלב הרשומה רצה **בפועל**, על הרג'יסטרי האמיתי.
+ *
+ * שני אירועים ולא אחד: `press` מחקה את הדפדפן, ולכן ברגע שה-capture טיפל הוא
+ * אינו קורא ל-`handle` כלל — כלומר הוא אינו יכול להבחין בין „רצה ב-capture”
+ * לבין „רצה בשני השלבים”, וזו בדיוק ההרצה הכפולה שיש לשמור מפניה.
+ */
+function phasesOf(init: Partial<KeyboardEvent> & { code?: string; key?: string }): {
+  capture: boolean;
+  bubble: boolean;
+} {
+  const build = (): KeyboardEvent =>
+    ({
+      key: '',
+      code: '',
+      ctrlKey: false,
+      metaKey: false,
+      shiftKey: false,
+      altKey: false,
+      target: null,
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+      ...init,
+    }) as unknown as KeyboardEvent;
+
+  const make = (): ReturnType<typeof createShortcutDispatcher> =>
+    createShortcutDispatcher({
+      runCommand: () => {},
+      runAction: () => true,
+      target: { addEventListener: () => {}, removeEventListener: () => {} },
+    });
+
+  const capture = make();
+  const bubble = make();
+  const result = { capture: capture.handleCapture(build()), bubble: bubble.handle(build()) };
+  capture.dispose();
+  bubble.dispose();
+  return result;
 }
 
 describe('עיצוב תו', () => {
@@ -183,5 +232,65 @@ describe('הרשימה כולה', () => {
     }
 
     expect(dead).toEqual([]);
+  });
+
+  /**
+   * השלב שכל רשומה רצה בו — על הרג'יסטרי האמיתי ולא על רשימה מומצאת.
+   *
+   * הבדיקה הזאת נוספה בסבב QA, אחרי שנמדד שהיא הייתה חסרה: החזרת
+   * `runsBeforeEngine` ל-`false` — כלומר בדיוק הבאג שבגללו עשר הרשומות האלה
+   * לא עבדו כשהסמן במסמך — השאירה את **כל** קובץ הניתוב ירוק, ואת שער
+   * „לכל רשומה יש ניתוב בפועל” שמעל ירוק במיוחד: הוא מריץ את שני השלבים
+   * ברצף, ולכן רשומה שנדדה מ-capture ל-bubble עדיין „רצה”.
+   *
+   * ולכן המצפן כאן הוא **רשימת המזהים**, ולא הפונקציה: בדיקה שקוראת ל-
+   * `runsBeforeEngine` כדי לדעת מה לצפות הייתה מסכימה עם כל מוטציה שלה.
+   * הרשימה היא מה שנמדד בדפדפן (scripts/qa/custom-shortcut-focus-qa.mjs):
+   * המאזין של המנוע מטפל ב-`Alt` בלי `Ctrl` כהקלדת תו. עשר מהן נבלעו בפועל,
+   * ו-`macro-manage` (מקש פונקציה, בלי תו להקליד) מצטרפת לשלב מכוח צורת
+   * הצירוף — ראו `runsBeforeEngine`. רשומה חדשה שתיפול לכאן תצבע את הבדיקה
+   * באדום, וזה הרצוי: „האם גם את זאת המנוע בולע” היא שאלה שעונים עליה
+   * במדידה, פעם אחת.
+   */
+  it('רשומות ה-`Alt` רצות ב-capture, וכל השאר ב-bubble', () => {
+    const BEFORE_ENGINE = [
+      'tab-goto-1',
+      'tab-goto-2',
+      'tab-goto-3',
+      'tab-goto-4',
+      'tab-goto-5',
+      'tab-goto-6',
+      'tab-goto-7',
+      'tab-goto-8',
+      'tab-goto-last',
+      'tell-me',
+      'macro-manage',
+    ];
+
+    const inCapture: string[] = [];
+    const inBoth: string[] = [];
+
+    for (const shortcut of ENTRIES) {
+      if (shortcut.native) continue;
+      if (shortcut.onKeyUp) continue;
+      // קוד אחד די: השלב נקבע מהמודיפיירים, ורשומה עם כמה קודים (Enter
+      // ו-NumpadEnter) אינה יכולה להתפצל ביניהם.
+      const code = typeof shortcut.code === 'string' ? shortcut.code : (shortcut.code?.[0] ?? '');
+
+      const { capture, bubble } = phasesOf({
+        code,
+        key: shortcut.key ?? '',
+        ctrlKey: shortcut.ctrl === true,
+        shiftKey: shortcut.shift === true,
+        altKey: shortcut.alt === true,
+      });
+
+      if (capture && bubble) inBoth.push(shortcut.id);
+      if (capture) inCapture.push(shortcut.id);
+    }
+
+    expect([...inCapture].sort()).toEqual([...BEFORE_ENGINE].sort());
+    // הרצה בשני השלבים פירושה הדגשה שנדלקת ונכבית באותה הקשה.
+    expect(inBoth).toEqual([]);
   });
 });
