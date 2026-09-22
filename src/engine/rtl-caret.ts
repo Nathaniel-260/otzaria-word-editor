@@ -178,9 +178,11 @@
 import {
   CARET_SELECTOR,
   atDocumentEdge,
-  attr,
+  blockIdOf,
   blockStart,
+  blocksInside,
   caretSlots,
+  contiguousWith,
   emptyLineSlot,
   findFragment,
   isEmptyRange,
@@ -188,7 +190,6 @@ import {
   linesOf,
   neighbourOf,
   readLineChars,
-  sameFlow,
   type CaretSlot,
 } from './painted-lines';
 
@@ -397,29 +398,13 @@ export function findTarget(
      טבלה אינם שכנים של הסמן; העמוד הבא בגוף כן. */
   const sibling = neighbourOf(host, fragment, forward);
   if (!sibling) return atDocumentEdge(host, fragment, forward) ? STAY : null;
-  if (!sameFlow(fragment, sibling)) return null;
+  if (!contiguousWith(fragment, sibling, forward)) return null;
 
-  /* ורק פסקה שצמודה **במסמך**, ולא רק ברשימת הבורר. טבלה מצוירת כ-fragment
-     בלי `data-source-node-id` (נמדד: „לפני” pm 104..114, הטבלה 115..122,
-     „אחרי” 123..133), ולכן הבורר מדלג עליה והפסקה שמעבר לה נראית שכנה —
-     והחץ קפץ מעל הטבלה כולה. פער בטווחים פירושו שיש משהו ביניהן, והמנוע,
-     שנכנס לתא כראוי, הוא שמטפל בהקשה. המשך של אותה פסקה בעמוד הבא מתחיל
-     בדיוק היכן שהקודם נגמר, ובלי הפרש. */
-  const siblingId = sibling.getAttribute('data-source-node-id');
-  const sameBlock = siblingId !== null && siblingId === fragment.getAttribute('data-source-node-id');
-  /* פסקה ריקה תופסת מקום pm נוסף **אחריה**. נמדד: „לפני הריקה 4” 1..13,
-     הריקה 14..14, „אחרי הריקה 5” 16..28 — כלומר הפרש 1 אחרי פסקה עם תוכן,
-     והפרש 2 אחרי ריקה. בלי זה הריקה נראית כמו „יש משהו ביניהן”. */
-  const earlier = forward ? fragment : sibling;
-  const gap = sameBlock ? 0 : isEmptyRange(earlier) ? 2 : 1;
-  const contiguous = forward
-    ? attr(sibling, 'data-pm-start') === attr(fragment, 'data-pm-end') + gap
-    : attr(fragment, 'data-pm-start') === attr(sibling, 'data-pm-end') + gap;
-  if (!contiguous) return null;
+  const siblingId = blockIdOf(sibling);
 
   /* בלוק בלי מזהה — טבלה: היעד הוא הפסקה הראשונה בה, או האחרונה. */
   if (siblingId === null) {
-    const inner = Array.from(sibling.querySelectorAll('[data-source-node-id]')).filter((el) => linesOf(el).length > 0);
+    const inner = blocksInside(sibling);
     const cell = inner[forward ? 0 : inner.length - 1];
     if (!cell) return null;
     const cellLines = linesOf(cell);
@@ -499,7 +484,7 @@ export function installRtlVisualArrows({ host, superdoc }: RtlCaretOptions): Rtl
 
     // צמצום טיפוס: כל ארבעת המסלולים ב-`findTarget` מחזירים fragment שנבחר
     // **לפי** התכונה הזאת, ולכן היא קיימת; `getAttribute` עדיין מחזיר null.
-    const blockId = target.fragment.getAttribute('data-source-node-id');
+    const blockId = blockIdOf(target.fragment);
     if (!blockId) return;
 
     /* ‏`NaN` כשהחלק הראשון של הפסקה אינו מצויר — היעד הוא המשך של פסקה

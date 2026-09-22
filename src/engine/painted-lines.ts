@@ -479,3 +479,104 @@ export function lineAt(lines: readonly Element[], caretPm: number, caretY: numbe
   }
   return best;
 }
+
+/**
+ * האם שני בלוקים סמוכים הם באמת שכנים **במסמך**, ולא רק ברשימת הבורר.
+ *
+ * טבלה מצוירת כ-fragment בלי `data-source-node-id` (נמדד: „לפני” pm 104..114,
+ * הטבלה 115..122, „אחרי” 123..133), ולכן בורר ה-fragments מדלג עליה והפסקה
+ * שמעבר לה נראית שכנה — והחץ קפץ מעל הטבלה כולה. פער בטווחים פירושו שיש
+ * ביניהן משהו, והמנוע — שנכנס לתא כראוי — הוא שמטפל בהקשה. המשך של אותה פסקה
+ * בעמוד הבא מתחיל בדיוק היכן שהקודם נגמר, בלי הפרש.
+ *
+ * ופסקה ריקה תופסת מקום pm נוסף **אחריה**. נמדד: „לפני הריקה 4” 1..13, הריקה
+ * 14..14, „אחרי הריקה 5” 16..28 — כלומר הפרש 1 אחרי פסקה עם תוכן, והפרש 2
+ * אחרי ריקה. בלי זה הריקה נראית כמו „יש משהו ביניהן”.
+ *
+ * ‏`sameFlow` נבדק כאן ולא אצל הקורא: כותרת עליונה ותא טבלה אינם שכנים של
+ * הסמן בשום מדיניות.
+ */
+export function contiguousWith(fragment: Element, sibling: Element, forward: boolean): boolean {
+  if (!sameFlow(fragment, sibling)) return false;
+  const siblingId = sibling.getAttribute('data-source-node-id');
+  const sameBlock = siblingId !== null && siblingId === fragment.getAttribute('data-source-node-id');
+  const earlier = forward ? fragment : sibling;
+  const gap = sameBlock ? 0 : isEmptyRange(earlier) ? 2 : 1;
+  return forward
+    ? attr(sibling, 'data-pm-start') === attr(fragment, 'data-pm-end') + gap
+    : attr(fragment, 'data-pm-start') === attr(sibling, 'data-pm-end') + gap;
+}
+
+/**
+ * הקצוות שהטקסט של השורה **מצויר** בהם, או `null` כשאין בה טקסט.
+ *
+ * מלבן אלמנט השורה אינו זה: הוא נמתח על רוחב הפסקה גם כששלוש מילים בלבד
+ * צוירו בה, וזו בדיוק השאלה שנשאלת כאן — האם עמודת המטרה נופלת על טקסט או
+ * מעבר לו. לכן הקצוות נלקחים מנושאי ה-pm, ולא מהשורה.
+ *
+ * זול בכוונה: מספר קריאות `getBoundingClientRect` כמספר הריצות בשורה, ולא
+ * כמספר הגרפמות שבה. מי שצריך את התיבה של כל תו קורא ל-`readLineChars`, וזה
+ * מסלול יקר בהרבה — הבדיקה „האם צריך בכלל להתערב” נעשית קודם, וכאן.
+ *
+ * ‏**רק מה שנושא טווח pm**, בדיוק כמו ב-`readLineChars`. סמן המספור של פריט
+ * רשימה מצויר בשורה ומותאם לבורר (טאב-הסיומת שלו הוא
+ * `SPAN.superdoc-tab.superdoc-marker-suffix-tab`) אבל **אין לו טווח**, מפני
+ * שאין בו מקום סמן. ספירתו כאן הייתה מותחת את הקצה אל אזור המספור, ואז עמודה
+ * שנופלת שם הייתה נספרת כ„בתוך השורה” — כלומר מקום שאי אפשר להעמיד בו סמן
+ * היה נחשב יעד תקין.
+ */
+export function lineExtent(line: Element): { left: number; right: number } | null {
+  let left = Infinity;
+  let right = -Infinity;
+  for (const el of Array.from(line.querySelectorAll(PM_CARRIER_SELECTOR))) {
+    if (!Number.isFinite(attr(el, 'data-pm-start'))) continue;
+    const rect = el.getBoundingClientRect();
+    if (!rect.width) continue;
+    left = Math.min(left, rect.left);
+    right = Math.max(right, rect.right);
+  }
+  return right < left ? null : { left, right };
+}
+
+/**
+ * האם ההיסט הראשון של השורה הוא **תפר גלישה** — כלומר גם ההיסט האחרון של
+ * השורה שמעליה.
+ *
+ * זה חשוב מפני שלתפר כזה יש בעלים אחד בלבד. נמדד (22.9.2026, superdoc 2.15.0,
+ * ‏`scripts/qa/rtl-vertical-seam-probe.mjs`): פסקה שגלשה לשתי שורות, pm 1..94
+ * ו-94..153; כתיבת ההיסט שבתפר דרך `authoring.setSelectionTarget` ציירה את
+ * הסמן ב-y של השורה ה**ראשונה** ובקצה השמאלי שלה — כלומר בסופה, ולא בתחילת
+ * השנייה. אותו כלל שכבר נמדד למקש `End` ב-`rtl-line-end.ts`.
+ *
+ * המסקנה למי שכותב בחירה: „לך לתחילת שורת המשך” **אינו ניתן לביטוי**, ומי
+ * שמכוון לשם מקבל את סוף השורה שמעליה — כלומר הקשה שנראית כאילו לא עשתה דבר.
+ * המקום היחיד שבו זה עולה הוא שורה מוזחת או ממורכזת שקצה ההתחלה שלה נסוג
+ * פנימה; בפסקה רגילה עמודת המטרה אינה יכולה ליפול מעבר לקצה ההתחלה, שהוא אותו
+ * x בכל השורות.
+ */
+export function startIsSeam(fragment: Element, lines: readonly Element[], index: number): boolean {
+  if (index > 0) {
+    const previous = lines[index - 1];
+    return !!previous && attr(previous, 'data-pm-end') === attr(lines[index]!, 'data-pm-start');
+  }
+  return flag(fragment, CONTINUES_FROM_PREV);
+}
+
+/**
+ * מזהה הבלוק שה-fragment מצייר, או `null` כשאין לו אחד.
+ *
+ * ‏`null` אינו „חסר” אלא **טבלה**: היא מצוירת כ-fragment בלי מזהה מקור, והבלוק
+ * האמיתי הוא הפסקה שבתוך התא. מי שמקבל `null` צריך להחליט מה לעשות עם זה —
+ * `rtl-caret.ts` יורד לתא, `rtl-vertical-caret.ts` מוסר למנוע — וזה הבדל
+ * במדיניות, לא בקריאה.
+ */
+export function blockIdOf(fragment: Element): string | null {
+  return fragment.getAttribute('data-source-node-id');
+}
+
+/** הבלוקים המצוירים שבתוך fragment — הפסקאות שבתאי טבלה, לפי הסדר. */
+export function blocksInside(fragment: Element): Element[] {
+  return Array.from(fragment.querySelectorAll('[data-source-node-id]')).filter(
+    (el) => linesOf(el).length > 0,
+  );
+}

@@ -610,6 +610,7 @@ import {
 import { createTextCursorWatch } from './engine/text-cursor';
 import { installRtlLineEnd } from './engine/rtl-line-end';
 import { installRtlVisualArrows } from './engine/rtl-caret';
+import { installRtlVerticalArrows } from './engine/rtl-vertical-caret';
 import { installCaretVisibility, type CaretVisibilityUi } from './engine/caret-visibility';
 import {
   deleteWorkspaceEntry,
@@ -2679,6 +2680,24 @@ async function openDocumentInto(
     superdoc: editor.superdoc,
   });
   editor.onDispose(() => sessionVisualArrows.dispose());
+
+  /**
+   * חצים אנכיים בשורה עברית — ראו engine/rtl-vertical-caret.ts. מאזין שלישי
+   * ולא הרחבה של השניים שמעליו, מאותה סיבה: מקש אחר, מדידה אחרת, ותנאי נפילה
+   * חזרה למנוע אחרים. הוא גם המאזין היחיד מבין השלושה שמחזיק **מצב** —
+   * עמודת המטרה — ולכן הוא נפרק עם המסמך בדיוק כמוהם, ובלי ששום דבר בממשק
+   * קורא אותו.
+   *
+   * ‏**הסדר בין שלוש השורות האלה אינו משנה**, ובמכוון: השניים שמעליו בולעים
+   * מקשים ב-`stopImmediatePropagation`, ולכן מאזין שנרשם אחריהם לא היה רואה
+   * חץ אופקי או `End`. האיפוס של עמודת המטרה יושב לכן על ה-`document` ולא על
+   * ה-host, וההכרעה הזאת מתועדת ומגודרת בבדיקה — ראו `onAnyKeyDown` שם.
+   */
+  const sessionVerticalArrows = installRtlVerticalArrows({
+    host: paintedHost(editor.ui),
+    superdoc: editor.superdoc,
+  });
+  editor.onDispose(() => sessionVerticalArrows.dispose());
 
   /**
    * „מקלידים ולא רואים” בחלון צר — ראו engine/caret-visibility.ts. פר-session
