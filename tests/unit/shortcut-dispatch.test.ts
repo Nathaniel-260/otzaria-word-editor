@@ -106,6 +106,7 @@ function event(over: Record<string, unknown> = {}): KeyboardEvent {
     altKey: false,
     target: null,
     preventDefault: vi.fn(),
+    stopPropagation: vi.fn(),
     ...over,
   } as unknown as KeyboardEvent;
 }
@@ -183,10 +184,44 @@ describe('המנתב', () => {
   it('פעולת מעטפת מקבלת את ה-payload של הרשומה', () => {
     // בלי זה שמונה רשומות `Alt+1`…`Alt+8` היו מריצות את אותה פעולה בלי שום
     // דרך לדעת לאיזה טאב לעבור — כלומר כולן היו עוברות לאותו אחד.
+    //
+    // `handleCapture` ולא `handle`: `Alt+3` הוא `Alt` בלי `Ctrl`, כלומר צירוף
+    // שהמנוע בולע — ראו `runsBeforeEngine`.
+    const { dispatcher, runAction } = setup();
+    const keyEvent = event({ code: 'Digit3', altKey: true });
+
+    expect(dispatcher.handleCapture(keyEvent)).toBe(true);
+    expect(runAction).toHaveBeenCalledWith('tab-goto', 3);
+    // ההקשה אינה ממשיכה למנוע, אחרת הספרה נכתבת במסמך במקום מעבר לשונית.
+    expect(keyEvent.stopPropagation).toHaveBeenCalled();
+  });
+
+  it('רשומת `Alt` אינה רצה פעמיים — ב-bubble היא כבר לא שלה', () => {
     const { dispatcher, runAction } = setup();
 
-    expect(dispatcher.handle(event({ code: 'Digit3', altKey: true }))).toBe(true);
-    expect(runAction).toHaveBeenCalledWith('tab-goto', 3);
+    expect(dispatcher.handle(event({ code: 'Digit3', altKey: true }))).toBe(false);
+    expect(runAction).not.toHaveBeenCalled();
+  });
+
+  it('`Ctrl+Alt` נשאר ב-bubble — המנוע אינו נוגע בו', () => {
+    // הכלל אינו „יש Alt” אלא „Alt בלי Ctrl”, וזה מה שנמדד: `Ctrl+Alt+M` עבר
+    // דרך המנוע בלי שנגע בו.
+    const CTRL_ALT: Shortcut = {
+      id: 'footnote',
+      label: 'Ctrl+Alt+F',
+      description: 'הערת שוליים',
+      group: 'insert',
+      code: 'KeyF',
+      ctrl: true,
+      alt: true,
+      action: 'save',
+    };
+    const { dispatcher, runAction } = setup({ shortcuts: [CTRL_ALT] });
+
+    expect(dispatcher.handleCapture(event({ code: 'KeyF', ctrlKey: true, altKey: true }))).toBe(false);
+    expect(runAction).not.toHaveBeenCalled();
+    expect(dispatcher.handle(event({ code: 'KeyF', ctrlKey: true, altKey: true }))).toBe(true);
+    expect(runAction).toHaveBeenCalledWith('save', undefined);
   });
 
   it('צירוף לא מוכר אינו נבלע', () => {
@@ -256,8 +291,9 @@ describe('המנתב', () => {
   });
 
   it('נרשם ליעד ומנותק ב-dispose', () => {
+    // שניים: הרשומות המובנות ב-bubble, והרשימה האישית ב-capture.
     const { dispatcher, target, runCommand } = setup();
-    expect(target.count()).toBe(1);
+    expect(target.count()).toBe(2);
 
     target.fire(event({ code: 'KeyB', ctrlKey: true }));
     expect(runCommand).toHaveBeenCalledTimes(1);
@@ -347,19 +383,50 @@ describe('קיצורים אישיים', () => {
     const { dispatcher, runCustom } = withCustom();
     const keydown = event({ code: 'KeyK', ctrlKey: true, altKey: true });
 
-    expect(dispatcher.handle(keydown)).toBe(true);
+    expect(dispatcher.handleCapture(keydown)).toBe(true);
     expect(runCustom).toHaveBeenCalledWith('cs-1');
     expect(keydown.preventDefault).toHaveBeenCalled();
   });
 
+  it('**ההקשה אינה מגיעה למנוע** — לא רק ברירת המחדל נבלעת', () => {
+    /*
+     * המנוע מחזיק מאזין capture על `.v2-super-editor__stage` שמטפל
+     * ב-`Alt+<מקש>` כהקלדת תו, והוא **אינו** בודק `defaultPrevented` לפני
+     * שהוא מקליד. `preventDefault` לבדו השאיר את התו במסמך — נמדד
+     * ב-scripts/qa/custom-shortcut-owner-probe.mjs. `stopPropagation` הוא מה
+     * שמונע מההקשה להגיע אליו בכלל.
+     */
+    const { dispatcher } = withCustom({}, true, [
+      { ...CUSTOM, id: 'cs-alt', label: 'Alt+X', code: 'KeyX', ctrl: false, alt: true },
+    ]);
+    const keydown = event({ code: 'KeyX', altKey: true });
+
+    expect(dispatcher.handleCapture(keydown)).toBe(true);
+    expect(keydown.stopPropagation).toHaveBeenCalled();
+  });
+
+  it('הרשימה האישית אינה נבחנת ב-bubble', () => {
+    // המסלול היחיד שלה הוא capture. בדיקה שקוראת ל-`handle` ומצפה להרצה
+    // הייתה מאשרת מסלול שאינו קיים יותר.
+    const { dispatcher, runCustom } = withCustom();
+
+    expect(dispatcher.handle(event({ code: 'KeyK', ctrlKey: true, altKey: true }))).toBe(false);
+    expect(runCustom).not.toHaveBeenCalled();
+  });
+
   it('**קיצור מובנה זוכה** — רשומה אישית על אותו צירוף אינה נבחנת', () => {
     // זו ההבטחה של כל המערכת: היא נוספת ואינה דורסת. `Ctrl+B` מריץ את
-    // פקודת המנוע, ולא את מה שהמשתמש הצמיד לו בטעות.
+    // פקודת המנוע, ולא את מה שהמשתמש הצמיד לו בטעות — וגם כאן, שהמסלול
+    // האישי הוא זה שרץ ראשון.
     const { dispatcher, runCommand, runCustom } = withCustom();
+    const keydown = event({ code: 'KeyB', ctrlKey: true });
 
-    expect(dispatcher.handle(event({ code: 'KeyB', ctrlKey: true }))).toBe(true);
-    expect(runCommand).toHaveBeenCalledWith('bold', undefined);
+    expect(dispatcher.handleCapture(keydown)).toBe(false);
     expect(runCustom).not.toHaveBeenCalled();
+    expect(keydown.stopPropagation).not.toHaveBeenCalled();
+
+    expect(dispatcher.handle(keydown)).toBe(true);
+    expect(runCommand).toHaveBeenCalledWith('bold', undefined);
   });
 
   it('צירוף שהדפדפן מטפל בו אינו נגזל בידי קיצור אישי', () => {
@@ -369,15 +436,18 @@ describe('קיצורים אישיים', () => {
     const { dispatcher, runCustom } = withCustom({}, true, [
       { ...CUSTOM, id: 'cs-3', code: 'KeyV', ctrl: true, alt: false },
     ]);
+    const keydown = event({ code: 'KeyV', ctrlKey: true });
 
-    expect(dispatcher.handle(event({ code: 'KeyV', ctrlKey: true }))).toBe(false);
+    expect(dispatcher.handleCapture(keydown)).toBe(false);
     expect(runCustom).not.toHaveBeenCalled();
+    // ולא נגזלת גם מהדפדפן: `stopPropagation` היה מונע את ההדבקה עצמה.
+    expect(keydown.stopPropagation).not.toHaveBeenCalled();
   });
 
   it('דיאלוג מודאלי פתוח חוסם — לקיצור אישי אין „מותר במודאל”', () => {
     const { dispatcher, runCustom } = withCustom({ isModalOpen: () => true });
 
-    expect(dispatcher.handle(event({ code: 'KeyK', ctrlKey: true, altKey: true }))).toBe(false);
+    expect(dispatcher.handleCapture(event({ code: 'KeyK', ctrlKey: true, altKey: true }))).toBe(false);
     expect(runCustom).not.toHaveBeenCalled();
   });
 
@@ -387,7 +457,9 @@ describe('קיצורים אישיים', () => {
 
     const blocked = withCustom();
     expect(
-      blocked.dispatcher.handle(event({ code: 'KeyK', ctrlKey: true, altKey: true, target: field })),
+      blocked.dispatcher.handleCapture(
+        event({ code: 'KeyK', ctrlKey: true, altKey: true, target: field }),
+      ),
     ).toBe(false);
     expect(blocked.runCustom).not.toHaveBeenCalled();
 
@@ -395,7 +467,9 @@ describe('קיצורים אישיים', () => {
     // חייב לעבוד, אחרת הוא מת בדיוק כשמקלידים.
     const allowed = withCustom({ isDocumentSurface: (node) => node === surface });
     expect(
-      allowed.dispatcher.handle(event({ code: 'KeyK', ctrlKey: true, altKey: true, target: surface })),
+      allowed.dispatcher.handleCapture(
+        event({ code: 'KeyK', ctrlKey: true, altKey: true, target: surface }),
+      ),
     ).toBe(true);
   });
 
@@ -403,20 +477,24 @@ describe('קיצורים אישיים', () => {
     const { dispatcher, runCustom } = withCustom({}, false);
     const keydown = event({ code: 'KeyK', ctrlKey: true, altKey: true });
 
-    expect(dispatcher.handle(keydown)).toBe(false);
+    expect(dispatcher.handleCapture(keydown)).toBe(false);
     expect(runCustom).toHaveBeenCalledWith('cs-1');
     expect(keydown.preventDefault).not.toHaveBeenCalled();
+    expect(keydown.stopPropagation).not.toHaveBeenCalled();
   });
 
   it('בלי רשימה אישית המנתב מתנהג כמו קודם', () => {
     const { dispatcher } = setup();
+    expect(dispatcher.handleCapture(event({ code: 'KeyK', ctrlKey: true, altKey: true }))).toBe(false);
     expect(dispatcher.handle(event({ code: 'KeyK', ctrlKey: true, altKey: true }))).toBe(false);
   });
 
   it('אירוע שכבר טופל אינו מגיע לרשימה האישית', () => {
     const { dispatcher, runCustom } = withCustom();
     expect(
-      dispatcher.handle(event({ code: 'KeyK', ctrlKey: true, altKey: true, defaultPrevented: true })),
+      dispatcher.handleCapture(
+        event({ code: 'KeyK', ctrlKey: true, altKey: true, defaultPrevented: true }),
+      ),
     ).toBe(false);
     expect(runCustom).not.toHaveBeenCalled();
   });

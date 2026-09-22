@@ -1024,6 +1024,53 @@ function runCustomShortcut(id: string): boolean {
     return true;
   }
 
+  /*
+   * המיקוד במסמך = יש לאן להחיל, בלי לשאול את המנוע.
+   *
+   * גם בחירה ריקה היא יעד לגיטימי כאן: הערכה נכנסת ל-stored marks ומוחלת על
+   * ההקלדה הבאה, וזה הפיצ'ר עצמו (ראו „סמן מכווץ” ב-shortcut-manager-qa).
+   * המסלול הזה גם נשאר סינכרוני בכוונה — קריאת בחירה מה-Document API בזמן
+   * הקלדה רציפה אינה חוזרת עד שהמנוע נרגע, ואין שום סיבה לשלם אותה כשהסמן
+   * ממילא במסמך.
+   */
+  if (isDocumentSurface(document.activeElement)) {
+    applyCustomPreset(entry, adapter);
+    return true;
+  }
+
+  void applyCustomPresetOutsideDocument(entry, adapter);
+  return true;
+}
+
+/**
+ * החלה כשהמיקוד **מחוץ** למסמך — ורק אחרי שנמדד שיש בחירה להחיל עליה.
+ *
+ * זה הדיווח שהתיקון נכתב בשבילו: שורת המצב הכריזה „הוחל”, והמסמך לא השתנה.
+ * המנוע אינו מסרב במצב הזה — `bold` מדווח `enabled: true`, הריצה מצליחה,
+ * והערכה נכנסת ל-stored marks שהמשתמש לא יגיע אליהם, כי הוא אינו מקליד
+ * במסמך. נמדד: אין `w:sz` ואין `w:b` ב-`word/document.xml`.
+ *
+ * ומדוע `readDocSelection` ולא `readoutSelection` שכבר ביד: הקריאה החיה
+ * **מפגרת**. מיד אחרי בחירה במקלדת `ui.selection.get()` מדווח
+ * `{status:'stale', empty:true}` בעוד `doc.selection.current()` מחזיר את
+ * „abcd” — נמדד ב-scripts/qa/custom-shortcut-selection-probe.mjs. הישענות על
+ * המפגר הייתה מסרבת למי שסימן טקסט ולחץ על פקד ברצועה, וזה בדיוק המסלול
+ * ש-engine/doc-selection.ts נכתב בשבילו.
+ */
+async function applyCustomPresetOutsideDocument(
+  entry: CustomShortcut,
+  adapter: CommandAdapter,
+): Promise<void> {
+  const selection = await readDocSelection(activeSuperdoc.value);
+  if (selection.empty) {
+    setStatus('יש למקם את הסמן במסמך', true);
+    return;
+  }
+  applyCustomPreset(entry, adapter);
+}
+
+/** ההכרעה וההרצה עצמן. משותפות לשני המסלולים כדי שלא ייפרדו בשקט. */
+function applyCustomPreset(entry: CustomShortcut, adapter: CommandAdapter): void {
   const decision = presetToggles.decide({
     id: entry.id,
     name: entry.name,
@@ -1036,7 +1083,6 @@ function runCustomShortcut(id: string): boolean {
   // ולכן הוא דורס אותה — וזו הקדימות הנכונה.
   setStatus(decision.status);
   void applyPreset(adapter, decision.apply, reportCommand);
-  return true;
 }
 
 

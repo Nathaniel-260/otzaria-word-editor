@@ -30,7 +30,7 @@ function press(init: Partial<KeyboardEvent> & { code?: string; key?: string }): 
     target: { addEventListener: () => {}, removeEventListener: () => {} },
   });
 
-  dispatcher.handle({
+  const keyEvent = {
     key: '',
     code: '',
     ctrlKey: false,
@@ -39,8 +39,17 @@ function press(init: Partial<KeyboardEvent> & { code?: string; key?: string }): 
     altKey: false,
     target: null,
     preventDefault: vi.fn(),
+    // הבליעה עוצרת גם את המסע אל המנוע — ראו `swallow` ב-dispatch.ts.
+    stopPropagation: vi.fn(),
     ...init,
-  } as unknown as KeyboardEvent);
+  } as unknown as KeyboardEvent;
+
+  /*
+   * שני השלבים, בסדר שבו הדפדפן מעביר אותם: capture ואז bubble. רשומות
+   * `Alt` בלי `Ctrl` רצות בראשון (ראו `runsBeforeEngine`), וכל השאר בשני —
+   * ובדיקה שקוראת רק ל-`handle` הייתה מדווחת על 11 רשומות חיות כמתות.
+   */
+  if (!dispatcher.handleCapture(keyEvent)) dispatcher.handle(keyEvent);
 
   dispatcher.dispose();
   return ran;
