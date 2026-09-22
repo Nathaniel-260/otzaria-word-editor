@@ -260,7 +260,7 @@ describe('installAtMention', () => {
    * הבאג: מחיקת קישור משאירה צומת ריק, והוא חוסם כתיבה חדשה באותו מקום
    * ב-`hyperlink-nested-unsupported` — על קישור שכבר לא רואים.
    */
-  it('מנקה צומתי קישור ריקים לפני שהוא כותב — גם בפסקה אחרת', async () => {
+  it('מנקה לפני הכתיבה רק את הבלוק החוסם, ואת שאר המסמך בזמן שקט', async () => {
     const { host, calls, order } = fakeDoc('@פסחים לד', {
       blanks: [
         { start: 0, end: 0 },
@@ -274,19 +274,30 @@ describe('installAtMention', () => {
     container.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     await vi.advanceTimersByTimeAsync(0);
 
-    const removed = (calls.get('hyperlinks.remove') ?? []) as Array<{
-      target: { anchor: { start: { blockId: string; offset: number } } };
-    }>;
-    // הריק שחוסם כאן, והריק שאחרת היה מגיע לקובץ כקישור בלתי-נראה.
-    expect(removed.map((r) => r.target.anchor.start)).toEqual([
+    const removedStarts = (): Array<{ blockId: string; offset: number }> =>
+      (
+        (calls.get('hyperlinks.remove') ?? []) as Array<{
+          target: { anchor: { start: { blockId: string; offset: number } } };
+        }>
+      ).map((r) => r.target.anchor.start);
+    // לפני הכתיבה אין להמתין על קישור ריק בפסקה אחרת: רק הריק שחוסם כאן
+    // נדרש כדי ש-wrap תוכל להצליח.
+    expect(removedStarts()).toEqual([
       { blockId: BLOCK, offset: 0 },
-      { blockId: 'b2', offset: 4 },
     ]);
 
     // והניקוי קודם ל**מחיקה**, לא רק לכתיבה: מרגע המחיקה הטקסט של המשתמש
     // אינו במסמך, וקריאת מנוע שאינה חוזרת בחלון הזה מאבדת אותו.
     expect(order.indexOf('hyperlinks.remove')).toBeLessThan(order.indexOf('insert'));
     expect(calls.get('hyperlinks.wrap')).toHaveLength(1);
+
+    // הניקוי הרחב נשמר, אך אינו נועל את מחוות הבחירה: אחרי השהיה אחת הוא
+    // מסיר גם את השארית הרחוקה, ובמספר אזכורים רצופים זו נשארת סריקה אחת.
+    await vi.advanceTimersByTimeAsync(750);
+    expect(removedStarts()).toEqual([
+      { blockId: BLOCK, offset: 0 },
+      { blockId: 'b2', offset: 4 },
+    ]);
     handle.dispose();
   });
 

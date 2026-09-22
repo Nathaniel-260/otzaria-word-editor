@@ -99,6 +99,17 @@ describe('removeBlankHyperlinks', () => {
     expect(remove).toHaveBeenCalledTimes(1);
   });
 
+  it('במסלול כתיבה ממוקד מסיר רק את הבלוק המבוקש', async () => {
+    const { doc, remove } = fakeDoc([
+      { text: '', address: address('b1', 0, 0) },
+      { text: '', address: address('b2', 0, 0) },
+    ]);
+
+    expect(await removeBlankHyperlinks(doc, { blockId: 'b1' })).toBe(1);
+    expect(remove).toHaveBeenCalledTimes(1);
+    expect(remove).toHaveBeenCalledWith({ target: address('b1', 0, 0) });
+  });
+
   it('שני צמתים ריקים באותו היסט בבלוקים שונים אינם מתבלבלים', async () => {
     const { doc, remove } = fakeDoc([
       { text: '', address: address('b1', 0, 0) },

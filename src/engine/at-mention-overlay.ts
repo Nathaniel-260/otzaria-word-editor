@@ -132,6 +132,12 @@ const AT_SIGN = '@';
 /** כמה הצעות להציג. מעבר לזה הרשימה מכסה את הטקסט שמעליה. */
 const MAX_SUGGESTIONS = 8;
 
+/**
+ * ניקוי שאריות במסמך כולו אינו חלק מהפעולה שהמשתמש מחכה לה. הוא נשמר,
+ * אך נדחה לזמן שקט כדי שקישור ישן במסמך אחר לא ינעל את ההקלדה כאן.
+ */
+const BLANK_HYPERLINK_CLEANUP_DELAY_MS = 750;
+
 const POPUP_CLASS = 'otzaria-at-mention';
 const POPUP_MAX_HEIGHT_PX = 260;
 const POPUP_WIDTH_PX = 320;
@@ -274,6 +280,7 @@ export function installAtMention(
    */
   let writing = false;
   let debounceTimer: ReturnType<typeof setTimeout> | undefined;
+  let blankCleanupTimer: ReturnType<typeof setTimeout> | undefined;
   let popupEl: HTMLDivElement | null = null;
   /** אחרון שדווח, כדי לא להציף את שורת הסטטוס באותה הודעה. */
   let lastReported: string | null = null;
@@ -470,6 +477,21 @@ export function installAtMention(
     debounceTimer = setTimeout(() => void evaluate(), INPUT_DEBOUNCE_MS);
   }
 
+  /**
+   * הניקוי הרחב הוא תחזוקה של המסמך, לא תנאי לכתיבת האזכור הנוכחי. הצומת
+   * החוסם באותו בלוק כבר הוסר לפני המחיקה; כאן מנקים שאריות אחרות רק אחרי
+   * שהמשתמש חדל להקליד לרגע. טיימר יחיד מאחד כמה אזכורים רצופים לסריקה אחת.
+   */
+  function scheduleBlankHyperlinkCleanup(): void {
+    clearTimeout(blankCleanupTimer);
+    blankCleanupTimer = setTimeout(() => {
+      blankCleanupTimer = undefined;
+      void removeBlankHyperlinks(doc).catch((error) => {
+        console.warn('[otzaria-word] אזכור: ניקוי קישורים ריקים נכשל', error);
+      });
+    }, BLANK_HYPERLINK_CLEANUP_DELAY_MS);
+  }
+
   function move(delta: number): void {
     if (session.kind !== 'suggesting') return;
     const count = session.hits.length;
@@ -519,16 +541,17 @@ export function installAtMention(
 
     /**
      * צומת קישור ריק ששרד מחיקה קודמת יושב במקום שעומדים לכתוב אליו וחוסם
-     * את העטיפה — זה „מחקתי קישור ואני מתייג מחדש באותה שורה”. הסריקה היא
-     * על המסמך כולו ובקריאת מנוע אחת, כדי שלא יישארו גם קישורים בלתי-נראים
-     * בקובץ שיוצא. ראו hyperlink-blanks.ts.
+     * את העטיפה — זה „מחקתי קישור ואני מתייג מחדש באותה שורה”. כאן סורקים
+     * רק את הבלוק הזה: זה כל מה שנדרש לכתיבה, ומסמך בעל שאריות רבות במקום
+     * אחר אינו צריך לנעול את ההקלדה. ניקוי שאר המסמך נשמר, אבל נדחה לזמן
+     * שקט אחרי הצלחת הכתיבה. ראו hyperlink-blanks.ts.
      *
      * **לפני המחיקה, ובמכוון.** מכאן והלאה האזכור של המשתמש כבר לא במסמך,
      * וכל קריאת מנוע בחלון הזה היא קריאה שאם לא תחזור — הטקסט שלו אבד בלי
      * שנכתב דבר במקומו. הסריקה אינה תלויה במחיקה (צומת ריק אינו נוצר ממנה,
      * והסרתו אינה מזיזה היסטים), ולכן אין סיבה להחזיק אותה שם.
      */
-    await removeBlankHyperlinks(doc);
+    await removeBlankHyperlinks(doc, { blockId: address.blockId });
 
     const deleted = await doc.insert({
       value: '',
@@ -594,6 +617,7 @@ export function installAtMention(
         return receipt;
       }
       placeCaretAfter(at.blockId, end, story);
+      scheduleBlankHyperlinkCleanup();
       return receipt;
     } catch (error) {
       await restore(start, end);
@@ -779,6 +803,7 @@ export function installAtMention(
     dispose() {
       disposed = true;
       if (debounceTimer !== undefined) clearTimeout(debounceTimer);
+      clearTimeout(blankCleanupTimer);
       closeSession();
       container.removeEventListener('input', onInput);
       container.removeEventListener('keyup', onKeyUp);

@@ -59,6 +59,17 @@ export interface HyperlinkBlanksDoc {
 }
 
 /**
+ * צמצום הניקוי לבלוק שבו עומדים לכתוב.
+ *
+ * מסלול כתיבת אזכור זקוק רק לצומת הריק שנמצא באותו בלוק; ניקוי המסמך המלא
+ * נעשה אחר כך, כשהעורך פנוי. כך מסמך עם הרבה שאריות ישנות אינו נועל את
+ * ההקלדה רק מפני שנבחרה הצעת „@”.
+ */
+export interface BlankHyperlinkScope {
+  blockId?: string;
+}
+
+/**
  * הקישורים שבתשובת `list`, **ממקור אחד**.
  *
  * `list` מחזיר את אותם קישורים פעמיים: `stories[].hyperlinks[]` היא הצורה
@@ -111,6 +122,12 @@ function isBlank(link: RawHyperlink): boolean {
   );
 }
 
+function isInScope(link: RawHyperlink, scope: BlankHyperlinkScope | undefined): boolean {
+  if (!scope?.blockId) return true;
+  const anchor = link.address?.anchor;
+  return anchor?.start?.blockId === scope.blockId && anchor?.end?.blockId === scope.blockId;
+}
+
 /**
  * מסירה כל צומת קישור שאין בו טקסט. מחזירה כמה הוסרו.
  *
@@ -126,6 +143,7 @@ function isBlank(link: RawHyperlink): boolean {
  */
 export async function removeBlankHyperlinks(
   doc: HyperlinkBlanksDoc | null | undefined,
+  scope?: BlankHyperlinkScope,
 ): Promise<number> {
   const list = doc?.hyperlinks?.list;
   const remove = doc?.hyperlinks?.remove;
@@ -145,7 +163,7 @@ export async function removeBlankHyperlinks(
   let removed = 0;
 
   for (const link of allHyperlinks(raw)) {
-    if (!isBlank(link)) continue;
+    if (!isBlank(link) || !isInScope(link, scope)) continue;
 
     try {
       const receipt = await remove({ target: link.address });
