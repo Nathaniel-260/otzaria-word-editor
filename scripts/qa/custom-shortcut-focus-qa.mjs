@@ -217,11 +217,11 @@ await withApp(9666, 'csf3', async (app) => {
 /* ================================================================== */
 await withApp(9666, 'csf4', async (app) => {
   /*
-   * אותו מאזין של המנוע בלע גם 11 רשומות **מובנות** — `Alt+1`…`Alt+9`
-   * (מעבר בין מסמכים פתוחים), `Alt+Q` ו-`Alt+F8`. הן לא רצו מעולם כשהסמן
-   * במסמך, ובמקומן נכתבה הספרה. את המעבר עצמו אי אפשר למדוד כאן (מסמך אחד
-   * פתוח, ו„המסמך האחרון” הוא זה), אבל את מה שנכתב במסמך — כן, וזו בדיוק
-   * הרגרסיה: הקשה שאמורה לנווט ובמקום זה מקלידה.
+   * אותו מאזין של המנוע בלע גם 10 רשומות **מובנות** — `Alt+1`…`Alt+9`
+   * (מעבר בין מסמכים פתוחים) ו-`Alt+Q`. הן לא רצו מעולם כשהסמן במסמך,
+   * ובמקומן נכתבה הספרה. את המעבר עצמו אי אפשר למדוד כאן (מסמך אחד פתוח,
+   * ו„המסמך האחרון” הוא זה), אבל את מה שנכתב במסמך — כן, וזו בדיוק הרגרסיה:
+   * הקשה שאמורה לנווט ובמקום זה מקלידה.
    */
   await selectWord(app);
   const before = await screen(app);
@@ -239,6 +239,37 @@ await withApp(9666, 'csf4', async (app) => {
   }
 
   /*
+   * `Alt+F8` **לפני** `Alt+Q`, ובכוונה: „ספר לי” גוזל את המיקוד לשדה טקסט
+   * של הממשק, ו-`macro-manage` אינה `inTextEntry` — כלומר אחרי `Alt+Q` היא
+   * מסרבת בדין, והשורה הייתה מודדת את סדר הלחיצות ולא את הקיצור.
+   *
+   * והיא נמדדת בכלל מפני שהיא הרשומה היחידה בשלב הזה שהמנוע **לא** בלע
+   * (מקש פונקציה אינו מפיק תו — ראו `runsBeforeEngine`), ולכן היא היחידה
+   * שהתיקון הזיז בלי שהיה לה באג משלה. מעבר בין שלבים בלי עדות הוא בדיוק מה
+   * שנשבר בשקט.
+   */
+  await app.press('F8', 'F8', 119, ALT);
+  await sleep(900);
+  const macros = await app.js(
+    "(function(){return JSON.stringify(!!document.querySelector('.macros-dialog'));})()",
+  ).then(JSON.parse);
+  const textAfterF8 = await screen(app);
+
+  if (macros && textAfterF8 === before) {
+    report.pass('Alt+F8 מובנה — ניהול מאקרו נפתח', `הטקסט נשאר „${textAfterF8}”`);
+  } else {
+    report.fail(
+      'Alt+F8 מובנה — ניהול מאקרו נפתח',
+      `הדיאלוג ${macros ? 'נפתח' : 'לא נפתח'}, הטקסט „${textAfterF8}”`,
+    );
+  }
+
+  await app.js("(function(){var b=document.querySelector('.macros-dialog .md-close-btn');return b?(b.click(),1):0;})()");
+  await sleep(400);
+  await app.caret(0);
+  await sleep(300);
+
+  /*
    * הצד החיובי של אותה רשומה: `Alt+Q` הוא „ספר לי”, ופתיחת התיבה היא משהו
    * שאפשר לראות. שער `tell-me-qa` מודד את התיבה עצמה, אבל הוא פותח אותה
    * בלחיצה — כלומר הקיצור שלה מעולם לא נמדד.
@@ -251,12 +282,18 @@ await withApp(9666, 'csf4', async (app) => {
   ).then(JSON.parse);
   const textAfterQ = await screen(app);
 
-  if (tellMe.found && textAfterQ === before) {
+  /*
+   * `focused` ולא `found` לבדו: תיבת „ספר לי” היא חלק מהרצועה והיא **תמיד**
+   * ב-DOM (נמדד — היא רושמת את מאזין ה-`keydown` הראשון בדף, לפני שהמנוע
+   * עולה). שורה שנשענת על קיומה בלבד הייתה ירוקה גם על קיצור שאינו עושה
+   * דבר; מה שהקיצור מבטיח הוא המיקוד.
+   */
+  if (tellMe.focused && textAfterQ === before) {
     report.pass('Alt+Q מובנה — „ספר לי” נפתח', `ממוקד=${tellMe.focused}, הטקסט נשאר „${textAfterQ}”`);
   } else {
     report.fail(
       'Alt+Q מובנה — „ספר לי” נפתח',
-      `תיבת החיפוש ${tellMe.found ? 'נפתחה' : 'לא נפתחה'}, הטקסט „${textAfterQ}”`,
+      `התיבה ${tellMe.found ? 'קיימת' : 'חסרה'}, ממוקדת=${tellMe.focused}, הטקסט „${textAfterQ}”`,
     );
   }
 });
