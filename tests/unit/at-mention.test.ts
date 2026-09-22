@@ -141,18 +141,24 @@ describe('סף שני התווים על טקסט שהוקלד', () => {
 });
 
 describe('buildRefHref', () => {
-  it('בונה קישור עומק לספר טקסט', () => {
-    expect(buildRefHref(hit(), 'פסחים לד')).toBe('otzaria://open/book/42?index=1234');
+  it('בונה קישור עומק לספר טקסט, עם המזהה היציב', () => {
+    expect(buildRefHref(hit(), 'פסחים לד')).toBe('otzaria://open/book/42?index=1234&uid=id%3A42');
+  });
+
+  it('בלי bookUid הקישור נשאר כפי שהיה — הוא אופציונלי', () => {
+    expect(buildRefHref(hit({ bookUid: undefined }), 'פסחים לד')).toBe(
+      'otzaria://open/book/42?index=1234',
+    );
   });
 
   it('בונה קישור PDF עם מספר עמוד', () => {
     expect(buildRefHref(hit({ isPdf: true, index: 17 }), 'x')).toBe(
-      'otzaria://open/pdf/42?index=17',
+      'otzaria://open/pdf/42?index=17&uid=id%3A42',
     );
   });
 
   it('עמוד PDF לעולם אינו קטן מ-1 — הראוטר דוחה 0', () => {
-    expect(buildRefHref(hit({ isPdf: true, index: 0 }), 'x')).toBe(
+    expect(buildRefHref(hit({ isPdf: true, index: 0, bookUid: undefined }), 'x')).toBe(
       'otzaria://open/pdf/42?index=1',
     );
   });
@@ -160,8 +166,29 @@ describe('buildRefHref', () => {
   it('ספר אישי נופל לאיתור מקורות ולא לקישור עומק', () => {
     // user_books.db מקצה מזהים באותו טווח כמו ספריית הבסיס: קישור לפי id
     // היה נפתר לספר אחר לגמרי.
-    expect(buildRefHref(hit({ isUserBook: true }), 'הערות שלי')).toBe(
-      'otzaria://open/detection?q=%D7%94%D7%A2%D7%A8%D7%95%D7%AA%20%D7%A9%D7%9C%D7%99',
+    const href = buildRefHref(hit({ isUserBook: true, reference: 'הערות שלי' }), 'הערות שלי');
+    expect(href).toBe('otzaria://open/detection?q=%D7%94%D7%A2%D7%A8%D7%95%D7%AA%20%D7%A9%D7%9C%D7%99');
+  });
+
+  /**
+   * זה הבאג שדווח: המשתמש הקליד „בסוגי”, בחר מהרשימה „בסוגיא דדיורים בריבית”,
+   * והקישור נשמר עם `q=בסוגי` — כלומר „איתור מקורות” חיפש קידומת חתוכה ולא
+   * מצא דבר, בזמן שהטקסט הנראה בקישור היה מלא ותקין.
+   */
+  it('הכתובת נבנית מההתאמה שנבחרה, לא מהקידומת שהוקלדה', () => {
+    const href = buildRefHref(
+      hit({ id: null, isUserBook: true, reference: 'בסוגיא דדיורים בריבית' }),
+      'בסוגי',
+    );
+    const q = decodeURIComponent(new URL(href).searchParams.get('q') ?? '');
+    expect(q).toBe('בסוגיא דדיורים בריבית');
+  });
+
+  it('הכתובת והטקסט הנראה נבנים מאותו מקור ואינם יכולים לסטות', () => {
+    const match = hit({ id: null, reference: 'תלמוד ירושלמי עירובין פרק ו' });
+    const href = buildRefHref(match, 'ירוש עיר');
+    expect(decodeURIComponent(new URL(href).searchParams.get('q') ?? '')).toBe(
+      buildLinkText(match, 'ירוש עיר'),
     );
   });
 
@@ -170,14 +197,33 @@ describe('buildRefHref', () => {
     expect(buildRefHref(hit({ id: undefined }), 'ספר סרוק ג')).toContain('open/detection?q=');
   });
 
-  it('הפניה מקודדת ב-UTF-8, כפי שהראוטר מצפה', () => {
-    const href = buildRefHref(hit({ id: null }), '  בראשית א  ');
+  it('רווחים מיותרים ב-bookUid אינם נכתבים לקישור', () => {
+    expect(buildRefHref(hit({ bookUid: '  id:42  ' }), 'x')).toBe(
+      'otzaria://open/book/42?index=1234&uid=id%3A42',
+    );
+    expect(buildRefHref(hit({ bookUid: '   ' }), 'x')).toBe('otzaria://open/book/42?index=1234');
+  });
+
+  it('כשאין להתאמה שם — מה שהוקלד, מנורמל', () => {
+    const href = buildRefHref(hit({ id: null, reference: '  ', title: '' }), '  בראשית א  ');
     expect(href).toBe('otzaria://open/detection?q=%D7%91%D7%A8%D7%90%D7%A9%D7%99%D7%AA%20%D7%90');
     expect(decodeURIComponent(new URL(href).searchParams.get('q') ?? '')).toBe('בראשית א');
   });
 });
 
 describe('buildLinkText', () => {
+  /**
+   * `doc.insert` עם `type: 'text'` מכניס טקסט לפסקה, ושבר שורה בתוכו אינו
+   * נכנס כפי שהוא; וטווח העטיפה מחושב כ-`start + text.length`, ולכן תו
+   * שנספר אחרת ממה שנכתב היה מזיז את קצה הקישור.
+   */
+  it('מנרמל רווחים לשורה אחת', () => {
+    const withBreak = 'בראשית\nפרק  א';
+    expect(buildLinkText(hit({ reference: withBreak }), 'x')).toBe('בראשית פרק א');
+    const withTab = '  פסחים\tלד  ';
+    expect(buildLinkText(hit({ reference: '', title: withTab }), 'x')).toBe('פסחים לד');
+  });
+
   it('מעדיף את ההפניה שנפתרה על מה שהוקלד', () => {
     expect(buildLinkText(hit(), 'פסחים לד')).toBe('פסחים דף לד');
   });

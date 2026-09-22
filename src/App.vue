@@ -392,6 +392,7 @@ import {
   insertCitation,
   normalizeSelectedText,
   openLibrary,
+  openOtzariaLink,
   openSearchTab,
   registerSendToDocumentItem,
   handleSendToDocument,
@@ -473,6 +474,7 @@ import MacrosDialog from './ui/panels/MacrosDialog.vue';
 import { installBookCompletion } from './engine/book-completion-overlay';
 import { installAtMention } from './engine/at-mention-overlay';
 import { installListAutoformat } from './engine/list-autoformat-install';
+import { installOtzariaLinkClicks } from './engine/otzaria-link-click';
 import { preflightSource } from './engine/docx-preflight';
 import { installDocumentFontAliases } from './engine/docx-fonts';
 import {
@@ -1930,6 +1932,7 @@ function createOpenEditorForSession(session: DocumentSession): OpenEditor {
       source,
       signal,
       onError: (err) => console.error('[otzaria-word] שגיאת מנוע:', err),
+      onStatus: (message, isError) => setStatus(message, isError),
       onUpdate: () => {
         session.save.markDirty();
         session.metrics?.noteDocumentChanged();
@@ -4319,6 +4322,25 @@ watch([activeEditorContainer, activeSuperdoc, documentGeneration], () => {
 watch(listAutoformatEnabled, (value) => listAutoformat?.setEnabled(value));
 
 /**
+ * לחיצה על קישור `otzaria://` במסמך (engine/otzaria-link-click.ts).
+ *
+ * אותו container ואותו תנאי כמו שתי השכבות שמעליו. זה אינו כפל של
+ * `hyperlinks.onActivate` שב-create-editor.ts: נמדד שהמנוע אינו מצייר קישור
+ * בסכימה שהוא חוסם כ-`<a>` כלל, ולכן ה-handler שלו אינו נקרא — והגשר כאן
+ * מדלג בעצמו על כל `<a>` אמיתי, כך שגם אם הסכימה תעבור לא תהיה פתיחה כפולה.
+ */
+let linkClicks: ReturnType<typeof installOtzariaLinkClicks> | null = null;
+watch([activeEditorContainer, activeSuperdoc, documentGeneration], () => {
+  linkClicks?.dispose();
+  linkClicks = null;
+  if (!activeEditorContainer.value || !activeSuperdoc.value) return;
+  linkClicks = installOtzariaLinkClicks(activeEditorContainer.value, activeSuperdoc.value, {
+    navigate: (target) => openOtzariaLink(target),
+    onStatus: (message, isError) => setStatus(message, isError),
+  });
+});
+
+/**
  * עד איפה מגיעים הפסים בפועל — הגובל שמחזיק את החשיפה פתוחה.
  *
  * נמדד ולא קבוע: הגובה תלוי במה שמוצג — רצועה מכונסת, סרגל מידות כבוי, שורת
@@ -5384,6 +5406,8 @@ onUnmounted(() => {
   bookCompletion = null;
   atMention?.dispose();
   atMention = null;
+  linkClicks?.dispose();
+  linkClicks = null;
   zoomCenter?.dispose();
   zoomCenter = null;
   shortcuts?.dispose();

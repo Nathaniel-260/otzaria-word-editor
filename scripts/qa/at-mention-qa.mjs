@@ -6,9 +6,16 @@
  * ב-document.xml, ו-Relationship עם ה-Target ב-document.xml.rels. אחד בלי
  * השני נראה כמו הצלחה ואינו קישור.
  *
- * השער גם מודד את מה שלא ידענו בכתיבה: האם `hyperlinks.insert` האטומית קיימת
- * ועובדת, או שהמסלול שרץ בפועל הוא `insert` + `wrap` (ראו הערת המודול
- * ב-engine/at-mention-overlay.ts).
+ * השער מודד גם את ארבעת הדברים שהמנוע לא נותן בקבלה, וכל אחד מהם היה באג
+ * מדווח (‎#66, ‎#69, ‎#73):
+ *
+ *   - **שני קישורים בפסקה אחת.** `hyperlinks.insert` דוחה את השני; המסלול
+ *     שרץ הוא `doc.insert` ואז `hyperlinks.wrap` (הערת המודול ב-
+ *     engine/at-mention-overlay.ts).
+ *   - **הסמן אחרי הקישור**, אחרת ההקלדה הבאה נדחפת לפניו.
+ *   - **תיוג מחדש אחרי מחיקה**, ושלא נשאר `<w:hyperlink>` בלי `<w:t>`.
+ *   - **הלחיצה פותחת**: המנוע אינו מצייר `otzaria://` כקישור, ולכן נמדד
+ *     שהגשר (engine/otzaria-link-click.ts) הוא שמתרגם אותה לקריאה למאחז.
  *
  * הרצה:  node scripts/qa/at-mention-qa.mjs
  * היציאה 9610 שמורה לשער הזה בלבד.
@@ -49,6 +56,25 @@ const HITS = [
     bookPath: 'ש"ס, בבלי',
   },
 ];
+
+/** ספר אישי: אין לו id חד-משמעי, ולכן הקישור אליו הוא „איתור מקורות”. */
+const USER_HIT = {
+  id: null,
+  bookId: 'בסוגיא דדיורים בריבית',
+  type: 'text',
+  title: 'בסוגיא דדיורים בריבית',
+  reference: 'בסוגיא דדיורים בריבית',
+  index: 0,
+  isPdf: false,
+  isSourceLine: false,
+  isUserBook: true,
+  bookPath: 'ספרים אישיים',
+};
+
+/** הטקסט הנראה של המסמך, בלי התגיות. */
+function flat(doc) {
+  return doc.replace(/<[^>]+>/g, '');
+}
 
 async function step(name, fn) {
   log(`\n──────── ${name} ────────`);
@@ -131,6 +157,14 @@ async function typeMention(app, text) {
 const app = await openApp({ name: 'at-mention', port: PORT });
 
 try {
+  // המאחז עונה בהצלחה על מתודות הניווט — כך „הלחיצה פתחה” נמדד ולא מונח.
+  await app.js(`window.__qaHost.replies['reader.openBook'] = function () {
+    return Promise.resolve({ success: true, data: true, error: null });
+  };
+  window.__qaHost.replies['reader.openSearchTab'] = function () {
+    return Promise.resolve({ success: true, data: true, error: null });
+  };`);
+
   await app.js(`window.__qaHost.replies['library.resolveRef'] = function (payload) {
     window.__qaResolveCalls = (window.__qaResolveCalls || []).concat([payload]);
     return Promise.resolve({ success: true, data: ${JSON.stringify(HITS)}, error: null });
@@ -203,7 +237,7 @@ try {
     }
     // ה-Target עובר escaping של XML; & הוא &amp; בקובץ.
     const target = rel[1].replace(/&amp;/g, '&');
-    if (target !== 'otzaria://open/book/42?index=1234') {
+    if (target !== 'otzaria://open/book/42?index=1234&uid=id%3A42') {
       report.fail('יעד הקישור', `Target=${target}`);
     } else {
       report.pass('יעד הקישור');
@@ -226,6 +260,191 @@ try {
       report.fail('הטקסט שלפני נשמר', `„ראה” נעלם: ${text.slice(0, 200)}`);
     } else {
       report.pass('הטקסט שלפני נשמר');
+    }
+  });
+
+  await step('הסמן נשאר אחרי הקישור, וההמשך אינו נדחף לפניו', async () => {
+    // הבאג: `hyperlinks.insert` השאירה את הסמן לפני הקישור, ולכן „ראה @פסחים
+    // לד” ואז „ וכן” יצא „ראה  וכןפסחים דף לד”. הטקסט הנכתב כאן הוא המדידה.
+    await app.type(' סוף');
+    await app.sleep(700);
+
+    const text = flat((await snap(app)).doc);
+    if (!text.includes('פסחים דף לד סוף')) {
+      report.fail('הסמן אחרי הקישור', `ההמשך לא נחת אחרי הקישור: ${text.slice(0, 160)}`);
+    } else {
+      report.pass('הסמן אחרי הקישור');
+    }
+  });
+
+  await step('קישור שני באותה פסקה — בדיוק מה ש-insert לא ידעה', async () => {
+    await typeMention(app, ' וכן @פסחים לד');
+    if (!(await popup(app)).open) return report.fail('רשימה לקישור השני', 'הרשימה לא נפתחה');
+
+    await app.press('ArrowDown', 'ArrowDown', 40, 0);
+    await app.sleep(200);
+    await app.press('Enter', 'Enter', 13, 0);
+    await app.sleep(1100);
+
+    const status = await app.status();
+    if (status?.error) {
+      return report.fail('קישור שני בפסקה', `שורת המצב: ${status.text}`);
+    }
+
+    const { doc, rels } = await snap(app);
+    // שני הקישורים חייבים לשבת **באותה פסקה** — זה מה שנכשל.
+    const paragraph = (doc.match(/<w:p\b[\s\S]*?<\/w:p>/g) ?? []).find(
+      (p) => (p.match(/<w:hyperlink\b/g) ?? []).length >= 2,
+    );
+    if (!paragraph) {
+      return report.fail('קישור שני בפסקה', 'אין פסקה עם שני קישורים');
+    }
+    report.pass('קישור שני בפסקה');
+
+    const ids = [...paragraph.matchAll(/<w:hyperlink[^>]*r:id="([^"]+)"/g)].map((m) => m[1]);
+    const targets = ids.map((id) => {
+      const rel = new RegExp(`Id="${id}"[^>]*Target="([^"]+)"`).exec(rels);
+      return (rel?.[1] ?? '').replace(/&amp;/g, '&');
+    });
+    if (!targets.some((t) => t.includes('/book/42?')) || !targets.some((t) => t.includes('/book/43?'))) {
+      report.fail('שני יעדים נפרדים', `היעדים: ${targets.join(' | ')}`);
+    } else {
+      report.pass('שני יעדים נפרדים');
+    }
+
+    // המזהה היציב נכתב לקישור — בלעדיו המאחז אינו יודע לפתור id עמום.
+    if (!targets.every((t) => t.includes('uid='))) {
+      report.fail('המזהה היציב בקישור', `היעדים: ${targets.join(' | ')}`);
+    } else {
+      report.pass('המזהה היציב בקישור');
+    }
+  });
+
+  await step('תיוג מחדש אחרי מחיקת קישור באותה שורה', async () => {
+    await clearDoc(app);
+    await typeMention(app, '@פסחים לד');
+    await app.press('Enter', 'Enter', 13, 0);
+    await app.sleep(1000);
+
+    const created = countLinks((await snap(app)).doc);
+    if (created === 0) return report.fail('הקישור הראשון נוצר', 'לא נכתב קישור לפני המחיקה');
+
+    // מחיקת הטקסט בלבד — בדיוק מה שהמשתמש עושה. הצומת נשאר ריק במסמך.
+    for (let i = 0; i < 'פסחים דף לד'.length; i += 1) {
+      await app.press('Backspace', 'Backspace', 8, 0);
+      await app.sleep(40);
+    }
+    await app.sleep(700);
+
+    await typeMention(app, '@פסחים לד');
+    if (!(await popup(app)).open) return report.fail('רשימה אחרי מחיקה', 'הרשימה לא נפתחה');
+    await app.press('Enter', 'Enter', 13, 0);
+    await app.sleep(1100);
+
+    const status = await app.status();
+    if (status?.error) {
+      return report.fail('תיוג מחדש', `שורת המצב: ${status.text}`);
+    }
+    report.pass('תיוג מחדש');
+
+    const { doc } = await snap(app);
+    const text = flat(doc);
+    if (!text.includes('פסחים דף לד')) {
+      report.fail('הקישור החדש נכתב', `הטקסט: ${text.slice(0, 160)}`);
+    } else {
+      report.pass('הקישור החדש נכתב');
+    }
+
+    // ‏`<w:hyperlink>` שאין בתוכו `<w:t>` הוא קישור בלתי-נראה בקובץ שיוצא.
+    const blank = (doc.match(/<w:hyperlink\b[^>]*>(?:(?!<w:t)[\s\S])*?<\/w:hyperlink>/g) ?? []).length;
+    if (blank > 0) {
+      report.fail('אין קישור ריק', `נשארו ${blank} צומתי קישור בלי טקסט`);
+    } else {
+      report.pass('אין קישור ריק');
+    }
+  });
+
+  await step('ספר אישי: q= הוא ההפניה שנבחרה, לא מה שהוקלד', async () => {
+    await clearDoc(app);
+    await app.js(`window.__qaHost.replies['library.resolveRef'] = function () {
+      return Promise.resolve({ success: true, data: ${JSON.stringify([USER_HIT])}, error: null });
+    };`);
+
+    // הקלדת קידומת בלבד — בדיוק התרחיש שדווח: הרשימה מציגה את השם המלא.
+    await typeMention(app, '@בסוגי');
+    if (!(await popup(app)).open) return report.fail('רשימה לספר אישי', 'הרשימה לא נפתחה');
+    await app.press('Enter', 'Enter', 13, 0);
+    await app.sleep(1100);
+
+    const { doc, rels } = await snap(app);
+    const ids = [...doc.matchAll(/<w:hyperlink[^>]*r:id="([^"]+)"/g)].map((m) => m[1]);
+    const last = ids[ids.length - 1];
+    const rel = last ? new RegExp(`Id="${last}"[^>]*Target="([^"]+)"`).exec(rels) : null;
+    const target = (rel?.[1] ?? '').replace(/&amp;/g, '&');
+    const q = target.includes('?q=') ? decodeURIComponent(target.split('?q=')[1] ?? '') : '';
+
+    if (q !== USER_HIT.reference) {
+      report.fail('q= מלא', `q=${JSON.stringify(q)} במקום ${JSON.stringify(USER_HIT.reference)}`);
+    } else {
+      report.pass('q= מלא');
+    }
+
+    // והטקסט הנראה חייב להסכים איתו — שניהם נבנים מאותו מקור.
+    if (!flat(doc).includes(USER_HIT.reference)) {
+      report.fail('הטקסט הנראה', `לא נמצא „${USER_HIT.reference}” במסמך`);
+    } else {
+      report.pass('הטקסט הנראה');
+    }
+
+    await app.js(`window.__qaHost.replies['library.resolveRef'] = function (payload) {
+      window.__qaResolveCalls = (window.__qaResolveCalls || []).concat([payload]);
+      return Promise.resolve({ success: true, data: ${JSON.stringify(HITS)}, error: null });
+    };`);
+  });
+
+  await step('לחיצה על הקישור פותחת אותו באוצריא', async () => {
+    await clearDoc(app);
+    await typeMention(app, '@פסחים לד');
+    await app.press('Enter', 'Enter', 13, 0);
+    await app.sleep(1100);
+
+    // המנוע מצייר קישור בסכימה חסומה כ-span ולא כ-<a>; זה מה שמאשר שהמדידה
+    // נעשית על המקרה האמיתי ולא על אנקור שהמנוע כבר מפעיל בעצמו.
+    const run = JSON.parse(
+      await app.js(`(function () {
+        var el = document.querySelector('[data-link-rid]');
+        if (!el) return JSON.stringify({ found: false });
+        var r = el.getBoundingClientRect();
+        return JSON.stringify({
+          found: true, tag: el.tagName, blocked: el.getAttribute('data-link-blocked'),
+          x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width,
+        });
+      })()`),
+    );
+    if (!run.found || run.w === 0) return report.fail('הקישור מצויר', 'לא נמצאה ריצה עם data-link-rid');
+    report.pass('הקישור מצויר');
+
+    await app.js('window.__qaHost.calls.length = 0');
+    await app.clickAt(run.x, run.y);
+    await app.sleep(800);
+
+    const calls = JSON.parse(await app.js('JSON.stringify(window.__qaHost.calls)'));
+    const opened = calls.find((c) => c.method === 'reader.openBook');
+    if (!opened) {
+      return report.fail('הלחיצה פותחת', `לא נקראה reader.openBook. נקראו: ${calls.map((c) => c.method).join(', ') || 'כלום'}`);
+    }
+    report.pass('הלחיצה פותחת');
+
+    if (opened.payload?.id !== 42 || opened.payload?.index !== 1234) {
+      report.fail('היעד שנשלח', `payload=${JSON.stringify(opened.payload)}`);
+    } else {
+      report.pass('היעד שנשלח');
+    }
+    // המזהה היציב הוא מה שמונע פתיחה של ספר אחר כשה-id עמום.
+    if (opened.payload?.bookUid !== 'id:42') {
+      report.fail('המזהה היציב נשלח', `bookUid=${JSON.stringify(opened.payload?.bookUid)}`);
+    } else {
+      report.pass('המזהה היציב נשלח');
     }
   });
 
@@ -253,7 +472,7 @@ try {
     if (!ids.length) return report.fail('כתיבה אחרי חץ', 'לא נכתב קישור');
     const rel = new RegExp(`Id="${ids[ids.length - 1]}"[^>]*Target="([^"]+)"`).exec(rels);
     const target = (rel?.[1] ?? '').replace(/&amp;/g, '&');
-    if (target !== 'otzaria://open/book/43?index=1300') {
+    if (target !== 'otzaria://open/book/43?index=1300&uid=id%3A43') {
       report.fail('ההצעה השנייה נבחרה', `Target=${target}`);
     } else {
       report.pass('ההצעה השנייה נבחרה');
@@ -342,21 +561,15 @@ try {
     }
   });
 
-  await step('מדידה: הקישור נחסם לציור במנוע', async () => {
-    // ה-DomPainter מסנן href מול רשימת סכימות קבועה (http/https/mailto/tel/sms)
-    // ואינו מקבל קונפיגורציה בנקודת הקריאה, ולכן `otzaria://` נחסם. הקישור
-    // עצמו נכתב ל-DOCX תקין — הפער הוא בלחיצה בתוך העורך בלבד.
+  await step('מדידה: האם המנוע עדיין חוסם את הסכימה', async () => {
+    // זו מדידה של המנוע, לא של הפיצ'ר: הלחיצה עצמה נבדקה למעלה ועובדת דרך
+    // הגשר. מה שנמדד כאן הוא האם הגשר עדיין נחוץ — ביום שהסכימה תעבור
+    // במעלה הזרם הריצה תצויר כ-`<a>`, הגשר ידלג עליה, ו-`onActivate` ייקח
+    // את התפקיד בלי שינוי קוד.
     const pageLog = (await app.log()) ?? [];
-    const blocked = pageLog.filter((l) => /Blocked potentially unsafe URL/.test(l));
-    if (blocked.length) {
-      report.partial(
-        'לחיצה בתוך העורך',
-        'המנוע חוסם otzaria:// לציור; הקישור ב-DOCX תקין. ראו docs/engine-gaps.md',
-      );
-    } else {
-      // אם המנוע הפסיק לחסום — הפער נסגר, ואפשר להסיר את ההסתייגות מהתיעוד.
-      report.pass('לחיצה בתוך העורך');
-    }
+    const blocked = pageLog.some((l) => /Blocked potentially unsafe URL/.test(l));
+    log(`   הסכימה ${blocked ? 'עדיין נחסמת' : 'עוברת'} — הגשר ${blocked ? 'נחוץ' : 'מיותר'}`);
+    report.pass('מצב חסימת הסכימה');
   });
 
   await step('לא הצטבר רעש', async () => {
@@ -380,6 +593,46 @@ try {
     if (noisy.length) bad.push(`log=${noisy.join(' | ')}`);
     if (bad.length) report.fail('ללא רעש', bad.join('; '));
     else report.pass('ללא רעש');
+  });
+  await step('ספר שאינו נמצא מדווח למשתמש, ולא נבלע', async () => {
+    // `reader.openBook` מחזיר `false` כשהספר לא נמצא — זה לא זריקה, וזה מה
+    // שנבלע קודם: „לחצתי ולא קרה כלום, וגם לא נאמר לי למה”.
+
+    // הצעד עומד בפני עצמו: הוא רץ אחרי בדיקת הרעש, ולכן אינו יכול להישען
+    // על מסמך שצעד קודם השאיר.
+    await clearDoc(app);
+    await typeMention(app, '@פסחים לד');
+    await app.press('Enter', 'Enter', 13, 0);
+    await app.sleep(1100);
+
+    const run = JSON.parse(
+      await app.js(`(function () {
+        var els = [].slice.call(document.querySelectorAll('[data-link-rid]'));
+        for (var i = 0; i < els.length; i++) {
+          var r = els[i].getBoundingClientRect();
+          if (r.width > 0) return JSON.stringify({ found: true, x: r.left + r.width / 2, y: r.top + r.height / 2 });
+        }
+        return JSON.stringify({ found: false });
+      })()`),
+    );
+    if (!run.found) return report.fail('קישור ללחיצה', 'לא נמצא קישור מצויר');
+
+    await app.js(`window.__qaHost.replies['reader.openBook'] = function () {
+      return Promise.resolve({ success: true, data: false, error: null });
+    };`);
+    await app.clickAt(run.x, run.y);
+    await app.sleep(900);
+
+    const status = await app.status();
+    if (!status?.error || !/אינו נמצא בספרייה/.test(status.text ?? '')) {
+      report.fail('כשל פתיחה מדווח', `שורת המצב: ${JSON.stringify(status)}`);
+    } else {
+      report.pass('כשל פתיחה מדווח');
+    }
+
+    await app.js(`window.__qaHost.replies['reader.openBook'] = function () {
+      return Promise.resolve({ success: true, data: true, error: null });
+    };`);
   });
 } finally {
   app.close();

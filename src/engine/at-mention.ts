@@ -103,21 +103,40 @@ export function isQueryable(trigger: AtTrigger): boolean {
  *
  * כשיש `id` מספרי מוחזר קישור עומק ישיר, שעובד גם במסמך שנפתח מחוץ לאוצריא.
  * בהיעדרו — ספר אישי או PDF ממערכת הקבצים — מוחזר קישור „איתור מקורות” עם
- * ההפניה כלשונה: `user_books.db` מקצה מזהים באותו טווח כמו ספריית הבסיס,
- * ולכן `otzaria://open/book/<id>` אליו היה נפתר לפי מי שקדם ברשימה. העברת
- * הפתירה לאוצריא עצמה מגיעה ליעד הנכון גם שם.
+ * ההפניה: `user_books.db` מקצה מזהים באותו טווח כמו ספריית הבסיס, ולכן
+ * `otzaria://open/book/<id>` אליו היה נפתר לפי מי שקדם ברשימה. העברת הפתירה
+ * לאוצריא עצמה מגיעה ליעד הנכון גם שם.
+ *
+ * ## `q=` נבנה מההתאמה, לא ממה שהוקלד
+ *
+ * `rawRef` הוא מה שהיה אחרי ה-„@” כשהרשימה נפתרה — כלומר קידומת. מי שהקליד
+ * „בסוגי”, ראה ברשימה „בסוגיא דדיורים בריבית” ובחר בו, קיבל קישור שכתוב בו
+ * `q=בסוגי`: הטקסט הנראה מלא (הוא נבנה מ-`hit`), והכתובת חתוכה — ו„איתור
+ * מקורות” שנפתח ממנה אינו מוצא את הספר. שני הצדדים נבנים עכשיו מאותו מקור
+ * אחד, ולכן אינם יכולים לסטות זה מזה.
+ *
+ * ## `uid=` — למה לא די ב-`id`
+ *
+ * ה-`id` הוא מספר סידורי ב-`seforim.db`, ואותו מספר יכול להופיע גם
+ * ב-`user_books.db`; המאחז מחפש את הספר עם `id`+`type`, ו**שתי התאמות
+ * מחזירות null** — כלומר הקישור נפתח על לא-כלום. `bookUid` הוא המזהה היציב,
+ * והמאחז פותר לפיו ישירות בלי ניחוש. הוא נוסף כפרמטר שאוצריא עצמה מתעלמת
+ * ממנו (הראוטר שלה קורא `index`/`q`/`mark`/`m` בלבד), ולכן הקישור בקובץ
+ * ממשיך לעבוד כשפותחים אותו מחוץ לתוסף.
  */
 export function buildRefHref(hit: ResolvedRefHit, rawRef: string): string {
   if (hit.id != null && !hit.isUserBook) {
+    const uid = typeof hit.bookUid === 'string' ? hit.bookUid.trim() : '';
+    const stable = uid ? `&uid=${encodeURIComponent(uid)}` : '';
     if (hit.isPdf) {
       // ב-PDF ה-index הוא מספר עמוד 1-based, וזה גם מה שהראוטר דורש.
       const page = Math.max(1, Math.trunc(hit.index));
-      return `otzaria://open/pdf/${hit.id}?index=${page}`;
+      return `otzaria://open/pdf/${hit.id}?index=${page}${stable}`;
     }
     const line = Math.max(0, Math.trunc(hit.index));
-    return `otzaria://open/book/${hit.id}?index=${line}`;
+    return `otzaria://open/book/${hit.id}?index=${line}${stable}`;
   }
-  return `otzaria://open/detection?q=${encodeURIComponent(rawRef.trim())}`;
+  return `otzaria://open/detection?q=${encodeURIComponent(buildLinkText(hit, rawRef))}`;
 }
 
 /**
@@ -125,9 +144,16 @@ export function buildRefHref(hit: ResolvedRefHit, rawRef: string): string {
  *
  * ההפניה שנפתרה מועדפת על מה שהוקלד: היא הצורה הקנונית של אותו מיקום, ואם
  * הקישור מצביע ל„בראשית פרק א” אין טעם שהטקסט הנראה יגיד משהו אחר.
+ *
+ * הרווחים מנורמלים לשורה אחת, מאותו טעם שבו `normalizeSelectedText`
+ * ב-host/otzaria-reader.ts עושה זאת: `doc.insert` עם `type: 'text'` מכניס
+ * טקסט **לפסקה**, ושבר שורה בתוכו אינו נכנס כפי שהוא. כאן יש לזה מחיר שני
+ * ומדיד — טווח העטיפה מחושב כ-`start + text.length`, ותו שנכנס אחרת ממה
+ * שנספר היה מזיז את קצה הקישור.
  */
 export function buildLinkText(hit: ResolvedRefHit, query: string): string {
-  return hit.reference.trim() || hit.title.trim() || query.trim();
+  const oneLine = (value: string): string => value.replace(/\s+/gu, ' ').trim();
+  return oneLine(hit.reference) || oneLine(hit.title) || oneLine(query);
 }
 
 /** השורה המשנית בהצעה: מאיפה בספרייה ההתאמה, וכמה היא מדויקת. */

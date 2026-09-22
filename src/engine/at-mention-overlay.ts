@@ -14,28 +14,36 @@
  * - **`keydown` נתפס ב-capture, ו-`preventDefault` רק כשהרשימה פתוחה** — אחרת
  *   חצים ו-Tab מפסיקים להתנהג רגיל בשאר המסמך.
  *
- * ## כתיבת הקישור: מחיקת האזכור ואז `hyperlinks.insert`
+ * ## כתיבת הקישור: מחיקת האזכור, כתיבת הטקסט, ואז `hyperlinks.wrap`
  *
- * שלושה דברים נמדדו, ושלושתם ביחד קובעים את המסלול:
+ * המסלול הזה החליף את `hyperlinks.insert`, ולא מטעמי סגנון — `insert` אינה
+ * יכולה לכתוב את הקישור השני בפסקה. מה שנמדד על 2.15.0:
  *
- * 1. `hyperlinks.insert` **מוסיפה ואינה מחליפה** — היא כתבה את הקישור
- *    והשאירה את „@פסחים לד” שלפניו במקומו.
- * 2. `hyperlinks.wrap` מחזירה `INVALID_TARGET` על טווח שנכתב זה עתה, גם
- *    כאשר `ranges.resolve` על אותו טווח בדיוק מחזירה את הטקסט הנכון. זה
- *    אינו תזמון ואינו ה-`blockId`: היא נכשלת גם עם `href` של https, ולכן
- *    גם אינו סינון הסכימה. היא נמדדה עובדת רק על הבחירה שהמשתמש סימן
- *    (כך היא נקראת ב-hyperlinks-manage.ts).
- * 3. `doc.insert` עם `value: ''` מוחקת טווח בהצלחה.
+ * 1. **`hyperlinks.insert` נדחית בכל פסקה שכבר יש בה קישור.** לא רק בקצה
+ *    שלו: הכנסה בהיסט 24, אחרי קישור שנגמר ב-19 ועם „ וכן ” מפריד ביניהם,
+ *    חזרה `INVALID_CONTEXT / hyperlink-nested-unsupported` בדיוק כמו הכנסה
+ *    בהיסט 19 עצמו. זה מה שהפך „שני קישורים בשורה אחת” לבלתי-אפשרי.
+ * 2. **`hyperlinks.insert` אינה מזיזה את הסמן.** אחרי הכנסה בהיסט 8 הסמן
+ *    נשאר ב-8 — כלומר **לפני** הקישור שנכתב, וכל מה שהוקלד אחריו נדחף לפניו.
+ *    ‏„ראה @פסחים לד” ואז „ וכן …” יצא „ראה  וכן …פסחים דף לד”.
+ * 3. **`hyperlinks.wrap` כן מצליחה** על טווח שנכתב זה עתה ב-`doc.insert`,
+ *    ובאותה פסקה שבה `insert` נדחתה. זה שינוי מול מה שנמדד ב-2.12.0, שם
+ *    היא החזירה `INVALID_TARGET` על טווח כזה; ההערה הישנה ב-
+ *    `docs/engine-gaps.md` תוארכה מחדש בהתאם.
+ * 4. **`doc.insert` עם `value: ''` מוחקת טווח**, ואף היא אינה מזיזה את הסמן.
  *
- * לכן: מוחקים את האזכור, ואז מוסיפים את הקישור בנקודה שנפתחה.
+ * לכן: מוחקים את האזכור, מנקים צומתי קישור ריקים שחוסמים את המקום
+ * (hyperlink-blanks.ts), כותבים את הטקסט, עוטפים אותו, ומציבים את הסמן
+ * אחריו — כדי שההקלדה הבאה תמשיך מהמקום הנכון.
  *
- * ## הקישור אינו לחיץ בתוך העורך
+ * ## הקישור אינו לחיץ מהמנוע, ולכן יש גשר
  *
  * נמדד: ה-DomPainter של המנוע מסנן כל href מול רשימת סכימות קבועה
  * (`http`, `https`, `mailto`, `tel`, `sms`), חוסם את השאר, ואינו מקבל
  * קונפיגורציה בנקודת הקריאה. הקישור נכתב ל-DOCX תקין ועובד בכל תוכנה
  * שפותחת אותו — אבל בתוך העורך `onActivate` (otzaria-link-activation.ts)
- * אינו נקרא, כי המנוע חוסם עוד לפניו. ראו docs/engine-gaps.md.
+ * אינו נקרא, כי המנוע אינו מצייר את הריצה כקישור כלל. הלחיצה מטופלת
+ * ב-otzaria-link-click.ts, שם גם המדידה המלאה. ראו docs/engine-gaps.md.
  */
 import type { SuperDoc } from 'superdoc';
 import {
@@ -55,6 +63,7 @@ import {
   type ResolvedRefHit,
 } from './at-mention';
 import { isCaretFollowScroll } from './caret-visibility';
+import { removeBlankHyperlinks, type HyperlinkBlanksDoc } from './hyperlink-blanks';
 import { resolveRef } from '../host/otzaria-reader';
 
 /** כתובת טווח טקסט, כפי ש-`hyperlinks.wrap`/`insert` מקבלים אותה. */
@@ -69,14 +78,15 @@ interface HyperlinkSpecLike {
   destination: { href: string };
 }
 
-export interface AtMentionDoc extends WordSelectionDoc {
+export interface AtMentionDoc extends WordSelectionDoc, HyperlinkBlanksDoc {
   insert?: (input: { value: string; type: 'text'; target?: unknown }) => MaybePromise<DocReceipt>;
   hyperlinks?: {
-    insert?: (input: {
+    wrap?: (input: {
       target: TextAddressLike;
-      text: string;
       link: HyperlinkSpecLike;
     }) => MaybePromise<DocReceipt>;
+    list?: (input?: Record<string, unknown>) => MaybePromise<unknown>;
+    remove?: (input: Record<string, unknown>) => MaybePromise<DocReceipt>;
   } | null;
 }
 
@@ -93,6 +103,8 @@ export interface AtMentionHost {
   ui?: {
     selection?: {
       getAnchorRect?: (input?: { placement?: 'start' | 'end' | 'center' }) => AnchorRectLike | null;
+      /** מציבה סמן. אותה ידית ש-caret-anchor.ts משתמשת בה להחזרת המקום. */
+      apply?: (target: SelectionTargetLike) => unknown;
     } | null;
   } | null;
 }
@@ -130,6 +142,21 @@ function pointAt(blockId: string, offset: number, story: unknown): SelectionPoin
   const point: SelectionPointLike = { kind: 'text', blockId, offset };
   if (story !== undefined && story !== null) point.story = story;
   return point;
+}
+
+/**
+ * „הטווח נוגע בקישור קיים”, בכל הצורות שהמנוע מדווח בהן.
+ *
+ * הבדיקה היא על ההודעה ולא על הקוד בלבד, וזה נמדד: הקוד שחזר הוא
+ * `INVALID_CONTEXT` (ומ-`wrap` — `INVALID_TARGET`), בעוד
+ * `hyperlink-nested-unsupported` הוא **ההודעה**. בדיקה על הקוד לבדו לא
+ * התאימה מעולם, ולכן המשתמש קיבל בשורת המצב את המחרוזת האנגלית הגולמית
+ * במקום את ההודעה בעברית.
+ */
+function isOverlapFailure(receipt: DocReceipt | null | undefined): boolean {
+  const failure = receipt?.failure;
+  const text = `${failure?.code ?? ''} ${failure?.message ?? ''}`;
+  return /hyperlink-nested-unsupported/i.test(text) || /overlap.*existing hyperlink/i.test(text);
 }
 
 interface Seed {
@@ -450,29 +477,67 @@ export function installAtMention(
     renderPopup();
   }
 
-  /** כותבת את הקישור. ראו הערת המודול: מחיקה ואז הוספה, ולא עטיפה. */
+  /**
+   * מציבה את הסמן אחרי הקישור שנכתב.
+   *
+   * בלי זה הסמן נשאר במקום שבו האזכור התחיל — כלומר לפני הקישור — וההקלדה
+   * הבאה נדחפת לפניו. נמדד ש-`apply` על ההיסט שאחרי הקישור אינו מצרף את
+   * ההקלדה הבאה לקישור: הטקסט שנכתב אחריו נשאר מחוצה לו, והעוגן אינו זז.
+   */
+  function placeCaretAfter(blockId: string, offset: number, story: unknown): void {
+    const apply = selectionHandle?.apply;
+    if (typeof apply !== 'function') return;
+    try {
+      apply.call(selectionHandle, {
+        kind: 'selection',
+        start: pointAt(blockId, offset, story),
+        end: pointAt(blockId, offset, story),
+      } satisfies SelectionTargetLike);
+    } catch (error) {
+      // הקישור כבר נכתב; מיקום הסמן אינו שווה הודעת שגיאה למשתמש.
+      console.warn('[otzaria-word] אזכור: הצבת הסמן אחרי הקישור נכשלה', error);
+    }
+  }
+
+  /** כותבת את הקישור. ראו הערת המודול: מחיקה, כתיבת הטקסט, ואז עטיפה. */
   async function writeLink(
     address: TextAddressLike,
     text: string,
     href: string,
     originalText: string,
   ): Promise<DocReceipt | null> {
-    const insertLink = doc?.hyperlinks?.insert;
-    if (typeof doc?.insert !== 'function' || typeof insertLink !== 'function') return null;
+    const wrap = doc?.hyperlinks?.wrap;
+    if (typeof doc?.insert !== 'function' || typeof wrap !== 'function') return null;
+
+    const { story } = address;
+    const over = (blockId: string, start: number, end: number): SelectionTargetLike => ({
+      kind: 'selection',
+      start: pointAt(blockId, start, story),
+      end: pointAt(blockId, end, story),
+      ...(story ? { story } : {}),
+    });
+
+    /**
+     * צומת קישור ריק ששרד מחיקה קודמת יושב במקום שעומדים לכתוב אליו וחוסם
+     * את העטיפה — זה „מחקתי קישור ואני מתייג מחדש באותה שורה”. הסריקה היא
+     * על המסמך כולו ובקריאת מנוע אחת, כדי שלא יישארו גם קישורים בלתי-נראים
+     * בקובץ שיוצא. ראו hyperlink-blanks.ts.
+     *
+     * **לפני המחיקה, ובמכוון.** מכאן והלאה האזכור של המשתמש כבר לא במסמך,
+     * וכל קריאת מנוע בחלון הזה היא קריאה שאם לא תחזור — הטקסט שלו אבד בלי
+     * שנכתב דבר במקומו. הסריקה אינה תלויה במחיקה (צומת ריק אינו נוצר ממנה,
+     * והסרתו אינה מזיזה היסטים), ולכן אין סיבה להחזיק אותה שם.
+     */
+    await removeBlankHyperlinks(doc);
 
     const deleted = await doc.insert({
       value: '',
       type: 'text',
-      target: {
-        kind: 'selection',
-        start: pointAt(address.blockId, address.range.start, address.story),
-        end: pointAt(address.blockId, address.range.end, address.story),
-        ...(address.story ? { story: address.story } : {}),
-      } satisfies SelectionTargetLike,
+      target: over(address.blockId, address.range.start, address.range.end),
     });
     if (deleted?.success === false) return deleted;
 
-    // הנקודה שנפתחה נקראת מהבחירה ולא מחושבת: זו גם נקודת ההוספה האמיתית
+    // הנקודה שנפתחה נקראת מהבחירה ולא מחושבת: זו גם נקודת הכתיבה האמיתית
     // וגם הסנכרון מול המחיקה שקדמה לה.
     let at = { blockId: address.blockId, offset: address.range.start };
     try {
@@ -482,42 +547,56 @@ export function installAtMention(
       /* נשארים עם תחילת הטווח שנמחק */
     }
 
-    const insertionTarget = {
-      kind: 'text' as const,
-      blockId: at.blockId,
-      range: { start: at.offset, end: at.offset },
-      ...(address.story ? { story: address.story } : {}),
-    };
-
     /**
-     * `hyperlinks.insert` אינו טרנזקציוני עם המחיקה שלפניו. אם הוא נכשל,
-     * הטקסט שהמשתמש הקליד חייב לחזור בדיוק לנקודה שנפתחה; הודעת שגיאה בלי
-     * שחזור הייתה מאבדת את האזכור שלו.
+     * שתי הפעולות אינן טרנזקציוניות עם המחיקה שלפניהן. אם אחת מהן נכשלת,
+     * האזכור שהמשתמש הקליד חייב לחזור למקומו; הודעת שגיאה בלי שחזור הייתה
+     * מאבדת אותו, ובלי האזכור אין גם מה לנסות שוב.
      */
-    const restore = async (): Promise<void> => {
+    const restore = async (start: number, end: number): Promise<void> => {
       try {
-        await doc.insert?.({
-          value: originalText,
-          type: 'text',
-          target: {
-            kind: 'selection',
-            start: pointAt(at.blockId, at.offset, address.story),
-            end: pointAt(at.blockId, at.offset, address.story),
-            ...(address.story ? { story: address.story } : {}),
-          } satisfies SelectionTargetLike,
-        });
+        await doc.insert?.({ value: originalText, type: 'text', target: over(at.blockId, start, end) });
       } catch (error) {
-        // זו תקלה כפולה ונדירה; החריגה המקורית עדיין מדווחת ל-caller.
+        // זו תקלה כפולה ונדירה; הכשל המקורי עדיין מדווח ל-caller.
         console.warn('[otzaria-word] אזכור: שחזור הטקסט נכשל', error);
       }
     };
 
+    let written: DocReceipt | undefined;
     try {
-      const receipt = await insertLink({ target: insertionTarget, text, link: { destination: { href } } });
-      if (receipt?.success === false) await restore();
+      written = await doc.insert({
+        value: text,
+        type: 'text',
+        target: over(at.blockId, at.offset, at.offset),
+      });
+    } catch (error) {
+      // זריקה כאן היא בדיוק המקרה שבו האזכור כבר נמחק ודבר לא נכתב במקומו.
+      await restore(at.offset, at.offset);
+      throw error;
+    }
+    if (written?.success === false) {
+      await restore(at.offset, at.offset);
+      return written;
+    }
+
+    // היסטי המנוע נמדדו כיחידות UTF-16, בדיוק כמו `String.length`: כתיבת
+    // „פסחים דף לד” (11) בהיסט 8 נתנה עוגן 8..19.
+    const start = at.offset;
+    const end = at.offset + text.length;
+
+    try {
+      const receipt = await wrap({
+        target: { kind: 'text', blockId: at.blockId, range: { start, end }, ...(story ? { story } : {}) },
+        link: { destination: { href } },
+      });
+      if (receipt?.success === false) {
+        // הטקסט נכתב אך אינו קישור — מחליפים אותו בחזרה באזכור.
+        await restore(start, end);
+        return receipt;
+      }
+      placeCaretAfter(at.blockId, end, story);
       return receipt;
     } catch (error) {
-      await restore();
+      await restore(start, end);
       throw error;
     }
   }
@@ -556,10 +635,8 @@ export function installAtMention(
       return;
     }
     if (receipt?.success === false) {
-      // המנוע אינו תומך בקישור בתוך קישור, ומודיע על כך באנגלית.
-      const nested = receipt.failure?.code === 'hyperlink-nested-unsupported';
       report(
-        nested
+        isOverlapFailure(receipt)
           ? 'אי אפשר להוסיף קישור בתוך קישור קיים'
           : (receipt.failure?.message ?? 'הוספת הקישור נכשלה'),
         true,

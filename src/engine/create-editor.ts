@@ -47,6 +47,14 @@ export interface CreateEditorOptions {
   source?: string | File | Blob;
   /** נקרא על כל exception של המנוע, גם אחרי שהמסמך נטען. */
   onError?: (error: Error, payload: SuperDocExceptionPayload) => void;
+  /**
+   * הודעה למשתמש משכבה שהמנוע מחזיק, ולא מהממשק.
+   *
+   * היום יש לזה צרכן אחד: כשל בפתיחת קישור `otzaria://`. `reader.openBook`
+   * מחזיר `false` כשהספר אינו נמצא, וללא הערוץ הזה התוצאה הייתה „לחצתי ולא
+   * קרה כלום, וגם לא נאמר לי למה”.
+   */
+  onStatus?: (message: string, isError: boolean) => void;
   /** נקרא על כל שינוי במסמך. זה מה שמסמן אותו כלא-שמור. */
   onUpdate?: () => void;
   /**
@@ -126,6 +134,7 @@ export function createEditor(options: CreateEditorOptions): Promise<EditorSessio
     container,
     source,
     onError,
+    onStatus,
     onUpdate,
     onPaginationUpdate,
     timeoutMs = OPEN_TIMEOUT_MS,
@@ -205,9 +214,19 @@ export function createEditor(options: CreateEditorOptions): Promise<EditorSessio
       // פתיחה בדפדפן, וה-WebView חוסם `window.open` — כלומר בלי זה קישור
       // עומק שנוצר במסמך (ראו at-mention.ts) אינו עושה דבר. כל href אחר
       // ממשיך להתנהג כרגיל.
+      //
+      // **נמדד שהמסלול הזה אינו נקרא כיום**: המנוע חוסם את הסכימה עוד לפני
+      // ההפעלה, ולכן הלחיצה מטופלת ב-engine/otzaria-link-click.ts. הוא נשאר
+      // מחווט כדי שהיום שבו הסכימה תעבור לא ידרוש שינוי — ולכן גם הוא מדווח
+      // כשלים, ואינו בולע אותם כפי שעשה קודם.
       hyperlinks: {
         onActivate: createOtzariaLinkActivation({
-          navigate: (target) => void openOtzariaLink(target),
+          navigate: (target) => {
+            void openOtzariaLink(target).then((result) => {
+              if (!result.ok) onStatus?.(result.message, true);
+            });
+          },
+          onStatus,
         }),
       },
 

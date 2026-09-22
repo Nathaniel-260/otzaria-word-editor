@@ -31,22 +31,61 @@ function hit(overrides: Partial<ResolvedRefHit> = {}): ResolvedRefHit {
 
 const BLOCK = 'b1';
 
-/** כפיל מנוע: הסמן יושב בסוף `text`, וחלון הקריאה מחזיר את הטקסט כולו. */
+/**
+ * כפיל מנוע: הסמן יושב בסוף `text`, וחלון הקריאה מחזיר את הטקסט כולו.
+ *
+ * שתי התנהגויות כאן אינן נוחות אלא **מדודות**, והבדיקות נשענות עליהן:
+ *
+ * - **`insert` אינו מזיז את הסמן.** נמדד: כתיבת „פסחים דף לה” בהיסט 24
+ *   השאירה את הסמן ב-24. כפיל שמזיז אותו לסוף היה מסתיר בדיוק את הבאג
+ *   שבגללו כל הקלדה נוספת נדחפה לפני הקישור.
+ * - **הקישורים מוחזרים גם ב-`stories[]` וגם ב-`items[]`.** זו הצורה שנמדדה,
+ *   וממנה נגזרת הדרישה ש-`removeBlankHyperlinks` לא יסיר את אותו צומת פעמיים.
+ */
 function fakeDoc(
   text: string,
-  options: { docInsert?: () => unknown; hyperlinkInsert?: () => unknown } = {},
+  options: {
+    docInsert?: () => unknown;
+    wrap?: () => unknown;
+    blanks?: Array<{ start: number; end: number; blockId?: string }>;
+  } = {},
 ) {
   const calls = new Map<string, unknown[]>();
-  const record = (name: string, input: unknown) =>
+  /** סדר הקריאות, ולא רק כמותן — יש ענפים שבהם הסדר הוא כל ההבדל. */
+  const order: string[] = [];
+  const record = (name: string, input: unknown) => {
+    order.push(name);
     calls.set(name, [...(calls.get(name) ?? []), input]);
+  };
 
-  // הסמן זז עם המסמך: `insert` מחליף טווח, ואחריו הוא יושב בסוף מה שנכתב —
-  // בדיוק מה שקוד ההחלפה קורא כדי לבנות את טווח העטיפה.
   let cursor = text.length;
+  const blanks = [...(options.blanks ?? [])];
+  const addressOf = (b: { start: number; end: number; blockId?: string }) => ({
+    kind: 'inline',
+    nodeType: 'hyperlink',
+    anchor: {
+      start: { blockId: b.blockId ?? BLOCK, offset: b.start },
+      end: { blockId: b.blockId ?? BLOCK, offset: b.end },
+    },
+  });
+
   const hyperlinks: Record<string, unknown> = {
-    insert: (input: unknown) => {
-      record('hyperlinks.insert', input);
-      return options.hyperlinkInsert?.() ?? { success: true };
+    wrap: (input: unknown) => {
+      record('hyperlinks.wrap', input);
+      return options.wrap?.() ?? { success: true };
+    },
+    list: () => {
+      record('hyperlinks.list', null);
+      const items = blanks.map((b) => ({ text: '', address: addressOf(b) }));
+      return { stories: [{ storyId: 'main', hyperlinks: items }], items };
+    },
+    remove: (input: unknown) => {
+      record('hyperlinks.remove', input);
+      const { target } = input as { target: { anchor: { start: { offset: number } } } };
+      const at = target.anchor.start.offset;
+      const index = blanks.findIndex((b) => b.start === at);
+      if (index >= 0) blanks.splice(index, 1);
+      return { success: true };
     },
   };
 
@@ -68,25 +107,29 @@ function fakeDoc(
     },
     insert: (input: unknown) => {
       record('insert', input);
-      const { value, target } = input as {
-        value: string;
-        target: { start: { offset: number } };
-      };
-      cursor = target.start.offset + value.length;
+      const { target } = input as { target: { start: { offset: number } } };
+      // נמדד: הסמן נשאר בתחילת הטווח שנכתב, ואינו זז לסופו.
+      cursor = target.start.offset;
       return options.docInsert?.() ?? { success: true };
     },
     hyperlinks,
   };
 
+  const applied: unknown[] = [];
   const host = {
     activeEditor: { doc },
     ui: {
       selection: {
         getAnchorRect: () => ({ left: 200, top: 100, width: 1, height: 18 }),
+        apply: (target: unknown) => {
+          applied.push(target);
+          record('selection.apply', target);
+          return { ok: true };
+        },
       },
     },
   };
-  return { host, calls };
+  return { host, calls, applied, order };
 }
 
 /** מריצה את מחזור ה-debounce וההערכה עד שהרשימה מצוירת. */
@@ -157,7 +200,7 @@ describe('installAtMention', () => {
     handle.dispose();
   });
 
-  it('מחליף את הטווח מה-@ ועד הסמן, וכותב קישור עומק', async () => {
+  it('מחליף את הטווח מה-@ ועד הסמן, כותב את הטקסט ועוטף אותו', async () => {
     const { host, calls } = fakeDoc('ראה @פסחים לד');
     const handle = installAtMention(container, host as never);
 
@@ -166,25 +209,84 @@ describe('installAtMention', () => {
     container.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     await vi.advanceTimersByTimeAsync(0);
 
-    // קודם מחיקת האזכור — `hyperlinks.insert` מוסיפה ואינה מחליפה.
-    const deleted = calls.get('insert')?.[0] as {
+    const inserts = calls.get('insert') as Array<{
       value: string;
       target: { start: { offset: number }; end: { offset: number } };
-    };
+    }>;
     // "ראה " הוא 4 תווים, ולכן ה-@ יושב ב-4 והסמן ב-13.
-    expect(deleted.value).toBe('');
-    expect(deleted.target.start.offset).toBe(4);
-    expect(deleted.target.end.offset).toBe(13);
+    expect(inserts[0]!.value).toBe('');
+    expect(inserts[0]!.target.start.offset).toBe(4);
+    expect(inserts[0]!.target.end.offset).toBe(13);
 
-    // ואז הקישור נכנס בנקודה שנפתחה.
-    const linked = calls.get('hyperlinks.insert')?.[0] as {
+    // ואז הטקסט הנראה נכתב בנקודה שנפתחה.
+    expect(inserts[1]!.value).toBe('פסחים דף לד');
+    expect(inserts[1]!.target).toMatchObject({ start: { offset: 4 }, end: { offset: 4 } });
+
+    // ורק אז הוא נעטף — `wrap` ולא `insert`, ראו הערת המודול.
+    const wrapped = calls.get('hyperlinks.wrap')?.[0] as {
       target: { blockId: string; range: { start: number; end: number } };
-      text: string;
       link: { destination: { href: string } };
     };
-    expect(linked.target).toMatchObject({ blockId: BLOCK, range: { start: 4, end: 4 } });
-    expect(linked.text).toBe('פסחים דף לד');
-    expect(linked.link.destination.href).toBe('otzaria://open/book/42?index=1234');
+    expect(wrapped.target).toMatchObject({ blockId: BLOCK, range: { start: 4, end: 15 } });
+    expect(wrapped.link.destination.href).toBe('otzaria://open/book/42?index=1234&uid=id%3A42');
+    handle.dispose();
+  });
+
+  /**
+   * הבאג: `hyperlinks.insert` השאירה את הסמן לפני הקישור, ולכן „ראה @פסחים לד”
+   * ואז „ וכן …” יצא „ראה  וכן …פסחים דף לד” — ההמשך נדחף לפני הקישור.
+   */
+  it('הסמן מוצב אחרי הקישור, כדי שההקלדה הבאה תמשיך ממנו', async () => {
+    const { host, applied } = fakeDoc('ראה @פסחים לד');
+    const handle = installAtMention(container, host as never);
+
+    container.dispatchEvent(new Event('input'));
+    await settle();
+    container.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await vi.advanceTimersByTimeAsync(0);
+
+    // 4 (תחילת האזכור) + 11 (אורך „פסחים דף לד”).
+    expect(applied).toEqual([
+      {
+        kind: 'selection',
+        start: { kind: 'text', blockId: BLOCK, offset: 15 },
+        end: { kind: 'text', blockId: BLOCK, offset: 15 },
+      },
+    ]);
+    handle.dispose();
+  });
+
+  /**
+   * הבאג: מחיקת קישור משאירה צומת ריק, והוא חוסם כתיבה חדשה באותו מקום
+   * ב-`hyperlink-nested-unsupported` — על קישור שכבר לא רואים.
+   */
+  it('מנקה צומתי קישור ריקים לפני שהוא כותב — גם בפסקה אחרת', async () => {
+    const { host, calls, order } = fakeDoc('@פסחים לד', {
+      blanks: [
+        { start: 0, end: 0 },
+        { start: 4, end: 4, blockId: 'b2' },
+      ],
+    });
+    const handle = installAtMention(container, host as never);
+
+    container.dispatchEvent(new Event('input'));
+    await settle();
+    container.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await vi.advanceTimersByTimeAsync(0);
+
+    const removed = (calls.get('hyperlinks.remove') ?? []) as Array<{
+      target: { anchor: { start: { blockId: string; offset: number } } };
+    }>;
+    // הריק שחוסם כאן, והריק שאחרת היה מגיע לקובץ כקישור בלתי-נראה.
+    expect(removed.map((r) => r.target.anchor.start)).toEqual([
+      { blockId: BLOCK, offset: 0 },
+      { blockId: 'b2', offset: 4 },
+    ]);
+
+    // והניקוי קודם ל**מחיקה**, לא רק לכתיבה: מרגע המחיקה הטקסט של המשתמש
+    // אינו במסמך, וקריאת מנוע שאינה חוזרת בחלון הזה מאבדת אותו.
+    expect(order.indexOf('hyperlinks.remove')).toBeLessThan(order.indexOf('insert'));
+    expect(calls.get('hyperlinks.wrap')).toHaveLength(1);
     handle.dispose();
   });
 
@@ -203,11 +305,11 @@ describe('installAtMention', () => {
     handle.dispose();
   });
 
-  it('בלי hyperlinks.insert אין כתיבה, ויש דיווח', async () => {
+  it('בלי hyperlinks.wrap אין כתיבה, ויש דיווח', async () => {
     const onStatus = vi.fn();
     const { host, calls } = fakeDoc('@פסחים לד');
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    delete (host.activeEditor.doc as any).hyperlinks.insert;
+    delete (host.activeEditor.doc as any).hyperlinks.wrap;
     const handle = installAtMention(container, host as never, { onStatus });
 
     container.dispatchEvent(new Event('input'));
@@ -220,9 +322,9 @@ describe('installAtMention', () => {
     handle.dispose();
   });
 
-  it('כשל בהוספת קישור משחזר את האזכור שנמחק', async () => {
+  it('כשל בעטיפה מחזיר את האזכור במקום הטקסט שנכתב', async () => {
     const { host, calls } = fakeDoc('@פסחים לד', {
-      hyperlinkInsert: () => ({ success: false, failure: { code: 'document-readonly' } }),
+      wrap: () => ({ success: false, failure: { code: 'document-readonly' } }),
     });
     const handle = installAtMention(container, host as never);
 
@@ -235,12 +337,116 @@ describe('installAtMention', () => {
       value: string;
       target: { start: { offset: number }; end: { offset: number } };
     }>;
-    expect(inserts).toHaveLength(2);
+    expect(inserts).toHaveLength(3);
+    // מחיקה, כתיבת הטקסט, ואז החלפתו בחזרה באזכור — על הטווח שנכתב.
     expect(inserts[0]).toMatchObject({ value: '', target: { start: { offset: 0 }, end: { offset: 9 } } });
-    expect(inserts[1]).toMatchObject({
+    expect(inserts[1]).toMatchObject({ value: 'פסחים דף לד', target: { start: { offset: 0 } } });
+    expect(inserts[2]).toMatchObject({
       value: '@פסחים לד',
-      target: { start: { offset: 0 }, end: { offset: 0 } },
+      target: { start: { offset: 0 }, end: { offset: 11 } },
     });
+    handle.dispose();
+  });
+
+  /**
+   * הענף הזה לא היה עטוף: `doc.insert` של הטקסט ישב מחוץ ל-`try`, ולכן
+   * **זריקה** בו מחקה את האזכור של המשתמש ולא שחזרה אותו — הטקסט שהוקלד
+   * פשוט נעלם, ובלי אזכור לא היה גם מה לנסות שוב.
+   */
+  it('זריקה בכתיבת הטקסט מחזירה את האזכור ואינה בולעת את השגיאה', async () => {
+    let call = 0;
+    const { host, calls } = fakeDoc('@פסחים לד', {
+      docInsert: () => {
+        if (++call === 2) throw new Error('boom');
+        return { success: true };
+      },
+    });
+    const onStatus = vi.fn();
+    const handle = installAtMention(container, host as never, { onStatus });
+
+    container.dispatchEvent(new Event('input'));
+    await settle();
+    container.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await vi.advanceTimersByTimeAsync(0);
+
+    const inserts = calls.get('insert') as Array<{
+      value: string;
+      target: { start: { offset: number }; end: { offset: number } };
+    }>;
+    expect(inserts.map((i) => i.value)).toEqual(['', 'פסחים דף לד', '@פסחים לד']);
+    // השחזור הוא על הנקודה שנפתחה — טווח רחב ממנה היה מוחק טקסט שכן נשאר.
+    expect(inserts[2]!.target).toMatchObject({ start: { offset: 0 }, end: { offset: 0 } });
+    expect(onStatus).toHaveBeenCalledWith('הוספת הקישור נכשלה', true);
+    handle.dispose();
+  });
+
+  it('כשל בכתיבת הטקסט עצמו מחזיר את האזכור לנקודה שנפתחה', async () => {
+    let call = 0;
+    const { host, calls } = fakeDoc('@פסחים לד', {
+      // הראשון הוא המחיקה והוא מצליח; השני הוא כתיבת הטקסט ונכשל.
+      docInsert: () => (++call === 2 ? { success: false, failure: { code: 'document-readonly' } } : { success: true }),
+    });
+    const handle = installAtMention(container, host as never);
+
+    container.dispatchEvent(new Event('input'));
+    await settle();
+    container.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await vi.advanceTimersByTimeAsync(0);
+
+    const inserts = calls.get('insert') as Array<{
+      value: string;
+      target: { start: { offset: number }; end: { offset: number } };
+    }>;
+    expect(inserts.map((i) => i.value)).toEqual(['', 'פסחים דף לד', '@פסחים לד']);
+    // הנקודה שנפתחה, ולא הטווח שהטקסט **היה** תופס אילו נכתב.
+    expect(inserts[2]!.target).toMatchObject({ start: { offset: 0 }, end: { offset: 0 } });
+    expect(calls.has('hyperlinks.wrap')).toBe(false);
+    handle.dispose();
+  });
+
+  /**
+   * המנוע מחזיר את הקינון כ-**הודעה** ‏(`hyperlink-nested-unsupported`) ואת
+   * `INVALID_CONTEXT` כקוד. בדיקה על הקוד לבדו לא התאימה מעולם, והמשתמש ראה
+   * בשורת המצב את המחרוזת האנגלית הגולמית.
+   */
+  it('קינון מדווח בעברית, גם כשהוא מגיע כהודעה ולא כקוד', async () => {
+    const onStatus = vi.fn();
+    const { host } = fakeDoc('@פסחים לד', {
+      wrap: () => ({
+        success: false,
+        failure: { code: 'INVALID_CONTEXT', message: 'hyperlink-nested-unsupported' },
+      }),
+    });
+    const handle = installAtMention(container, host as never, { onStatus });
+
+    container.dispatchEvent(new Event('input'));
+    await settle();
+    container.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(onStatus).toHaveBeenCalledWith('אי אפשר להוסיף קישור בתוך קישור קיים', true);
+    handle.dispose();
+  });
+
+  it('חפיפה שמדווחת בנוסח של wrap מתורגמת אף היא', async () => {
+    const onStatus = vi.fn();
+    const { host } = fakeDoc('@פסחים לד', {
+      wrap: () => ({
+        success: false,
+        failure: {
+          code: 'INVALID_TARGET',
+          message: 'hyperlinks.wrap does not support ranges that overlap an existing hyperlink.',
+        },
+      }),
+    });
+    const handle = installAtMention(container, host as never, { onStatus });
+
+    container.dispatchEvent(new Event('input'));
+    await settle();
+    container.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(onStatus).toHaveBeenCalledWith('אי אפשר להוסיף קישור בתוך קישור קיים', true);
     handle.dispose();
   });
 
@@ -267,8 +473,8 @@ describe('installAtMention', () => {
     container.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }));
     await vi.advanceTimersByTimeAsync(0);
 
-    const linked = calls.get('hyperlinks.insert')?.[0] as { link: { destination: { href: string } } };
-    expect(linked.link.destination.href).toBe('otzaria://open/book/7?index=99');
+    const linked = calls.get('hyperlinks.wrap')?.[0] as { link: { destination: { href: string } } };
+    expect(linked.link.destination.href).toBe('otzaria://open/book/7?index=99&uid=id%3A42');
     handle.dispose();
   });
 
@@ -285,8 +491,8 @@ describe('installAtMention', () => {
     options()[1]!.click();
     await vi.advanceTimersByTimeAsync(0);
 
-    const linked = calls.get('hyperlinks.insert')?.[0] as { link: { destination: { href: string } } };
-    expect(linked.link.destination.href).toBe('otzaria://open/book/7?index=99');
+    const linked = calls.get('hyperlinks.wrap')?.[0] as { link: { destination: { href: string } } };
+    expect(linked.link.destination.href).toBe('otzaria://open/book/7?index=99&uid=id%3A42');
     handle.dispose();
   });
 
