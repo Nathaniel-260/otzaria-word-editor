@@ -19,19 +19,28 @@
  * ‏`SPAN.superdoc-tab` עם `data-pm-start`/`data-pm-end` משלו, בלי טקסט.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
+/*
+ * הקריאה של מה שצויר עברה ל-`painted-lines.ts`, והמדיניות נשארה
+ * ב-`rtl-caret.ts`. הבדיקות של שתיהן נשארו יחד כאן **בכוונה**: הן חולקות את
+ * אותן תיבות שנמדדו (`LATIN_ISLAND`, `DIGIT_ISLAND`, השורות מהגשש), ופיצול
+ * הקובץ היה מכפיל אותן — כלומר מייצר שני מקורות אמת למדידה אחת. מה שמפריד
+ * בין השניים הוא שם הייבוא שלמטה.
+ */
 import {
-  caretSlots,
-  charDirections,
   edgeSlot,
   installRtlVisualArrows,
   isHorizontalArrow,
   movesForward,
-  readLineChars,
   visualTarget,
-  type CaretSlot,
-  type PaintedChar,
   type RtlCaretHost,
 } from '../../src/engine/rtl-caret';
+import {
+  caretSlots,
+  charDirections,
+  readLineChars,
+  type CaretSlot,
+  type PaintedChar,
+} from '../../src/engine/painted-lines';
 
 /**
  * תיבות מרשימת קצוות, עם היסטים רצופים מ-`pm`.
