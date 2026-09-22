@@ -12,6 +12,12 @@
  * `success: true` אינו הוכחה: נמדדים גם הטקסט שבשורת המצב וגם המלבנים
  * המצוירים בפועל, כמו ב-page-border-overlay-qa.mjs.
  *
+ * הבאג השני שהשער הזה מחזיק: מלבן שאינו נמדד מחדש אחרי עריכה. ‏`revision`
+ * הוא הטריגר היחיד לעריכה שאינה מזיזה מלבן עמוד, והוא היה כבול לבדיקת
+ * האיות — שכבויה בברירת המחדל. „המלבן עוקב אחרי העריכה” מודד את זה, ולכל
+ * שורה כאן יש דרישה שגם „לא צויר כלום” נכשל בה: הסרה נמדדת מול מספר
+ * המלבנים שהיו, והמעקב נמדד רק אחרי שהטקסט אכן זז.
+ *
  * הרצה:
  *   node scripts/qa/page-marking-qa.mjs
  * יציאה 9382 בלבד — שערים מקבילים רצים על יציאות אחרות.
@@ -31,9 +37,32 @@ await app.cdp.send('Emulation.setDeviceMetricsOverride', {
 });
 await app.sleep(1200);
 
-/** המלבנים שהשכבה ציירה, ומלבן העמוד הראשון — למדוד אותם זה מול זה. */
-async function marks() {
+/** הפסקה שאחריה עוקב שער „המלבן זז עם הטקסט”. */
+const TRACKED = 'סוף העמוד האחרון';
+
+/**
+ * המלבנים שהשכבה ציירה, ומלבן העמוד הראשון — למדוד אותם זה מול זה.
+ *
+ * `tracked` הוא מלבן השורה של הפסקה שטקסטה נמסר — הטקסט שהמלבן `last` אמור
+ * לשבת עליו. הוא נמדד **באותה קריאה** כמו המלבנים, כי רק הפרש שנמדד בתוך
+ * תצלום אחד שורד עריכה: מלבן שנתפס לפני העריכה כבר אינו מתאר את הדף.
+ */
+async function marks(trackText = null) {
   const raw = await app.js(`(function () {
+    var TRACK = ${JSON.stringify(trackText)};
+    var tracked = null;
+    if (TRACK) {
+      var frags = document.querySelectorAll('.superdoc-fragment[data-source-node-id]');
+      for (var i = 0; i < frags.length; i++) {
+        if ((frags[i].textContent || '').indexOf(TRACK) >= 0) {
+          // ה-fragment עצמו מחזיר מלבן שלילי אחרי reflow; השורה שבתוכו אמינה.
+          var box = frags[i].querySelector('.superdoc-line') || frags[i];
+          var br = box.getBoundingClientRect();
+          if (br.width && br.height) tracked = { top: br.top, bottom: br.bottom };
+          break;
+        }
+      }
+    }
     var els = Array.prototype.slice.call(document.querySelectorAll('.page-marking-layer__mark'));
     var items = els.map(function (el) {
       var r = el.getBoundingClientRect();
@@ -50,6 +79,7 @@ async function marks() {
       pages: document.querySelectorAll('[data-page-index]').length,
       count: items.length,
       items: items,
+      tracked: tracked,
       page: pr ? { left: pr.left, top: pr.top, right: pr.right, bottom: pr.bottom } : null,
     });
   })()`);
@@ -139,13 +169,65 @@ try {
     report.fail('בדיקת עמודים', `שורת מצב לא צפויה: „${checkText}”`);
   }
 
-  // „הסר סימון” — הציור יורד.
+  /*
+    השער המרכזי: עריכה שאינה מזיזה מלבן עמוד.
+
+    מעקב מלבני העמודים (`watchAllPageRects`) אינו יורה על Enter בתוך פסקה —
+    העמוד נשאר באותו גודל ובאותו מקום. הטריגר היחיד הוא `revision`, ואם הוא
+    אינו עולה המלבנים נשארים על הטקסט הישן והמסגרת יושבת על מילה אחרת.
+    נמדד בדפדפן על הקוד השבור: המילה האחרונה ירדה מ-332px ל-351px והמלבן
+    נשאר ב-332px גם אחרי 2500ms.
+
+    הגאומטריה נתפסת מחדש בכל תצלום, ומה שמושווה הוא **ההפרש שבתוך התצלום**
+    בין המלבן לטקסט שהוא מסמן — הפרש שנשמר הוא „המלבן עקב”, גם אם שניהם זזו.
+  */
+  const settled = await marks(TRACKED);
+  const markBefore = settled.items.find((m) => m.kind === 'last');
+  await app.caretPara('ראש העמוד הראשון');
+  await app.press('Enter', 'Enter', 13);
+  // 400ms השקטה של `revision` + 300ms מדידת ההתיישבות, ברווח.
+  await app.sleep(1800);
+  const edited = await marks(TRACKED);
+  const markAfter = edited.items.find((m) => m.kind === 'last');
+  console.log('אחרי Enter בפסקה הראשונה:', JSON.stringify({ settled: settled.tracked, edited: edited.tracked }));
+
+  const offsetBefore = markBefore && settled.tracked ? markBefore.top - settled.tracked.top : null;
+  const offsetAfter = markAfter && edited.tracked ? markAfter.top - edited.tracked.top : null;
+  const textMoved = settled.tracked && edited.tracked ? edited.tracked.top - settled.tracked.top : 0;
+  if (offsetBefore === null || offsetAfter === null) {
+    report.fail(
+      'המלבן עוקב אחרי העריכה',
+      `אין מה למדוד: מלבן „last” ${markBefore ? 'קיים' : 'חסר'} לפני ו-${markAfter ? 'קיים' : 'חסר'} אחרי, ` +
+        `הפסקה „${TRACKED}” ${edited.tracked ? 'נמדדה' : 'לא נמצאה'}`,
+    );
+  } else if (textMoved <= 6) {
+    // בלי שהטקסט זז אין כאן בדיקה — בדיוק כמו „הסרה” שעוברת על אפס מלבנים.
+    report.fail('המלבן עוקב אחרי העריכה', `Enter לא הזיז את „${TRACKED}” (${Math.round(textMoved)}px) — המדידה ריקה`);
+  } else if (Math.abs(offsetAfter - offsetBefore) <= 2) {
+    report.pass(
+      'המלבן עוקב אחרי העריכה',
+      `הטקסט ירד ${Math.round(textMoved)}px והמלבן אחריו (הפרש ${Math.round(offsetBefore)}px → ${Math.round(offsetAfter)}px)`,
+    );
+  } else {
+    report.fail(
+      'המלבן עוקב אחרי העריכה',
+      `הטקסט ירד ${Math.round(textMoved)}px והמלבן נשאר: ההפרש מהטקסט ${Math.round(offsetBefore)}px → ` +
+        `${Math.round(offsetAfter)}px (המלבן ב-${Math.round(markAfter.top)}px, הטקסט ב-${Math.round(edited.tracked.top)}px)`,
+    );
+  }
+
+  // „הסר סימון” — הציור יורד. `edited.count` הוא המדידה הטרייה שלפני הלחיצה:
+  // „0 אחרי” אינו הוכחה כשלא צויר דבר מלכתחילה, וזו הייתה השורה היחידה מתוך
+  // שש שעברה בריצה על הקוד שבו החיווט נמחק.
+  const drawnBeforeRemove = edited.count;
   const removed = await app.click('הסר סימון', { after: 1200 });
   const removeText = await status();
   const afterOff = await marks();
   console.log('אחרי „הסר סימון”:', removeText, JSON.stringify(afterOff));
-  if (removed && afterOff.count === 0) {
-    report.pass('הסרת הסימון', `„${removeText}”, 0 מלבנים ב-DOM`);
+  if (removed && drawnBeforeRemove > 0 && afterOff.count === 0) {
+    report.pass('הסרת הסימון', `${drawnBeforeRemove} מלבנים ירדו — „${removeText}”, 0 ב-DOM`);
+  } else if (drawnBeforeRemove === 0) {
+    report.fail('הסרת הסימון', 'לא היה מה להסיר — 0 מלבנים כבר לפני הלחיצה');
   } else {
     report.fail('הסרת הסימון', `צפויים 0 מלבנים — התקבל ${afterOff.count} („${removeText}”)`);
   }
