@@ -171,6 +171,30 @@ describe('markNeutralParagraphEnds — מה שאינו נגע', () => {
 });
 
 describe('markNeutralParagraphEnds — הערובות', () => {
+  it('long single text node does not overflow the argument stack', () => {
+    const input = doc(para(run('א'.repeat(300_000) + '.')));
+    expect(markNeutralParagraphEnds(input)).toBe(input.replace('.</w:t>', `.${RLM}</w:t>`));
+  });
+
+  it('decodes a paragraph written entirely as numeric entities', () => {
+    expect(bodyOf(doc(para(run('&#x5E9;&#1500;&#1493;&#1501;&#46;'))))).toBe(
+      para(run(`&#x5E9;&#1500;&#1493;&#1501;&#46;${RLM}`)),
+    );
+  });
+
+  it('does not override digits or an explicit left-to-right mark', () => {
+    for (const text of ['שלום ١٢.', 'שלום ۱۲.', 'שלום\u200e.', 'שלום.\u200e']) {
+      expect(markNeutralParagraphEnds(doc(para(run(text))))).toBeNull();
+    }
+  });
+
+  it('finds the last directional character across neutral-only text nodes', () => {
+    expect(bodyOf(doc(para(run('שלום'), run('&amp;'), run('&#46;'), run('  '))))).toBe(
+      para(run('שלום'), run('&amp;'), run(`&#46;${RLM}`), run('  ')),
+    );
+    expect(markNeutralParagraphEnds(doc(para(run('שלום'), run('abc'), run(' .'))))).toBeNull();
+  });
+
   it('הרצה שנייה אינה מוסיפה דבר', () => {
     const once = markNeutralParagraphEnds(doc(para(run('שלום עולם.'))));
     expect(once).not.toBeNull();

@@ -308,19 +308,27 @@ export function mirrorComplexScript(xml: string): string | null {
 
     // רק הבנים הישרים של ה-`rPr` החיה. `rPrChange` מעלה את העומק, ולכן מה
     // שבתוכה נספר כאן כעומק 2 ואינו נקרא.
-    if (depth !== 1 || !props || closing) continue;
+    if (depth !== 1 || !props) continue;
     const tagEnd = match.index + match[0].length;
+    // Empty properties can also use paired XML tags. Insert siblings after
+    // the closing tag, never inside <w:b> or <w:sz>.
+    if (closing) {
+      if (name === 'b') props.boldEnd = tagEnd;
+      else if (name === 'i') props.italicEnd = tagEnd;
+      else if (name === 'sz') props.sizeEnd = tagEnd;
+      continue;
+    }
 
     if (name === 'b') {
-      props.boldEnd = tagEnd;
+      props.boldEnd = selfClosing ? tagEnd : null;
       props.boldVal = valueOf(attributes);
     } else if (name === 'bCs') props.hasBoldCs = true;
     else if (name === 'i') {
-      props.italicEnd = tagEnd;
+      props.italicEnd = selfClosing ? tagEnd : null;
       props.italicVal = valueOf(attributes);
     } else if (name === 'iCs') props.hasItalicCs = true;
     else if (name === 'sz') {
-      props.sizeEnd = tagEnd;
+      props.sizeEnd = selfClosing ? tagEnd : null;
       props.sizeVal = valueOf(attributes);
     } else if (name === 'szCs') props.hasSizeCs = true;
     else if (name === 'rFonts') {

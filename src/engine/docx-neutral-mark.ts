@@ -148,9 +148,11 @@ type CharClass = 'R' | 'L' | 'D' | 'M' | 'N';
 
 function classOf(ch: string): CharClass {
   if (MARK.test(ch)) return 'M';
+  if (DIGIT.test(ch)) return 'D';
+  if (ch === '\u200e') return 'L';
+  if (ch === RLM || ch === '\u061c') return 'R';
   if (RTL_SCRIPT.test(ch)) return 'R';
   if (LETTER.test(ch)) return 'L';
-  if (DIGIT.test(ch)) return 'D';
   return 'N';
 }
 
@@ -186,43 +188,57 @@ const ENTITY = /&(?:#(\d+)|#x([0-9a-fA-F]+)|(amp|lt|gt|quot|apos));/y;
  * תו אחד שתופס חמישה בייטים, ותו על-בסיסי הוא תו אחד ששני יחידות UTF-16.
  * שניהם מטופלים כאן, ולכן `[...text]` במקום לולאת אינדקסים.
  */
-function decodeWithOffsets(raw: string, base: number, to: number): DecodedChar[] {
+function readTextTail(paragraph: ParagraphRecord, raw: string, base: number, to: number): void {
   const span = { from: base, to };
-  const out: DecodedChar[] = [];
-  let at = 0;
-  while (at < raw.length) {
-    if (raw[at] === '&') {
-      ENTITY.lastIndex = at;
-      const match = ENTITY.exec(raw);
-      if (match) {
+  let at = raw.length;
+  let foundTail = false;
+  // Only the final non-space character and the last directional character are
+  // needed. Read each text node backwards; do not allocate one object per
+  // character or spread an arbitrarily long paragraph into Array.push().
+  while (at > 0) {
+    const end = base + at;
+    let start = at - 1;
+    let ch = raw[start]!;
+    if (ch === ';') {
+      let amp = start - 1;
+      while (amp >= 0 && /[a-zA-Z0-9#]/.test(raw[amp]!)) amp -= 1;
+      ENTITY.lastIndex = amp;
+      const match = amp >= 0 && raw[amp] === '&' ? ENTITY.exec(raw) : null;
+      if (match && ENTITY.lastIndex === at) {
         const [whole, dec, hex, named] = match;
-        let ch: string | null = null;
         if (named) {
-          ch = NAMED_ENTITIES[named] ?? null;
+          ch = NAMED_ENTITIES[named] ?? whole;
         } else {
           const code = dec ? Number.parseInt(dec, 10) : Number.parseInt(hex!, 16);
           // סרוגייט בודד אינו תו, ותו שמעבר לטווח אינו קיים. ישות כזאת נשארת
           // כמות שהיא, ונספרת כתו אחד — די בכך שההיסט יהיה נכון.
           ch = Number.isFinite(code) && code <= 0x10ffff && (code < 0xd800 || code > 0xdfff)
             ? String.fromCodePoint(code)
-            : null;
+            : whole;
         }
-        at += whole.length;
-        out.push({ ch: ch ?? whole, end: base + at, span });
-        continue;
+        start = amp;
       }
+    } else if (start > 0 && /[\uDC00-\uDFFF]/.test(ch) && /[\uD800-\uDBFF]/.test(raw[start - 1]!)) {
+      start -= 1;
+      ch = raw.slice(start, at);
     }
-    const point = raw.codePointAt(at);
-    const ch = point === undefined ? raw[at]! : String.fromCodePoint(point);
-    at += ch.length;
-    out.push({ ch, end: base + at, span });
+    at = start;
+    if (!foundTail && !/^\s$/u.test(ch)) {
+      paragraph.tail = { ch, end, span };
+      foundTail = true;
+    }
+    const kind = classOf(ch);
+    if (kind !== 'N' && kind !== 'M') {
+      paragraph.lastDirectional = kind;
+      return;
+    }
   }
-  return out;
 }
 
 /** פסקה אחת: התווים שנאספו מ-`<w:t>` שלה, בסדר. */
 interface ParagraphRecord {
-  chars: DecodedChar[];
+  tail: DecodedChar | null;
+  lastDirectional: CharClass | null;
 }
 
 /**
@@ -233,13 +249,8 @@ interface ParagraphRecord {
  * כתב ימנית.
  */
 function insertionFor(paragraph: ParagraphRecord): XmlInsert | null {
-  const chars = paragraph.chars;
-  // הזנב הרווחי יורד: ההכנסה נכנסת לפניו, וכך הרווח נשאר סופי ונמחק כמו קודם.
-  let last = chars.length - 1;
-  while (last >= 0 && /^\s$/u.test(chars[last]!.ch)) last -= 1;
-  if (last < 0) return null;
-
-  const tail = chars[last]!;
+  const tail = paragraph.tail;
+  if (!tail) return null;
   // כבר סומן. ‏RLM הוא עצמו חזק ימני, ולכן בלי הבדיקה הזאת פסקה שיש לה רווח
   // סופי הייתה מקבלת RLM נוסף בכל שמירה.
   if (tail.ch === RLM) return null;
@@ -247,15 +258,7 @@ function insertionFor(paragraph: ParagraphRecord): XmlInsert | null {
   // שכנו, ופסקה שנגמרת בו אינה המקרה שדווח.
   if (classOf(tail.ch) !== 'N') return null;
 
-  for (let i = last - 1; i >= 0; i -= 1) {
-    const kind = classOf(chars[i]!.ch);
-    if (kind === 'N' || kind === 'M') continue;
-    // המכריע הראשון שנמצא: ימני מתקן, כל דבר אחר יוצא מהתחום הצר.
-    return kind === 'R' ? { at: tail.end, text: RLM, span: tail.span } : null;
-  }
-  // פסקה שכולה ניטרלית — אין בה שום עדות לכיוון, וניחוש כאן היה נוגע במסמכים
-  // לטיניים.
-  return null;
+  return paragraph.lastDirectional === 'R' ? { at: tail.end, text: RLM, span: tail.span } : null;
 }
 
 /**
@@ -296,7 +299,7 @@ function wordPrefix(xml: string): string | null {
  */
 export function markNeutralParagraphEnds(xml: string): string | null {
   // חיפוש אחד לפני הסריקה: חלק שאין בו אף אות ימנית אינו נוגע לזה בכלל.
-  if (!RTL_SCRIPT.test(xml)) return null;
+  if (!RTL_SCRIPT.test(xml) && !/&#(?:x[0-9a-fA-F]+|\d+);/.test(xml)) return null;
   const prefix = wordPrefix(xml);
   if (prefix === null) return null;
 
@@ -336,7 +339,7 @@ export function markNeutralParagraphEnds(xml: string): string | null {
         const at = done ? insertionFor(done) : null;
         if (at !== null) inserts.push(at);
       } else {
-        paragraphs.push({ chars: [] });
+        paragraphs.push({ tail: null, lastDirectional: null });
       }
       continue;
     }
@@ -356,9 +359,7 @@ export function markNeutralParagraphEnds(xml: string): string | null {
       const paragraph = paragraphs[paragraphs.length - 1];
       if (closing) {
         if (textFrom !== null && paragraph) {
-          paragraph.chars.push(
-            ...decodeWithOffsets(xml.slice(textFrom, match.index), textFrom, match.index),
-          );
+          readTextTail(paragraph, xml.slice(textFrom, match.index), textFrom, match.index);
         }
         textFrom = null;
       } else {

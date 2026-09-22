@@ -351,6 +351,9 @@ async function measure(engine, label, bytes, times) {
 async function main() {
   const paragraphs = Number(process.argv[2] ?? 40000);
   const times = Number(process.argv[3] ?? 5);
+  if (!Number.isInteger(paragraphs) || paragraphs <= 0 || !Number.isInteger(times) || times <= 0) {
+    throw new Error('paragraphs and repetitions must be positive integers');
+  }
   const engine = await loadEngine();
 
   console.log(`postflight-bench — ${paragraphs.toLocaleString('he-IL')} פסקאות, ${times} חזרות, Node ${process.version}`);
@@ -362,12 +365,16 @@ async function main() {
   if (!fixed) throw new Error('הפיקסטורה העברית לא תוקנה — אין מצב steady למדוד');
   const steady = await measure(engine, 'steady — אותו מסמך אחרי שכבר תוקן', fixed, times);
   const again = await engine.postflightDocx(fixed);
+  if (again !== null) throw new Error('steady fixture is not idempotent');
   console.log(`   אידמפוטנטי: מעבר שני מחזיר ${again === null ? 'null — אין מה לתקן' : '**בייטים חדשים**'}`);
 
   // `false` — בלי `w:rtl`. זה מה שמבודד את היציאה המוקדמת של המראה; עם
   // ברירת המחדל הפיקסטורה נושאת הצהרות, והמראה רצה במלואה.
   const latin = buildFixture(paragraphs, LAT, false);
   const plain = await measure(engine, 'latin — בלי אף אות ימנית', latin, times);
+  if (plain.phase.changedParts !== 0 || (await engine.postflightDocx(latin)) !== null) {
+    throw new Error('Latin control must not rewrite any parts');
+  }
 
   console.log('\n── ההכרעה במספרים');
   const share = (part, whole) => `${((part / whole) * 100).toFixed(0)}%`;

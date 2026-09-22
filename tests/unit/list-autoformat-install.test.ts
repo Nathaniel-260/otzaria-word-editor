@@ -756,6 +756,30 @@ describe('installListAutoformat — סוג הבלוק', () => {
  * במנוע האמיתי הוא נמדד ב-~1ms.
  */
 describe('installListAutoformat — קלט בזמן ההמתנה שלפני המחיקה', () => {
+  it('כיבוי בזמן המתנה להיסטוריה מבטל גם המרה שכבר יצאה לדרך', async () => {
+    const app = await install();
+    app.holdHistory();
+    await type(app.textarea, `${ALEF}) `);
+    await app.whenHistoryParked();
+    app.handle.setEnabled(false);
+    app.releaseHistory();
+    await settle();
+    expect(app.blocks()[0]).toMatchObject({ text: `${ALEF}) `, list: false });
+    expect(named(app.calls, 'insert')).toHaveLength(0);
+  });
+
+  it('כיבוי מבטל המרה שעדיין ממתינה לקריאת המסמך', async () => {
+    const app = await install({ readsBlocked: true });
+    await type(app.textarea, `${ALEF}) `);
+    await app.idle();
+    await settle(20);
+    app.handle.setEnabled(false);
+    app.releaseReads();
+    await settle();
+    expect(app.blocks()[0]).toMatchObject({ text: `${ALEF}) `, list: false });
+    expect(named(app.calls, 'insert')).toHaveLength(0);
+  });
+
   it('לחיצה בזמן ההמתנה — אין מחיקה, גם כשהסמן לא זז', async () => {
     const app = await install();
     app.holdHistory();
@@ -1127,6 +1151,47 @@ describe('installListAutoformat — Ctrl+Z מיד אחרי ההמרה', () => {
     return app;
   }
 
+  function reinstall(app: Awaited<ReturnType<typeof converted>>) {
+    app.handle.dispose();
+    const handle = installListAutoformat({ container: app.container, host: app.host as never });
+    handles.push(handle);
+    return handle;
+  }
+
+  it('מעבר לטאב אחר וחזרה שומר את קבוצת הביטול של המסמך', async () => {
+    const app = await converted();
+    const handle = reinstall(app);
+    expect(handle.undo()).toBe(true);
+    await settle();
+    expect(named(app.calls, 'history.undo')).toHaveLength(3);
+    expect(app.blocks()[0]).toMatchObject({ text: `${ALEF}) `, list: false });
+  });
+
+  it('מעבר לטאב אחר וחזרה שומר גם את קבוצת החזרה', async () => {
+    const app = await converted();
+    expect(app.handle.undo()).toBe(true);
+    await settle();
+    const handle = reinstall(app);
+    expect(handle.redo()).toBe(true);
+    await settle();
+    expect(named(app.calls, 'history.redo')).toHaveLength(3);
+    expect(app.blocks()[0]).toMatchObject({ text: '', list: true });
+  });
+
+  it('ביטול שהתחיל לפני החלפת טאב מעדכן את קבוצת החזרה אחרי ההחלפה', async () => {
+    const app = await converted();
+    app.holdHistory();
+    expect(app.handle.undo()).toBe(true);
+    await app.whenHistoryParked();
+    const handle = reinstall(app);
+    app.releaseHistory();
+    await settle();
+    expect(handle.redo()).toBe(true);
+    await settle();
+    expect(app.blocks()[0]).toMatchObject({ text: '', list: true });
+    expect(named(app.calls, 'history.redo')).toHaveLength(3);
+  });
+
   it('הקשה אחת מחזירה את „א) ” כטקסט — שלושה צעדים יחד', async () => {
     const app = await converted();
     const event = ctrl(app.textarea, 'KeyZ');
@@ -1304,6 +1369,21 @@ describe('installListAutoformat — Ctrl+Z מיד אחרי ההמרה', () => {
     const event = ctrl(app.textarea, 'KeyZ');
     await settle();
     expect(event.defaultPrevented, 'הקבוצה נזרקה').toBe(false);
+  });
+
+  it('ביטול זר ואז עריכה חדשה באותו עומק אינו מבטל קבוצת המרה זרה', async () => {
+    const app = await converted();
+    await (app.host.activeEditor.doc as unknown as { history: { undo(): Promise<unknown> } }).history.undo();
+    await type(app.textarea, 'x');
+    await settle();
+
+    ctrl(app.textarea, 'KeyZ');
+    await settle();
+    expect(named(app.calls, 'history.undo'), 'ההקשה מבטלת רק את x').toHaveLength(2);
+    expect(app.blocks()[0]).toMatchObject({ text: '', list: true });
+    const next = ctrl(app.textarea, 'KeyZ');
+    await settle();
+    expect(next.defaultPrevented, 'קבוצת ההמרה הזרה נזרקה').toBe(false);
   });
 
   it('עריכה אחרי הביטול מוחקת את „חזור”', async () => {

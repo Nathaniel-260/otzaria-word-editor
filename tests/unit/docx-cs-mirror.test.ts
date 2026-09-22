@@ -203,6 +203,16 @@ describe('mirrorComplexScript — מה שאינו נגע', () => {
 });
 
 describe('mirrorComplexScript — הערובות', () => {
+  it('paired property tags receive sibling mirrors, not nested children', () => {
+    const input = doc(run(`<w:b w:val="0"></w:b><w:i></w:i><w:sz w:val="28"></w:sz>${RTL}`));
+    const expected = input
+      .replace('</w:b>', '</w:b><w:bCs w:val="0"/>')
+      .replace('</w:i>', '</w:i><w:iCs/>')
+      .replace('</w:sz>', '</w:sz><w:szCs w:val="28"/>');
+    expect(mirrorComplexScript(input)).toBe(expected);
+    expect(mirrorComplexScript(expected)).toBeNull();
+  });
+
   it('הפלט הוא הקלט ועוד האיברים שנוספו — שום בייט לא נמחק ולא זז', () => {
     const input = doc(
       run(`<w:rFonts w:ascii="David"/><w:b/><w:i/><w:sz w:val="28"/>${RTL}`) + run('<w:b/>', 'לטינית'),
