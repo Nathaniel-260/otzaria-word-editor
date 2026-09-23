@@ -1,7 +1,11 @@
 <template>
+  <!-- `ribbon-menu--large`: כפתור גדול שאינו מפוצל. בשלב הבינוני של הרצועה
+       הוא נעשה קטן ותופס שורה אחת ולא טור (styles/ribbon.css) — מחלקה ולא
+       `:has()`, שכל אחד מהם דורש אישור (tests/unit/css-hygiene.test.ts). -->
   <div
     ref="containerRef"
     class="ribbon-menu"
+    :class="{ 'ribbon-menu--large': variant === 'large' && !split }"
     @keydown.escape="onEscape"
   >
     <!--

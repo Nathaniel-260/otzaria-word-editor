@@ -490,6 +490,88 @@
   cursor: default;
 }
 
+/* ------------------------------------------------------------------ */
+/* שלבי ההקטנה שלפני הכיווץ (ui/ribbon/overflow.ts)                      */
+/* ------------------------------------------------------------------ */
+
+/* השלב נכתב כ-`data-scale` על שורש הקבוצה: 1 בינוני, 2 קטן, ובלי התכונה —
+   פרוש. CSS בלבד, בכוונה: הבקר מודד את רוחב הקבוצה בכל שלב בכתיבה וקריאה
+   סינכרונית, ומה שדורש רינדור של Vue לא היה ניתן למדידה כך.
+
+   **בינוני** — מה ש-Word עושה: הכפתורים הגדולים נעשים קטנים, בטורים של
+   שלושה. רשת ולא `flex-wrap: column`: ב-Chromium רוחב של flex עמודתי שעוטף
+   נמדד כעמודה אחת, והקבוצה הייתה נשפכת על שכנתה. שלוש שורות של
+   `--ribbon-row-h` עם שני רווחים הן בדיוק `--ribbon-content-h`, ולכן הגובה
+   של הקבוצה אינו זז באף שלב.
+
+   מה שאינו כפתור גדול בודד — מחסנית, גלריה, בורר, כפתור מפוצל גדול — תופס
+   טור שלם ונשאר כמו שהוא: הוא כבר בנוי לגובה הקבוצה.
+
+   גם הראשון בקבוצה אינו מוקטן באף שלב (`:not(:first-child)` בכל הכללים
+   למטה): הוא הפעולה הראשית שלה — „הדבק”, „תוכן עניינים”, „הערת שוליים” —
+   ו-Word משאיר אותו גדול עד שהקבוצה כולה מתקפלת. לכן קבוצה של כפתור גדול
+   אחד („טבלה”) אינה מתכווצת בשלבים, רק לצ'יפ. */
+.word-ribbon-group[data-scale] .word-group-content:not(.column-flow) {
+  display: grid;
+  grid-auto-flow: column;
+  grid-template-rows: repeat(3, var(--ribbon-row-h));
+  row-gap: var(--ribbon-row-gap);
+  column-gap: 3px;
+  align-items: center;
+  justify-items: stretch;
+}
+
+.word-ribbon-group[data-scale] .word-group-content:not(.column-flow) > * {
+  grid-row: span 3;
+}
+
+.word-ribbon-group[data-scale] .word-group-content:not(.column-flow) > .word-btn.btn-large:not(:first-child),
+.word-ribbon-group[data-scale] .word-group-content:not(.column-flow) > .ribbon-menu--large:not(:first-child) {
+  grid-row: span 1;
+}
+
+.word-ribbon-group[data-scale] .word-group-content > .word-separator {
+  display: none;
+}
+
+/* הכפתור הגדול בלבוש של `.btn-small`, בדיוק באותן מידות — כדי שבטור אחד עם
+   מחסנית שכנה השורות יתיישרו. האייקון מקבל גודל מה-`style` של SvgIcon, ולכן
+   `!important` הוא הדרך היחידה לגבור עליו מכאן. */
+.word-ribbon-group[data-scale] .word-group-content > .word-btn.btn-large:not(:first-child),
+.word-ribbon-group[data-scale] .word-group-content > .ribbon-menu:not(:first-child) > .word-btn.btn-large {
+  flex-direction: row;
+  justify-content: flex-start;
+  gap: 4px;
+  height: var(--ribbon-row-h);
+  min-width: 0;
+  width: 100%;
+  padding: 2px 6px;
+}
+
+.word-ribbon-group[data-scale] .word-group-content > .word-btn.btn-large:not(:first-child) > .svg-icon,
+.word-ribbon-group[data-scale] .word-group-content > .ribbon-menu:not(:first-child) > .word-btn.btn-large > .svg-icon {
+  width: 16px !important;
+  height: 16px !important;
+}
+
+/* **קטן** — התוויות יורדות ונשאר האייקון. מוסתרות לעין ולא `display: none`:
+   בכפתור עם תווית גלויה אין `aria-label` (RibbonButton.vue), והתווית היא
+   השם הנגיש שלו. הטולטיפ נושא את השם גם הוא (`data-tip-title`).
+
+   רק בכפתור שיש לו אייקון (`.word-btn--icon`, RibbonButton.vue): ב„שולחן העורך” יש כפתורים
+   של תווית בלבד („גודל עמוד ושוליים”, „סמן עמודים”), והסתרת התווית השאירה
+   שם קבוצה ריקה. */
+.word-ribbon-group[data-scale='2'] .word-btn--icon.btn-small > .btn-label,
+.word-ribbon-group[data-scale='2'] .word-group-content > .word-btn--icon.btn-large:not(:first-child) > .btn-label,
+.word-ribbon-group[data-scale='2'] .word-group-content > .ribbon-menu:not(:first-child) > .word-btn--icon.btn-large > .btn-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 /* @pointerdown.prevent על פקדי הרצועה שומר את הבחירה בעורך, ובמחיר הזה הכפתור
    גם אינו מקבל מיקוד בלחיצה — כלומר המקלדת היא הדרך היחידה למקד אותו, וטבעת
    המיקוד חייבת להישאר נראית. offset שלילי ולא חיובי: לרצועה יש overflow משלה,
