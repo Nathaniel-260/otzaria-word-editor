@@ -62,6 +62,7 @@ const MEASURE = `JSON.stringify((function () {
      שהיה קורה אם הרשת של השלב הבינוני נשברת. */
   var spilled = [];
   var empty = [];
+  var noPrimary = [];
   body.querySelectorAll('.word-ribbon-group[data-scale] .word-group-content').forEach(function (c) {
     var cr = c.getBoundingClientRect();
     var gr = c.closest('.word-ribbon-group').getBoundingClientRect();
@@ -81,6 +82,18 @@ const MEASURE = `JSON.stringify((function () {
       });
       if (!seen) empty.push((b.textContent || b.getAttribute('aria-label') || '?').trim().slice(0, 24));
     });
+    /* הפעולה הראשית נשארת גדולה: קבוצה שיש בה כפתור גדול שומרת לפחות אחד
+       באייקון של 32. ב„מידע” של „קובץ” „אודות” הוקטן לאייקון בודד, כי הכלל
+       חיפש את הילד הראשון ולא את הגדול הראשון. */
+    var larges = c.querySelectorAll(':scope > .word-btn.btn-large, :scope > .ribbon-menu--large > .word-btn.btn-large');
+    var kept = Array.prototype.some.call(larges, function (b) {
+      var icon = b.querySelector('.svg-icon');
+      return icon && Math.round(icon.getBoundingClientRect().height) === 32;
+    });
+    if (larges.length && !kept) {
+      var t = c.closest('.word-ribbon-group').querySelector('.word-group-title');
+      noPrimary.push(t ? t.textContent.trim() : '?');
+    }
   });
   /* האייקון הגדול: של הצ'יפים, ושל הכפתורים הגדולים בקבוצות הפרושות —
      מלמעלה ביחס לגוף, כדי ששני הסוגים יימדדו באותה מערכת. */
@@ -98,6 +111,7 @@ const MEASURE = `JSON.stringify((function () {
     groups: groups,
     spilled: spilled,
     empty: empty,
+    noPrimary: noPrimary,
     chipIcons: icons('.word-group-chip > .svg-icon'),
     largeIcons: icons('.word-ribbon-group:not(.word-ribbon-group--collapsed) .word-btn.btn-large:not(.word-split .word-btn) > .svg-icon'),
   };
@@ -132,10 +146,11 @@ function uniformity(label, state, base) {
     report.pass(`${label} — גובה הרצועה`, `${state.bodyH}px`);
   }
   if (state.groups.some((g) => g.scale > 0)) {
-    if (state.spilled.length || state.empty.length) {
+    if (state.spilled.length || state.empty.length || state.noPrimary.length) {
       report.fail(
         `${label} — שלבי ההקטנה`,
-        `נשפכו מהקבוצה: ${state.spilled.join(', ') || 'אין'}; כפתורים ריקים: ${state.empty.join(', ') || 'אין'}`,
+        `נשפכו מהקבוצה: ${state.spilled.join(', ') || 'אין'}; כפתורים ריקים: ${state.empty.join(', ') || 'אין'}; ` +
+          `בלי כפתור גדול: ${state.noPrimary.join(', ') || 'אין'}`,
       );
     } else {
       const staged = state.groups.filter((g) => g.scale > 0).map((g) => `${g.title}:${g.scale}`);

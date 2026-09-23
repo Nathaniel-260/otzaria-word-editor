@@ -506,10 +506,12 @@
    מה שאינו כפתור גדול בודד — מחסנית, גלריה, בורר, כפתור מפוצל גדול — תופס
    טור שלם ונשאר כמו שהוא: הוא כבר בנוי לגובה הקבוצה.
 
-   גם הראשון בקבוצה אינו מוקטן באף שלב (`:not(:first-child)` בכל הכללים
-   למטה): הוא הפעולה הראשית שלה — „הדבק”, „תוכן עניינים”, „הערת שוליים” —
-   ו-Word משאיר אותו גדול עד שהקבוצה כולה מתקפלת. לכן קבוצה של כפתור גדול
-   אחד („טבלה”) אינה מתכווצת בשלבים, רק לצ'יפ. */
+   גם הגדול הראשון בקבוצה אינו מוקטן באף שלב (`:nth-child(1 of …)` בכל
+   הכללים למטה): הוא הפעולה הראשית שלה — „הדבק”, „תוכן עניינים”, „אודות” —
+   ו-Word משאיר אותו גדול עד שהקבוצה כולה מתקפלת. הגדול הראשון ולא הילד
+   הראשון: ב„מידע” המחסנית קודמת ל„אודות”, ו-`:first-child` הקטין את „אודות”
+   לאייקון בודד שצף בראש הטור. קבוצה של כפתור גדול אחד („טבלה”) אינה
+   מתכווצת בשלבים כלל, רק לצ'יפ. */
 .word-ribbon-group[data-scale] .word-group-content:not(.column-flow) {
   display: grid;
   grid-auto-flow: column;
@@ -524,8 +526,8 @@
   grid-row: span 3;
 }
 
-.word-ribbon-group[data-scale] .word-group-content:not(.column-flow) > .word-btn.btn-large:not(:first-child),
-.word-ribbon-group[data-scale] .word-group-content:not(.column-flow) > .ribbon-menu--large:not(:first-child) {
+.word-ribbon-group[data-scale] .word-group-content:not(.column-flow) > .word-btn.btn-large:not(:nth-child(1 of .word-btn.btn-large, .ribbon-menu--large, .color-picker-container--large)),
+.word-ribbon-group[data-scale] .word-group-content:not(.column-flow) > .ribbon-menu--large:not(.ribbon-menu--split):not(:nth-child(1 of .word-btn.btn-large, .ribbon-menu--large, .color-picker-container--large)) {
   grid-row: span 1;
 }
 
@@ -536,8 +538,8 @@
 /* הכפתור הגדול בלבוש של `.btn-small`, בדיוק באותן מידות — כדי שבטור אחד עם
    מחסנית שכנה השורות יתיישרו. האייקון מקבל גודל מה-`style` של SvgIcon, ולכן
    `!important` הוא הדרך היחידה לגבור עליו מכאן. */
-.word-ribbon-group[data-scale] .word-group-content > .word-btn.btn-large:not(:first-child),
-.word-ribbon-group[data-scale] .word-group-content > .ribbon-menu:not(:first-child) > .word-btn.btn-large {
+.word-ribbon-group[data-scale] .word-group-content > .word-btn.btn-large:not(:nth-child(1 of .word-btn.btn-large, .ribbon-menu--large, .color-picker-container--large)),
+.word-ribbon-group[data-scale] .word-group-content > .ribbon-menu--large:not(.ribbon-menu--split):not(:nth-child(1 of .word-btn.btn-large, .ribbon-menu--large, .color-picker-container--large)) > .word-btn.btn-large {
   flex-direction: row;
   justify-content: flex-start;
   gap: 4px;
@@ -547,8 +549,8 @@
   padding: 2px 6px;
 }
 
-.word-ribbon-group[data-scale] .word-group-content > .word-btn.btn-large:not(:first-child) > .svg-icon,
-.word-ribbon-group[data-scale] .word-group-content > .ribbon-menu:not(:first-child) > .word-btn.btn-large > .svg-icon {
+.word-ribbon-group[data-scale] .word-group-content > .word-btn.btn-large:not(:nth-child(1 of .word-btn.btn-large, .ribbon-menu--large, .color-picker-container--large)) > .svg-icon,
+.word-ribbon-group[data-scale] .word-group-content > .ribbon-menu--large:not(.ribbon-menu--split):not(:nth-child(1 of .word-btn.btn-large, .ribbon-menu--large, .color-picker-container--large)) > .word-btn.btn-large > .svg-icon {
   width: 16px !important;
   height: 16px !important;
 }
@@ -561,8 +563,8 @@
    של תווית בלבד („גודל עמוד ושוליים”, „סמן עמודים”), והסתרת התווית השאירה
    שם קבוצה ריקה. */
 .word-ribbon-group[data-scale='2'] .word-btn--icon.btn-small > .btn-label,
-.word-ribbon-group[data-scale='2'] .word-group-content > .word-btn--icon.btn-large:not(:first-child) > .btn-label,
-.word-ribbon-group[data-scale='2'] .word-group-content > .ribbon-menu:not(:first-child) > .word-btn--icon.btn-large > .btn-label {
+.word-ribbon-group[data-scale='2'] .word-group-content > .word-btn--icon.btn-large:not(:nth-child(1 of .word-btn.btn-large, .ribbon-menu--large, .color-picker-container--large)) > .btn-label,
+.word-ribbon-group[data-scale='2'] .word-group-content > .ribbon-menu--large:not(.ribbon-menu--split):not(:nth-child(1 of .word-btn.btn-large, .ribbon-menu--large, .color-picker-container--large)) > .word-btn--icon.btn-large > .btn-label {
   position: absolute;
   width: 1px;
   height: 1px;
