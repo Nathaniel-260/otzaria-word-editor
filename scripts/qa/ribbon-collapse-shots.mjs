@@ -21,7 +21,7 @@ const MEASURE = `JSON.stringify((function () {
   body.querySelectorAll('.word-ribbon-group').forEach(function (g) {
     var r = g.getBoundingClientRect();
     var chip = g.querySelector('.word-group-chip');
-    var row = { t: ((g.querySelector('.word-group-title') || chip || {}).textContent || '').trim(), x: Math.round(r.left), w: Math.round(r.width), h: Math.round(r.height), top: Math.round(r.top - b.top) };
+    var row = { t: ((g.querySelector('.word-group-title') || chip || {}).textContent || '').trim(), x: Math.round(r.left), w: Math.round(r.width), h: Math.round(r.height), top: Math.round(r.top - b.top), s: Number(g.dataset.scale || 0) };
     if (chip) {
       var c = chip.getBoundingClientRect();
       var ic = chip.querySelector('svg').getBoundingClientRect();
