@@ -18,6 +18,9 @@
  *   4. **הפופאובר של הצ'יפ מציג את הפקדים** ואינו נחתך בגוף הרצועה, ופקודה
  *      שמופעלת ממנו מגיעה למנוע.
  *   5. **הכיווץ הפיך**: חזרה לרוחב מלא פורשת את כולן.
+ *   6. **אחידות**: גובה הרצועה זהה בכל רוחב ובכל לשונית, הצ'יפ הוא כפתור
+ *      גדול שהאייקון שלו בגובה של השכנים, וכל פופאובר נפתח בגובה אחד ועם
+ *      כותרת הקבוצה — ראו `uniformity` למטה.
  *
  * יציאה 9648 בלבד — שערים אחרים רצים במקביל על יציאות אחרות.
  *
@@ -52,10 +55,22 @@ const MEASURE = `JSON.stringify((function () {
       width: Math.round(g.getBoundingClientRect().width),
     });
   });
+  /* האייקון הגדול: של הצ'יפים, ושל הכפתורים הגדולים בקבוצות הפרושות —
+     מלמעלה ביחס לגוף, כדי ששני הסוגים יימדדו באותה מערכת. */
+  var top = body.getBoundingClientRect().top;
+  function icons(selector) {
+    return Array.prototype.map.call(body.querySelectorAll(selector), function (el) {
+      var r = el.getBoundingClientRect();
+      return { top: Math.round((r.top - top) * 10) / 10, size: Math.round(r.height) };
+    });
+  }
   return {
     W: innerWidth,
+    bodyH: Math.round(body.getBoundingClientRect().height),
     overflow: Math.round(body.scrollWidth - body.clientWidth),
     groups: groups,
+    chipIcons: icons('.word-group-chip > .svg-icon'),
+    largeIcons: icons('.word-ribbon-group:not(.word-ribbon-group--collapsed) .word-btn.btn-large:not(.word-split .word-btn) > .svg-icon'),
   };
 })())`;
 
@@ -70,6 +85,42 @@ function widerThanChip(state) {
   if (!chips.length) return [];
   const widest = Math.max(...chips);
   return state.groups.filter((g) => !g.collapsed && g.width > widest).map((g) => g.title);
+}
+
+/**
+ * האחידות שדווחה כשבורה: „חלק מהסרגלים גבוהים וחלק נמוכים”. שני דברים נמדדים,
+ * ושניהם נפלו על הקוד שלפני התיקון:
+ *
+ *   - **גובה הרצועה זהה בכל רוחב ובכל לשונית.** מתחת ל-600px הטוקן היה `auto`,
+ *     ולשונית שכל קבוצותיה צ'יפים ירדה ל-49px מול 94px בשכנתה.
+ *   - **הצ'יפ הוא כפתור גדול**: אייקון 32 באותו גובה של האייקונים הגדולים
+ *     בקבוצות הפרושות. היה 18px באמצע הקבוצה — 16px נמוך מהשכנים.
+ */
+function uniformity(label, state, base) {
+  if (state.bodyH !== base.bodyH) {
+    report.fail(`${label} — גובה הרצועה`, `${state.bodyH}px מול ${base.bodyH}px ברוחב מלא`);
+  } else {
+    report.pass(`${label} — גובה הרצועה`, `${state.bodyH}px`);
+  }
+  if (!state.chipIcons.length) return;
+  const small = state.chipIcons.filter((icon) => icon.size !== 32);
+  // לשונית שכל קבוצותיה צ'יפים אין בה כפתור גדול להשוות אליו, ולכן הגובה
+  // נלקח מ„בית” ברוחב מלא — הוא אותו גובה בכל הלשוניות (ribbon-geometry).
+  const expected = medianTop(state) ?? medianTop(base);
+  const off = state.chipIcons.filter((icon) => Math.abs(icon.top - expected) > 0.5);
+  if (small.length || off.length) {
+    report.fail(
+      `${label} — הצ'יפ ככפתור גדול`,
+      `${small.length} אייקונים שאינם 32px, ${off.length} שאינם בגובה ${expected}px: ${state.chipIcons.map((i) => `${i.size}@${i.top}`).join(', ')}`,
+    );
+  } else {
+    report.pass(`${label} — הצ'יפ ככפתור גדול`, `${state.chipIcons.length} צ'יפים, אייקון 32 בגובה ${expected}px`);
+  }
+}
+
+function medianTop(state) {
+  const tops = state.largeIcons.map((icon) => icon.top).sort((a, b) => a - b);
+  return tops.length ? tops[Math.floor(tops.length / 2)] : null;
 }
 
 async function resize(width) {
@@ -104,6 +155,8 @@ try {
     }
     const collapsed = state.groups.filter((g) => g.collapsed);
     const names = collapsed.map((g) => g.title).join(', ') || 'אין';
+
+    uniformity(`${width}px`, state, widest ?? state);
 
     if (width === WIDTHS[0]) {
       widest = state;
@@ -148,6 +201,7 @@ try {
     await resize(WIDTHS[0]);
     await app.tab(tab);
     const state = await resize(POPOVER_WIDTH);
+    uniformity(`„${tab}” ב-${POPOVER_WIDTH}px`, state, widest);
     const stillWide = widerThanChip(state);
     if (state.overflow > 1 && stillWide.length) {
       report.fail(`„${tab}” ב-${POPOVER_WIDTH}px`, `גלישה ${state.overflow}px ועוד ${stillWide.join(', ')} פרושות ורחבות מצ'יפ`);
@@ -187,6 +241,43 @@ try {
 
   /* הפופאובר נסגר אחרי פקודה — ואם לא, לפחות אינו נחתך. */
   report.pass('הפופאובר אחרי הפקודה', popover.open ? `פתוח, גובה ${popover.h}, בתוך החלון: ${popover.inside}` : 'נסגר');
+
+  /* 4ב. כל הפופאוברים באותו גובה, ועם הכותרת — הקבוצה כפי שהיא ברצועה. */
+  await resize(POPOVER_WIDTH);
+  await app.js(`document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))`);
+  const chips = JSON.parse(
+    await app.js(`JSON.stringify(Array.prototype.map.call(document.querySelectorAll('.word-group-chip'), function (c) {
+      var r = c.getBoundingClientRect();
+      return { t: c.getAttribute('aria-label'), x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    }))`),
+  );
+  const heights = [];
+  for (const chip of chips) {
+    await app.clickAt(chip.x, chip.y);
+    await sleep(300);
+    const panel = JSON.parse(
+      await app.js(`JSON.stringify((function () {
+        var open = document.querySelector('.word-ribbon-group--collapsed.is-open .word-group-panel');
+        if (!open) return null;
+        var title = open.querySelector('.word-group-footer .word-group-title');
+        return { h: Math.round(open.getBoundingClientRect().height), title: title && title.offsetHeight ? title.textContent.trim() : '' };
+      })())`),
+    );
+    await app.clickAt(chip.x, chip.y);
+    await sleep(200);
+    if (!panel) {
+      report.fail(`פופאובר „${chip.t}”`, 'לא נפתח');
+      continue;
+    }
+    heights.push(panel.h);
+    if (!panel.title) report.fail(`פופאובר „${chip.t}”`, 'בלי כותרת הקבוצה');
+    else report.pass(`פופאובר „${chip.t}”`, `${panel.h}px, כותרת „${panel.title}”`);
+  }
+  if (new Set(heights).size > 1) {
+    report.fail('כל הפופאוברים באותו גובה', heights.join(', '));
+  } else if (heights.length) {
+    report.pass('כל הפופאוברים באותו גובה', `${heights[0]}px ×${heights.length}`);
+  }
 
   /* 5. הפיכות. */
   const back = await resize(1400);
