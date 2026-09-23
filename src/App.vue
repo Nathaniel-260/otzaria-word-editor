@@ -268,6 +268,24 @@
       :busy="isOpening || saveSnapshot.isSaving"
       :discarded-count="discardedBackups.length"
       :previous-version="previousVersion"
+      :notice="openDialogNotice"
+      :place="openSources.place.value"
+      :library="openSources.library.value"
+      :library-state="openSources.libraryState.value"
+      :library-message="openSources.libraryMessage.value"
+      :folders="openSources.folders.value"
+      :folders-supported="openSources.foldersSupported.value"
+      :listings="openSources.listings"
+      :source-query="sourceSearch"
+      @update:source-query="sourceSearch = $event"
+      @select-place="onOpenDialogPlace"
+      @expand-folder="openSources.ensureListing"
+      @add-folder="onOpenDialogAddFolder"
+      @remove-folder="onOpenDialogRemoveFolder"
+      @open-library-book="onOpenDialogLibraryBook"
+      @open-folder-file="onOpenDialogFolderFile"
+      @refresh-source="onOpenDialogRefresh"
+      @search-library="onOpenDialogSearchLibrary"
       @close="isOpenDialogOpen = false"
       @browse="onOpenDialogBrowse"
       @create-from-template="onOpenDialogCreate"
@@ -653,6 +671,9 @@ import { readFormat } from './engine/format-reading';
 import { applyPreset } from './engine/apply-preset';
 import type { ShellAction } from './ui/shortcuts/registry';
 import { useContextMenu } from './composables/use-context-menu';
+import { useOpenSources } from './composables/use-open-sources';
+import { openDocFolderFile, openLibraryBook, type SourceResult } from './host/open-sources';
+import type { LibraryBook, OpenPlace } from './sessions/open-sources';
 import ContextMenu from './ui/menu/ContextMenu.vue';
 import {
   createShortcutDispatcher,
@@ -1121,6 +1142,19 @@ const isDiscardedBusy = computed(
   () => isOpening.value || saveSnapshot.value.isSaving || isDiscardedOpening.value,
 );
 const recentSearch = ref('');
+
+/**
+ * העץ של „פתח מסמך” — ספרי ה-Word מהספרייה והתיקיות של המשתמש. המצב, המטמון
+ * והרענון ברקע ב-`useOpenSources`; כאן רק החיווט לדיאלוג ולמסלול הפתיחה.
+ */
+const openSources = useOpenSources();
+/** החיפוש של המקומות שאינם „אחרונים”. נפרד מ-`recentSearch`, כמו בדיאלוג. */
+const sourceSearch = ref('');
+/**
+ * הודעה בתחתית הדיאלוג — כשל פתיחה מהעץ. שורת המצב של העורך יושבת מתחת
+ * לרקע המעומעם, והודעה שנכתבת לשם בזמן שהדיאלוג פתוח אינה נקראת.
+ */
+const openDialogNotice = ref('');
 
 /**
  * רושמת מסמך שנפתח או שנשמר בשם חדש לרשימת האחרונים.
@@ -3254,7 +3288,88 @@ function openOpenDialog(intent: 'new' | 'open'): void {
   // אחרי שני השערים ולא לפניהם: פתיחה שנחסמה אינה משנה כלום, ובכלל זה את
   // המקום שהפתיחה **הבאה** תנחת בו.
   openDialogIntent.value = intent;
+  openDialogNotice.value = '';
+  sourceSearch.value = '';
   isOpenDialogOpen.value = true;
+  // ברקע, ואחרי שהחלון כבר על המסך: העץ מוצג מהמטמון, והרענון מחליף אותו
+  // כשהוא מגיע. תיקייה שנבחרה בפעם הקודמת מתרעננת — ייתכן שנוספו בה קבצים.
+  void openSources.init().then(() => {
+    void openSources.refreshLibrary();
+    const place = openSources.place.value;
+    if (place.kind === 'folder') void openSources.listFolder(place.token, place.path);
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/* „פתח מסמך” — העץ                                                     */
+/* ------------------------------------------------------------------ */
+
+function onOpenDialogPlace(place: OpenPlace): void {
+  openDialogNotice.value = '';
+  sourceSearch.value = '';
+  openSources.setPlace(place);
+}
+
+/** „הצג הכול” מתחת לאחרונים: הספרייה, עם אותו חיפוש. */
+function onOpenDialogSearchLibrary(query: string): void {
+  openSources.setPlace({ kind: 'library', path: '/' });
+  sourceSearch.value = query;
+}
+
+async function onOpenDialogAddFolder(): Promise<void> {
+  openDialogNotice.value = '';
+  const result = await openSources.addDocFolder();
+  if (!result.ok) openDialogNotice.value = result.message;
+}
+
+/**
+ * „הסר את התיקייה מהרשימה” — אינה נוגעת בדיסק, ולכן אין שאלת אישור. מה
+ * שנעלם הוא שורה בעץ, והוספה חוזרת היא שתי לחיצות.
+ */
+function onOpenDialogRemoveFolder(token: string): void {
+  openSources.removeDocFolder(token);
+}
+
+function onOpenDialogRefresh(place: OpenPlace): void {
+  if (place.kind === 'folder') void openSources.listFolder(place.token, place.path);
+  else void openSources.refreshLibrary(true);
+}
+
+/**
+ * פתיחה מהעץ: ספר מהספרייה או קובץ מתיקייה. אותו מבנה בדיוק כמו
+ * `onOpenDialogRecent` — שומר מפני לחיצה כפולה, ביטול כשהדיאלוג נסגר בזמן
+ * ההמתנה, וטאב חדש כשהפעיל אינו ריק — עם הבדל אחד: כשל אינו סוגר את החלון.
+ * ההודעה נכתבת בתחתיתו, והמשתמש נשאר במקום שבו הוא בחר.
+ *
+ * הקובץ נכנס ל„אחרונים” דרך `openDocument` עצמו, כמו כל פתיחה אחרת — ולכן
+ * ספר שנפתח פעם אחת מהספרייה זמין בפעם הבאה בלחיצה אחת, מהענף הראשון.
+ */
+async function openFromSource(resolve: () => Promise<SourceResult<UserFile>>): Promise<void> {
+  if (isOpenBusy() || recentOpenPending) return;
+  openDialogNotice.value = '';
+  recentOpenPending = true;
+  let result: SourceResult<UserFile>;
+  try {
+    result = await resolve();
+  } finally {
+    recentOpenPending = false;
+  }
+  if (!isOpenDialogOpen.value) return;
+  if (!result.ok) {
+    openDialogNotice.value = result.message;
+    return;
+  }
+  isOpenDialogOpen.value = false;
+  ensureOpenTargetTab();
+  await openDocument(result.value);
+}
+
+function onOpenDialogLibraryBook(book: LibraryBook): Promise<void> {
+  return openFromSource(() => openLibraryBook(book));
+}
+
+function onOpenDialogFolderFile(token: string, path: string, name: string): Promise<void> {
+  return openFromSource(() => openDocFolderFile(token, path, name));
 }
 
 /**
@@ -5375,6 +5490,9 @@ onMounted(async () => {
     // אותה הכרעה בדיוק כמו של „אחרונים”: מה שמגיע מ-storage אין לו הבטחת
     // סדר, והמיון הוא של הרשימה שכל שאר הקוד רואה — לא של התצוגה בלבד.
     discardedBackups.value = normalizeBackups(storedDiscarded);
+    // העץ של „פתח מסמך” מהמטמון — עכשיו, ולא בפתיחה הראשונה של הדיאלוג, כדי
+    // שהוא ייפתח מלא. אינו חוסם את העלייה: אין לו חלק בפתיחת המסמך.
+    void openSources.init();
     // צבע הבד מוחל כאן ולא בלשונית „תצוגה”: הפקד שמשנה אותו יושב בלשונית
     // שמורכבת רק כשהיא הפעילה (`v-else-if` ב-Ribbon.vue), והבד נראה מהרגע
     // הראשון. `applyCanvasColor` ולא `setCanvasColor` — זו קריאה, ואין טעם

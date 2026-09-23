@@ -20,7 +20,8 @@
     "navigation.write",
     "clipboard.read",
     "library.refresh",
-    "library.books.read"
+    "library.books.read",
+    "library.content.read"
   ],
   "contributes": {
     "startup": {

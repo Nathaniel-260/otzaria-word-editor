@@ -8,6 +8,7 @@
 import { call, tryCall } from './otzaria-client';
 import type { RecentDocument } from '../sessions/recent-documents';
 import type { DiscardedDocument } from '../sessions/discard-backup';
+import type { DocFolder, LibraryCache } from '../sessions/open-sources';
 
 /**
  * המסמך שהיה פתוח לאחרונה.
@@ -269,4 +270,44 @@ export async function loadDiscardBackups(): Promise<unknown> {
  */
 export async function saveDiscardBackups(list: readonly DiscardedDocument[]): Promise<void> {
   await tryCall('storage.set', { key: DISCARD_BACKUPS_KEY, value: [...list] });
+}
+
+const DOC_FOLDERS_KEY = 'open-dialog-folders';
+
+/**
+ * התיקיות שהמשתמש הוסיף ל„פתח מסמך”. גולמי — הפירוש ב-sessions/open-sources.ts
+ * (`normalizeFolders`), כמו כל שאר ההפרדות כאן. נשמרים token, שם ונתיב
+ * לתצוגה בלבד: ה-token הוא ההרשאה, והנתיב אינו פותח דבר בלעדיו.
+ */
+export async function loadDocFolders(): Promise<unknown> {
+  return tryCall<unknown>('storage.get', { key: DOC_FOLDERS_KEY });
+}
+
+export async function saveDocFolders(list: readonly DocFolder[]): Promise<void> {
+  await tryCall('storage.set', { key: DOC_FOLDERS_KEY, value: [...list] });
+}
+
+const LIBRARY_CACHE_KEY = 'open-dialog-library';
+
+/**
+ * העץ הגזום של ספרי ה-Word מהפעם הקודמת — מה שמאפשר לדיאלוג להיפתח מלא
+ * מיד, לפני שאוצריא ענתה. גולמי; הפענוח ב-`normalizeLibraryCache`.
+ */
+export async function loadLibraryCache(): Promise<unknown> {
+  return tryCall<unknown>('storage.get', { key: LIBRARY_CACHE_KEY });
+}
+
+export async function saveLibraryCache(cache: LibraryCache): Promise<void> {
+  await tryCall('storage.set', { key: LIBRARY_CACHE_KEY, value: cache });
+}
+
+const OPEN_PLACE_KEY = 'open-dialog-place';
+
+/** הצומת שהיה נבחר בעץ בפעם הקודמת — מחרוזת אטומה של הדיאלוג. */
+export async function loadOpenDialogPlace(): Promise<unknown> {
+  return tryCall<unknown>('storage.get', { key: OPEN_PLACE_KEY });
+}
+
+export async function saveOpenDialogPlace(place: string): Promise<void> {
+  await tryCall('storage.set', { key: OPEN_PLACE_KEY, value: place });
 }
