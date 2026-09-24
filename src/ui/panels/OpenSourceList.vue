@@ -485,8 +485,11 @@ function buildItems(): { items: Item[]; truncated?: boolean } {
 
 const footnote = computed(() => {
   if (view.value.truncated) return `מוצגות ${SEARCH_LIMIT} התוצאות הראשונות — אפשר לצמצם את החיפוש`;
-  if (props.place.kind === 'folder' && props.listing?.state === 'ready' && props.listing.listing.truncated) {
-    return 'התיקייה גדולה מאוד, ומוצג רק חלק ממנה';
+  if (props.place.kind === 'folder' && props.listing?.state === 'ready') {
+    const notes: string[] = [];
+    if (props.listing.listing.truncated) notes.push('התיקייה גדולה מאוד, ומוצג רק חלק ממנה');
+    if (props.listing.refreshError) notes.push('הרענון נכשל; עדיין מוצגים הנתונים הקודמים');
+    return notes.join(' · ');
   }
   return '';
 });

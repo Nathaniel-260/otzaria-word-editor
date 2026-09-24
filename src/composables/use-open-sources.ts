@@ -55,7 +55,13 @@ export type LibraryState = 'idle' | 'loading' | 'ready' | 'unsupported' | 'denie
 
 export type ListingState =
   | { state: 'loading' }
-  | { state: 'ready'; listing: FolderListing; refreshing: boolean }
+  | {
+      state: 'ready';
+      listing: FolderListing;
+      refreshing: boolean;
+      /** כשל ברענון שקט; הנתונים הקודמים נשארים זמינים. */
+      refreshError?: { reason: string; message: string };
+    }
   | { state: 'error'; reason: string; message: string };
 
 export function useOpenSources() {
@@ -132,7 +138,7 @@ export function useOpenSources() {
     if (running) return running;
 
     const previous = listings.get(key);
-    if (previous?.state === 'ready') listings.set(key, { ...previous, refreshing: true });
+    if (previous?.state === 'ready') listings.set(key, { ...previous, refreshing: true, refreshError: undefined });
     else listings.set(key, { state: 'loading' });
 
     const task = (async () => {
@@ -143,7 +149,17 @@ export function useOpenSources() {
         return;
       }
       if (result.reason === 'unsupported') foldersSupported.value = false;
-      listings.set(key, { state: 'error', reason: result.reason, message: result.message });
+      if (previous?.state === 'ready') {
+        // רענון נכשל אינו מוחק תוכן שכבר הוצג. משאירים אותו זמין, ומסמנים
+        // שהמידע עלול להיות ישן כדי שהרשימה תוכל להציג הודעה ורענון חוזר.
+        listings.set(key, {
+          ...previous,
+          refreshing: false,
+          refreshError: { reason: result.reason, message: result.message },
+        });
+      } else {
+        listings.set(key, { state: 'error', reason: result.reason, message: result.message });
+      }
     })().finally(() => inflight.delete(key));
     inflight.set(key, task);
     return task;

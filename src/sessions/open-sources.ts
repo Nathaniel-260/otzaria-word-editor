@@ -190,22 +190,32 @@ export interface LibraryHit {
  */
 export function searchLibrary(root: LibraryShelf | null, query: string, limit = 50): LibraryHit[] {
   const needle = foldForSearch(query);
-  if (!root || needle === '') return [];
+  const cap = Math.max(0, Math.floor(limit));
+  if (!root || needle === '' || cap === 0) return [];
   const starts: LibraryHit[] = [];
   const contains: LibraryHit[] = [];
-  const visit = (shelf: LibraryShelf, trail: string[]): void => {
+  /**
+   * מחזיקים רק את מה שיכול להיכנס לתוצאה הסופית. כל תוצאות ה-`starts`
+   * מדורגות לפני `contains`, לכן כשהגענו לתקרה שלהן אפשר לעצור את הסריקה.
+   */
+  const visit = (shelf: LibraryShelf, trail: string[]): boolean => {
     for (const book of shelf.books) {
       const title = foldForSearch(book.title);
       const where = trail.join(' / ');
-      if (title.startsWith(needle)) starts.push({ book, where });
-      else if (title.includes(needle) || foldForSearch(book.author).includes(needle)) {
-        contains.push({ book, where });
+      if (title.startsWith(needle)) {
+        starts.push({ book, where });
+        if (starts.length === cap) return true;
+      } else if (title.includes(needle) || foldForSearch(book.author).includes(needle)) {
+        if (contains.length < cap) contains.push({ book, where });
       }
     }
-    for (const child of shelf.shelves) visit(child, [...trail, child.title]);
+    for (const child of shelf.shelves) {
+      if (visit(child, [...trail, child.title])) return true;
+    }
+    return false;
   };
   visit(root, []);
-  return [...starts, ...contains].slice(0, limit);
+  return starts.length === cap ? starts : [...starts, ...contains].slice(0, cap);
 }
 
 /* ------------------------------------------------------------------ */
