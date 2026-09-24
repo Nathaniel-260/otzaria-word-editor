@@ -319,6 +319,10 @@ export function installRtlVerticalArrows({
    */
   let goalContentX: number | null = null;
   let owns = false;
+  // A vertical key we pass through may move the engine selection. Remember
+  // that one movement so it is not mistaken for an unrelated caret move on
+  // the next key (which would discard the goal column we still own).
+  let engineHandoffPending = false;
 
   /**
    * מה שכתבנו בפעם האחרונה — ואיתו התשובה לשאלה „האם מישהו אחר הזיז את הסמן
@@ -330,16 +334,21 @@ export function installRtlVerticalArrows({
    * הנכונות כאן הייתה נשענת על לראות את המקש, היא הייתה נשענת על **סדר
    * ההתקנה** ב-App.vue, ומשתנה בלי שאיש ישים לב ברגע שמישהו יסדר שם מחדש.
    *
-   * ההשוואה לעומת זאת עובדת תמיד: כל דבר שמזיז את הסמן — חץ אופקי, `End`,
-   * הקלדה, לחיצה, או המנוע עצמו — משאיר היסט אחר מזה שכתבנו, והעמודה נזרעת
-   * מחדש מהסמן המצויר.
+   * ההשוואה מזהה תזוזות של מודולים אחרים, והמאזין הגלובלי מאפס על הקלדה,
+   * לחיצה ומקשים שאינם אנכיים. חץ אנכי שמסרנו למנוע מסומן בנפרד, כדי שתנועה
+   * צפויה שלו — למשל דרך פסקה ריקה — לא תיחשב כאיפוס של עמודת המטרה.
    */
   let lastWrite: { blockId: string; offset: number } | null = null;
 
   const forget = (): void => {
     goalContentX = null;
     owns = false;
+    engineHandoffPending = false;
     lastWrite = null;
+  };
+
+  const passToEngine = (): void => {
+    if (owns) engineHandoffPending = true;
   };
 
   const onKeyDown = (event: KeyboardEvent): void => {
@@ -349,6 +358,7 @@ export function installRtlVerticalArrows({
     const setSelectionTarget = editor?.authoring?.setSelectionTarget;
     const readSnapshot = editor?.host?.readLiveSelectionSyncSnapshot;
     if (typeof setSelectionTarget !== 'function' || typeof readSnapshot !== 'function') {
+      passToEngine();
       return;
     }
 
@@ -358,22 +368,33 @@ export function installRtlVerticalArrows({
     const selection = snapshot?.selectionTarget;
     const head = selection?.end;
     if (!head || head.kind !== 'text' || typeof head.blockId !== 'string') {
+      passToEngine();
       return;
     }
     if (typeof head.offset !== 'number') {
+      passToEngine();
       return;
     }
 
     const caretRect = host.querySelector(CARET_SELECTOR)?.getBoundingClientRect();
     if (!caretRect) {
+      passToEngine();
       return;
     }
     const caretY = (caretRect.top + caretRect.bottom) / 2;
 
     // הסמן אינו היכן שהשארנו אותו — מישהו אחר הזיז אותו, והעמודה שלנו ישנה.
     if (owns && (lastWrite?.blockId !== head.blockId || lastWrite.offset !== head.offset)) {
-      forget();
+      if (engineHandoffPending) {
+        // A previous vertical key was deliberately given to the engine (for
+        // example, to cross an empty paragraph). Track its new caret position
+        // while retaining our original goal column.
+        lastWrite = { blockId: head.blockId, offset: head.offset };
+      } else {
+        forget();
+      }
     }
+    engineHandoffPending = false;
 
     // מקומי, ולא קריאה חוזרת של השדה: `forget()` שבין לבין היה מאפס אותו.
     // ההמרה לקואורדינטות חלון ובחזרה — ההסבר ב-`goalContentX`.
@@ -383,56 +404,73 @@ export function installRtlVerticalArrows({
 
     const home = findFragment(host, head.blockId, head.offset, caretY);
     if (!home) {
+      passToEngine();
       return;
     }
 
     const lines = linesOf(home.fragment);
     const index = lineAt(lines, home.caretPm, caretY);
     if (index < 0) {
+      passToEngine();
       return;
     }
 
     const target = nextVisualLine(host, home.fragment, lines, index, event.key === 'ArrowDown');
     if (!target) {
+      passToEngine();
       return;
     }
 
     /* שורת יעד ריקה: מקום סמן אחד, והמנוע נוחת עליו בכל עמודה. אין מה לתקן,
        וגם אין מה לבחור — מסירה כאן היא ניטרלית. */
     if (isEmptyRange(target.line)) {
-      return;
-    }
-
-    const extent = lineExtent(target.line);
-    if (!extent) {
+      passToEngine();
       return;
     }
 
     const targetRtl = target.line.getAttribute('dir') === 'rtl';
 
+    // LTR destinations were measured to behave correctly. When we have not
+    // taken ownership, hand them back before measuring every run in the line.
+    if (!owns && !targetRtl) {
+      passToEngine();
+      return;
+    }
+
+    const extent = lineExtent(target.line);
+    if (!extent) {
+      passToEngine();
+      return;
+    }
+
     /*
-     * הבדיקה הזולה קודמת. כל עוד לא כתבנו, המנוע נמדד תקין בשני המקרים
-     * שאינם התקלה — שורה לטינית, ועמודה שנופלת בתוך שורת היעד — ומסירה לו
-     * חוסכת את `readLineChars`, שהוא המסלול היקר כאן. ‏`lineExtent` הוא
-     * קריאת מלבן אחת לכל ריצה בשורה, ולא אחת לכל גרפמה.
+     * כיוון השורה נבדק לפני המדידה: שורה לטינית נמסרת למנוע בלי למדוד את
+     * הריצות שבה. בשורה עברית, `lineExtent` בודק אם עמודת המטרה בפנים — ואז
+     * גם היא נמסרת. זה זול מ-`readLineChars`: מלבן אחד לכל ריצה ולא לכל גרפמה.
      */
-    if (!owns && (!targetRtl || goalInside(extent, goal))) return;
+    if (!owns && goalInside(extent, goal)) {
+      passToEngine();
+      return;
+    }
 
     /* `null` כשהטווחים המצוירים אינם מכסים את השורה ברצף — אין מיפוי, וההקשה
        נמסרת. שורה בלי תוכן כבר יצאה למעלה, ולכן אין כאן מסלול „ריקה”. */
     const chars = readLineChars(target.line);
     if (!chars) {
+      passToEngine();
       return;
     }
     const slots = caretSlots(chars, targetRtl);
 
     const slot = landingSlot(slots, goal, startIsSeam(target.fragment, target.lines, target.index));
     if (!slot) {
+      passToEngine();
       return;
     }
 
     const blockId = blockIdOf(target.fragment);
     if (!blockId) {
+      passToEngine();
       return;
     }
 
@@ -440,6 +478,7 @@ export function installRtlVerticalArrows({
        צייר. אין מיפוי מ-pm להיסט, וההקשה נמסרת. */
     const offset = slot.pm - blockStart(host, blockId);
     if (!Number.isFinite(offset)) {
+      passToEngine();
       return;
     }
 
@@ -459,6 +498,7 @@ export function installRtlVerticalArrows({
      */
     event.preventDefault();
     event.stopPropagation();
+    engineHandoffPending = false;
 
     /*
      * היעד הוא המקום שהסמן כבר עליו. זה קורה בקצה המסמך, וגם כשהציור מפגר
@@ -488,6 +528,7 @@ export function installRtlVerticalArrows({
       },
       focus: true,
     });
+
   };
 
   /**

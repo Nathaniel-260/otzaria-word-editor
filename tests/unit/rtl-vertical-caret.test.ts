@@ -1032,6 +1032,34 @@ describe('installRtlVerticalArrows — עמודת המטרה', () => {
     handle.dispose();
   });
 
+  it('מסירה אחרי התערבות שומרת את העמודה דרך פסקה ריקה', () => {
+    const state = setup({
+      paras: [
+        { id: 'p1', lines: [LONG] },
+        { id: 'p2', lines: [SHORT] },
+        { id: 'p3', lines: [{ pmStart: 82, count: 0, left: 1043.4, right: 1043.4, empty: true }] },
+        { id: 'p4', lines: [{ ...SHORT, pmStart: 84 }] },
+      ],
+      caretOffset: 40,
+      caretX: 700,
+    });
+    const handle = installRtlVerticalArrows({ host: state.host, superdoc: state.superdoc });
+
+    press(state.source, 'ArrowDown');
+    expect(state.caret()).toMatchObject({ blockId: 'p2', offset: 9 });
+
+    const throughEmpty = press(state.source, 'ArrowDown');
+    expect(throughEmpty.defaultPrevented, 'החץ אל הפסקה הריקה נמסר למנוע').toBe(false);
+    state.moveCaret('p3', 0);
+
+    const afterEmpty = press(state.source, 'ArrowDown');
+
+    expect(afterEmpty.defaultPrevented, 'המודול שומר את עמודת המטרה המקורית').toBe(true);
+    expect(written(state.setSelectionTarget, 1).target.end.blockId).toBe('p4');
+    expect(written(state.setSelectionTarget, 1).target.end.offset).toBe(9);
+    handle.dispose();
+  });
+
   it('גלילה אופקית של ה-host אינה מזיזה את העמודה', () => {
     // `caret-visibility.ts` יושב על אותו host וגולל אופקית כשהסמן יוצא
     // מהתצוגה — כלומר הכתיבה שלנו עצמה מייצרת את הגלילה. עמודה שנשמרה

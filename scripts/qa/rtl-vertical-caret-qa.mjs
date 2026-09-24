@@ -102,6 +102,10 @@ const BODY = [
   p1('Short centered', '<w:jc w:val="center"/>', ''),
   p1('שורה עברית ארוכה אחרונה שממלאת כמעט את כל רוחב העמוד ואינה גולשת הלאה', RTL),
   p1('פריט קצר', RTL + numPr(1)),
+  p1('שורת מקור לבדיקה שומרת עמודת מטרה דרך פסקה ריקה', RTL),
+  p1('יעד קצר לפני ריקה', RTL),
+  `<w:p><w:pPr><w:bidi/></w:pPr></w:p>`,
+  p1('יעד קצר אחרי ריקה', RTL),
 ].join('');
 
 const docx = buildDocx(BODY);
@@ -401,6 +405,51 @@ try {
   } catch (e) {
     report.stuck('חץ מוחזק', String(e.message || e).slice(0, 100));
   }
+  /* -------- עמודת המטרה שורדת מסירה למנוע אחרי שכבר התערבנו -------- */
+  console.log('');
+  console.log('== מסירה למנוע דרך פסקה ריקה אחרי התערבות');
+  try {
+    const lines = await allLines();
+    const source = lines.find((l) => l.text.indexOf('שורת מקור לבדיקה') >= 0);
+    const target = lines.find((l) => l.text.indexOf('יעד קצר אחרי ריקה') >= 0);
+    if (!source || !target) throw new Error('לא נמצאו שורות המקור והיעד');
+
+    const x = Math.round(source.left + (source.right - source.left) * 0.15);
+    await app.clickAt(x, Math.round((source.top + source.bottom) / 2));
+    await app.sleep(500);
+
+    const advance = async (before) => {
+      await app.press('ArrowDown', 'ArrowDown', 40);
+      let after = before;
+      for (let waited = 0; waited < 5_000 && after === before; waited += 100) {
+        await app.sleep(100);
+        after = await selectionNow();
+      }
+      if (after === before) throw new Error(`הבחירה לא זזה אחרי החץ (${before})`);
+      return after;
+    };
+
+    const start = await selectionNow();
+    const onShort = await advance(start);
+    const onEmpty = await advance(onShort);
+    const afterEmpty = await advance(onEmpty);
+    const caret = await caretRect();
+    const now = await allLines();
+    const landedOn = lineAt(now, caret.y);
+    const charWidth = Math.max((target.right - target.left) / Math.max(target.text.length, 1), 4);
+    const onExpectedLine = !!landedOn && landedOn.text.indexOf('יעד קצר אחרי ריקה') >= 0;
+    const atExpectedColumn = Math.abs(caret.x - target.left) <= charWidth * 1.5;
+    const detail = `${start} → ${onShort} → ${onEmpty} → ${afterEmpty}; x=${caret.x}, יעד=${target.left}`;
+    console.log(`   ${detail}`);
+
+    if (afterEmpty === onEmpty) report.fail('הבחירה לא יצאה מהפסקה הריקה', detail);
+    else if (!onExpectedLine) report.fail('החץ שאחרי הפסקה הריקה לא הגיע ליעד', detail);
+    else if (!atExpectedColumn) report.fail('עמודת המטרה לא שרדה את המסירה למנוע', detail);
+    else report.pass('עמודת המטרה שורדת מסירה למנוע דרך פסקה ריקה', detail);
+  } catch (e) {
+    report.fail('עמודת המטרה שורדת מסירה למנוע דרך פסקה ריקה', String(e.message || e).slice(0, 120));
+  }
+
   /* -------- המסלול שדווח, מקצה לקצה: מה שנכנס למסמך -------- */
   /*
    * כל מה שלמעלה מודד **פיקסלים**. הנזק שבגללו המודול קיים הוא במסמך: מי
