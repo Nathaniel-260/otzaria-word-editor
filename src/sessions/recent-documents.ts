@@ -278,7 +278,7 @@ export function setRecentPinned(
  * מה שלא נכלל: מרכאות מסולסלות (’ “). הן נוצרות בתיקון אוטומטי של טקסט, ולא
  * בשמות קבצים — ואין למי מהמסלולים שכותבים לרשימה הזאת דרך לייצר אותן.
  */
-function foldForSearch(text: string): string {
+export function foldForSearch(text: string): string {
   return text.trim().toLowerCase().replace(/״/g, '"').replace(/׳/g, "'");
 }
 

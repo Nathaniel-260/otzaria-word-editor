@@ -431,6 +431,14 @@ vi.mock('../../src/host/settings', () => ({
   },
   loadCustomShortcuts: async () => null,
   saveCustomShortcuts: async () => {},
+  // העץ של „פתח מסמך” — `useOpenSources().init()` רץ בעלייה, ומוק בלי
+  // הפונקציות האלה זורק מתוכו דחייה לא-מטופלת (כך נפל ה-CI של #78).
+  loadDocFolders: async () => null,
+  saveDocFolders: async () => {},
+  loadLibraryCache: async () => null,
+  saveLibraryCache: async () => {},
+  loadOpenDialogPlace: async () => null,
+  saveOpenDialogPlace: async () => {},
 }));
 
 // הייבוא **אחרי** ה-mocks במכוון (הם מורמים בכל מקרה, וזה הסדר שקורא נכון).

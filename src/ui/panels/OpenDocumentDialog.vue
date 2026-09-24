@@ -174,181 +174,274 @@
             />
           </button>
 
-          <!-- מסמכים אחרונים -->
-          <section
-            class="rec-section"
-            :aria-labelledby="REC_TITLE_ID"
-          >
-            <div class="rec-head">
-              <h3
-                :id="REC_TITLE_ID"
-                class="section-title"
+          <!--
+            העמודה (העץ) מימין, והרשימה של המקום שנבחר משמאל — כמו חלונית
+            הניווט בסייר הקבצים. „אחרונים” מציג את הרשימה הקיימת בדיוק כפי
+            שהייתה; כל מקום אחר מוצג ב-`OpenSourceList`.
+          -->
+          <div class="open-split">
+            <OpenSourcesNav
+              ref="navRef"
+              :place="place"
+              :recent-count="recents.length"
+              :library="libraryView"
+              :library-state="libraryState"
+              :personal-count="personalList.length"
+              :folders="folders"
+              :folders-supported="foldersSupported"
+              :listings="listings"
+              :busy="busy"
+              @select="$emit('select-place', $event)"
+              @expand-folder="(token: string, path: string) => $emit('expand-folder', token, path)"
+              @add-folder="$emit('add-folder')"
+            />
+
+            <OpenSourceList
+              v-if="place.kind !== 'recent'"
+              :place="place"
+              :query="sourceQuery"
+              :library="libraryView"
+              :library-state="libraryState"
+              :library-message="libraryMessage"
+              :personal="personalList"
+              :folder="currentFolder"
+              :listing="currentListing"
+              :busy="busy"
+              @update:query="$emit('update:sourceQuery', $event)"
+              @navigate="$emit('select-place', $event)"
+              @open-book="$emit('open-library-book', $event)"
+              @open-file="(token: string, path: string, name: string) => $emit('open-folder-file', token, path, name)"
+              @remove-folder="$emit('remove-folder', $event)"
+              @refresh="$emit('refresh-source', place)"
+            />
+
+            <!-- מסמכים אחרונים -->
+            <section
+              v-else
+              class="rec-section"
+              :aria-labelledby="REC_TITLE_ID"
+            >
+              <div class="rec-head">
+                <h3
+                  :id="REC_TITLE_ID"
+                  class="section-title"
+                >
+                  מסמכים אחרונים
+                </h3>
+                <p
+                  v-if="countText"
+                  class="rec-count"
+                  role="status"
+                  aria-live="polite"
+                >
+                  {{ countText }}
+                </p>
+                <div
+                  v-if="recents.length > 0"
+                  class="rec-search"
+                >
+                  <SvgIcon
+                    name="search"
+                    :size="14"
+                    class="rec-search__icon"
+                  />
+                  <input
+                    class="rec-search__input"
+                    type="text"
+                    :value="searchQuery"
+                    :disabled="busy"
+                    aria-label="סינון מסמכים אחרונים לפי שם"
+                    @input="onSearchInput"
+                  >
+                  <button
+                    v-if="searchQuery !== ''"
+                    type="button"
+                    class="rec-search__clear"
+                    aria-label="נקה את הסינון"
+                    :disabled="busy"
+                    @click="$emit('update:searchQuery', '')"
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
+
+              <!-- אין אחרונים כלל -->
+              <div
+                v-if="recents.length === 0"
+                class="rec-empty"
               >
-                מסמכים אחרונים
-              </h3>
-              <p
-                v-if="countText"
-                class="rec-count"
+                <SvgIcon
+                  name="folder"
+                  :size="28"
+                  class="rec-empty__icon"
+                />
+                <p class="rec-empty__title">
+                  עדיין אין מסמכים אחרונים
+                </p>
+                <p class="rec-empty__hint">
+                  מסמך שתפתח מכאן או מ„עיון בקבצים…” יופיע כאן.
+                </p>
+              </div>
+
+              <!-- סינון בלי תוצאות -->
+              <div
+                v-else-if="visible.length === 0"
+                class="rec-empty"
                 role="status"
                 aria-live="polite"
               >
-                {{ countText }}
-              </p>
-              <div
-                v-if="recents.length > 0"
-                class="rec-search"
-              >
-                <SvgIcon
-                  name="search"
-                  :size="14"
-                  class="rec-search__icon"
-                />
-                <input
-                  class="rec-search__input"
-                  type="text"
-                  :value="searchQuery"
-                  :disabled="busy"
-                  aria-label="סינון מסמכים אחרונים לפי שם"
-                  @input="onSearchInput"
-                >
+                <p class="rec-empty__title">
+                  אין מסמך שתואם ל„{{ searchQuery }}”
+                </p>
                 <button
-                  v-if="searchQuery !== ''"
                   type="button"
-                  class="rec-search__clear"
-                  aria-label="נקה את הסינון"
-                  :disabled="busy"
+                  class="rec-empty__clear"
                   @click="$emit('update:searchQuery', '')"
                 >
-                  ✕
+                  נקה סינון
                 </button>
               </div>
-            </div>
 
-            <!-- אין אחרונים כלל -->
-            <div
-              v-if="recents.length === 0"
-              class="rec-empty"
-            >
-              <SvgIcon
-                name="folder"
-                :size="28"
-                class="rec-empty__icon"
-              />
-              <p class="rec-empty__title">
-                עדיין אין מסמכים אחרונים
-              </p>
-              <p class="rec-empty__hint">
-                מסמך שתפתח מכאן או מ„עיון בקבצים…” יופיע כאן.
-              </p>
-            </div>
-
-            <!-- סינון בלי תוצאות -->
-            <div
-              v-else-if="visible.length === 0"
-              class="rec-empty"
-              role="status"
-              aria-live="polite"
-            >
-              <p class="rec-empty__title">
-                אין מסמך שתואם ל„{{ searchQuery }}”
-              </p>
-              <button
-                type="button"
-                class="rec-empty__clear"
-                @click="$emit('update:searchQuery', '')"
+              <ul
+                v-else
+                class="rec-list"
+                :aria-labelledby="REC_TITLE_ID"
+                @keydown="onRowKeydown"
               >
-                נקה סינון
-              </button>
-            </div>
-
-            <ul
-              v-else
-              class="rec-list"
-              :aria-labelledby="REC_TITLE_ID"
-              @keydown="onRowKeydown"
-            >
-              <li
-                v-for="(item, index) in visible"
-                :key="item.token"
-                :ref="(el) => setRowRef(el, index)"
-                class="rec-row"
-                :class="{ 'rec-row--last-pinned': index === lastPinnedIndex }"
-              >
-                <button
-                  type="button"
-                  class="rec-open"
-                  data-col="open"
-                  :aria-label="openLabel(item)"
-                  :data-tip-title="item.name"
-                  :tabindex="index === activeRow ? 0 : -1"
-                  :disabled="busy"
-                  @focus="onRowFocus(index, 'open')"
-                  @click="$emit('open-recent', item.token)"
+                <li
+                  v-for="(item, index) in visible"
+                  :key="item.token"
+                  :ref="(el) => setRowRef(el, index)"
+                  class="rec-row"
+                  :class="{ 'rec-row--last-pinned': index === lastPinnedIndex }"
                 >
-                  <!--
-                    `dir="auto"` — בלעדיו שם קובץ לועזי יורש rtl, והחיתוך
-                    (`text-overflow`) נופל ב-inline-end שהוא **תחילת** השם:
-                    `Shulchan_Aruch_..._vol2_final.docx` היה מוצג כ-
-                    `…_vol2_final.docx`, כלומר בדיוק החלק המזהה נעלם.
-                    `RibbonCombo.vue` עושה את זה מאותו נימוק.
-                  -->
-                  <span
-                    class="rec-name"
-                    dir="auto"
-                  >{{ item.name }}</span>
-                  <span
-                    v-if="metaParts(item).length > 0"
-                    class="rec-meta"
+                  <button
+                    type="button"
+                    class="rec-open"
+                    data-col="open"
+                    :aria-label="openLabel(item)"
+                    :data-tip-title="item.name"
+                    :tabindex="index === activeRow ? 0 : -1"
+                    :disabled="busy"
+                    @focus="onRowFocus(index, 'open')"
+                    @click="$emit('open-recent', item.token)"
                   >
-                    <template
-                      v-for="(part, i) in metaParts(item)"
-                      :key="i"
+                    <!--
+                      `dir="auto"` — בלעדיו שם קובץ לועזי יורש rtl, והחיתוך
+                      (`text-overflow`) נופל ב-inline-end שהוא **תחילת** השם:
+                      `Shulchan_Aruch_..._vol2_final.docx` היה מוצג כ-
+                      `…_vol2_final.docx`, כלומר בדיוק החלק המזהה נעלם.
+                      `RibbonCombo.vue` עושה את זה מאותו נימוק.
+                    -->
+                    <span
+                      class="rec-name"
+                      dir="auto"
+                    >{{ item.name }}</span>
+                    <span
+                      v-if="metaParts(item).length > 0"
+                      class="rec-meta"
                     >
-                      <span
-                        v-if="i > 0"
-                        aria-hidden="true"
-                      > · </span>{{ part }}
-                    </template>
+                      <template
+                        v-for="(part, i) in metaParts(item)"
+                        :key="i"
+                      >
+                        <span
+                          v-if="i > 0"
+                          aria-hidden="true"
+                        > · </span>{{ part }}
+                      </template>
+                    </span>
+                  </button>
+                  <span class="rec-actions">
+                    <button
+                      type="button"
+                      class="rec-iconbtn rec-pin"
+                      data-col="pin"
+                      :aria-pressed="item.pinned"
+                      :aria-label="item.pinned ? `בטל הצמדה של ${item.name}` : `הצמד את ${item.name} לראש הרשימה`"
+                      :data-tip-title="item.pinned ? 'בטל הצמדה' : 'הצמד לראש הרשימה'"
+                      :tabindex="index === activeRow ? 0 : -1"
+                      :disabled="busy"
+                      @focus="onRowFocus(index, 'pin')"
+                      @click="$emit('toggle-pin', item.token, !item.pinned)"
+                    >
+                      <SvgIcon
+                        name="bookmark"
+                        :size="15"
+                      />
+                    </button>
+                    <button
+                      type="button"
+                      class="rec-iconbtn rec-forget"
+                      data-col="forget"
+                      :aria-label="`הסר את ${item.name} מרשימת האחרונים`"
+                      data-tip-title="הסר מהרשימה"
+                      :tabindex="index === activeRow ? 0 : -1"
+                      :disabled="busy"
+                      @focus="onRowFocus(index, 'forget')"
+                      @click="$emit('forget-recent', item.token)"
+                    >
+                      <SvgIcon
+                        name="reject"
+                        :size="15"
+                      />
+                    </button>
                   </span>
+                </li>
+              </ul>
+
+              <!--
+                חיפוש אחד שמוצא גם בספרייה: מי שמקליד שם ספר ב„אחרונים” לא
+                צריך לדעת שהוא עוד לא פתח אותו אף פעם. חמש תוצאות לכל היותר —
+                זו הצעה, לא רשימה; „הצג הכול” עובר לספרייה עם אותו חיפוש.
+              -->
+              <div
+                v-if="alsoInLibrary.length > 0"
+                class="rec-also"
+              >
+                <div class="rec-also__head">
+                  <SvgIcon
+                    name="library"
+                    :size="14"
+                  />
+                  <span>בספריית אוצריא</span>
+                  <button
+                    type="button"
+                    class="rec-also__all"
+                    :disabled="busy"
+                    @click="$emit('search-library', searchQuery)"
+                  >
+                    הצג הכול
+                  </button>
+                </div>
+                <button
+                  v-for="hit in alsoInLibrary"
+                  :key="hit.book.key"
+                  type="button"
+                  class="rec-also__row"
+                  :disabled="busy"
+                  :data-tip-title="hit.book.title"
+                  @click="$emit('open-library-book', hit.book)"
+                >
+                  <SvgIcon
+                    name="docFile"
+                    :size="16"
+                    class="rec-also__icon"
+                  />
+                  <span
+                    class="rec-also__name"
+                    dir="auto"
+                  >{{ hit.book.title }}</span>
+                  <span
+                    v-if="hit.where"
+                    class="rec-also__where"
+                    dir="auto"
+                  >{{ hit.where }}</span>
                 </button>
-                <span class="rec-actions">
-                  <button
-                    type="button"
-                    class="rec-iconbtn rec-pin"
-                    data-col="pin"
-                    :aria-pressed="item.pinned"
-                    :aria-label="item.pinned ? `בטל הצמדה של ${item.name}` : `הצמד את ${item.name} לראש הרשימה`"
-                    :data-tip-title="item.pinned ? 'בטל הצמדה' : 'הצמד לראש הרשימה'"
-                    :tabindex="index === activeRow ? 0 : -1"
-                    :disabled="busy"
-                    @focus="onRowFocus(index, 'pin')"
-                    @click="$emit('toggle-pin', item.token, !item.pinned)"
-                  >
-                    <SvgIcon
-                      name="bookmark"
-                      :size="15"
-                    />
-                  </button>
-                  <button
-                    type="button"
-                    class="rec-iconbtn rec-forget"
-                    data-col="forget"
-                    :aria-label="`הסר את ${item.name} מרשימת האחרונים`"
-                    data-tip-title="הסר מהרשימה"
-                    :tabindex="index === activeRow ? 0 : -1"
-                    :disabled="busy"
-                    @focus="onRowFocus(index, 'forget')"
-                    @click="$emit('forget-recent', item.token)"
-                  >
-                    <SvgIcon
-                      name="reject"
-                      :size="15"
-                    />
-                  </button>
-                </span>
-              </li>
-            </ul>
-          </section>
+              </div>
+            </section>
+          </div>
         </div>
       </div>
 
@@ -358,7 +451,7 @@
           role="status"
           aria-live="polite"
         >
-          {{ busy ? 'פותח מסמך…' : '' }}
+          {{ busy ? 'פותח מסמך…' : notice }}
         </p>
         <div class="open-footer__end">
           <!--
@@ -440,10 +533,24 @@
  */
 import { computed, nextTick, ref, watch } from 'vue';
 import SvgIcon from '../icons/SvgIcon.vue';
+import OpenSourcesNav from './OpenSourcesNav.vue';
+import OpenSourceList from './OpenSourceList.vue';
 import { nextTabIndex } from '../ribbon/aria';
 import { draftAgeLabel } from '../../sessions/session-state';
 import { filterRecents, sortedRecents, type RecentDocument } from '../../sessions/recent-documents';
 import type { DocumentTemplate, TemplatePreview } from '../../engine/templates';
+import type { LibraryState, ListingState } from '../../composables/use-open-sources';
+import {
+  RECENT_PLACE,
+  listingKey,
+  personalBooks,
+  searchLibrary,
+  withoutPersonalShelves,
+  type DocFolder,
+  type LibraryBook,
+  type LibraryShelf,
+  type OpenPlace,
+} from '../../sessions/open-sources';
 
 const TITLE_ID = 'open-dialog-title';
 const TPL_TITLE_ID = 'open-dialog-templates-title';
@@ -476,6 +583,22 @@ const props = withDefaults(
      * שהם קובעים הוא איפה הוא נוחת ואיפה המיקוד. ראו `landOnOpenPane`.
      */
     intent?: 'new' | 'open';
+    /**
+     * העץ: המקום שנבחר, ומה שכל ענף מציג. כולם אופציונליים וברירת המחדל
+     * שלהם ריקה — דיאלוג שהורכב בלעדיהם הוא בדיוק הדיאלוג שהיה כאן לפני העץ,
+     * עם „אחרונים” בלבד. המצב והמטמון מוחזקים ב-`useOpenSources`.
+     */
+    place?: OpenPlace;
+    library?: LibraryShelf | null;
+    libraryState?: LibraryState;
+    libraryMessage?: string;
+    folders?: readonly DocFolder[];
+    foldersSupported?: boolean | null;
+    listings?: ReadonlyMap<string, ListingState>;
+    /** החיפוש של המקומות שאינם „אחרונים” — נפרד מ-`searchQuery`. */
+    sourceQuery?: string;
+    /** הודעה בתחתית — למשל ספר שלא נפתח. ריקה = אין מה לומר. */
+    notice?: string;
   }>(),
   {
     // נכשל סגור: דיאלוג שהורכב בלי מידע אינו מציג תבניות שאינו מכיר ואינו
@@ -492,6 +615,15 @@ const props = withDefaults(
     // ברירת המחדל היא „מסמך חדש”: מי שמרכיב את הדיאלוג בלי להצהיר על כוונה
     // מקבל בדיוק את ההתנהגות שהייתה כאן לפני שהשדה נולד — ראש המסך.
     intent: 'new',
+    place: () => RECENT_PLACE,
+    library: null,
+    libraryState: 'idle',
+    libraryMessage: '',
+    folders: () => [],
+    foldersSupported: null,
+    listings: () => new Map(),
+    sourceQuery: '',
+    notice: '',
   },
 );
 
@@ -507,7 +639,48 @@ const emit = defineEmits<{
   (e: 'show-discarded'): void;
   /** „גרסה קודמת” — הקריאה והפתיחה הן של המעטפת. */
   (e: 'open-previous'): void;
+  /** בחירת מקום בעץ, או ניווט אליו מהרשימה ומשביל הלחם. */
+  (e: 'select-place', place: OpenPlace): void;
+  /** צומת תיקייה נפתח — המעטפת טוענת את תת-התיקיות שלו. */
+  (e: 'expand-folder', token: string, path: string): void;
+  (e: 'add-folder'): void;
+  (e: 'remove-folder', token: string): void;
+  (e: 'open-library-book', book: LibraryBook): void;
+  (e: 'open-folder-file', token: string, path: string, name: string): void;
+  (e: 'refresh-source', place: OpenPlace): void;
+  (e: 'update:sourceQuery', value: string): void;
+  /** „הצג הכול” מתחת לאחרונים — מעבר לספרייה עם אותו חיפוש. */
+  (e: 'search-library', query: string): void;
 }>();
+
+/* ------------------------------------------------------------------ */
+/* העץ                                                                  */
+/* ------------------------------------------------------------------ */
+
+const navRef = ref<InstanceType<typeof OpenSourcesNav> | null>(null);
+
+const personalList = computed(() => personalBooks(props.library));
+
+/**
+ * הספרייה כפי שהעץ והרשימה מציגים אותה — בלי המדף של הספרים האישיים, שיש
+ * לו צומת משלו. ראו `withoutPersonalShelves`.
+ */
+const libraryView = computed(() => withoutPersonalShelves(props.library));
+
+const currentFolder = computed(() => {
+  const place = props.place;
+  return place.kind === 'folder' ? (props.folders.find((folder) => folder.token === place.token) ?? null) : null;
+});
+
+const currentListing = computed(() => {
+  const place = props.place;
+  return place.kind === 'folder' ? (props.listings.get(listingKey(place.token, place.path)) ?? null) : null;
+});
+
+/** חמש התוצאות מהספרייה מתחת לאחרונים, כשמחפשים שם. */
+const alsoInLibrary = computed(() =>
+  props.searchQuery.trim() === '' ? [] : searchLibrary(props.library, props.searchQuery, 5),
+);
 
 /* ------------------------------------------------------------------ */
 /* הרשימה הנראית                                                       */
@@ -1037,8 +1210,13 @@ function onTab(event: KeyboardEvent): void {
    *
    * נקודות המעבר לא זזו — `npm run check:open-dialog` מודד אותן: 1440 → 5
    * עמודות, 800 → 4, 520 → 2.
+   *
+   * **920, מאז העץ.** העמודה של העץ (224) לוקחת רוחב מהרשימה, ו-840 השאיר
+   * לשם קובץ עם גיל וגודל פחות מ-400 פיקסלים. 920 מחזיר לרשימה את הרוחב
+   * שהייתה לה לפני העץ בקירוב, ואינו נוגע בנקודות המעבר: מתחת ל-980 פיקסלים
+   * של חלון ה-`94vw` הוא שקובע, בדיוק כמו קודם.
    */
-  width: min(840px, 94vw);
+  width: min(920px, 94vw);
   /*
    * **גובה קבוע, ולא `max-height`.**
    *
@@ -1132,6 +1310,32 @@ function onTab(event: KeyboardEvent): void {
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+/*
+ * העץ מימין והרשימה משמאל. `grid` ולא `flex`: שתי העמודות חייבות גובה אחד
+ * (הגבול של העץ והגבול של הרשימה יושבים על אותו קו תחתון), ו-grid נותן את זה
+ * בלי לחשב. העמודה הראשונה ב-DOM היא הימנית, כי המסמך RTL.
+ */
+.open-split {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 224px minmax(0, 1fr);
+  gap: 12px;
+}
+
+.open-split > * {
+  min-height: 0;
+}
+
+/* חלון צר: העץ עובר מעל הרשימה, בגובה מוגבל — רשימה של 200 פיקסלים עדיפה על
+   עמודה של 224 שמשאירה לשמות הקבצים רצועה של מילה אחת. */
+@media (max-width: 680px) {
+  .open-split {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 160px) minmax(0, 1fr);
+  }
 }
 
 .section-title {
@@ -1558,6 +1762,86 @@ function onTab(event: KeyboardEvent): void {
   background: var(--word-btn-hover);
 }
 
+/* „בספריית אוצריא” מתחת לאחרונים — הצעה, ולכן במשקל נמוך מהרשימה עצמה:
+   בלי מסגרת משלה, כותרת קטנה, ושורות נמוכות. */
+.rec-also {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.rec-also__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-inline: 4px;
+  font-size: 0.86em;
+  font-weight: 700;
+  color: var(--color-primary);
+}
+
+.rec-also__all {
+  margin-inline-start: auto;
+  padding: 1px 6px;
+  background: none;
+  border: none;
+  border-radius: var(--radius-xs);
+  font-family: var(--font-main);
+  font-size: 1em;
+  font-weight: 500;
+  color: var(--color-primary);
+  cursor: pointer;
+}
+
+.rec-also__all:hover:not(:disabled) {
+  background: var(--word-btn-hover);
+}
+
+.rec-also__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 3px 8px;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-main);
+  font-size: inherit;
+  text-align: start;
+  color: var(--color-on-surface);
+  cursor: pointer;
+  transition: background-color 0.08s ease;
+}
+
+.rec-also__row:hover:not(:disabled) {
+  background: var(--word-btn-hover);
+}
+
+.rec-also__icon {
+  flex: 0 0 auto;
+  color: var(--word-blue);
+}
+
+.rec-also__name {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rec-also__where {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.86em;
+  color: var(--color-on-surface-variant);
+}
+
 /* ------------------------------------------------------------------ */
 /* כותרת תחתונה                                                        */
 /* ------------------------------------------------------------------ */
@@ -1627,7 +1911,8 @@ function onTab(event: KeyboardEvent): void {
   .open-browse,
   .rec-row,
   .rec-iconbtn,
-  .rec-search__input {
+  .rec-search__input,
+  .rec-also__row {
     transition: none;
   }
 }

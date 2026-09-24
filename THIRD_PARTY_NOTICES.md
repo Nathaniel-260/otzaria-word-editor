@@ -93,6 +93,16 @@
 | `export` | ייצוא ל־Word | `arrow_export_rtl` |
 | `exportPdf` | ייצוא ל־PDF | `document_pdf` |
 | `print` | הדפסה | `print` |
+
+**„פתח מסמך” — העץ והרשימה**
+
+| שם ב־`ICONS` | פקד | אייקון מקורי |
+|---|---|---|
+| `history` | אחרונים | `history` |
+| `library` | ספריית אוצריא | `library` |
+| `folderClosed` | מדף, תיקייה | `folder` |
+| `folderAdd` | הוסף תיקייה | `folder_add` |
+| `docFile` | ספר או קובץ ברשימה | `document_text` |
 | `info` | אודות | `info` |
 
 **לשונית „בית” — לוח**
@@ -266,7 +276,7 @@ MDL2 היא הספרייה של Office UI Fabric שיצאה משימוש, System
   ואף אחד מהם אינו עדכון של דף — הסימן צריך להיות רענון גנרי. `arrow_sync`,
   המועמד השני, יוצא 93.5% לגובה ונחתך.
 
-> **76 מתוך 82 האייקונים** ב־`icons.ts` הם Fluent System Icons, וזו אינה
+> **81 מתוך 87 האייקונים** ב־`icons.ts` הם Fluent System Icons, וזו אינה
 > הצהרת כוונות: `npm run check:icons` מוריד את `@fluentui/svg-icons@1.1.338`
 > מ־npm ומשווה כל `d=` בקובץ מול הגליף המקורי — byte-for-byte — וגם מאמת שהטבלה
 > למעלה נוקבת בשם הגליף הנכון. השער נכשל על סטייה, על אייקון מצויר בבית שאינו

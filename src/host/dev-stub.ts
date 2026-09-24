@@ -13,6 +13,7 @@
  * לאלה יש שער Windows.
  */
 import type { BootPayload, OtzariaGlobal } from '../types/otzaria_plugin';
+import { blankDocumentSource } from '../engine/blank-document-source';
 
 const BOOT: BootPayload = {
   plugin: { id: 'dev', version: '0.0.0' },
@@ -87,6 +88,69 @@ function download(blob: Blob, name: string): void {
   link.click();
   link.remove();
   setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
+
+/** ספרייה מדומה: שני מדפים מקוננים, ספר אישי אחד, וספר שאינו Word (נגזם). */
+const DEV_LIBRARY = {
+  title: 'ספריית אוצריא',
+  path: '/',
+  books: [],
+  categories: [
+    {
+      title: 'הלכה',
+      path: '/הלכה',
+      books: [{ bookId: 'קונטרס בהלכות שבת', title: 'קונטרס בהלכות שבת', type: 'docx', bookUid: 'uid:1', source: 'library', author: 'ר׳ פלוני' }],
+      categories: [
+        {
+          title: 'שו״ת',
+          path: '/הלכה/שו״ת',
+          books: [
+            { bookId: 'שו״ת דברי שלום', title: 'שו״ת דברי שלום', type: 'docx', bookUid: 'uid:2', source: 'library' },
+            { bookId: 'שו״ת טקסט', title: 'שו״ת טקסט', type: 'text' },
+          ],
+          categories: [],
+        },
+      ],
+    },
+    {
+      title: 'ספרים אישיים',
+      path: '/ספרים אישיים',
+      books: [{ bookId: 'חידושי תורה שלי', title: 'חידושי תורה שלי', type: 'docx', bookUid: 'uid:3', source: 'user' }],
+      categories: [],
+    },
+    { title: 'תנך', path: '/תנך', books: [{ bookId: 'בראשית', title: 'בראשית', type: 'text' }], categories: [] },
+  ],
+};
+
+function devListing(path: string): unknown {
+  const at = (days: number): string => new Date(Date.now() - days * 86_400_000).toISOString();
+  if (path === '') {
+    return {
+      entries: [
+        { name: 'שיעורים', path: 'שיעורים', type: 'dir', size: 0, modified: at(3) },
+        { name: 'מכתבים', path: 'מכתבים', type: 'dir', size: 0, modified: at(9) },
+        { name: 'חידושים על הדף.docx', path: 'חידושים על הדף.docx', type: 'file', size: 48_200, modified: at(0.1) },
+        { name: 'Letter to the printer.docx', path: 'Letter to the printer.docx', type: 'file', size: 18_004, modified: at(12) },
+      ],
+      truncated: false,
+    };
+  }
+  if (path === 'שיעורים') {
+    return {
+      entries: [{ name: 'שיעור א.docx', path: 'שיעורים/שיעור א.docx', type: 'file', size: 22_000, modified: at(1) }],
+      truncated: false,
+    };
+  }
+  return { entries: [], truncated: false };
+}
+
+function devOpen(name: string, writable: boolean): unknown {
+  const blob = blankDocumentSource();
+  if (!blob) throw new Error('error.internal: no blank document in dev');
+  const token = `dev-file-${++counter}`;
+  const url = URL.createObjectURL(blob);
+  files.set(token, { name, url, writable });
+  return { cancelled: false, token, url, name, size: blob.size, access: writable ? 'readwrite' : 'read' };
 }
 
 async function handle(method: string, payload: Record<string, unknown> = {}): Promise<unknown> {
@@ -255,6 +319,32 @@ async function handle(method: string, payload: Record<string, unknown> = {}): Pr
     case 'library.refreshUserBooks':
       console.info('[stub] library.refreshUserBooks');
       return { addedBooks: 0, updatedBooks: 0, errors: [] };
+
+    /*
+     * העץ של „פתח מסמך”. ספרייה ותיקייה מדומות, כדי שכל הענפים — כולל
+     * הקינון, החיפוש והמצבים הריקים — ייבדקו בדפדפן. „פתיחה” מחזירה את
+     * המסמך הריק של התוסף: הבייטים אינם העניין כאן, המסלול כן.
+     */
+    case 'library.getTree':
+      return DEV_LIBRARY;
+
+    case 'library.openBookFile':
+      return devOpen(`${String(payload.bookUid ?? payload.bookId ?? 'ספר')}.docx`, payload.access === 'readwrite');
+
+    case 'fs.pickUserFolder': {
+      const name = window.prompt('שם התיקייה (dev):', 'חידושים');
+      if (!name) return { cancelled: true };
+      return { cancelled: false, folderToken: `dev-folder-${name}`, name, path: `C:\\Users\\dev\\Documents\\${name}` };
+    }
+
+    case 'fs.listUserFolder':
+      return devListing(String(payload.path ?? ''));
+
+    case 'fs.openFolderFile':
+      return devOpen(String(payload.path ?? 'מסמך.docx').split('/').pop()!, payload.access === 'readwrite');
+
+    case 'fs.revokeFolder':
+      return true;
 
     default:
       console.info('[stub] call לא ממומש:', method, payload);
