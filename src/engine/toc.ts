@@ -201,6 +201,11 @@ export interface TocDocumentApi extends SelectionDocumentApi {
       }) => MaybePromise<DocReceipt>;
     };
   };
+  create?: {
+    paragraph?: (input: {
+      at: { kind: 'after'; target: { kind: 'block'; nodeType: string; nodeId: string } };
+    }) => MaybePromise<DocReceipt>;
+  };
   blocks?: {
     list?: (input?: {
       limit?: number;
@@ -716,6 +721,29 @@ async function sweepTocRows(
 }
 
 /**
+ * ב-superdoc 2.17 `toc.remove` מסרב לטבלה שאין אחריה פסקה (superdoc/docx-editor#4033).
+ * מוסיפה פסקה ריקה כשהמסמך נגמר בשורת טבלה; `true` אם נוספה.
+ */
+async function appendParagraphAfterTocEnd(host: TocTarget, signature: TocRowSignature): Promise<boolean> {
+  const doc = docOf(host);
+  const list = doc?.blocks?.list;
+  const createParagraph = doc?.create?.paragraph;
+  if (typeof list !== 'function' || typeof createParagraph !== 'function') return false;
+
+  const head = await attempt(REMOVE_FAILED, () => list({ limit: 1 }));
+  const total = head.ok ? head.value?.total : undefined;
+  if (typeof total !== 'number' || total < 1) return false;
+  const tail = await attempt(REMOVE_FAILED, () => list({ limit: 1, offset: total - 1 }));
+  const last = tail.ok ? tail.value?.blocks?.[0] : undefined;
+  if (typeof last?.nodeId !== 'string' || typeof last.nodeType !== 'string') return false;
+  if (last.nodeType !== 'tableOfContents' && !isTocRow(last, signature.styleNames)) return false;
+
+  const target = { kind: 'block' as const, nodeType: last.nodeType, nodeId: last.nodeId };
+  const created = await attempt(REMOVE_FAILED, () => createParagraph({ at: { kind: 'after', target } }));
+  return created.ok && created.value?.success !== false;
+}
+
+/**
  * „הסר תוכן עניינים” — מוחקת את הטבלה כולה, כולל השורות שהמנוע משאיר.
  *
  * מקומו של הבלוק נקרא **לפני** ההסרה: אחריה הוא כבר אינו ברשימה, ואין דרך
@@ -733,7 +761,14 @@ export async function removeTableOfContents(host: TocTarget): Promise<CommandOut
 
   const at = await ordinalOf(host, sole.address.nodeId);
 
-  const removed = await attempt(REMOVE_FAILED, () => remove({ target: sole.address }));
+  let removed = await attempt(REMOVE_FAILED, () => remove({ target: sole.address }));
+  if (
+    removed.ok &&
+    removed.value?.failure?.code === 'CAPABILITY_UNAVAILABLE' &&
+    (await appendParagraphAfterTocEnd(host, sole.rows))
+  ) {
+    removed = await attempt(REMOVE_FAILED, () => remove({ target: sole.address }));
+  }
   if (!removed.ok) return removed.outcome;
   const failure = failureOf(REMOVE_FAILED, removed.value);
   if (failure) return failure;
