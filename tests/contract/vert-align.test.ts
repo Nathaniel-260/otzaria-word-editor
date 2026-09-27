@@ -94,7 +94,9 @@ describe('המסלול שנבחר קיים', () => {
   it('הרַנטַיים v2 — זה שרץ בדפדפן — מנתב את הפעולה', () => {
     // ההצהרה בטיפוסים אינה מבטיחה מימוש ברַנטַיים שאנחנו רצים בו. הפעולה
     // מופיעה ברשימת הפעולות שה-v2 מנתב לפאסדה.
-    expect(engineHas(`'${VERT_ALIGN_OPERATION}'`)).toBe(true);
+    // מ-docx-engine 0.16 המזהה נבנה כ-`'format.'+key`, ולכן נמצא רק רישום המפתח.
+    const routed = engineHas(`'${VERT_ALIGN_OPERATION}'`) || engineHas("'vertAlign','string','w:vertAlign'");
+    expect(routed).toBe(true);
   });
 
   it('`vertAlign` נשמר כתכונה של mark מסוג textStyle', () => {

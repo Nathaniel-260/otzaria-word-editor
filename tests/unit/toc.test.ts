@@ -71,6 +71,8 @@ interface FakeOptions {
   failures?: Record<string, { code: string; message?: string }>;
   throws?: readonly string[];
   missing?: readonly string[];
+  /** כמו superdoc 2.17: `toc.remove` מסרב כשהמסמך נגמר בשורת טבלה. */
+  refuseTocAtEnd?: boolean;
 }
 
 function fakeEngine(options: FakeOptions = {}) {
@@ -119,6 +121,10 @@ function fakeEngine(options: FakeOptions = {}) {
       update: route('toc.update', () => receipt('toc.update')),
       remove: route('toc.remove', (input) => {
         const target = (input as { target: { nodeId: string } }).target;
+        const last = blocks[blocks.length - 1];
+        if (options.refuseTocAtEnd && /^TOC/.test(last?.styleId ?? '')) {
+          return { success: false, failure: { code: 'CAPABILITY_UNAVAILABLE' } };
+        }
         blocks = blocks.filter((block) => block.nodeId !== target.nodeId);
         return receipt('toc.remove');
       }),
@@ -136,6 +142,14 @@ function fakeEngine(options: FakeOptions = {}) {
           options.entriesTotal,
         ),
       ),
+    },
+    create: {
+      paragraph: route('create.paragraph', (input) => {
+        const target = (input as { at: { target: { nodeId: string } } }).at.target;
+        const at = blocks.findIndex((block) => block.nodeId === target.nodeId);
+        blocks.splice(at + 1, 0, { ordinal: at + 1, nodeId: 'trail', nodeType: 'paragraph', styleId: 'Normal' });
+        return receipt('create.paragraph');
+      }),
     },
     blocks: {
       list: route('blocks.list', (input) => {
@@ -358,6 +372,38 @@ describe('הסרת תוכן העניינים', () => {
       },
     ]);
     expect(engine.remaining()).toEqual(['body-1', 'body-2']);
+    expect(engine.ops()).not.toContain('create.paragraph');
+  });
+
+  it('טבלה בסוף המסמך שהמנוע מסרב להסיר — פסקה נוספת אחריה, וניסיון חוזר', async () => {
+    // superdoc 2.17 מסרב להסיר טבלה שאין אחריה פסקה (נמדד ב-references-qa).
+    const engine = fakeEngine({
+      tocs: ['toc-1'],
+      total: 1,
+      blocks: documentWithToc().slice(0, 3),
+      refuseTocAtEnd: true,
+    });
+
+    expect(await removeTableOfContents(engine.host)).toEqual({ ok: true });
+
+    expect(engine.inputs('create.paragraph')).toEqual([
+      { at: { kind: 'after', target: { kind: 'block', nodeType: 'paragraph', nodeId: 'row-2' } } },
+    ]);
+    expect(engine.inputs('toc.remove')).toHaveLength(2);
+    expect(engine.remaining()).toEqual(['trail']);
+  });
+
+  it('סירוב שאינו בגלל סוף המסמך — בלי פסקה נוספת, והכשל מוחזר', async () => {
+    const engine = fakeEngine({
+      tocs: ['toc-1'],
+      total: 1,
+      blocks: documentWithToc(),
+      failures: { 'toc.remove': { code: 'CAPABILITY_UNAVAILABLE' } },
+    });
+
+    expect((await removeTableOfContents(engine.host)).ok).toBe(false);
+    expect(engine.ops()).not.toContain('create.paragraph');
+    expect(engine.inputs('toc.remove')).toHaveLength(1);
   });
 
   it('שואבת עמודים: תוכן עניינים ארוך מ-200 שורות נמחק כולו', async () => {
