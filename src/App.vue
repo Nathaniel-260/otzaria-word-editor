@@ -6038,13 +6038,33 @@ async function discardedBytes(session: DocumentSession): Promise<Uint8Array | nu
    זה הלבן-כמעט; בכהה — המשטח הכהה ביותר, כך שאין כאן הבהרה בכוח.
    הכלל חל על שורש כל פס, **חוץ מסרגל המסמכים** (הילד הראשון) — הוא נשאר
    בצבע המקורי שלו. משטחים פנימיים שיש להם רקע משלהם בקובץ הרכיב
-   (למשל לוח הרצועה) דורשים שינוי שם. */
+   (למשל שורת הלשוניות שבתוך הרצועה) דורשים שינוי שם. */
 .shell-top > :not(.ruler-row):not(:first-child),
 .shell-top .ruler-corner {
   background-color: var(
     --color-surface-container-lowest,
     var(--color-surface)
   ) !important;
+}
+
+/* רצועת הכלים: מרווח של 4px מקצוות המסך, פינות מעוגלות, ובלי הקו המפריד
+   מתחת לשורת הכותרת. הצבע הוא אותו טוקן M3 בהיר, ולכן מסתדר גם בערכה
+   כהה. `.word-ribbon-container` הוא ה-hook ש-`focusRing` משתמש בו;
+   `.word-titlebar` — אותו דבר. בלי `overflow: hidden` במכוון: הוא היה
+   חותך תפריטים צפים שנפתחים מתוך הרצועה. */
+.shell-top :deep(.word-ribbon-container) {
+  margin-inline: 4px;
+  border-radius: 12px;
+  border-block-start: 0 !important;
+  background-color: var(
+    --color-surface-container-lowest,
+    var(--color-surface)
+  ) !important;
+}
+
+.shell-top :deep(.word-titlebar) {
+  border-block-end: 0 !important;
+  box-shadow: none !important;
 }
 
 /* אזור המסמך: שורה של הסרגל האנכי וה-stack. `min-width: 0` על ה-stack הוא מה
