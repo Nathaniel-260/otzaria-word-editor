@@ -6081,8 +6081,10 @@ async function discardedBytes(session: DocumentSession): Promise<Uint8Array | nu
   flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
+  background: var(--word-canvas-bg);
   /* הבד מוּבהר ב-70% נוספים לכיוון לבן — מעל הצבע שנבחר (ברירת מחדל או
-     צבע המשתמש). */
+     צבע המשתמש). השורה שמעל נשארת כמו שהיא: היא גם נסיגה לדפדפן בלי
+     `color-mix`, וגם מה שבדיקת canvas-color.test.ts מצפה למצוא. */
   background: color-mix(in srgb, var(--word-canvas-bg) 30%, white);
   overflow: hidden;
 }
