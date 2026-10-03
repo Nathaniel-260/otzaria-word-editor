@@ -6033,20 +6033,17 @@ async function discardedBytes(session: DocumentSession): Promise<Uint8Array | nu
   flex-shrink: 0;
 }
 
-/* הבהרת הפסים העליונים ב-70% נוספים לכיוון לבן. הערך הוא `30%` מהצבע
-   המקורי + לבן — שנו את `--bar-keep` כדי לכוון (100% = ללא שינוי).
-   הכלל חל על שורש כל פס; משטחים פנימיים שיש להם רקע משלהם בקובץ הרכיב
+/* הפסים העליונים על טוקן ה-M3 הבהיר ביותר של משטחי המיכל
+   (`--color-surface-container-lowest`) במקום `-highest`. בערכת נושא בהירה
+   זה הלבן-כמעט; בכהה — המשטח הכהה ביותר, כך שאין כאן הבהרה בכוח.
+   הכלל חל על שורש כל פס, **חוץ מסרגל המסמכים** (הילד הראשון) — הוא נשאר
+   בצבע המקורי שלו. משטחים פנימיים שיש להם רקע משלהם בקובץ הרכיב
    (למשל לוח הרצועה) דורשים שינוי שם. */
-.shell-top {
-  --bar-keep: 30%;
-}
-
-.shell-top > :not(.ruler-row),
+.shell-top > :not(.ruler-row):not(:first-child),
 .shell-top .ruler-corner {
-  background-color: color-mix(
-    in srgb,
-    var(--color-surface-container-highest) var(--bar-keep),
-    white
+  background-color: var(
+    --color-surface-container-lowest,
+    var(--color-surface)
   ) !important;
 }
 
@@ -6073,6 +6070,17 @@ async function discardedBytes(session: DocumentSession): Promise<Uint8Array | nu
   inset: 0;
 }
 
+/* ברירת המחדל של הבד: טוקן ה-M3 הבהיר ביותר של משטחי המיכל. מוגדר כאן על
+   השורש (`html:root`, ספציפיות גבוהה מ-`:root` של tokens.css) ולא ב-
+   `.editor-stack`, כדי שצבע שהמשתמש בחר — שנכתב כהצהרה ישירה על השורש
+   ב-`applyCanvasColor` — ימשיך לגבור. */
+:global(html:root) {
+  --word-canvas-bg: var(
+    --color-surface-container-lowest,
+    var(--color-surface)
+  );
+}
+
 /* הרקע הוא `--word-canvas-bg` ולא טוקן ערכת הנושא ישירות: זהו הבד, והוא
    האלמנט היחיד שהמשתמש יכול לצבוע (composables/canvas-color.ts). ברירת
    המחדל של הטוקן היא אותו צבע ערכת נושא בדיוק — ראו styles/tokens.css. */
@@ -6082,10 +6090,6 @@ async function discardedBytes(session: DocumentSession): Promise<Uint8Array | nu
   min-width: 0;
   min-height: 0;
   background: var(--word-canvas-bg);
-  /* הבד מוּבהר ב-70% נוספים לכיוון לבן — מעל הצבע שנבחר (ברירת מחדל או
-     צבע המשתמש). השורה שמעל נשארת כמו שהיא: היא גם נסיגה לדפדפן בלי
-     `color-mix`, וגם מה שבדיקת canvas-color.test.ts מצפה למצוא. */
-  background: color-mix(in srgb, var(--word-canvas-bg) 30%, white);
   overflow: hidden;
 }
 
