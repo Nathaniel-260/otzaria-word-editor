@@ -6048,23 +6048,53 @@ async function discardedBytes(session: DocumentSession): Promise<Uint8Array | nu
 }
 
 /* רצועת הכלים: מרווח של 4px מקצוות המסך, פינות מעוגלות, ובלי הקו המפריד
-   מתחת לשורת הכותרת. הצבע הוא אותו טוקן M3 בהיר, ולכן מסתדר גם בערכה
-   כהה. `.word-ribbon-container` הוא ה-hook ש-`focusRing` משתמש בו;
-   `.word-titlebar` — אותו דבר. בלי `overflow: hidden` במכוון: הוא היה
+   מתחת לשורת הכותרת. הצבע הוא טוקן M3 בהיר, ולכן מסתדר גם בערכה כהה.
+
+   למה לא רק על `.word-ribbon-container`: לשורת הלשוניות (`.word-tab-bar`)
+   ולגוף הרצועה (`.word-ribbon-body`) יש רקע משלהם, והם מכסים את העטיפה
+   (Ribbon.vue עצמו בלי `<style>` — הרקעים בגיליון הכללי). הם נצבעים כאן
+   ישירות, והעיגול ניתן להם ולא לעטיפה: `overflow: hidden` על העטיפה היה
    חותך תפריטים צפים שנפתחים מתוך הרצועה. */
 .shell-top :deep(.word-ribbon-container) {
   margin-inline: 4px;
   border-radius: 12px;
-  border-block-start: 0 !important;
   background-color: var(
     --color-surface-container-lowest,
     var(--color-surface)
   ) !important;
 }
 
+.shell-top :deep(.word-tab-bar),
+.shell-top :deep(.word-ribbon-body) {
+  background-color: var(
+    --color-surface-container-lowest,
+    var(--color-surface)
+  ) !important;
+}
+
+/* הקו המפריד בין שורת הכותרת לשורת הלשוניות — משני צדדיו, כי אין לי את
+   הגיליון שמצייר אותו. */
 .shell-top :deep(.word-titlebar) {
   border-block-end: 0 !important;
   box-shadow: none !important;
+}
+
+.shell-top :deep(.word-tab-bar) {
+  border-block-start: 0 !important;
+  box-shadow: none !important;
+  border-start-start-radius: 12px;
+  border-start-end-radius: 12px;
+}
+
+.shell-top :deep(.word-ribbon-body) {
+  border-end-start-radius: 12px;
+  border-end-end-radius: 12px;
+}
+
+/* רצועה מכווצת: הגוף מוסתר (`v-show`), ושורת הלשוניות היא כל מה שנשאר —
+   גם הפינות התחתונות שלה מעוגלות. */
+.shell-top :deep(.word-ribbon-container:has(> .word-ribbon-body[style*='display: none']) .word-tab-bar) {
+  border-radius: 12px;
 }
 
 /* אזור המסמך: שורה של הסרגל האנכי וה-stack. `min-width: 0` על ה-stack הוא מה
