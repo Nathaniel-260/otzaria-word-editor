@@ -10,14 +10,14 @@
   z-index: 10;
 }
 
-/* סרגל לשוניות (Tabs Bar) — מקבל את צבע הנושא של השורה העליונה */
+/* סרגל לשוניות (Tabs Bar) — שקוף, יורש את צבע הסביבה. הרקע, הגבול
+   והעיגול נקבעים ע"י הקונטקסט (App.vue) ולא פה. */
 .word-tab-bar {
   display: flex;
   align-items: flex-end;
   padding-inline: 8px;
-  background: var(--color-surface-container-high);
+  background: transparent;
   height: var(--tabbar-height);
-  border-block-end: 1px solid var(--color-outline-variant);
 }
 
 /* ה-tablist עצמו (ראו Ribbon.vue). הגלילה יושבת כאן ולא על הסרגל, כדי שכפתור
