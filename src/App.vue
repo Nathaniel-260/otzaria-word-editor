@@ -19,6 +19,15 @@
       `.shell-top` ב-`<style>`.
     -->
     <div class="shell-top">
+      <!-- רצועת טאבים — העליונה ביותר, מעל הכותרת. אחד ל-`DocumentSession` פתוח. ראו „ריבוי מסמכים” ליד `sessions` בסקריפט. -->
+      <DocumentTabsBar
+        :tabs="documentTabs"
+        :active-id="documentIdView"
+        @select-tab="onDocumentTabSelect"
+        @close-tab="onDocumentTabClose"
+        @new-tab="onDocumentTabNew"
+      />
+
       <!-- פס עליון -->
       <TitleBar
         ref="titleBarRef"
@@ -40,15 +49,6 @@
         @open-ribbon-tab="openRibbonTab"
         @toggle-autosave="toggleAutosave"
         @update-title="onTitleUpdate"
-      />
-
-      <!-- רצועת טאבים — אחד ל-`DocumentSession` פתוח. ראו „ריבוי מסמכים” ליד `sessions` בסקריפט. -->
-      <DocumentTabsBar
-        :tabs="documentTabs"
-        :active-id="documentIdView"
-        @select-tab="onDocumentTabSelect"
-        @close-tab="onDocumentTabClose"
-        @new-tab="onDocumentTabNew"
       />
 
       <!-- רצועת הכלים (Ribbon) -->
@@ -6033,6 +6033,23 @@ async function discardedBytes(session: DocumentSession): Promise<Uint8Array | nu
   flex-shrink: 0;
 }
 
+/* הבהרת הפסים העליונים ב-70% נוספים לכיוון לבן. הערך הוא `30%` מהצבע
+   המקורי + לבן — שנו את `--bar-keep` כדי לכוון (100% = ללא שינוי).
+   הכלל חל על שורש כל פס; משטחים פנימיים שיש להם רקע משלהם בקובץ הרכיב
+   (למשל לוח הרצועה) דורשים שינוי שם. */
+.shell-top {
+  --bar-keep: 30%;
+}
+
+.shell-top > :not(.ruler-row),
+.shell-top .ruler-corner {
+  background-color: color-mix(
+    in srgb,
+    var(--color-surface-container-highest) var(--bar-keep),
+    white
+  ) !important;
+}
+
 /* אזור המסמך: שורה של הסרגל האנכי וה-stack. `min-width: 0` על ה-stack הוא מה
    שמאפשר לו להצטמצם — פריט flex אינו יורד מתחת לרוחב התוכן שלו בלעדיו, ומיכל
    הגלילה של המנוע היה דוחף את הסרגל האנכי אל מחוץ למסך. */
@@ -6064,7 +6081,9 @@ async function discardedBytes(session: DocumentSession): Promise<Uint8Array | nu
   flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
-  background: var(--word-canvas-bg);
+  /* הבד מוּבהר ב-70% נוספים לכיוון לבן — מעל הצבע שנבחר (ברירת מחדל או
+     צבע המשתמש). */
+  background: color-mix(in srgb, var(--word-canvas-bg) 30%, white);
   overflow: hidden;
 }
 
