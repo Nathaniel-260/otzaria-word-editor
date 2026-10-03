@@ -6068,7 +6068,7 @@ async function discardedBytes(session: DocumentSession): Promise<Uint8Array | nu
 .shell-top :deep(.word-ribbon-body) {
   background-color: var(
     --color-surface-container-lowest,
-    var(--color-surface)
+    var(--color-on-primary)
   ) !important;
 }
 
