@@ -191,36 +191,32 @@ button:disabled {
   box-shadow: inset 0 -3px 6px rgba(0,0,0,0.06);
 }
 
-/* Use pseudo-elements for rounded gutter overlays. ::before is the left
-   gutter, ::after is the right gutter. They are invisible by default and
-   fade in on host hover; they do not capture pointer events. */
-.editor-stack__host::before,
-.editor-stack__host::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: var(--editor-scrollbar-w);
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity 120ms ease, transform 120ms ease;
-  z-index: 6;
-}
-.editor-stack__host::before {
-  left: 0;
+/* Removed pseudo-element gutters to avoid capturing pointer events that
+   interfered with the scrollbar handle. Use track + thumb styling on hover
+   instead so visuals match but pointer interactions are preserved. */
+
+/* When hovering the host, show a light track (gutter) and a visible thumb
+   that matches the lighter canvas overlay. Thumb gets stronger styling on
+   direct hover for clarity. */
+.editor-stack__host:hover::-webkit-scrollbar-track,
+.editor-stack__host:has(.superdoc:hover)::-webkit-scrollbar-track,
+.editor-stack__host:has(.superdoc .superdoc-page:hover)::-webkit-scrollbar-track {
   background: rgba(255,255,255,0.04);
-  /* round inner corners toward the document */
-  border-radius: 0 8px 8px 0;
+  border-radius: 8px;
 }
-.editor-stack__host::after {
-  right: 0;
-  background: rgba(255,255,255,0.04);
-  border-radius: 8px 0 0 8px;
+.editor-stack__host:hover::-webkit-scrollbar-thumb,
+.editor-stack__host:has(.superdoc:hover)::-webkit-scrollbar-thumb,
+.editor-stack__host:has(.superdoc .superdoc-page:hover)::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.12);
+  border: 1px solid rgba(0,0,0,0.06);
+  border-radius: 8px;
+  box-shadow: inset 0 -2px 4px rgba(0,0,0,0.04);
+}
+.editor-stack__host::-webkit-scrollbar-thumb:hover {
+  background: var(--color-outline);
+  box-shadow: inset 0 -3px 6px rgba(0,0,0,0.06);
 }
 
-/* Show gutters and make the track visible on hover; the thumb is shown as
-   part of the host-hover state (WebKit) so the gutter and handle read as one
-   element. */
 .editor-stack__host:hover::before,
 .editor-stack__host:has(.superdoc:hover)::before,
 .editor-stack__host:has(.superdoc .superdoc-page:hover)::before,
@@ -244,7 +240,7 @@ button:disabled {
   scrollbar-width: thin;
 }
 
-/* מרכוז העמוד.
+/* מרכוז העמוד."
 
    נמדד על ה-dist הארוז: המנוע מרנדר `.superdoc` כ-`display: flex; position:
    relative` **בלי `justify-content`**, וב-style.css שלו יש גם
