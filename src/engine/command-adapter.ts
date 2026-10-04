@@ -47,6 +47,7 @@ export const REASON_TEXT: Record<SuperDocUIReason, string> = {
   'history-empty': 'אין פעולה לבטל',
   'search-unavailable': 'החיפוש אינו זמין במסמך הזה',
   'search-invalid-pattern': 'תבנית החיפוש אינה חוקית',
+  'search-truncated': 'יש יותר מדי תוצאות לספור את כולן, ולכן לא הוחלף דבר',
   'replace-unsupported': 'החלפת טקסט אינה נתמכת בגרסה הזאת של המנוע',
   'content-control-locked': 'החלק הזה במסמך מוגן מפני שינוי עיצוב',
   'permission-denied': 'אין הרשאה לבצע את הפעולה',
