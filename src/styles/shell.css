@@ -178,17 +178,39 @@ button:disabled {
   box-shadow: inset 0 -3px 6px rgba(0,0,0,0.06);
 }
 
-/* Firefox: keep gutter stable and show colored scrollbar only on hover */
+/* When the scrollbar is visible (hover) make the entire reserved gutter and
+   the scrollbar track slightly lighter so the whole area reads as a single
+   element. The overlay is only applied on hover so the canvas remains
+   unchanged when the scrollbar is hidden. */
+.editor-stack__host:hover,
+.editor-stack__host:has(.superdoc:hover),
+.editor-stack__host:has(.superdoc .superdoc-page:hover) {
+  /* overlay narrow strips on both edges equal to the reserved scrollbar width */
+  background-image:
+    linear-gradient(to right, rgba(255,255,255,0.04), rgba(255,255,255,0.04)),
+    linear-gradient(to left, rgba(255,255,255,0.04), rgba(255,255,255,0.04));
+  background-repeat: no-repeat;
+  background-size: var(--editor-scrollbar-w) 100%, var(--editor-scrollbar-w) 100%;
+  background-position: left top, right top;
+
+  /* Make the track visible and match the gutter overlay color in Firefox */
+  scrollbar-color: var(--word-canvas-bg) var(--word-canvas-bg);
+  scrollbar-width: auto;
+}
+
+/* WebKit: make the track visible and colored when hovered so it reads as the
+   same lighter gutter area. */
+.editor-stack__host:hover::-webkit-scrollbar-track,
+.editor-stack__host:has(.superdoc:hover)::-webkit-scrollbar-track,
+.editor-stack__host:has(.superdoc .superdoc-page:hover)::-webkit-scrollbar-track {
+  background: var(--word-canvas-bg);
+}
+
+/* Default (non-hover) state for Firefox/host kept subtle and thin */
 .editor-stack__host {
   /* default: show subtle thumb matching canvas */
   scrollbar-color: var(--word-canvas-bg) transparent;
   scrollbar-width: thin;
-}
-.editor-stack__host:hover,
-.editor-stack__host:has(.superdoc:hover),
-.editor-stack__host:has(.superdoc .superdoc-page:hover) {
-  scrollbar-color: var(--color-outline) transparent;
-  scrollbar-width: auto;
 }
 
 /* מרכוז העמוד.
