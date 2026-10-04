@@ -140,6 +140,9 @@ button:disabled {
   /* keep the scrollbar visually hidden when not hovered */
   scrollbar-width: thin;
   scrollbar-color: transparent transparent;
+
+  /* reserve physical left space so appearance/disappearance doesn't change layout */
+  padding-left: var(--editor-scrollbar-w);
 }
 
 /* WebKit/Blink: keep reserved width but make thumb transparent until hover */
@@ -156,7 +159,8 @@ button:disabled {
   transition: background 120ms ease;
 }
 
-/* Reveal the thumb (make it visible) only when hovering the rendered document/page */
+/* Reveal the thumb (make it visible) when hovering the rendered document/page or the host scrollbar area */
+.editor-stack__host:hover::-webkit-scrollbar-thumb,
 .editor-stack__host:has(.superdoc:hover)::-webkit-scrollbar-thumb,
 .editor-stack__host:has(.superdoc .superdoc-page:hover)::-webkit-scrollbar-thumb {
   background: var(--color-outline);
@@ -167,6 +171,7 @@ button:disabled {
   /* default: invisible */
   scrollbar-color: transparent transparent;
 }
+.editor-stack__host:hover,
 .editor-stack__host:has(.superdoc:hover),
 .editor-stack__host:has(.superdoc .superdoc-page:hover) {
   scrollbar-color: var(--color-outline) transparent;
