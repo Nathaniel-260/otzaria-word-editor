@@ -6045,9 +6045,7 @@ async function discardedBytes(session: DocumentSession): Promise<Uint8Array | nu
     var(--color-shell-dim, rgba(0, 0, 0, 0.05)),
     var(--color-shell-dim, rgba(0, 0, 0, 0.05))
   ) !important;
-}
-
-/* רצועת הכלים: מרווח של 4px מקצוות המסך, ובלי הקו המפריד מתחת לשורת הכותרת.
+}: מרווח של 4px מקצוות המסך, ובלי הקו המפריד מתחת לשורת הכותרת.
    הטאבים יושבים על רקע הסביבה (שקוף), וגוף הרצועה הוא הכרטיס הלבן עם הפינות
    המעוגלות — כמו ב-Word. `overflow: hidden` על העטיפה הושמט בכוונה: הוא היה
    חותך תפריטים צפים שנפתחים מתוך הרצועה. */
@@ -6124,13 +6122,18 @@ async function discardedBytes(session: DocumentSession): Promise<Uint8Array | nu
 
 /* הרקע הוא `--word-canvas-bg` ולא טוקן ערכת הנושא ישירות: זהו הבד, והוא
    האלמנט היחיד שהמשתמש יכול לצבוע (composables/canvas-color.ts). ברירת
-   המחדל של הטוקן היא אותו צבע ערכת נושא בדיוק — ראו styles/tokens.css. */
+   המחדל של הטוקן היא אותו צבע ערכת נושא בדיוק — ראו styles/tokens.css.
+   שכבת ה-dim מכהה את הקנבס קלות מול הרצועה, בלי לנגוע בצבע שהמשתמש בחר. */
 .editor-stack {
   position: relative;
   flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
   background: var(--word-canvas-bg);
+  background-image: linear-gradient(
+    var(--color-shell-dim, rgba(0, 0, 0, 0.05)),
+    var(--color-shell-dim, rgba(0, 0, 0, 0.05))
+  );
   overflow: hidden;
 }
 
@@ -6147,6 +6150,10 @@ async function discardedBytes(session: DocumentSession): Promise<Uint8Array | nu
   width: 22px;
   height: 22px;
   background: var(--color-surface-container-highest);
+  background-image: linear-gradient(
+    var(--color-shell-dim, rgba(0, 0, 0, 0.05)),
+    var(--color-shell-dim, rgba(0, 0, 0, 0.05))
+  );
   border-block-end: 1px solid var(--color-outline-variant);
   border-inline-end: 1px solid var(--color-outline-variant);
 }
