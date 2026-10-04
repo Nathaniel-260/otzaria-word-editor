@@ -150,6 +150,10 @@ function onTabKeydown(event: KeyboardEvent): void {
   background: var(--color-surface);
   border-color: var(--color-outline-variant);
   color: var(--color-primary);
+  /* מופע מורם: צל שמושך את הלשונית מעל הפס שמתחתיו. */
+  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.08);
+  position: relative;
+  z-index: 2;
 }
 
 .word-doctab-title {
