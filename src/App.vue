@@ -6046,14 +6046,34 @@ async function discardedBytes(session: DocumentSession): Promise<Uint8Array | nu
   ) !important;
 }
 
-/* רצועת הכלים: מרווח של 4px מקצוות המסך, ובלי הקו המפריד מתחת לשורת הכותרת.
+/* רצועת הכלים: מרווח של 6px מקצוות המסך, ובלי הקו המפריד מתחת לשורת הכותרת.
    הטאבים יושבים על רקע הסביבה (שקוף), וגוף הרצועה הוא הכרטיס הלבן עם הפינות
    המעוגלות — כמו ב-Word. `overflow: hidden` על העטיפה הושמט בכוונה: הוא היה
    חותך תפריטים צפים שנפתחים מתוך הרצועה. */
 .shell-top :deep(.word-ribbon-container) {
-  margin-inline: 4px;
+  margin-inline: 6px;
   border-radius: 0;
   background: transparent !important;
+}
+
+/* הצללה של ששת הפיקסלים שבין הרצועה לקצה המסך. היא נצבעת באותו גוון כמו
+   שכבת הרקע, בלי להכהות את שורת הטאבים השקופה שמעל הרצועה. */
+.shell-top :deep(.word-ribbon-container)::before,
+.shell-top :deep(.word-ribbon-container)::after {
+  content: '';
+  position: absolute;
+  inset-block: 0;
+  width: 6px;
+  background: var(--color-shell-dim, rgba(0, 0, 0, 0.05));
+  pointer-events: none;
+}
+
+.shell-top :deep(.word-ribbon-container)::before {
+  inset-inline-start: -6px;
+}
+
+.shell-top :deep(.word-ribbon-container)::after {
+  inset-inline-end: -6px;
 }
 
 /* שורת הטאבים — שקופה לחלוטין, יורשת את צבע הסביבה.
