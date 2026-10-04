@@ -139,7 +139,7 @@ button:disabled {
   direction: rtl;
 
   /* reserve space to avoid layout shift when the scrollbar appears */
-  --editor-scrollbar-w: 14px;
+  --editor-scrollbar-w: 18px;
   scrollbar-gutter: stable both-edges;
 
   /* keep the scrollbar visually hidden when not hovered */
@@ -166,14 +166,13 @@ button:disabled {
 .editor-stack__host::-webkit-scrollbar-thumb {
   /* hidden by default */
   background: transparent;
-  border-radius: 8px;
+  border-radius: 12px;
   transition: background 120ms ease, box-shadow 120ms ease;
   box-shadow: none;
 }
 
-/* When the pointer is over the host (canvas area) show the thumb so it
-   matches the lighter gutter overlay. Direct thumb hover still uses the
-   stronger outline color for clarity. */
+/* Show the thumb whenever the host is hovered (canvas area or gutter) so it
+   matches the lighter gutter overlay. */
 .editor-stack__host:hover::-webkit-scrollbar-thumb,
 .editor-stack__host:has(.superdoc:hover)::-webkit-scrollbar-thumb,
 .editor-stack__host:has(.superdoc .superdoc-page:hover)::-webkit-scrollbar-thumb {
@@ -200,7 +199,7 @@ button:disabled {
   background-size: var(--editor-scrollbar-w) 100%, var(--editor-scrollbar-w) 100%;
   background-position: left top, right top;
 
-  /* make track visible and thumb visible in Firefox too */
+  /* Firefox: make track visible and thumb visible */
   scrollbar-color: var(--word-canvas-bg) var(--word-canvas-bg);
   scrollbar-width: thin;
 }
@@ -213,10 +212,17 @@ button:disabled {
   background: var(--word-canvas-bg);
 }
 
-/* Default (non-hover) state for Firefox/host kept subtle and thin */
+/* Firefox: DEFAULT (non-hover) state — keep invisible */
 .editor-stack__host {
   scrollbar-color: transparent transparent;
   scrollbar-width: thin;
+}
+/* Firefox: HOVER state — show thumb and track. Use :hover and :has() to match
+   the WebKit hover selectors so the thumb appears at the same time. */
+.editor-stack__host:hover,
+.editor-stack__host:has(.superdoc:hover),
+.editor-stack__host:has(.superdoc .superdoc-page:hover) {
+  scrollbar-color: var(--word-canvas-bg) var(--word-canvas-bg);
 }
 
 /* מרכוז העמוד.
