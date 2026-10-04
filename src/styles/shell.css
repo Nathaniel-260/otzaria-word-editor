@@ -40,7 +40,7 @@ body {
   gap: 12px;
   height: var(--topbar-height);
   padding-inline: 16px;
-  background: var(--color-surface-container-highest);
+  background: var(--color-surface-container-high);
   color: var(--color-on-surface);
   border-block-end: 1px solid var(--color-outline);
 }
