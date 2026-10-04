@@ -6033,7 +6033,6 @@ async function discardedBytes(session: DocumentSession): Promise<Uint8Array | nu
   flex-shrink: 0;
 }
 
-/* הפסים העליונים על טוקן ה-M3 הבהיר ביותר של משטחי המיכל
 /* הפסים העליונים — רקע הנושא עם שכבת הכהייה עדינה (5% שחור) כדי לייצר
    ניגוד קל מול הרצועה הלבנה, בלי לנגוע בצבע הנושא עצמו.
    `background-image` לא מחליף את `background-color` שנגזר מהנושא — הוא יושב
@@ -6045,7 +6044,9 @@ async function discardedBytes(session: DocumentSession): Promise<Uint8Array | nu
     var(--color-shell-dim, rgba(0, 0, 0, 0.05)),
     var(--color-shell-dim, rgba(0, 0, 0, 0.05))
   ) !important;
-}: מרווח של 4px מקצוות המסך, ובלי הקו המפריד מתחת לשורת הכותרת.
+}
+
+/* רצועת הכלים: מרווח של 4px מקצוות המסך, ובלי הקו המפריד מתחת לשורת הכותרת.
    הטאבים יושבים על רקע הסביבה (שקוף), וגוף הרצועה הוא הכרטיס הלבן עם הפינות
    המעוגלות — כמו ב-Word. `overflow: hidden` על העטיפה הושמט בכוונה: הוא היה
    חותך תפריטים צפים שנפתחים מתוך הרצועה. */
