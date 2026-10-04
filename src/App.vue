@@ -6043,7 +6043,7 @@ async function discardedBytes(session: DocumentSession): Promise<Uint8Array | nu
 .shell-top .ruler-corner {
   background-color: var(
     --color-surface-container-lowest,
-    var(--color-surface)
+    var(--color-surface-container-high)
   ) !important;
 }
 
