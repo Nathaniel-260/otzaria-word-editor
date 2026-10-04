@@ -10,10 +10,6 @@
   z-index: 10;
 }
 
-/* צל על כל הרצועה — מעל ומתחת, בולט יותר כדי להפריד אותה מהמסמך */
-.word-ribbon-container {
-  box-shadow: var(--ribbon-shadow-top), var(--ribbon-shadow-bottom);
-}
 
 /* סרגל לשוניות (Tabs Bar) — שקוף, יורש את צבע הסביבה. הרקע, הגבול
    והעיגול נקבעים ע"י הקונטקסט (App.vue) ולא פה. */
@@ -148,6 +144,12 @@
   overflow-y: hidden;
   gap: 0;
   width: 100%;
+}
+
+/* הצל יופעל רק על גוף הרצועה הלבנה, לא על פס הטאבים */
+.word-ribbon-body {
+  box-shadow: var(--ribbon-shadow-top), var(--ribbon-shadow-bottom);
+  z-index: 1;
 }
 
 .word-ribbon-body::-webkit-scrollbar {
