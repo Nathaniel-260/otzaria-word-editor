@@ -9,6 +9,16 @@
   box-sizing: border-box;
 }
 
+/* Ensure UI chrome captures the pointer so hovering them does not count as
+   hovering the document canvas underneath (prevents accidental scrollbar reveal). */
+.word-ribbon-container,
+.topbar,
+.ruler-row,
+.ruler-corner,
+.word-tab-bar {
+  pointer-events: auto;
+}
+
 html,
 body,
 #app {
@@ -120,7 +130,36 @@ button:disabled {
   position: absolute;
   inset: 0;
   overflow: auto;
-  direction: ltr;
+  /* place the native vertical scrollbar on the left side of the viewport */
+  direction: rtl;
+
+  /* hide native scrollbar by default; show on hover (Firefox) */
+  scrollbar-width: none;
+  scrollbar-color: transparent transparent;
+}
+
+/* WebKit/Blink: hide scrollbar when not hovered, reveal on hover */
+.editor-stack__host::-webkit-scrollbar {
+  width: 0;
+  background: transparent;
+}
+/* Reveal the scrollbar only when the user hovers the rendered document/page.
+   Uses :has() to detect a hovered child (.superdoc or its .superdoc-page). */
+.editor-stack__host:has(.superdoc:hover)::-webkit-scrollbar,
+.editor-stack__host:has(.superdoc .superdoc-page:hover)::-webkit-scrollbar {
+  width: 10px;
+}
+.editor-stack__host:has(.superdoc:hover)::-webkit-scrollbar-thumb,
+.editor-stack__host:has(.superdoc .superdoc-page:hover)::-webkit-scrollbar-thumb {
+  background: var(--color-outline);
+  border-radius: 8px;
+}
+
+/* Firefox: reveal a thin scrollbar when hovering the document/page */
+.editor-stack__host:has(.superdoc:hover),
+.editor-stack__host:has(.superdoc .superdoc-page:hover) {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-outline) transparent;
 }
 
 /* מרכוז העמוד.
@@ -145,6 +184,10 @@ button:disabled {
    הכלל אינו תלוי בכיווניות: מרכוז הוא סימטרי, ולכן מעבר המיכל ל-ltr אינו נוגע
    בו. */
 .editor-stack__host .superdoc {
+  /* keep content layout left-to-right even though the host's direction
+     is rtl so the scrollbar sits on the left. This preserves document
+     rendering and centering logic. */
+  direction: ltr;
   justify-content: center;
 }
 
