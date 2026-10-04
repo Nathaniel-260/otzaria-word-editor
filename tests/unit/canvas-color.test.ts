@@ -7,18 +7,17 @@
  *    בהפעלה קודמת. צבע פגום שמגיע עד `setProperty` אינו זורק ואינו מדווח —
  *    הדפדפן פשוט מתעלם מההצהרה, והמשתמש מקבל בד בלי רקע כלל.
  *
- * 2. **„אין העדפה” הוא היעדר ההצהרה, ולא צבע שני.** זה מה שמחזיק את המעקב
- *    אחרי ערכת הנושא: `removeProperty` מחזיר את הבד לרשת של tokens.css, ומשם
- *    לצבע שאוצריא כותבת בכל שינוי ערכה ובכל מעבר בהיר/כהה. אילו „ברירת מחדל”
- *    הייתה נכתבת כאפור קבוע, הבד היה נשאר בהיר במצב כהה — וזה בדיוק סוג הבאג
- *    שאיש אינו רואה עד שהוא מחליף ערכה.
+ * 2. **„אין העדפה” הוא היעדר ההצהרה, ולא צבע שני.** `removeProperty` מחזיר
+ *    את הבד לברירת המחדל שב-tokens.css (חום בהיר). אילו „ברירת מחדל” הייתה
+ *    נכתבת כצבע, היא הייתה נשמרת ב-`storage` כבחירה, ושינוי עתידי של ברירת
+ *    המחדל לא היה מגיע למי שלחץ עליה.
  */
 import { beforeEach, describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   CANVAS_COLOR_VAR,
-  THEME_CANVAS_VAR,
+  DEFAULT_CANVAS_COLOR,
   applyCanvasColor,
   canvasColor,
   normalizeCanvasColor,
@@ -87,8 +86,8 @@ describe('applyCanvasColor', () => {
   });
 
   it('`null` מסיר את ההצהרה ואינו כותב צבע אחר', () => {
-    // הלב של „ברירת מחדל”: הבד חייב לחזור **לעקוב** אחרי ערכת הנושא, ולכן
-    // אסור שיישאר כאן ערך כלשהו — גם לא האפור שהיה שם רגע קודם.
+    // הלב של „ברירת מחדל”: הבד חוזר לערך שב-tokens.css, ולכן אסור שיישאר
+    // כאן ערך כלשהו — גם לא הצבע שהיה שם רגע קודם.
     applyCanvasColor('#123456');
     applyCanvasColor(null);
 
@@ -118,12 +117,19 @@ describe('הטוקן שב-TypeScript הוא הטוקן שב-CSS', () => {
     expect(source('styles', 'shell.css')).toContain(`background: var(${CANVAS_COLOR_VAR});`);
   });
 
-  it('ברירת המחדל של הטוקן היא צבע ערכת הנושא שהבורר קורא', () => {
-    // זה מה שמחזיק את „ברירת מחדל”: הפס בבורר מראה את `THEME_CANVAS_VAR`,
-    // והבד — בלי העדפה — נצבע ממנו. שני טוקנים שונים כאן פירושם פס שמבטיח
-    // צבע אחד ובד שמצויר באחר.
+  it('ברירת המחדל של הטוקן היא `DEFAULT_CANVAS_COLOR` שהבורר מראה', () => {
+    // זה מה שמחזיק את „ברירת מחדל”: הפס בבורר מראה את `DEFAULT_CANVAS_COLOR`,
+    // והבד — בלי העדפה — נצבע מ-tokens.css. שני ערכים שונים כאן פירושם פס
+    // שמבטיח צבע אחד ובד שמצויר באחר.
     expect(source('styles', 'tokens.css')).toContain(
-      `${CANVAS_COLOR_VAR}: var(${THEME_CANVAS_VAR});`,
+      `${CANVAS_COLOR_VAR}: ${DEFAULT_CANVAS_COLOR};`,
+    );
+  });
+
+  it('ברירת המחדל היא „חום בהיר” מהפלטה — המשבצת מסומנת כשאין העדפה', () => {
+    // הגוון הבסיסי של העמודה „חום בהיר” ב-ColorPickerPopover.vue.
+    expect(source('ui', 'ribbon', 'common', 'ColorPickerPopover.vue')).toContain(
+      `{ family: 'חום בהיר', shades: ['${DEFAULT_CANVAS_COLOR}',`,
     );
   });
 });
