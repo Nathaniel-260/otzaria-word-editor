@@ -140,7 +140,7 @@ button:disabled {
 
   /* reserve space to avoid layout shift when the scrollbar appears */
   --editor-scrollbar-w: 14px;
-  scrollbar-gutter: stable;
+  scrollbar-gutter: stable both-edges;
 
   /* keep the scrollbar visually hidden when not hovered */
   scrollbar-width: thin;
@@ -148,8 +148,9 @@ button:disabled {
      under the ribbon/statusbar while keeping the track transparent. */
   scrollbar-color: var(--word-canvas-bg) transparent;
 
-  /* reserve physical left space so appearance/disappearance doesn't change layout */
+  /* reserve physical space so appearance/disappearance doesn't change layout */
   padding-left: var(--editor-scrollbar-w);
+  padding-right: var(--editor-scrollbar-w);
 }
 
 /* WebKit/Blink: reserve width and style the thumb so its color and subtle inset
@@ -179,8 +180,9 @@ button:disabled {
 
 /* Firefox: keep gutter stable and show colored scrollbar only on hover */
 .editor-stack__host {
-  /* default: invisible */
-  scrollbar-color: transparent transparent;
+  /* default: show subtle thumb matching canvas */
+  scrollbar-color: var(--word-canvas-bg) transparent;
+  scrollbar-width: thin;
 }
 .editor-stack__host:hover,
 .editor-stack__host:has(.superdoc:hover),
