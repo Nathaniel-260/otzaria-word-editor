@@ -144,9 +144,9 @@ button:disabled {
 
   /* keep the scrollbar visually hidden when not hovered */
   scrollbar-width: thin;
-  /* Show a thumb color derived from the canvas so it visually matches the area
-     under the ribbon/statusbar while keeping the track transparent. */
-  scrollbar-color: var(--word-canvas-bg) transparent;
+  /* Default: keep both thumb and track invisible. When hovering the canvas or
+     a page the colors are set so the gutter + thumb read as a single element. */
+  scrollbar-color: transparent transparent;
 
   /* reserve physical space so appearance/disappearance doesn't change layout */
   padding-left: var(--editor-scrollbar-w);
@@ -154,14 +154,16 @@ button:disabled {
 }
 
 /* WebKit/Blink: reserve width and keep thumb hidden until the user interacts
-   directly with the scrollbar. When the host shows the lighter gutter (host:hover)
-   the thumb becomes visible so the gutter and handle read as a single element. */
+   directly with the scrollbar. When the pointer is over the document canvas (host:hover)
+   or over a page inside it, show both a subtle track background and a visible thumb
+   so the gutter, background and handle read as a single element. */
 .editor-stack__host::-webkit-scrollbar {
   width: var(--editor-scrollbar-w);
   background: transparent;
 }
 .editor-stack__host::-webkit-scrollbar-track {
   background: transparent;
+  transition: background 120ms ease;
 }
 .editor-stack__host::-webkit-scrollbar-thumb {
   /* hidden by default */
@@ -171,19 +173,24 @@ button:disabled {
   box-shadow: none;
 }
 
-/* Show the thumb whenever the host is hovered (canvas area or gutter) so it
-   matches the lighter gutter overlay. */
+/* Show a subtle darker track and a visible thumb when hovering the canvas or a page */
+.editor-stack__host:hover::-webkit-scrollbar-track,
+.editor-stack__host:has(.superdoc:hover)::-webkit-scrollbar-track,
+.editor-stack__host:has(.superdoc .superdoc-page:hover)::-webkit-scrollbar-track {
+  background: rgba(0,0,0,0.04);
+}
+
 .editor-stack__host:hover::-webkit-scrollbar-thumb,
 .editor-stack__host:has(.superdoc:hover)::-webkit-scrollbar-thumb,
 .editor-stack__host:has(.superdoc .superdoc-page:hover)::-webkit-scrollbar-thumb {
-  background: var(--word-canvas-bg);
-  box-shadow: inset 0 -2px 4px rgba(0,0,0,0.04);
+  background: var(--color-outline);
+  box-shadow: inset 0 -2px 4px rgba(0,0,0,0.06);
 }
 
 /* Show stronger appearance when hovering the thumb directly */
 .editor-stack__host::-webkit-scrollbar-thumb:hover {
-  background: var(--color-outline);
-  box-shadow: inset 0 -3px 6px rgba(0,0,0,0.06);
+  background: var(--color-outline-variant, var(--color-outline));
+  box-shadow: inset 0 -3px 6px rgba(0,0,0,0.08);
 }
 
 /* When the pointer is anywhere over the host (canvas area) lighten the
@@ -199,17 +206,17 @@ button:disabled {
   background-size: var(--editor-scrollbar-w) 100%, var(--editor-scrollbar-w) 100%;
   background-position: left top, right top;
 
-  /* Firefox: make both track AND thumb visible with the lighter gutter color */
-  scrollbar-color: var(--word-canvas-bg) var(--word-canvas-bg);
+  /* Firefox: make both track AND thumb visible when hovering the canvas or page */
+  scrollbar-color: var(--color-outline) rgba(0,0,0,0.04);
   scrollbar-width: thin;
 }
 
 /* WebKit: make the track visible and colored when hovered so it reads as the
-   same lighter gutter area. */
+   same darker gutter area. */
 .editor-stack__host:hover::-webkit-scrollbar-track,
 .editor-stack__host:has(.superdoc:hover)::-webkit-scrollbar-track,
 .editor-stack__host:has(.superdoc .superdoc-page:hover)::-webkit-scrollbar-track {
-  background: var(--word-canvas-bg);
+  background: rgba(0,0,0,0.04);
 }
 
 /* Firefox: DEFAULT (non-hover) state — keep invisible */
