@@ -6034,14 +6034,17 @@ async function discardedBytes(session: DocumentSession): Promise<Uint8Array | nu
 }
 
 /* הפסים העליונים על טוקן ה-M3 הבהיר ביותר של משטחי המיכל
-   (`--color-surface-container-lowest`) במקום `-highest`. בערכת נושא בהירה
-   זה הלבן-כמעט; בכהה — המשטח הכהה ביותר, כך שאין כאן הבהרה בכוח.
-   הכלל חל על שורש כל פס, **חוץ מסרגל המסמכים** (הילד הראשון) — הוא נשאר
-   בצבע המקורי שלו. משטחים פנימיים שיש להם רקע משלהם בקובץ הרכיב
-   (למשל שורת הלשוניות שבתוך הרצועה) דורשים שינוי שם. */
+/* הפסים העליונים — רקע הנושא עם שכבת הכהייה עדינה (5% שחור) כדי לייצר
+   ניגוד קל מול הרצועה הלבנה, בלי לנגוע בצבע הנושא עצמו.
+   `background-image` לא מחליף את `background-color` שנגזר מהנושא — הוא יושב
+   מעליו כשכבה שקופה. כך הכלל עובד עם כל ערכת צבעים, בהירה או כהה. */
 .shell-top > :not(.ruler-row):not(:first-child),
-.shell-top .ruler-corner {
-  background-color: var(--color-surface-container-high) !important;
+.shell-top .ruler-corner,
+.topbar {
+  background-image: linear-gradient(
+    var(--color-shell-dim, rgba(0, 0, 0, 0.05)),
+    var(--color-shell-dim, rgba(0, 0, 0, 0.05))
+  ) !important;
 }
 
 /* רצועת הכלים: מרווח של 4px מקצוות המסך, ובלי הקו המפריד מתחת לשורת הכותרת.
