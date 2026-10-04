@@ -188,8 +188,7 @@ button:disabled {
 
 /* When the pointer is anywhere over the host (canvas area) lighten the
    reserved gutter visually so it reads as a single element; the thumb is
-   shown in the same state. Add rounded corners to the background overlays
-   using mask-image with radial-gradient. */
+   shown in the same state. */
 .editor-stack__host:hover,
 .editor-stack__host:has(.superdoc:hover),
 .editor-stack__host:has(.superdoc .superdoc-page:hover) {
@@ -200,24 +199,7 @@ button:disabled {
   background-size: var(--editor-scrollbar-w) 100%, var(--editor-scrollbar-w) 100%;
   background-position: left top, right top;
 
-  /* Round the corners of the gutter overlays using mask-image with
-     radial-gradient (12px radius matches the thumb border-radius).
-     WebKit prefix for broader browser support. */
-  -webkit-mask-image: 
-    radial-gradient(circle 12px at left top, transparent 12px, black 12px, black 100%),
-    radial-gradient(circle 12px at right top, transparent 12px, black 12px, black 100%);
-  -webkit-mask-size: var(--editor-scrollbar-w) 100%, var(--editor-scrollbar-w) 100%;
-  -webkit-mask-position: left top, right top;
-  -webkit-mask-repeat: no-repeat;
-
-  mask-image: 
-    radial-gradient(circle 12px at left top, transparent 12px, black 12px, black 100%),
-    radial-gradient(circle 12px at right top, transparent 12px, black 12px, black 100%);
-  mask-size: var(--editor-scrollbar-w) 100%, var(--editor-scrollbar-w) 100%;
-  mask-position: left top, right top;
-  mask-repeat: no-repeat;
-
-  /* Firefox: make track visible and thumb visible */
+  /* Firefox: make both track AND thumb visible with the lighter gutter color */
   scrollbar-color: var(--word-canvas-bg) var(--word-canvas-bg);
   scrollbar-width: thin;
 }
@@ -234,13 +216,6 @@ button:disabled {
 .editor-stack__host {
   scrollbar-color: transparent transparent;
   scrollbar-width: thin;
-}
-/* Firefox: HOVER state — show thumb and track. Use :hover and :has() to match
-   the WebKit hover selectors so the thumb appears at the same time. */
-.editor-stack__host:hover,
-.editor-stack__host:has(.superdoc:hover),
-.editor-stack__host:has(.superdoc .superdoc-page:hover) {
-  scrollbar-color: var(--word-canvas-bg) var(--word-canvas-bg);
 }
 
 /* מרכוז העמוד.
