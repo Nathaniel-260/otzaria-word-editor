@@ -6041,10 +6041,7 @@ async function discardedBytes(session: DocumentSession): Promise<Uint8Array | nu
    (למשל שורת הלשוניות שבתוך הרצועה) דורשים שינוי שם. */
 .shell-top > :not(.ruler-row):not(:first-child),
 .shell-top .ruler-corner {
-  background-color: var(
-    --color-surface-container-lowest,
-    var(--color-surface-container-high)
-  ) !important;
+  background-color: var(--color-surface-container-high) !important;
 }
 
 /* רצועת הכלים: מרווח של 4px מקצוות המסך, ובלי הקו המפריד מתחת לשורת הכותרת.
