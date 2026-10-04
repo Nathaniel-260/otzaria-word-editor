@@ -8,3 +8,8 @@ tmp
 .DS_Store
 Thumbs.db
 .qa-golden/
+
+# IDE folders: don't commit Visual Studio / VS Code workspace files
+.vscode/
+.vs/
+*.code-workspace

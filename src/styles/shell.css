@@ -9,6 +9,16 @@
   box-sizing: border-box;
 }
 
+/* Ensure UI chrome captures the pointer so hovering them does not count as
+   hovering the document canvas underneath (prevents accidental scrollbar reveal). */
+.word-ribbon-container,
+.topbar,
+.ruler-row,
+.ruler-corner,
+.word-tab-bar {
+  pointer-events: auto;
+}
+
 html,
 body,
 #app {
@@ -40,7 +50,7 @@ body {
   gap: 12px;
   height: var(--topbar-height);
   padding-inline: 16px;
-  background: var(--color-surface-container-high);
+  background: var(--color-surface);
   color: var(--color-on-surface);
   border-block-end: 1px solid var(--color-outline);
 }
@@ -120,7 +130,52 @@ button:disabled {
   position: absolute;
   inset: 0;
   overflow: auto;
-  direction: ltr;
+  /* place the native vertical scrollbar on the left side of the viewport */
+  direction: rtl;
+
+  /* reserve space to avoid layout shift when the scrollbar appears */
+  --editor-scrollbar-w: 14px;
+  scrollbar-gutter: stable;
+
+  /* keep the scrollbar visually hidden when not hovered */
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+
+  /* reserve physical left space so appearance/disappearance doesn't change layout */
+  padding-left: var(--editor-scrollbar-w);
+}
+
+/* WebKit/Blink: keep reserved width but make thumb transparent until hover */
+.editor-stack__host::-webkit-scrollbar {
+  width: var(--editor-scrollbar-w);
+  background: transparent;
+}
+.editor-stack__host::-webkit-scrollbar-track {
+  background: transparent;
+}
+.editor-stack__host::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 8px;
+  transition: background 120ms ease;
+}
+
+/* Reveal the thumb (make it visible) when hovering the rendered document/page or the host scrollbar area */
+.editor-stack__host:hover::-webkit-scrollbar-thumb,
+.editor-stack__host:has(.superdoc:hover)::-webkit-scrollbar-thumb,
+.editor-stack__host:has(.superdoc .superdoc-page:hover)::-webkit-scrollbar-thumb {
+  background: var(--color-outline);
+}
+
+/* Firefox: keep gutter stable and show colored scrollbar only on hover */
+.editor-stack__host {
+  /* default: invisible */
+  scrollbar-color: transparent transparent;
+}
+.editor-stack__host:hover,
+.editor-stack__host:has(.superdoc:hover),
+.editor-stack__host:has(.superdoc .superdoc-page:hover) {
+  scrollbar-color: var(--color-outline) transparent;
+  scrollbar-width: auto;
 }
 
 /* מרכוז העמוד.
@@ -145,6 +200,10 @@ button:disabled {
    הכלל אינו תלוי בכיווניות: מרכוז הוא סימטרי, ולכן מעבר המיכל ל-ltr אינו נוגע
    בו. */
 .editor-stack__host .superdoc {
+  /* keep content layout left-to-right even though the host's direction
+     is rtl so the scrollbar sits on the left. This preserves document
+     rendering and centering logic. */
+  direction: ltr;
   justify-content: center;
 }
 
