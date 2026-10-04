@@ -151,8 +151,6 @@ button:disabled {
   /* reserve physical space so appearance/disappearance doesn't change layout */
   padding-left: var(--editor-scrollbar-w);
   padding-right: var(--editor-scrollbar-w);
-  /* ensure pseudo-elements can layer above document content */
-  z-index: 0;
 }
 
 /* WebKit/Blink: reserve width and keep thumb hidden until the user interacts
@@ -179,9 +177,7 @@ button:disabled {
 .editor-stack__host:hover::-webkit-scrollbar-thumb,
 .editor-stack__host:has(.superdoc:hover)::-webkit-scrollbar-thumb,
 .editor-stack__host:has(.superdoc .superdoc-page:hover)::-webkit-scrollbar-thumb {
-  /* make thumb visible when host hovered: slightly lighter than canvas for contrast */
-  background: rgba(255,255,255,0.12);
-  border: 1px solid rgba(0,0,0,0.06);
+  background: var(--word-canvas-bg);
   box-shadow: inset 0 -2px 4px rgba(0,0,0,0.04);
 }
 
@@ -191,43 +187,26 @@ button:disabled {
   box-shadow: inset 0 -3px 6px rgba(0,0,0,0.06);
 }
 
-/* Removed pseudo-element gutters to avoid capturing pointer events that
-   interfered with the scrollbar handle. Use track + thumb styling on hover
-   instead so visuals match but pointer interactions are preserved. */
+/* When the pointer is anywhere over the host (canvas area) lighten the
+   reserved gutter visually so it reads as a single element; the thumb is
+   shown in the same state. */
+.editor-stack__host:hover,
+.editor-stack__host:has(.superdoc:hover),
+.editor-stack__host:has(.superdoc .superdoc-page:hover) {
+  background-image:
+    linear-gradient(to right, rgba(255,255,255,0.04), rgba(255,255,255,0.04)),
+    linear-gradient(to left, rgba(255,255,255,0.04), rgba(255,255,255,0.04));
+  background-repeat: no-repeat;
+  background-size: var(--editor-scrollbar-w) 100%, var(--editor-scrollbar-w) 100%;
+  background-position: left top, right top;
 
-/* When hovering the host, show a light track (gutter) and a visible thumb
-   that matches the lighter canvas overlay. Thumb gets stronger styling on
-   direct hover for clarity. */
-.editor-stack__host:hover::-webkit-scrollbar-track,
-.editor-stack__host:has(.superdoc:hover)::-webkit-scrollbar-track,
-.editor-stack__host:has(.superdoc .superdoc-page:hover)::-webkit-scrollbar-track {
-  background: rgba(255,255,255,0.04);
-  border-radius: 8px;
-}
-.editor-stack__host:hover::-webkit-scrollbar-thumb,
-.editor-stack__host:has(.superdoc:hover)::-webkit-scrollbar-thumb,
-.editor-stack__host:has(.superdoc .superdoc-page:hover)::-webkit-scrollbar-thumb {
-  background: rgba(255,255,255,0.12);
-  border: 1px solid rgba(0,0,0,0.06);
-  border-radius: 8px;
-  box-shadow: inset 0 -2px 4px rgba(0,0,0,0.04);
-}
-.editor-stack__host::-webkit-scrollbar-thumb:hover {
-  background: var(--color-outline);
-  box-shadow: inset 0 -3px 6px rgba(0,0,0,0.06);
+  /* make track visible and thumb visible in Firefox too */
+  scrollbar-color: var(--word-canvas-bg) var(--word-canvas-bg);
+  scrollbar-width: thin;
 }
 
-.editor-stack__host:hover::before,
-.editor-stack__host:has(.superdoc:hover)::before,
-.editor-stack__host:has(.superdoc .superdoc-page:hover)::before,
-.editor-stack__host:hover::after,
-.editor-stack__host:has(.superdoc:hover)::after,
-.editor-stack__host:has(.superdoc .superdoc-page:hover)::after {
-  opacity: 1;
-}
-
-/* Make the track visible and colored when the host is hovered so it reads as
-   the same lighter gutter area. */
+/* WebKit: make the track visible and colored when hovered so it reads as the
+   same lighter gutter area. */
 .editor-stack__host:hover::-webkit-scrollbar-track,
 .editor-stack__host:has(.superdoc:hover)::-webkit-scrollbar-track,
 .editor-stack__host:has(.superdoc .superdoc-page:hover)::-webkit-scrollbar-track {
@@ -240,7 +219,7 @@ button:disabled {
   scrollbar-width: thin;
 }
 
-/* מרכוז העמוד."
+/* מרכוז העמוד.
 
    נמדד על ה-dist הארוז: המנוע מרנדר `.superdoc` כ-`display: flex; position:
    relative` **בלי `justify-content`**, וב-style.css שלו יש גם
