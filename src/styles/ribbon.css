@@ -44,7 +44,8 @@
   border-radius: 0;
   color: var(--color-on-surface);
   font-family: var(--font-main);
-  font-size: var(--font-size-tab);
+  /* slightly larger tab text */
+  font-size: calc(var(--font-size-tab) * 1.05);
   line-height: 1.25;
   padding: 2px 10px 3px;
   cursor: pointer;
@@ -75,7 +76,10 @@
      background or shadow so it looks minimal and does not change layout. */
   background: transparent;
   border-color: transparent;
-  color: var(--color-primary);
+  /* keep the tab color unchanged when active */
+  color: inherit;
+  /* active tab should be bold */
+  font-weight: 700;
   box-shadow: none;
   border-radius: 0;
   margin-bottom: 0;
@@ -96,8 +100,8 @@
   bottom: 0;
   left: 0;
   right: 0;
-  height: 2px;
-  background: var(--color-primary);
+  height: 3px;
+  background: currentColor;
   z-index: 4;
 }
 

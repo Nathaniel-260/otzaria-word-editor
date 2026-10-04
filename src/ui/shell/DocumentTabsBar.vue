@@ -135,8 +135,7 @@ function onTabKeydown(event: KeyboardEvent): void {
   border-radius: var(--radius-sm);
   color: var(--color-on-surface);
   font-family: var(--font-main);
-  /* slightly larger tab text */
-  font-size: calc(var(--font-size-tab) * 1.05);
+  font-size: var(--font-size-tab);
   padding: 2px 8px;
   cursor: pointer;
   white-space: nowrap;
@@ -150,27 +149,11 @@ function onTabKeydown(event: KeyboardEvent): void {
 .word-doctab.active {
   background: var(--color-surface);
   border-color: var(--color-outline-variant);
-  /* keep the tab color unchanged when active */
-  color: var(--color-on-surface);
-  /* active tab should be bold */
-  font-weight: 700;
+  color: var(--color-primary);
   /* מופע מורם: צל שמושך את הלשונית מעל הפס שמתחתיו. */
   box-shadow: 0 6px 12px rgba(0, 0, 0, 0.08);
   position: relative;
   z-index: 2;
-}
-
-/* thicker underline indicator for the active tab */
-.word-doctab.active::after {
-  content: "";
-  position: absolute;
-  left: 6px;
-  right: 6px;
-  bottom: -3px;
-  height: 3px;
-  background: currentColor;
-  border-radius: 2px;
-  z-index: 1;
 }
 
 .word-doctab-title {
@@ -208,8 +191,7 @@ function onTabKeydown(event: KeyboardEvent): void {
   border-radius: var(--radius-sm);
   color: var(--color-on-surface-variant);
   font-family: var(--font-main);
-  /* match the slightly larger tab text */
-  font-size: calc(var(--font-size-tab) * 1.05);
+  font-size: var(--font-size-tab);
   line-height: 1;
   width: 20px;
   height: 20px;
