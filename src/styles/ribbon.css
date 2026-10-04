@@ -71,14 +71,23 @@
    ההדגשה גם אינה חסרה: ב-Word הלשונית הפעילה אינה מודגשת, והיא מסומנת בארבעה
    סימנים אחרים שכולם כאן — הכרטיס הלבן, הגבול, צבע ה-primary, והפס התחתון. */
 .word-tab-btn.active {
-  background: var(--color-on-primary);
+  /* Active ribbon tab: only marked with a bottom underline. No raised
+     background or shadow so it looks minimal and does not change layout. */
+  background: transparent;
   border-color: transparent;
   color: var(--color-primary);
+  box-shadow: none;
+  border-radius: 0;
+  margin-bottom: 0;
+  /* ensure the active underline floats above neighboring raised tabs */
+  position: relative;
   z-index: 3;
-  box-shadow: 0 6px 14px rgba(0,0,0,0.08);
-  border-radius: 4px 4px 0 0;
-  margin-bottom: -1px; /* make tab look connected to ribbon */
 }
+
+/* Non-active ribbon tabs appear as raised buttons with a soft shadow,
+   similar to the document tab visual, so the active underline floats above
+   them visually. */
+
 
 /* פס ההדגשה — מתחת ללשונית הפעילה בלבד. */
 .word-tab-btn.active::after {
@@ -89,6 +98,7 @@
   right: 0;
   height: 2px;
   background: var(--color-primary);
+  z-index: 4;
 }
 
 .word-tab-btn.otzaria-tab {
