@@ -133,33 +133,44 @@ button:disabled {
   /* place the native vertical scrollbar on the left side of the viewport */
   direction: rtl;
 
-  /* hide native scrollbar by default; show on hover (Firefox) */
-  scrollbar-width: none;
+  /* reserve space to avoid layout shift when the scrollbar appears */
+  --editor-scrollbar-w: 14px;
+  scrollbar-gutter: stable;
+
+  /* keep the scrollbar visually hidden when not hovered */
+  scrollbar-width: thin;
   scrollbar-color: transparent transparent;
 }
 
-/* WebKit/Blink: hide scrollbar when not hovered, reveal on hover */
+/* WebKit/Blink: keep reserved width but make thumb transparent until hover */
 .editor-stack__host::-webkit-scrollbar {
-  width: 0;
+  width: var(--editor-scrollbar-w);
   background: transparent;
 }
-/* Reveal the scrollbar only when the user hovers the rendered document/page.
-   Uses :has() to detect a hovered child (.superdoc or its .superdoc-page). */
-.editor-stack__host:has(.superdoc:hover)::-webkit-scrollbar,
-.editor-stack__host:has(.superdoc .superdoc-page:hover)::-webkit-scrollbar {
-  width: 10px;
+.editor-stack__host::-webkit-scrollbar-track {
+  background: transparent;
 }
+.editor-stack__host::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 8px;
+  transition: background 120ms ease;
+}
+
+/* Reveal the thumb (make it visible) only when hovering the rendered document/page */
 .editor-stack__host:has(.superdoc:hover)::-webkit-scrollbar-thumb,
 .editor-stack__host:has(.superdoc .superdoc-page:hover)::-webkit-scrollbar-thumb {
   background: var(--color-outline);
-  border-radius: 8px;
 }
 
-/* Firefox: reveal a thin scrollbar when hovering the document/page */
+/* Firefox: keep gutter stable and show colored scrollbar only on hover */
+.editor-stack__host {
+  /* default: invisible */
+  scrollbar-color: transparent transparent;
+}
 .editor-stack__host:has(.superdoc:hover),
 .editor-stack__host:has(.superdoc .superdoc-page:hover) {
-  scrollbar-width: thin;
   scrollbar-color: var(--color-outline) transparent;
+  scrollbar-width: auto;
 }
 
 /* מרכוז העמוד.

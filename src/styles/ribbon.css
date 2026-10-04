@@ -97,11 +97,13 @@
 .word-tab-btn.active::after {
   content: '';
   position: absolute;
-  bottom: 0;
+  /* leave a 1px gap between the underline and the ribbon body */
+  bottom: 1px;
   left: 0;
   right: 0;
-  height: 3px;
-  background: currentColor;
+  /* slightly thinner by 1px */
+  height: 2px;
+  background: var(--color-primary);
   z-index: 4;
 }
 
