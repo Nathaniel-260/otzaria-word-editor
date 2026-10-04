@@ -144,13 +144,17 @@ button:disabled {
 
   /* keep the scrollbar visually hidden when not hovered */
   scrollbar-width: thin;
-  scrollbar-color: transparent transparent;
+  /* Show a thumb color derived from the canvas so it visually matches the area
+     under the ribbon/statusbar while keeping the track transparent. */
+  scrollbar-color: var(--word-canvas-bg) transparent;
 
   /* reserve physical left space so appearance/disappearance doesn't change layout */
   padding-left: var(--editor-scrollbar-w);
 }
 
-/* WebKit/Blink: keep reserved width but make thumb transparent until hover */
+/* WebKit/Blink: reserve width and style the thumb so its color and subtle inset
+   shadow match the canvas overlay (alpha 0.04). This makes the thumb visible
+   and visually consistent with the lighter area under the ribbon. */
 .editor-stack__host::-webkit-scrollbar {
   width: var(--editor-scrollbar-w);
   background: transparent;
@@ -159,16 +163,18 @@ button:disabled {
   background: transparent;
 }
 .editor-stack__host::-webkit-scrollbar-thumb {
-  background: transparent;
+  background: var(--word-canvas-bg);
   border-radius: 8px;
-  transition: background 120ms ease;
+  transition: background 120ms ease, box-shadow 120ms ease;
+  box-shadow: inset 0 -2px 4px rgba(0,0,0,0.04);
 }
 
-/* Reveal the thumb (make it visible) when hovering the rendered document/page or the host scrollbar area */
+/* Keep a slightly stronger visible thumb on hover to aid discovery */
 .editor-stack__host:hover::-webkit-scrollbar-thumb,
 .editor-stack__host:has(.superdoc:hover)::-webkit-scrollbar-thumb,
 .editor-stack__host:has(.superdoc .superdoc-page:hover)::-webkit-scrollbar-thumb {
   background: var(--color-outline);
+  box-shadow: inset 0 -3px 6px rgba(0,0,0,0.06);
 }
 
 /* Firefox: keep gutter stable and show colored scrollbar only on hover */
