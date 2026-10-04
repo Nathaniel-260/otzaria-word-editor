@@ -10,6 +10,11 @@
   z-index: 10;
 }
 
+/* צל על כל הרצועה — מעל ומתחת, בולט יותר כדי להפריד אותה מהמסמך */
+.word-ribbon-container {
+  box-shadow: var(--ribbon-shadow-top), var(--ribbon-shadow-bottom);
+}
+
 /* סרגל לשוניות (Tabs Bar) — שקוף, יורש את צבע הסביבה. הרקע, הגבול
    והעיגול נקבעים ע"י הקונטקסט (App.vue) ולא פה. */
 .word-tab-bar {
@@ -70,10 +75,13 @@
    ההדגשה גם אינה חסרה: ב-Word הלשונית הפעילה אינה מודגשת, והיא מסומנת בארבעה
    סימנים אחרים שכולם כאן — הכרטיס הלבן, הגבול, צבע ה-primary, והפס התחתון. */
 .word-tab-btn.active {
-  background: transparent;
+  background: var(--color-on-primary);
   border-color: transparent;
   color: var(--color-primary);
-  z-index: 2;
+  z-index: 3;
+  box-shadow: 0 6px 14px rgba(0,0,0,0.08);
+  border-radius: 4px 4px 0 0;
+  margin-bottom: -1px; /* make tab look connected to ribbon */
 }
 
 /* פס ההדגשה — מתחת ללשונית הפעילה בלבד. */

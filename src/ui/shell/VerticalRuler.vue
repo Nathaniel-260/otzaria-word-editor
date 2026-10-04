@@ -496,8 +496,8 @@ function handleTitle(handle: Handle): string {
   overflow: hidden;
   background: var(--color-surface-container-highest);
   background-image: linear-gradient(
-    var(--color-shell-dim, rgba(0, 0, 0, 0.05)),
-    var(--color-shell-dim, rgba(0, 0, 0, 0.05))
+    var(--color-shell-dim),
+    var(--color-shell-dim)
   );
   border-inline-end: 1px solid var(--color-outline-variant);
   user-select: none;

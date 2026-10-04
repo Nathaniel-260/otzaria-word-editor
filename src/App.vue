@@ -6041,8 +6041,8 @@ async function discardedBytes(session: DocumentSession): Promise<Uint8Array | nu
 .shell-top .ruler-corner,
 .topbar {
   background-image: linear-gradient(
-    var(--color-shell-dim, rgba(0, 0, 0, 0.05)),
-    var(--color-shell-dim, rgba(0, 0, 0, 0.05))
+    var(--color-shell-dim),
+    var(--color-shell-dim)
   ) !important;
 }
 
@@ -6064,7 +6064,7 @@ async function discardedBytes(session: DocumentSession): Promise<Uint8Array | nu
   position: absolute;
   inset-block: 0;
   width: 6px;
-  background: var(--color-shell-dim, rgba(0, 0, 0, 0.05));
+  background: var(--color-shell-dim);
   pointer-events: none;
 }
 
@@ -6152,8 +6152,8 @@ async function discardedBytes(session: DocumentSession): Promise<Uint8Array | nu
   min-height: 0;
   background: var(--word-canvas-bg);
   background-image: linear-gradient(
-    var(--color-shell-dim, rgba(0, 0, 0, 0.05)),
-    var(--color-shell-dim, rgba(0, 0, 0, 0.05))
+    var(--color-shell-dim),
+    var(--color-shell-dim)
   );
   overflow: hidden;
 }
@@ -6172,8 +6172,8 @@ async function discardedBytes(session: DocumentSession): Promise<Uint8Array | nu
   height: 22px;
   background: var(--color-surface-container-highest);
   background-image: linear-gradient(
-    var(--color-shell-dim, rgba(0, 0, 0, 0.05)),
-    var(--color-shell-dim, rgba(0, 0, 0, 0.05))
+    var(--color-shell-dim),
+    var(--color-shell-dim)
   );
   border-block-end: 1px solid var(--color-outline-variant);
   border-inline-end: 1px solid var(--color-outline-variant);
