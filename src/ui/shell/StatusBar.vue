@@ -241,9 +241,7 @@ function resetZoom(): void {
   padding-inline: 10px;
   /* Match the lighter area under the ribbon: subtle white overlay over the
      canvas background for the height of the statusbar (alpha 0.04). */
-  background: 
-    linear-gradient(to top, rgba(255,255,255,0.04) 0, rgba(255,255,255,0) calc(var(--statusbar-height))),
-    var(--word-canvas-bg);
+  background: var(--statusbar-bg);
   border-block-start: 1px solid var(--color-outline-variant);
   color: var(--color-on-surface-variant);
   font-size: 11px;

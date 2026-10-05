@@ -63,6 +63,8 @@
      העדפה הוא היעדר ההצהרה, והבד ממשיך לעקוב אחרי ערכת הנושא ואחרי מצב
      בהיר/כהה מאליו. ראו composables/canvas-color.ts. */
   --word-canvas-bg: var(--color-surface-container-highest);
+  /* background used by the bottom status bar and (when hovered) the editor gutter */
+  --statusbar-bg: linear-gradient(to top, rgba(255,255,255,0.04) 0, rgba(255,255,255,0) calc(var(--statusbar-height))), var(--word-canvas-bg);
 
   /* גופנים.
 

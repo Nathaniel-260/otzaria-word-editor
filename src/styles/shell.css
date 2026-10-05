@@ -139,13 +139,14 @@ button:disabled {
   direction: rtl;
 
   /* reserve space to avoid layout shift when the scrollbar appears */
-  --editor-scrollbar-w: 18px;
+  --editor-scrollbar-w: 16px;
   scrollbar-gutter: stable both-edges;
 
-  /* keep the scrollbar visually hidden when not hovered */
-  scrollbar-width: thin;
-  /* Default: keep both thumb and track invisible. When hovering the canvas or
-     a page the colors are set so the gutter + thumb read as a single element. */
+  /* keep the scrollbar visually subtle when not hovered. Use `auto` so
+     Firefox renders a wider native thumb rather than `thin`. */
+  scrollbar-width: auto;
+  /* Default: keep both thumb and track invisible visually; colors below
+     control visibility when hovered. */
   scrollbar-color: transparent transparent;
 
   /* reserve physical space so appearance/disappearance doesn't change layout */
@@ -166,25 +167,29 @@ button:disabled {
   transition: background 120ms ease;
 }
 .editor-stack__host::-webkit-scrollbar-thumb {
-  /* hidden by default */
-  background: transparent;
-  border-radius: 12px;
+  /* Visible thumb sized to the reserved gutter width. */
+  background: var(--color-outline);
+  /* make the thumb round relative to the gutter width */
+  border-radius: calc(var(--editor-scrollbar-w) / 2);
   transition: background 120ms ease, box-shadow 120ms ease;
   box-shadow: none;
+  /* ensure the thumb occupies the full gutter visually (prevents inner shrink) */
+  background-clip: padding-box;
+  border: 3px solid transparent;
 }
 
-/* Show a subtle darker track and a visible thumb when hovering the canvas or a page */
-.editor-stack__host:hover::-webkit-scrollbar-track,
+/* Show a subtle lighter track and a visible thumb when hovering the canvas or a page */
+editor-stack__host:hover::-webkit-scrollbar-track,
 .editor-stack__host:has(.superdoc:hover)::-webkit-scrollbar-track,
 .editor-stack__host:has(.superdoc .superdoc-page:hover)::-webkit-scrollbar-track {
-  background: rgba(0,0,0,0.04);
+  background: var(--statusbar-bg);
 }
 
 .editor-stack__host:hover::-webkit-scrollbar-thumb,
 .editor-stack__host:has(.superdoc:hover)::-webkit-scrollbar-thumb,
 .editor-stack__host:has(.superdoc .superdoc-page:hover)::-webkit-scrollbar-thumb {
   background: var(--color-outline);
-  box-shadow: inset 0 -2px 4px rgba(0,0,0,0.06);
+  box-shadow: none;
 }
 
 /* Show stronger appearance when hovering the thumb directly */
@@ -200,29 +205,42 @@ button:disabled {
 .editor-stack__host:has(.superdoc:hover),
 .editor-stack__host:has(.superdoc .superdoc-page:hover) {
   background-image:
-    linear-gradient(to right, rgba(255,255,255,0.04), rgba(255,255,255,0.04)),
-    linear-gradient(to left, rgba(255,255,255,0.04), rgba(255,255,255,0.04));
+    linear-gradient(to right, var(--color-surface-container-high), var(--color-surface-container-high)),
+    linear-gradient(to left, var(--color-surface-container-high), var(--color-surface-container-high));
   background-repeat: no-repeat;
   background-size: var(--editor-scrollbar-w) 100%, var(--editor-scrollbar-w) 100%;
   background-position: left top, right top;
 
   /* Firefox: make both track AND thumb visible when hovering the canvas or page */
-  scrollbar-color: var(--color-outline) rgba(0,0,0,0.04);
-  scrollbar-width: thin;
+  scrollbar-color: var(--color-outline) var(--color-surface-container-high);
+  scrollbar-width: auto;
 }
 
 /* WebKit: make the track visible and colored when hovered so it reads as the
-   same darker gutter area. */
+   same lighter gutter area. */
 .editor-stack__host:hover::-webkit-scrollbar-track,
+
 .editor-stack__host:has(.superdoc:hover)::-webkit-scrollbar-track,
 .editor-stack__host:has(.superdoc .superdoc-page:hover)::-webkit-scrollbar-track {
-  background: rgba(0,0,0,0.04);
+  background: var(--statusbar-bg);
+  /* match the status bar exactly: same border and shadow */
+  border-block-start: 1px solid var(--color-outline-variant);
+  box-shadow: var(--ribbon-shadow-top), var(--ribbon-shadow-bottom);
+  outline: none;
+}
+
+/* Make the thumb stronger when hovering the host so it reads as the handle */
+.editor-stack__host:hover::-webkit-scrollbar-thumb,
+.editor-stack__host:has(.superdoc:hover)::-webkit-scrollbar-thumb,
+.editor-stack__host:has(.superdoc .superdoc-page:hover)::-webkit-scrollbar-thumb {
+  background: var(--color-outline);
+  box-shadow: none;
 }
 
 /* Firefox: DEFAULT (non-hover) state — keep invisible */
 .editor-stack__host {
   scrollbar-color: transparent transparent;
-  scrollbar-width: thin;
+  scrollbar-width: auto;
 }
 
 /* מרכוז העמוד.

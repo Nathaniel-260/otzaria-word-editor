@@ -105,7 +105,7 @@ function onTabKeydown(event: KeyboardEvent): void {
   align-items: center;
   gap: 4px;
   flex-shrink: 0;
-  height: var(--tabbar-height);
+  height: 36px;
   padding-inline: 8px;
   background: var(--color-surface-container-high);
   border-block-end: 1px solid var(--color-outline-variant);
@@ -147,13 +147,18 @@ function onTabKeydown(event: KeyboardEvent): void {
 }
 
 .word-doctab.active {
-  background: var(--color-surface);
-  border-color: var(--color-outline-variant);
-  color: var(--color-primary);
-  /* מופע מורם: צל שמושך את הלשונית מעל הפס שמתחתיו. */
-  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.08);
+  background: var(--word-canvas-bg);
+  border: 1px solid var(--color-outline-variant);
+  border-bottom-color: transparent;
+  color: var(--color-on-surface);
+  box-shadow: none;
+  border-top-left-radius: var(--radius-md);
+  border-top-right-radius: var(--radius-md);
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  margin-bottom: -1px;
   position: relative;
-  z-index: 2;
+  z-index: 6;
 }
 
 .word-doctab-title {
