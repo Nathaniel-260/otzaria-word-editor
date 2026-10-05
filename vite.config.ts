@@ -392,13 +392,6 @@ export default defineConfig({
   // ולכן ההודעות נאספות לסוף הקובץ. check-dist.mjs מאמת שהן שם.
   esbuild: { legalComments: 'eof' },
 
-  // superdoc 2.20 טוען את pdfjs-dist (ו-worker שלו כ-data: URL של 1.65MB) רק בשביל
-  // תמונות EMF שבתוכן PDF. בבאנדל IIFE עם `inlineDynamicImports` הטעינה העצלה הזאת
-  // נבלעת ל-app.js: ‏2.66MB (+20%) שכל משתמש פורס בעלייה. הדגל הוא המתג היחיד
-  // בקוד של superdoc שמשמיט את הענף, וההתנהגות חוזרת לזו של 2.17 — שבה pdfjs
-  // לא היה תלות כלל.
-  define: { __SUPERDOC_BUILD__: JSON.stringify('cdn-iife') },
-
   // בשרת הפיתוח אין הטמעת workers, והמנוע בונה את ה-URL שלהם יחסית למודול
   // שלו. אם ה-dep optimizer של Vite אורז את המנוע מחדש ל-node_modules/.vite/deps,
   // ה-URL היחסי מצביע לשם — ושם אין קובץ worker, כלומר המסמך לא נפתח בפיתוח.

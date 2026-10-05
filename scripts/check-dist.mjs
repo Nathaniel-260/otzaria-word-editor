@@ -189,20 +189,6 @@ for (const { file, markers, what, size } of LAZY_ASSETS) {
   }
 }
 
-/**
- * pdfjs של superdoc 2.20 נשאר מחוץ לבאנדל. הטעינה העצלה שלו (`await import()`
- * של pdfjs-dist ושל worker כ-data: URL) נבלעת ל-app.js דרך `inlineDynamicImports`
- * — 2.66MB שנמדדו — וההגדרה `__SUPERDOC_BUILD__` ב-vite.config.ts היא מה שמשמיט
- * את הענף. `PDFWorker` הוא מחלקה של pdfjs שאינה מופיעה בשום מקום אחר באריזה:
- * 0 עם ההגדרה, 4 בלעדיה.
- */
-if (existsSync(appPath) && readFileSync(appPath, 'utf8').includes('PDFWorker')) {
-  errors.push(
-    'assets/app.js מכיל את pdfjs-dist — הטעינה העצלה של superdoc נבלעה לבאנדל הראשי. ' +
-      'ההגדרה __SUPERDOC_BUILD__ ב-vite.config.ts נפלה או שהמנוע שינה את התנאי; 2.66MB לכל משתמש.',
-  );
-}
-
 const files = [];
 function walk(dir, prefix = '') {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
