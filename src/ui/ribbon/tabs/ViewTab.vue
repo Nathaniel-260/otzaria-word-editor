@@ -129,9 +129,9 @@ import { editorStackWidth, fitWidthPercent } from '../../../engine/fit-width';
 import { zoomBounds } from '../../../engine/zoom';
 import { zoomPayload } from '../../../engine/payloads';
 import {
+  DEFAULT_CANVAS_COLOR,
   canvasColor,
   setCanvasColor,
-  themeCanvasColor,
 } from '../../../composables/canvas-color';
 
 defineEmits<{
@@ -189,18 +189,15 @@ async function runFitPageWidth(): Promise<void> {
 /**
  * הצבע שהפס מתחת לאייקון מראה, ושלחיצה על הכפתור הראשי תחיל.
  *
- * ההעדפה כשיש אחת, וצבע ערכת הנושא כשאין — כלומר הפס מראה תמיד את מה שהבד
- * צבוע בו **עכשיו**. בלי הענף השני הוא היה מראה שחור (ברירת המחדל של הבורר)
- * כל עוד לא נבחר צבע, כלומר מבטיח שלחיצה תצבע את הבד בשחור.
- *
- * `undefined` — כשצבע הערכה אינו נקרא — מחזיר את הבורר לברירת המחדל שלו,
- * וזה גם מה שקורה בהרכבת בדיקה בלי גיליונות סגנון.
+ * ההעדפה כשיש אחת, וברירת המחדל (חום בהיר) כשאין — כלומר הפס מראה תמיד את
+ * מה שהבד צבוע בו **עכשיו**. בלי הענף השני הוא היה מראה שחור (ברירת המחדל
+ * של הבורר) כל עוד לא נבחר צבע, כלומר מבטיח שלחיצה תצבע את הבד בשחור.
  */
-const canvasSwatch = computed(() => canvasColor.value ?? themeCanvasColor());
+const canvasSwatch = computed(() => canvasColor.value ?? DEFAULT_CANVAS_COLOR);
 
 /**
  * `null` מהבורר („ברירת מחדל”) הוא הסרת ההעדפה, לא צביעה בשקוף: הבד חוזר
- * לעקוב אחרי ערכת הנושא. ראו composables/canvas-color.ts.
+ * לברירת המחדל שב-tokens.css. ראו composables/canvas-color.ts.
  *
  * בלי `await`: הצביעה עצמה סינכרונית, וההמתנה היחידה היא הכתיבה ל-storage.
  */
