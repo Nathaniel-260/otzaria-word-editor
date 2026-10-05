@@ -46,7 +46,15 @@ const TOP_LEVEL_FUNCTIONS = [
   'unwrapScalar',
   'buildInlineFormatInput',
   'paragraphTarget',
+  // 2.20: פקודות מספור העמודים. הקטלוג מפנה אליהן, ובלעדיהן הוא אינו נטען כלל.
+  'readPageNumberKind',
+  'readPageNumbersRecord',
+  'normalizePageNumbersApplyPayload',
+  'normalizePageNumbersRemovePayload',
 ] as const;
+
+/** קבועי `new Set([...])` ברמת המודול שהפונקציות שנחלצו נשענות עליהם. */
+const TOP_LEVEL_SETS = ['PAGE_NUMBER_ALIGNMENTS', 'PAGE_NUMBER_FORMATS'] as const;
 
 /** ה-closures שבתוך ה-controller. אינם ברמת המודול, ולכן נחלצים לפי ההזחה. */
 const CONTROLLER_CLOSURES = ['instanceCommandPayloadIsValid', 'buildBlockParagraphInput'] as const;
@@ -130,6 +138,13 @@ function extractTopLevelBlock(name: string, open: '{' | '['): string {
   return match[0];
 }
 
+/** `var X = /* @__PURE__ *\/ new Set([...]);` ברמת המודול. */
+function extractTopLevelSet(name: string): string {
+  const match = CHUNK.match(new RegExp(String.raw`^var ${name} = [^\n]*new Set\(\[[\s\S]*?\n\]\);`, 'm'));
+  if (!match) throw new Error(`הקבוע ${name} לא נמצא ב-chunk — מבנה ה-chunk של superdoc השתנה`);
+  return match[0];
+}
+
 /** שורה בודדת (`var X = ...;`). */
 function extractTopLevelLine(name: string): string {
   const match = CHUNK.match(new RegExp(String.raw`^var ${name} = [^\n]*`, 'm'));
@@ -148,6 +163,7 @@ export const engine: EngineValidators = new Function(
     extractTopLevelBlock('SUPERDOC_UI_REASONS', '{'),
     extractTopLevelLine('UNSUPPORTED'),
     extractTopLevelLine('TABLE_CONTEXT'),
+    ...TOP_LEVEL_SETS.map((name) => extractTopLevelSet(name)),
     ...TOP_LEVEL_FUNCTIONS.map((name) => extractTopLevelFunction(name)),
     ...CONTROLLER_CLOSURES.map((name) => extractControllerClosure(name)),
     extractTopLevelBlock('COMMAND_CATALOG', '['),
