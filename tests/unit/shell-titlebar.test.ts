@@ -65,6 +65,7 @@ describe('רוחב שדה שם המסמך', () => {
   });
 
   it('שם ארוך נעצר בתקרה, ושם קצר ברצפה', () => {
+    expect(DOC_TITLE_MAX_CH).toBe(48);
     expect(docTitleWidthCh('א'.repeat(200))).toBe(DOC_TITLE_MAX_CH);
     expect(docTitleWidthCh('א')).toBe(DOC_TITLE_MIN_CH);
     expect(docTitleWidthCh('')).toBe(DOC_TITLE_MIN_CH);
@@ -76,6 +77,11 @@ describe('רוחב שדה שם המסמך', () => {
     // `min-width` אינו „רוחב קשיח” — הוא מה שמאפשר לשדה להיצמד לגריד.
     expect(block).not.toMatch(/(?<![-\w])width\s*:/);
     expect(TEMPLATE).toContain('docTitleWidthCh(title)');
+  });
+
+  it('שם המסמך מיושר לשמאל גם בממשק RTL', () => {
+    const block = TITLEBAR.match(/\.doc-title-input\s*\{[^}]*\}/)?.[0] ?? '';
+    expect(block).toMatch(/text-align:\s*left/);
   });
 });
 
@@ -124,15 +130,21 @@ describe('תנועת המתג', () => {
 });
 
 describe('פריסת הפס', () => {
-  it('המרכז הוא עמודה בגריד סימטרי, ולא שארית של space-between', () => {
+  it('החיפוש ממורכז בין עמודות קצה שוות', () => {
     const bar = TITLEBAR.match(/\.word-titlebar\s*\{[^}]*\}/)?.[0] ?? '';
     expect(bar).toMatch(/display:\s*grid/);
-    // שני הצדדים באותה יחידה — זה מה שמשאיר את העמודה האמצעית במרכז החלון
-    // בלי תלות ברוחב הצדדים.
     const columns = bar.match(/grid-template-columns:\s*([^;]+);/)?.[1] ?? '';
-    const [start, , end] = columns.trim().split(/\s+(?![^(]*\))/);
+    const [start, center, end] = columns.trim().split(/\s+(?![^(]*\))/);
+    expect(start).toBe('minmax(160px, 1fr)');
+    expect(center).toBe('minmax(0, 320px)');
     expect(start).toBe(end);
     expect(bar).not.toMatch(/justify-content/);
+  });
+
+  it('תיבת שם המסמך אינה מתכווצת אל תוך קבוצת הפקדים', () => {
+    const wrappers = TITLEBAR.match(/\.doc-title-wrapper\s*\{[^}]*\}/g) ?? [];
+    const wrapper = wrappers[wrappers.length - 1] ?? '';
+    expect(wrapper).toMatch(/flex-shrink:\s*0/);
   });
 
   it('הבלוק ה-scoped אינו מגדיר מחדש מה ש-.topbar כבר מגדיר', () => {
