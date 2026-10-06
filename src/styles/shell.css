@@ -92,11 +92,13 @@ button:disabled {
   flex: 1 1 auto;
   min-height: 0;
   /* Lighten the area directly under the ribbon by overlaying a subtle white gradient
-     over the canvas background for the height of the ribbon. The overlay uses 0.04
-     alpha as requested. */
-  background:
-    linear-gradient(to bottom, rgba(255,255,255,0.04) 0, rgba(255,255,255,0) calc(var(--ribbon-height))),
-    var(--word-canvas-bg);
+     over the canvas background for the height of the ribbon. */
+  background-color: var(--word-canvas-bg);
+  background-image: linear-gradient(
+    to bottom,
+    var(--color-surface-highlight) 0,
+    transparent calc(var(--ribbon-height))
+  );
 }
 
 /* כל מסמך מקבל host משלו, וכולם באותו מקום: מסמך שנטען יושב מעל הפעיל עד

@@ -6130,20 +6130,9 @@ async function discardedBytes(session: DocumentSession): Promise<Uint8Array | nu
   inset: 0;
 }
 
-/* ברירת המחדל של הבד: טוקן ה-M3 הבהיר ביותר של משטחי המיכל. מוגדר כאן על
-   השורש (`html:root`, ספציפיות גבוהה מ-`:root` של tokens.css) ולא ב-
-   `.editor-stack`, כדי שצבע שהמשתמש בחר — שנכתב כהצהרה ישירה על השורש
-   ב-`applyCanvasColor` — ימשיך לגבור. */
-:global(html:root) {
-  --word-canvas-bg: var(
-    --color-surface-container-lowest,
-    var(--color-surface)
-  );
-}
-
 /* הרקע הוא `--word-canvas-bg` ולא טוקן ערכת הנושא ישירות: זהו הבד, והוא
    האלמנט היחיד שהמשתמש יכול לצבוע (composables/canvas-color.ts). ברירת
-   המחדל של הטוקן היא אותו צבע ערכת נושא בדיוק — ראו styles/tokens.css.
+   המחדל הקבועה שלו היא „חום בהיר” — ראו styles/tokens.css.
    שכבת ה-dim מכהה את הקנבס קלות מול הרצועה, בלי לנגוע בצבע שהמשתמש בחר. */
 .editor-stack {
   position: relative;

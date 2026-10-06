@@ -18,6 +18,7 @@
   --color-outline: #cbd5e1;
   --color-outline-variant: #e1dfdd;
   --color-scrim: rgba(0, 0, 0, 0.32);
+  --color-surface-highlight: rgba(255, 255, 255, 0.04);
   /* שכבת הכהייה הניטרלית של הרקע העליון והבד. מוגדרת כטוקן כדי ש-CSS צרכני
      ישתמש בתפקיד צבע במקום להטמיע rgba ישירות. */
   --color-shell-dim: rgba(0, 0, 0, 0.07);
@@ -62,9 +63,10 @@
      המשתמש היה נצבע גם עליהם.
 
      הדריסה היא סגנון inline על שורש המסמך, כמו כל צבעי אוצריא — ולכן היעדר
-     העדפה הוא היעדר ההצהרה, והבד ממשיך לעקוב אחרי ערכת הנושא ואחרי מצב
-     בהיר/כהה מאליו. ראו composables/canvas-color.ts. */
-  --word-canvas-bg: var(--color-surface-container-highest);
+     העדפה הוא היעדר ההצהרה והבד מקבל את ברירת המחדל הקבועה הזאת. ראו
+     composables/canvas-color.ts. */
+  --word-canvas-bg: #eeece1;
+  --word-canvas-bg-active: color-mix(in srgb, var(--word-canvas-bg) 93%, black);
   /* background used by the bottom status bar and (when hovered) the editor gutter */
   --statusbar-bg: linear-gradient(to top, rgba(255,255,255,0.04) 0, rgba(255,255,255,0) calc(var(--statusbar-height))), var(--word-canvas-bg);
 

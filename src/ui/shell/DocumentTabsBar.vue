@@ -147,8 +147,7 @@ function onTabKeydown(event: KeyboardEvent): void {
 }
 
 .word-doctab.active {
-  --word-doctab-active-bg: color-mix(in srgb, var(--word-canvas-bg) 93%, black);
-  background: var(--word-doctab-active-bg);
+  background: var(--word-canvas-bg-active);
   border: 1px solid var(--color-outline-variant);
   border-bottom-color: transparent;
   color: var(--color-on-surface);
@@ -176,13 +175,13 @@ function onTabKeydown(event: KeyboardEvent): void {
 .word-doctab.active::before {
   left: -10px;
   border-bottom-right-radius: 10px;
-  box-shadow: 5px 5px 0 5px var(--word-doctab-active-bg);
+  box-shadow: 5px 5px 0 5px var(--word-canvas-bg-active);
 }
 
 .word-doctab.active::after {
   right: -10px;
   border-bottom-left-radius: 10px;
-  box-shadow: -5px 5px 0 5px var(--word-doctab-active-bg);
+  box-shadow: -5px 5px 0 5px var(--word-canvas-bg-active);
 }
 
 .word-doctab-title {
