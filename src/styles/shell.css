@@ -204,15 +204,17 @@ editor-stack__host:hover::-webkit-scrollbar-track,
 .editor-stack__host:hover,
 .editor-stack__host:has(.superdoc:hover),
 .editor-stack__host:has(.superdoc .superdoc-page:hover) {
-  background-image:
-    linear-gradient(to right, var(--color-surface-container-high), var(--color-surface-container-high)),
-    linear-gradient(to left, var(--color-surface-container-high), var(--color-surface-container-high));
+  background-image: linear-gradient(
+    to right,
+    var(--color-surface-container-high),
+    var(--color-surface-container-high)
+  );
   background-repeat: no-repeat;
-  background-size: var(--editor-scrollbar-w) 100%, var(--editor-scrollbar-w) 100%;
-  background-position: left top, right top;
+  background-size: var(--editor-scrollbar-w) 100%;
+  background-position: left top;
 
   /* Firefox: make both track AND thumb visible when hovering the canvas or page */
-  scrollbar-color: var(--color-outline) var(--color-surface-container-high);
+  scrollbar-color: var(--color-outline) var(--word-canvas-bg);
   scrollbar-width: auto;
 }
 

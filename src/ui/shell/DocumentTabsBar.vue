@@ -108,7 +108,6 @@ function onTabKeydown(event: KeyboardEvent): void {
   height: 36px;
   padding-inline: 8px;
   background: var(--color-surface-container-high);
-  border-block-end: 1px solid var(--color-outline-variant);
   user-select: none;
 }
 
@@ -119,6 +118,7 @@ function onTabKeydown(event: KeyboardEvent): void {
   min-width: 0;
   height: 100%;
   overflow-x: auto;
+  padding-inline: 10px;
   scrollbar-width: none;
 }
 
@@ -147,7 +147,8 @@ function onTabKeydown(event: KeyboardEvent): void {
 }
 
 .word-doctab.active {
-  background: var(--word-canvas-bg);
+  --word-doctab-active-bg: color-mix(in srgb, var(--word-canvas-bg) 93%, black);
+  background: var(--word-doctab-active-bg);
   border: 1px solid var(--color-outline-variant);
   border-bottom-color: transparent;
   color: var(--color-on-surface);
@@ -159,6 +160,29 @@ function onTabKeydown(event: KeyboardEvent): void {
   margin-bottom: -1px;
   position: relative;
   z-index: 6;
+}
+
+.word-doctab.active::before,
+.word-doctab.active::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  width: 10px;
+  height: 10px;
+  background: transparent;
+  pointer-events: none;
+}
+
+.word-doctab.active::before {
+  left: -10px;
+  border-bottom-right-radius: 10px;
+  box-shadow: 5px 5px 0 5px var(--word-doctab-active-bg);
+}
+
+.word-doctab.active::after {
+  right: -10px;
+  border-bottom-left-radius: 10px;
+  box-shadow: -5px 5px 0 5px var(--word-doctab-active-bg);
 }
 
 .word-doctab-title {
