@@ -15,7 +15,6 @@ import ViewTab from '../../src/ui/ribbon/tabs/ViewTab.vue';
 import { ZOOM_PERCENT_MAX } from '../../src/engine/zoom';
 import {
   CANVAS_COLOR_VAR,
-  THEME_CANVAS_VAR,
   applyCanvasColor,
 } from '../../src/composables/canvas-color';
 import {
@@ -222,7 +221,7 @@ describe('כפתורי לשונית „תצוגה”', () => {
  *
  * הפקד הזה אינו פקודת מנוע: הוא כותב טוקן CSS על שורש המסמך ושומר את הבחירה
  * (composables/canvas-color.ts). לכן מה שנמדד כאן הוא שלוש הטענות שהמשתמש
- * רואה — הבד נצבע, „ברירת מחדל” מחזירה אותו לעקוב אחרי ערכת הנושא, והפס
+ * רואה — הבד נצבע, „ברירת מחדל” מחזירה אותו לחום הבהיר של tokens.css, והפס
  * מתחת לאייקון מבטיח את מה שהלחיצה תחיל.
  *
  * הקבוצה בלשונית „תצוגה” ולא ב„בית”: זו העדפת תצוגה, לא תכונה של המסמך.
@@ -243,14 +242,10 @@ describe('צבע רקע העורך', () => {
 
   beforeEach(() => {
     saveCanvasColor.mockClear();
-    // צבע ערכת נושא ידוע — זה מה ש-`themeCanvasColor` קוראת, וזה מה שהבד
-    // מצויר בו כשאין העדפה.
-    document.documentElement.style.setProperty(THEME_CANVAS_VAR, '#edebe9');
   });
 
   afterEach(() => {
     applyCanvasColor(null);
-    document.documentElement.style.removeProperty(THEME_CANVAS_VAR);
   });
 
   it('בחירת צבע צובעת את הבד ונזכרת', async () => {
@@ -266,9 +261,9 @@ describe('צבע רקע העורך', () => {
     expect(saveCanvasColor).toHaveBeenCalledWith('#c00000');
   });
 
-  it('„ברירת מחדל” מסירה את ההצהרה — הבד חוזר לעקוב אחרי ערכת הנושא', async () => {
-    // הלב של התיקון: אילו הניקוי היה כותב אפור קבוע, הבד היה נשאר בהיר
-    // כשאוצריא עוברת למצב כהה. היעדר ההצהרה הוא מה שמחזיר את המעקב.
+  it('„ברירת מחדל” מסירה את ההצהרה — הבד חוזר לערך שב-tokens.css', async () => {
+    // היעדר ההצהרה, ולא כתיבה של החום הבהיר: כך ברירת המחדל נשארת במקום
+    // אחד, ושינוי שלה מגיע גם למי שבחר בה פעם.
     const harness = mountUi(ViewTab);
     await settle();
 
@@ -286,8 +281,8 @@ describe('צבע רקע העורך', () => {
   });
 
   it('הפריט המנקה אומר „ברירת מחדל” ולא „ללא צבע”', async () => {
-    // „ללא צבע” הוא תיאור שגוי של מה שהלחיצה עושה: היא מחזירה את צבע ערכת
-    // הנושא, ומשטח חסר צבע אינו קיים כאן. ראו `clearLabel`.
+    // „ללא צבע” הוא תיאור שגוי של מה שהלחיצה עושה: היא מחזירה את צבע ברירת
+    // המחדל, ומשטח חסר צבע אינו קיים כאן. ראו `clearLabel`.
     const harness = mountUi(ViewTab);
     await settle();
 
@@ -311,14 +306,14 @@ describe('צבע רקע העורך', () => {
     expect(split.find('.btn-label').text()).toBe('צבע רקע');
   });
 
-  it('בלי העדפה הפס מראה את צבע ערכת הנושא, ולא שחור', async () => {
+  it('בלי העדפה הפס מראה חום בהיר — הצבע שהבד צבוע בו — ולא שחור', async () => {
     // ברירת המחדל של הבורר היא `#000000`, והפס הוא ההבטחה של הכפתור הראשי —
     // כלומר בלי הענף הזה הפקד היה מבטיח „לחיצה תצבע את הבד בשחור”.
     const harness = mountUi(ViewTab);
     await settle();
 
     expect(harness.wrapper.find('.color-indicator-bar').attributes('style')).toContain(
-      'rgb(237, 235, 233)',
+      'rgb(238, 236, 225)',
     );
   });
 });
