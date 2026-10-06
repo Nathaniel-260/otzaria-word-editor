@@ -378,8 +378,7 @@ defineExpose({
   border-radius: var(--radius-sm);
   transition: background 0.1s;
   min-width: 0;
-  flex-shrink: 0;
-  margin-inline-start: auto;
+  flex: 1 1 0;
 }
 
 .doc-title-wrapper:hover {
@@ -388,6 +387,7 @@ defineExpose({
 
 /* הרוחב נקבע בתבנית לפי אורך השם — ראו composables/shell-format.ts. */
 .doc-title-input {
+  flex: 1 1 auto;
   background: transparent;
   border: none;
   color: var(--color-on-surface);

@@ -141,10 +141,12 @@ describe('פריסת הפס', () => {
     expect(bar).not.toMatch(/justify-content/);
   });
 
-  it('תיבת שם המסמך אינה מתכווצת אל תוך קבוצת הפקדים', () => {
+  it('תיבת שם המסמך מתרחבת למקום הפנוי בלי לדחוק את הפקדים', () => {
     const wrappers = TITLEBAR.match(/\.doc-title-wrapper\s*\{[^}]*\}/g) ?? [];
     const wrapper = wrappers[wrappers.length - 1] ?? '';
-    expect(wrapper).toMatch(/flex-shrink:\s*0/);
+    expect(wrapper).toMatch(/flex:\s*1 1 0/);
+    const input = TITLEBAR.match(/\.doc-title-input\s*\{[^}]*\}/)?.[0] ?? '';
+    expect(input).toMatch(/flex:\s*1 1 auto/);
   });
 
   it('הבלוק ה-scoped אינו מגדיר מחדש מה ש-.topbar כבר מגדיר', () => {
