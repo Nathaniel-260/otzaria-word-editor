@@ -6130,9 +6130,19 @@ async function discardedBytes(session: DocumentSession): Promise<Uint8Array | nu
   inset: 0;
 }
 
+/* ברירת המחדל של הבד נשארת צבע המשטח של ערכת הנושא. הספציפיות של
+   `html:root` גוברת על :root ב-tokens.css, אבל בחירה inline של המשתמש
+   ב-applyCanvasColor ממשיכה לגבור גם עליה. */
+:global(html:root) {
+  --word-canvas-bg: var(
+    --color-surface-container-lowest,
+    var(--color-surface)
+  );
+}
+
 /* הרקע הוא `--word-canvas-bg` ולא טוקן ערכת הנושא ישירות: זהו הבד, והוא
    האלמנט היחיד שהמשתמש יכול לצבוע (composables/canvas-color.ts). ברירת
-   המחדל הקבועה שלו היא „חום בהיר” — ראו styles/tokens.css.
+   המחדל נגזרת מערך הנושא — ראו styles/tokens.css.
    שכבת ה-dim מכהה את הקנבס קלות מול הרצועה, בלי לנגוע בצבע שהמשתמש בחר. */
 .editor-stack {
   position: relative;
