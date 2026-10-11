@@ -1237,3 +1237,46 @@ describe('repairComplexScriptBold — מכולות שאינן ריצה', () => {
     expect(repaired).toContain('<w:rPr><w:b/><w:bCs/><w:rPrChange');
   });
 });
+
+describe('איחוד ריצות בתוך השלב המקדים', () => {
+  const NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+  const run = (t: string) => `<w:r w:rsidR="1"><w:rPr><w:rtl/></w:rPr><w:t xml:space="preserve">${t}</w:t></w:r>`;
+  const documentWith = (body: string) => `<w:document xmlns:w="${NS}"><w:body><w:p>${body}</w:p></w:body></w:document>`;
+  const cleanSettings = `<w:settings xmlns:w="${NS}"><w:proofState w:spelling="clean" w:grammar="clean"/></w:settings>`;
+
+  it('סימוני איות שהוסרו מסמנים את proofState כ-dirty — גם כשההגדרות באות לפני הגוף בארכיון', async () => {
+    const repaired = await preflightDocx(
+      buildZip([
+        { name: SETTINGS_PART, content: cleanSettings },
+        { name: 'word/document.xml', content: documentWith(run('א') + '<w:proofErr w:type="spellStart"/>' + run('ב')) },
+      ]),
+    );
+    expect(repaired).not.toBeNull();
+    expect(await readDocxPart(repaired!.bytes, 'word/document.xml')).toContain('<w:t xml:space="preserve">אב</w:t>');
+    expect(await readDocxPart(repaired!.bytes, SETTINGS_PART)).toContain('w:spelling="dirty" w:grammar="dirty"');
+  });
+
+  it('איחוד שלא הסיר סימון איות אינו נוגע בהגדרות', async () => {
+    const repaired = await preflightDocx(
+      buildZip([
+        { name: SETTINGS_PART, content: cleanSettings },
+        { name: 'word/document.xml', content: documentWith(run('א') + run('ב')) },
+      ]),
+    );
+    expect(repaired).not.toBeNull();
+    expect(await readDocxPart(repaired!.bytes, SETTINGS_PART)).toBe(cleanSettings);
+  });
+
+  it('ההגדרות מקבלות גם את תיקון defaultTabStop וגם את dirty, בלי שאחד ידרוס את השני', async () => {
+    const settings = `<w:settings xmlns:w="${NS}"><w:defaultTabStop w:val="0"/><w:proofState w:spelling="clean"/></w:settings>`;
+    const repaired = await preflightDocx(
+      buildZip([
+        { name: SETTINGS_PART, content: settings },
+        { name: 'word/document.xml', content: documentWith(run('א') + '<w:proofErr w:type="spellEnd"/>' + run('ב')) },
+      ]),
+    );
+    const out = await readDocxPart(repaired!.bytes, SETTINGS_PART);
+    expect(out).toContain(`w:val="${DEFAULT_TAB_STOP_TWIPS}"`);
+    expect(out).toContain('w:spelling="dirty"');
+  });
+});
