@@ -3096,13 +3096,18 @@ async function openDocumentInto(
    *
    * אותם שערים כמו `focusOpenedDocument`, ומאותו טעם; ועוד אחד: בחירה
    * שהמשתמש כבר הספיק להציב בקליק בזמן שהפתיחה רצה אינה נדרסת.
+   *
+   * בלי `await`, ובכוונה: במסלול הרגיל הסמן נקבע מהעמוד המצויר באופן
+   * סינכרוני, עוד לפני שהשורה הזאת חוזרת. רק מסלול הגיבוי ממתין לקריאת
+   * מסמך של המנוע — ובמסמך ארוך זו המתנה ארוכה, שבה המסמך כבר על המסך אך
+   * הפתיחה „עוד לא נגמרה” והרצועה מנוטרלת. ראו `applyDocumentStartCaret`.
    */
   if (
     !caretRestored &&
     !isOutsideDocumentEditing(document.activeElement) &&
     !hasTextCaret(editor.ui)
   ) {
-    await applyDocumentStartCaret(editor.ui, editor.superdoc);
+    void applyDocumentStartCaret(editor.ui, editor.superdoc, editor.container);
   }
 
   // אחרון, ולא ליד `outcome.status === 'opened'`: מרגע ש-100% על המסך „דלג”

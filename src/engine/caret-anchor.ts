@@ -37,6 +37,7 @@
 import type { BorrowedSuperDocUI, SuperDoc } from 'superdoc';
 import type { SelectionTarget, TextAddress } from 'superdoc/ui';
 import type { MaybePromise } from './document-api';
+import { paintedFirstBlockId } from './painted-lines';
 
 /** קצה אחד של הבחירה: פסקה, מקומה בסדר, והיסט התו בתוכה. */
 export interface CaretPoint {
@@ -402,12 +403,29 @@ export function hasTextCaret(host: CaretUi): boolean {
  * בלי מקום שמור מקבלים כאן את מה ש-Word נותן בחינם: סמן שאפשר להקליד אחריו
  * מיד.
  *
+ * שני מסלולים. הראשון — מהעמוד המצויר (`paintedFirstBlockId`) — **סינכרוני**:
+ * כשהוא מצליח הסמן כבר במקומו כשהפונקציה מחזירה את ההבטחה, ולכן מי שאינו
+ * ממתין לה עדיין מקבל סמן לפני השורה הבאה שלו. השני — `doc.blocks.list` —
+ * נשאר למקרה שהעמוד אינו מצויר או שהמנוע דחה את המזהה (פסקה ראשונה שהיא
+ * טבלה, למשל), והוא זה שעלול להמתין שניות ארוכות. לכן הבחירה נבדקת שוב אחריו:
+ * קליק שהמשתמש הציב בזמן ההמתנה אינו נדרס.
+ *
  * בלי גלילה, בכוונה: המסמך ממילא נפתח בתחילתו. `false` פירושו שאין פסקה
  * עם מזהה או שהמנוע דחה — והמסמך נשאר כפי שהיה, בלי סמן, כמו קודם.
  */
-export async function applyDocumentStartCaret(host: CaretUi, doc: CaretDoc): Promise<boolean> {
+export async function applyDocumentStartCaret(
+  host: CaretUi,
+  doc: CaretDoc,
+  container?: ParentNode | null,
+): Promise<boolean> {
   const ui = host as CaretUiSource | null | undefined;
   if (typeof ui?.selection?.apply !== 'function') return false;
+
+  const painted = paintedFirstBlockId(container);
+  if (painted) {
+    const head: CaretPoint = { blockId: painted, ordinal: 0, offset: 0 };
+    if (applied(ui, selectionTargetOf(head, head))) return true;
+  }
 
   const list = (doc as CaretDocSource | null | undefined)?.activeEditor?.doc?.blocks?.list;
   if (typeof list !== 'function') return false;
@@ -421,6 +439,7 @@ export async function applyDocumentStartCaret(host: CaretUi, doc: CaretDoc): Pro
 
   const first = Array.isArray(result?.blocks) ? (result.blocks[0] as BlockEntryLike) : undefined;
   if (typeof first?.nodeId !== 'string' || first.nodeId === '') return false;
+  if (hasTextCaret(ui)) return false;
 
   const head: CaretPoint = { blockId: first.nodeId, ordinal: 0, offset: 0 };
   return applied(ui, selectionTargetOf(head, head));

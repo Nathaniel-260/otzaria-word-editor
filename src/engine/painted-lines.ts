@@ -580,3 +580,29 @@ export function blocksInside(fragment: Element): Element[] {
     (el) => linesOf(el).length > 0,
   );
 }
+
+/**
+ * מזהה הבלוק הראשון של גוף המסמך, כפי שהוא מצויר — או `null`.
+ *
+ * הצרכן: סמן הפתיחה (`applyDocumentStartCaret` ב-caret-anchor.ts). קריאות
+ * המסמך של המנוע ממתינות לשקט, ובמסמך ארוך המנוע ממשיך לעמד ברקע עוד זמן רב
+ * אחרי `onReady`, ואילו העמוד הראשון כבר מצויר בו.
+ *
+ * רק גוף המסמך (`data-layout-story="body"`) — כותרת עליונה ותחתונה מצוירות
+ * באותו עמוד. והמינימום לפי `data-pm-start` ולא הראשון ב-DOM: המקטעים ממוקמים
+ * באופן מוחלט, וסדר הצאצאים אינו מובטח להיות סדר המסמך. טבלה בלי טווח משלה
+ * פשוט אינה נבחרת; הקורא נופל אז למסלול של המנוע.
+ */
+export function paintedFirstBlockId(host: ParentNode | null | undefined): string | null {
+  if (typeof host?.querySelectorAll !== 'function') return null;
+  let firstId: string | null = null;
+  let firstStart = Infinity;
+  for (const fragment of Array.from(host.querySelectorAll(`[data-layout-story="body"]${FRAGMENT_SELECTOR}`))) {
+    const start = attr(fragment, 'data-pm-start');
+    const id = fragment.getAttribute('data-source-node-id');
+    if (!id || !Number.isFinite(start) || start >= firstStart) continue;
+    firstStart = start;
+    firstId = id;
+  }
+  return firstId;
+}
