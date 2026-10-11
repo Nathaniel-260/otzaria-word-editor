@@ -10,6 +10,7 @@ import {
   loadLastDocument,
   loadSessionRecord,
   saveAutosaveEnabled,
+  saveCanvasColor,
   saveSessionRecord,
 } from '../../src/host/settings';
 
@@ -142,5 +143,25 @@ describe('רשומת ההפעלה', () => {
   it('היעדר SDK מוחזר כ-null ואינו זורק', async () => {
     await expect(loadSessionRecord()).resolves.toBeNull();
     await expect(saveSessionRecord({ version: 1 })).resolves.toBeUndefined();
+  });
+});
+
+describe('saveCanvasColor', () => {
+  it('צבע נשמר תחת canvas-color', async () => {
+    const call = hostReturns({});
+
+    await saveCanvasColor('#3366cc');
+
+    expect(call).toHaveBeenCalledWith('storage.set', { key: 'canvas-color', value: '#3366cc' });
+  });
+
+  it('איפוס לברירת מחדל מוחק את המפתח ואינו כותב null', async () => {
+    // כתיבת null אינה מובטחת לדרוס את הצבע הקודם במארח — והצבע הישן חזר בפתיחה הבאה.
+    const call = hostReturns({});
+
+    await saveCanvasColor(null);
+
+    expect(call).toHaveBeenCalledWith('storage.remove', { key: 'canvas-color' });
+    expect(call).not.toHaveBeenCalledWith('storage.set', expect.anything());
   });
 });
