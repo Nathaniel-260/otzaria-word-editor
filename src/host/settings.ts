@@ -179,7 +179,19 @@ export async function loadCanvasColor(): Promise<unknown> {
   return tryCall<unknown>('storage.get', { key: CANVAS_COLOR_KEY });
 }
 
+/**
+ * `null` = „אין העדפה” = המפתח נמחק, ואינו נכתב כ-`null`.
+ *
+ * כתיבת `null` ל-`storage.set` אינה מובטחת לדרוס את הערך הקודם: המארח עשוי
+ * לדחות אותה, וה-`tryCall` בולע את הדחייה — והצבע שנבחר קודם נשאר שמור וחוזר
+ * בפתיחה הבאה, גם אחרי שהמשתמש לחץ „ברירת מחדל”. `storage.remove` הוא הצורה
+ * היחידה ש„אין העדפה” מתבטאת בה באמת, וזה גם מה ש-`loadCanvasColor` קורא כ-`null`.
+ */
 export async function saveCanvasColor(color: string | null): Promise<void> {
+  if (color === null) {
+    await tryCall('storage.remove', { key: CANVAS_COLOR_KEY });
+    return;
+  }
   await tryCall('storage.set', { key: CANVAS_COLOR_KEY, value: color });
 }
 
