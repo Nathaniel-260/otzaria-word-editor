@@ -55,6 +55,26 @@
       })();
     </script>
 
+    <script>
+      /* ה-latch של קובץ שתוסף אחר שולח (`plugin.page_opened`), מאותו טעם.
+
+         „סייר קבצים” פותח את הלשונית דרך `plugin.openOther`, ואוצריא מוסרת
+         את האירוע מיד בסוף ה-boot — שניות לפני שהמאזין ב-App.vue קיים. בלעדיו
+         הלשונית נפתחת והמסמך לא. תור, `live` והגבלת האורך — כמו למעלה.
+
+         השם __otzariaPageOpened משותף עם src/host/received-file.ts, ו-
+         tests/unit/received-file.test.ts מקבע את הזהות הזאת. */
+      (function () {
+        var latch = { queue: [], live: false };
+        window.__otzariaPageOpened = latch;
+        window.addEventListener('plugin.page_opened', function (event) {
+          if (latch.live) return;
+          if (latch.queue.length >= 8) latch.queue.shift();
+          latch.queue.push(event.detail);
+        });
+      })();
+    </script>
+
     <!-- מסך הטעינה. ה-CSS כאן ולא בגיליון חיצוני, ובכוונה: הוא חייב להיות
          מצויר לפני שנטענת ולו שורה אחת מקוד התוסף, וכל בקשה נוספת היא עוד
          סיבוב שבו המסך לבן. מאותה סיבה אין כאן הגופן הארוז — הוא מותקן

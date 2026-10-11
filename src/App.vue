@@ -419,6 +419,12 @@ import {
   type ReaderResult,
 } from './host/otzaria-reader';
 import {
+  readReceivedFile,
+  takePendingPageOpens,
+  type PageOpenedEvent,
+  type ReceivedFile,
+} from './host/received-file';
+import {
   fallbackStyleGallery,
   observeStyleGallery,
   type StyleGalleryState,
@@ -1663,6 +1669,8 @@ function isOpenBusy(): boolean {
   return isOpening.value || pendingTabLoad;
 }
 let contextMenuListener: (() => void) | null = null;
+/** מבטל את ההאזנה לקובץ שתוסף אחר שולח. ראו `registerReceivedFiles`. */
+let pageOpenedListener: (() => void) | null = null;
 /** מבטל את ההאזנה ליציאה ממסך מלא שלא באה מאיתנו. */
 let fullscreenListener: (() => void) | null = null;
 
@@ -5348,6 +5356,81 @@ function registerSendToDocument(): void {
   }
 }
 
+/**
+ * נפתרת כשהעלייה סיימה לפתוח את המסמך של ההפעלה הקודמת — בהצלחה או בכשל.
+ *
+ * קובץ שהגיע מתוסף אחר ממתין לה: `reopenPreviousSession` פותחת לתוך הטאב
+ * הפעיל, ופתיחה שנייה שהייתה רצה במקביל הייתה נכתבת לאותו טאב.
+ */
+let startupSettled: () => void = () => {};
+const startupDone = new Promise<void>((resolve) => {
+  startupSettled = resolve;
+});
+
+/**
+ * התור של הקבצים שהגיעו מתוספים אחרים. אחד-אחד: לחיצה שנייה בסייר לפני
+ * שהראשונה נפתחה אינה אמורה להתחרות בה על הטאב הפעיל.
+ */
+let receivedFiles: Promise<void> = startupDone;
+
+/** ממתינה עד שאין פתיחה באוויר — למשל „פתח” שהמשתמש לחץ ברגע שהקובץ הגיע. */
+async function untilOpenIdle(): Promise<void> {
+  while (isOpenBusy()) await new Promise((resolve) => setTimeout(resolve, 100));
+}
+
+/**
+ * פותחת קובץ שתוסף אחר שלח, בטאב משלו.
+ *
+ * המסלול הוא של „נסגרו בלי לשמור” (`onOpenDiscarded`): בייטים בלי token.
+ * המסמך מסומן כלא-שמור, ובכוונה — אין לנו דרך לכתוב לקובץ המקורי, ו„שמור”
+ * פותח „שמור בשם”. הסימון הוא גם מה שמחזיר אותו אחרי סגירת אוצריא: מסמך
+ * בלי token ובלי טיוטה היה חוזר בהפעלה הבאה כמסמך ריק.
+ */
+async function openReceivedFile(received: Exclude<ReceivedFile, { kind: 'ignore' }>): Promise<void> {
+  if (received.kind === 'rejected') {
+    setStatus(received.message, true);
+    return;
+  }
+
+  await untilOpenIdle();
+  ensureOpenTargetTab();
+  const opened = await openDocument(undefined, { draft: received.blob, name: received.name });
+  setStatus(
+    opened
+      ? `${received.name} נפתח מתוסף אחר — „שמור” יבקש מקום לשמירה`
+      : `${received.name} לא נפתח`,
+    !opened,
+  );
+}
+
+function queueReceivedFile(event: PageOpenedEvent): void {
+  const received = readReceivedFile(event);
+  if (received.kind === 'ignore') return;
+  receivedFiles = receivedFiles
+    .then(() => openReceivedFile(received))
+    .catch((error: unknown) => {
+      console.warn('[otzaria-word] פתיחת קובץ מתוסף אחר נכשלה', error);
+      setStatus(`${received.kind === 'file' ? received.name : 'הקובץ'} לא נפתח`, true);
+    });
+}
+
+/**
+ * קובץ Word שתוסף אחר שולח (`plugin.page_opened`) — ראו host/received-file.ts.
+ *
+ * אותו סדר בדיוק כמו `registerSendToDocument`: המאזין החי קודם, ורק אחריו
+ * ריקון ה-latch, באותה משימה סינכרונית. הפתיחה עצמה ממתינה ל-`startupDone`.
+ */
+function registerReceivedFiles(): void {
+  if (!isAvailable()) return;
+
+  try {
+    pageOpenedListener = on('plugin.page_opened', (event) => queueReceivedFile(event));
+    for (const pending of takePendingPageOpens()) queueReceivedFile(pending);
+  } catch (error) {
+    console.warn('[otzaria-word] ההאזנה לקבצים מתוספים אחרים נכשלה', error);
+  }
+}
+
 onMounted(async () => {
   /**
    * המנייה של גופני המכונה — ראשונה, ובלי `await`, ובשני שלבים.
@@ -5404,6 +5487,7 @@ onMounted(async () => {
   // ממשיך לצבור ואיש לא היה מרוקן אותו. אינו תלוי בכלום כאן — קיומו של מסמך
   // נבדק בזמן הלחיצה, לא עכשיו.
   registerSendToDocument();
+  registerReceivedFiles();
 
   shortcuts = createShortcutDispatcher({
     runCommand: (id, payload) => void runShortcutCommand(id, payload),
@@ -5558,9 +5642,11 @@ onMounted(async () => {
       // מה שצריך להיקרא.
       splashDone();
       if (customShortcutsNotice !== '') setStatus(customShortcutsNotice);
+      startupSettled();
     }
   } else {
     splashDone();
+    startupSettled();
   }
 });
 
@@ -5597,6 +5683,8 @@ onUnmounted(() => {
   shownListener = null;
   contextMenuListener?.();
   contextMenuListener = null;
+  pageOpenedListener?.();
+  pageOpenedListener = null;
   fullscreenListener?.();
   fullscreenListener = null;
   // מעטפת שנפרקת בזמן מסך מלא הייתה משאירה את החלון מורחב בלי מי שיצא ממנו.
