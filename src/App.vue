@@ -398,6 +398,7 @@ import {
   READOUT_SELECTION,
   SPELLCHECK,
   STYLE_DOCUMENT,
+  AUTOCORRECT,
   STYLE_GALLERY,
   STYLE_SHORTCUTS,
 } from './composables/keys';
@@ -505,6 +506,8 @@ import { installAtMention } from './engine/at-mention-overlay';
 import { installPasteIntercept } from './engine/paste-intercept';
 import { loadPasteDefault, pasteDefaultMode } from './composables/paste-default';
 import { installListAutoformat } from './engine/list-autoformat-install';
+import { installAutoCorrect } from './engine/autocorrect-install';
+import { DEFAULT_AUTOCORRECT, normalizeAutoCorrect, type AutoCorrectOptions } from './engine/autocorrect';
 import { installOtzariaLinkClicks } from './engine/otzaria-link-click';
 import { preflightSource } from './engine/docx-preflight';
 import { installDocumentFontAliases } from './engine/docx-fonts';
@@ -601,6 +604,8 @@ import {
   saveSpellcheckEnabled,
   loadListAutoformatEnabled,
   saveListAutoformatEnabled,
+  loadAutoCorrect,
+  saveAutoCorrect,
   loadCanvasColor,
   loadSessionRecord,
   saveSessionRecord,
@@ -1479,6 +1484,20 @@ provide(SPELLCHECK, {
   enabled: computed(() => spellcheckDictionary.value !== null),
   busy: spellcheckBusy,
   toggle: () => void toggleSpellcheck(),
+});
+
+/**
+ * תיקון אוטומטי בהקלדה (engine/autocorrect-install.ts). ההגדרות חיות כאן
+ * ונקראות בכל הערכה, ולכן שינוי מהדיאלוג חל על ההקלדה הבאה בלי התקנה מחדש.
+ * נשמר ב-`storage` ולא בזיכרון: זו העדפה של המשתמש, לא של המסמך.
+ */
+const autoCorrectOptions = ref<AutoCorrectOptions>(DEFAULT_AUTOCORRECT);
+provide(AUTOCORRECT, {
+  options: autoCorrectOptions,
+  apply: (options: AutoCorrectOptions) => {
+    autoCorrectOptions.value = options;
+    void saveAutoCorrect(options);
+  },
 });
 
 /**
@@ -4664,6 +4683,24 @@ watch([activeEditorContainer, activeSuperdoc, documentGeneration], () => {
 });
 
 /**
+ * התיקון האוטומטי, על אותו container ובאותם תנאים כמו זיהוי הרשימות. מותקן
+ * מחדש עם כל מסמך: הוא מחזיק את ה-`doc` של המנוע שהותקן עליו, וספירת מה
+ * שהוקלד וזיכרון הביטולים שלו הם של המסמך הזה בלבד.
+ */
+let autoCorrect: ReturnType<typeof installAutoCorrect> | null = null;
+watch([activeEditorContainer, activeSuperdoc, documentGeneration], () => {
+  autoCorrect?.dispose();
+  autoCorrect = null;
+  if (!activeEditorContainer.value || !activeSuperdoc.value) return;
+  autoCorrect = installAutoCorrect({
+    container: activeEditorContainer.value,
+    host: activeSuperdoc.value,
+    getOptions: () => autoCorrectOptions.value,
+    isSuppressed: isModalDialogOpen,
+  });
+});
+
+/**
  * לחיצה על קישור `otzaria://` במסמך (engine/otzaria-link-click.ts).
  *
  * אותו container ואותו תנאי כמו שתי השכבות שמעליו. זה אינו כפל של
@@ -5755,6 +5792,7 @@ onMounted(async () => {
       storedSpellcheck,
       storedCanvasColor,
       storedListAutoformat,
+      storedAutoCorrect,
       customShortcutsNotice,
     ] =
       await Promise.all([
@@ -5766,6 +5804,7 @@ onMounted(async () => {
         loadSpellcheckEnabled(),
         loadCanvasColor(),
         loadListAutoformatEnabled(),
+        loadAutoCorrect(),
         // לפני פתיחת המסמך הראשון: MacroKit קוראת `reservedShortcuts` פעם
         // אחת בלבד. אם הקיצורים האישיים ייטענו אחר כך, מאקרו קיים יכול
         // להיקשר אליהם לפני שהם מוכרזים כשמורים ולהשתיק אותם.
@@ -5775,6 +5814,8 @@ onMounted(async () => {
       ]);
     autosaveEnabled.value = storedAutosave;
     listAutoformatEnabled.value = storedListAutoformat;
+    // ערך חסר או פגום הוא ברירות המחדל, ושדה פגום נופל לברירת המחדל שלו.
+    autoCorrectOptions.value = normalizeAutoCorrect(storedAutoCorrect);
     rulerPreference = storedRuler;
     // ממוינת כבר כאן ולא רק בתצוגה: זו הרשימה שכל שאר הקוד רואה, ורשימה
     // שמגיעה מ-storage אין לה הבטחת סדר.
@@ -5878,6 +5919,8 @@ onUnmounted(() => {
   // אינו „דולף” בשקט אלא ממשיך לחטוף הקשות.
   listAutoformat?.dispose();
   listAutoformat = null;
+  autoCorrect?.dispose();
+  autoCorrect = null;
   // חיפוש-בזמן-הקלדה שממתין ירוץ אחרי הפירוק על handle של controller מפורק.
   // בכל הטאבים, לא רק הפעיל — לכולם יש `searchAdapter`/`keeper` משלהם.
   for (const s of sessions.values()) {
