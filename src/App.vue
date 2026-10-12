@@ -1657,6 +1657,12 @@ let shownListener: (() => void) | null = null;
  * שלפני ש-`openDocument` מרימה את `isOpening` בעצמה.
  */
 let pendingTabLoad = false;
+/** כולל סידור תצוגה ושחזור אחרי swap.open; ניסיון שבוטל משחרר מיד את השער. */
+let openingAttempt: LoadAttempt | null = null;
+/** סגירה מחזיקה את הטאב הפעיל עד אחרי השאלה, הגיבוי ופירוק המנוע. */
+let tabClosePending = false;
+/** קובץ שהתקבל נשאר בפתיחה עד שהבייטים שלו נכתבו לשחזור. */
+let receivedFileOpening = false;
 
 /**
  * האם אסור להתחיל פתיחה או להחליף טאב כרגע.
@@ -1666,7 +1672,8 @@ let pendingTabLoad = false;
  * לבדו, שאינו מכסה את שלב ההכנה של `openPendingTab`.
  */
 function isOpenBusy(): boolean {
-  return isOpening.value || pendingTabLoad;
+  return isOpening.value || pendingTabLoad || (openingAttempt !== null && !openingAttempt.cancelled) ||
+    tabClosePending || isExiting.value || receivedFileOpening;
 }
 let contextMenuListener: (() => void) | null = null;
 /** מבטל את ההאזנה לקובץ שתוסף אחר שולח. ראו `registerReceivedFiles`. */
@@ -1863,7 +1870,7 @@ function initSaveCoordinator(getSession: () => DocumentSession): SaveCoordinator
 function initSessionKeeper(getSession: () => DocumentSession, id: DocumentSessionId): SessionKeeper {
   return createSessionKeeper({
     id,
-    persist: (state) => persistCombinedSession(getSession(), state),
+    persist: (state, requireSuccess) => persistCombinedSession(getSession(), state, requireSuccess),
     exportDocument: () => {
       const active = getSession().swap.current;
       if (!active) throw new Error('אין מסמך פתוח');
@@ -1940,7 +1947,7 @@ provide(HEAVY_ACTION_GUARD, guardHeavyAction);
  * `activeId` ו-`view` נלקחים מהטאב הפעיל. `view` משותף לכל הטאבים (ראו
  * `updateShellView`), ולכן זו אינה בחירה שרירותית אלא קריאה של אותו ערך.
  */
-function persistCombinedSession(session: DocumentSession, state: SessionState): Promise<void> {
+function persistCombinedSession(session: DocumentSession, state: SessionState, requireSuccess = false): Promise<void> {
   const documents: SessionState['documents'] = [];
   for (const other of sessions.values()) {
     // `activeEntry` ולא `.documents[0]`: זוכר שאימץ רשומה שמורה (`adopt`,
@@ -1957,7 +1964,7 @@ function persistCombinedSession(session: DocumentSession, state: SessionState): 
     activeId: active.id,
     view: active.keeper.state.view,
   };
-  return saveSessionRecord(combined);
+  return saveSessionRecord(combined, requireSuccess);
 }
 
 /**
@@ -2027,7 +2034,8 @@ function restoredUiSnapshot(entry: SessionDocumentEntry, fallbackTitle?: string)
   const remembered = entry.document;
   return {
     ...base,
-    title: remembered ? stripWordExtension(remembered.name) : (fallbackTitle ?? base.title),
+    title: remembered ? stripWordExtension(remembered.name) :
+      (entry.draft?.name ? stripWordExtension(entry.draft.name) : (fallbackTitle ?? base.title)),
     saveSnapshot: {
       ...base.saveSnapshot,
       isDirty: entry.draft !== null,
@@ -2455,14 +2463,16 @@ async function openDocument(file?: UserFile, options: OpenOptions = {}): Promise
     file?.name ?? options.name ?? 'מסמך חדש',
     file || options.draft ? 'קורא את הקובץ…' : 'מכין מסמך ריק…',
   );
+  openingAttempt = attempt;
   try {
     return await openDocumentInto(attempt, file, options);
   } finally {
+    if (openingAttempt === attempt) openingAttempt = null;
     attempt.fail();
     // וגם המצב שמשתק את הרצועה: פתיחה שזרקה השאירה אותה מנוטרלת לתמיד. הערך
     // נקרא מה-swap ולא נקבע ל-false, כדי שפתיחה חדשה יותר שכבר בדרך לא
     // תיראה כמי שהסתיימה.
-    isOpening.value = swap?.isOpening ?? false;
+    isOpening.value = (openingAttempt !== null && !openingAttempt.cancelled) || (swap?.isOpening ?? false);
     // מנוע חי נוסף נולד כאן — הנקודה השנייה שבה התקרה יכולה להישבר (הראשונה
     // היא מעבר טאב). ראו `MAX_LIVE_DOCUMENTS`.
     void trimLiveDocuments();
@@ -2506,7 +2516,6 @@ async function openDocumentInto(
   // engine/blank-document.ts. `undefined` בבדיקות, ואז המנוע פותח את שלו.
   const blank = !file && !options.draft ? blankDocumentSource() : undefined;
   const outcome = await swap.open(source ?? blank);
-  isOpening.value = swap.isOpening;
 
   // ה-swap מדווח `superseded` גם על פתיחה שבוטלה — הביטול מקדם שם את הדור
   // לפני שהוא מרים את האיתות (ראו EditorSwap.cancel). המחוון כבר סולק
@@ -3096,6 +3105,7 @@ async function openDocumentInto(
   // `restoreSelection` מציב סמן משלו, ומי שרץ אחרון הוא זה שקובע איפה הוא
   // יושב.
   const caretRestored = await restoreDocumentView(editor, adapter, options.restore);
+  if (attempt.cancelled) return false;
 
   /*
    * מסמך שנפתח בלי מקום שמור נפתח בלי סמן בכלל: `focus()` של המנוע ממקד את
@@ -4210,29 +4220,34 @@ async function onDocumentTabClose(id: DocumentSessionId): Promise<void> {
   if (isOpenBusy()) return;
   const session = sessions.get(id);
   if (!session) return;
-  const resolution = await resolveUnsavedBeforeClose(session, 'close-tab');
-  if (!resolution.closable) return;
+  tabClosePending = true;
+  try {
+    const resolution = await resolveUnsavedBeforeClose(session, 'close-tab');
+    if (!resolution.closable) return;
 
-  // לפני הפירוק: `destroy` משחרר את המנוע ומוחק את הטיוטה, ואחריו כבר אין
-  // ממה לקרוא את המסמך שהיה בטאב. ראו `closedTabs`.
-  rememberClosedTab(session);
+    // לפני הפירוק: `destroy` משחרר את המנוע ומוחק את הטיוטה, ואחריו כבר אין
+    // ממה לקרוא את המסמך שהיה בטאב. ראו `closedTabs`.
+    rememberClosedTab(session);
 
-  const wasActive = session === activeSession.value;
-  sessions.delete(session.id);
-  const recentAt = recentTabs.indexOf(session.id);
-  if (recentAt >= 0) recentTabs.splice(recentAt, 1);
-  // לפני הפירוק, ורק אחרי שברור שהטאב באמת נסגר: `destroy` מוחק את הטיוטה,
-  // והמנוע שממנו מייצאים הולך איתו.
-  if (resolution.discarded) await backupDiscardedDocument(session);
-  await session.destroy({ removeDraft: true });
+    const wasActive = session === activeSession.value;
+    sessions.delete(session.id);
+    const recentAt = recentTabs.indexOf(session.id);
+    if (recentAt >= 0) recentTabs.splice(recentAt, 1);
+    // לפני הפירוק, ורק אחרי שברור שהטאב באמת נסגר: `destroy` מוחק את הטיוטה,
+    // והמנוע שממנו מייצאים הולך איתו.
+    if (resolution.discarded) await backupDiscardedDocument(session);
+    await session.destroy({ removeDraft: true });
 
-  // הרשומה עצמה אינה נכתבת כאן: `destroy({ removeDraft: true })` קורא
-  // ל-`keeper.discardDraft`, וזה כותב דרך `persistCombinedSession` — שמרכיבה
-  // את האוסף מהטאבים ש**נשארו** במפה (הטאב הזה כבר הוסר ממנה). כלומר טאב
-  // שנסגר יורד מהרשומה מיד, ואינו חוזר בעלייה הבאה.
-  if (!wasActive) return;
+    // הרשומה עצמה אינה נכתבת כאן: `destroy({ removeDraft: true })` קורא
+    // ל-`keeper.discardDraft`, וזה כותב דרך `persistCombinedSession` — שמרכיבה
+    // את האוסף מהטאבים ש**נשארו** במפה (הטאב הזה כבר הוסר ממנה). כלומר טאב
+    // שנסגר יורד מהרשומה מיד, ואינו חוזר בעלייה הבאה.
+    if (!wasActive) return;
 
-  await activateAfterClose();
+    await activateAfterClose();
+  } finally {
+    tabClosePending = false;
+  }
 }
 
 /** כפתור „+”: תמיד טאב ריק חדש — לא בודק „שינויים לא שמורים”, כי אין מה לאבד. */
@@ -5373,9 +5388,13 @@ const startupDone = new Promise<void>((resolve) => {
  */
 let receivedFiles: Promise<void> = startupDone;
 
-/** ממתינה עד שאין פתיחה באוויר — למשל „פתח” שהמשתמש לחץ ברגע שהקובץ הגיע. */
+/** החלפת הטאב ממתינה גם להכרעה על עבודה לא שמורה ולכתיבה שרצה. */
 async function untilOpenIdle(): Promise<void> {
-  while (isOpenBusy()) await new Promise((resolve) => setTimeout(resolve, 100));
+  while (
+    isOpenBusy() || recentOpenPending || isDiscardedOpening.value ||
+    unsavedPrompt.question.value ||
+    Array.from(sessions.values()).some((session) => session.save.snapshot.isSaving)
+  ) await new Promise((resolve) => setTimeout(resolve, 100));
 }
 
 /**
@@ -5393,14 +5412,32 @@ async function openReceivedFile(received: Exclude<ReceivedFile, { kind: 'ignore'
   }
 
   await untilOpenIdle();
-  ensureOpenTargetTab();
-  const opened = await openDocument(undefined, { draft: received.blob, name: received.name });
-  setStatus(
-    opened
-      ? `${received.name} נפתח מתוסף אחר — „שמור” יבקש מקום לשמירה`
-      : `${received.name} לא נפתח`,
-    !opened,
-  );
+  try {
+    ensureOpenTargetTab();
+    const opened = await openDocument(undefined, { draft: received.blob, name: received.name });
+    if (opened && keeper) {
+      receivedFileOpening = true;
+      // כאן אין יעד כתיבה ואין autosave לקובץ המקורי. זו קבלה חדשה, לא
+      // שחזור לקובץ שמור: שחרור ההקפאה מאפשר לגבות גם הקלדה בזמן סידור התצוגה.
+      save?.markDirty();
+      const written = await keeper.storeOpenedDraft(received.blob, received.name).catch((error: unknown) => {
+        console.warn('[otzaria-word] כתיבת הקובץ שהתקבל לשחזור נכשלה', error);
+        return 'failed' as const;
+      });
+      if (written !== 'written') {
+        setStatus(`${received.name} נפתח, אך לא נוצר עותק לשחזור — יש לשמור לקובץ כדי למנוע אובדן`, true);
+        return;
+      }
+    }
+    setStatus(
+      opened
+        ? `${received.name} נפתח מתוסף אחר — „שמור” יבקש מקום לשמירה`
+        : `${received.name} לא נפתח`,
+      !opened,
+    );
+  } finally {
+    receivedFileOpening = false;
+  }
 }
 
 function queueReceivedFile(event: PageOpenedEvent): void {
@@ -5851,7 +5888,9 @@ async function reopenPreviousSession(
   const draft = await recoverDraft(session, file);
   const restore = documentViewFor(session, file?.token ?? null);
 
-  if (await openDocument(file ?? undefined, { draft: draft ?? undefined, restore })) {
+  if (await openDocument(file ?? undefined, {
+    draft: draft ?? undefined, restore, name: entry?.draft?.name,
+  })) {
     if (draft) setStatus(restoredDraftMessage(session, fromThisRun));
     return;
   }

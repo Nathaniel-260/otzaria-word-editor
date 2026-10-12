@@ -767,6 +767,81 @@ describe('flush', () => {
  * שלושת המסלולים הם שלוש התשובות האפשריות של כתיבת הטיוטה: נכתבה, לא נכתבה,
  * ונכתבה אך העבודה המשיכה.
  */
+describe('בייטים שנפתחו בלי קובץ מקור', () => {
+  it('כותב ומאמץ את המקור גם כשהשחזור מקפיא שמירה ובלי לייצא מחדש', async () => {
+    const h = harness();
+    h.dirty = true;
+    h.held = true;
+    h.keeper.setDocument(null, { keepDraft: true });
+    expect(await h.keeper.storeOpenedDraft(new Blob(['received bytes']), 'מקור.docm')).toBe('written');
+    expect(h.drafts).toEqual([14]);
+    expect(lastEntry(h.persisted)?.draft).toMatchObject({ path: DRAFT_PATH, name: 'מקור.docm', documentToken: null });
+    expect(h.keeper.hasUnwrittenWork).toBe(false);
+    await h.keeper.flush();
+    expect(h.exports).toBe(0);
+    expect(h.drafts).toHaveLength(1);
+  });
+
+  it.each(['failed', 'too-large'] as const)('כשל %s אינו מרשה לפרק עבודה שאינה מגובה', async (result) => {
+    const h = harness();
+    h.dirty = true;
+    h.held = true;
+    h.writeResult = result;
+    expect(await h.keeper.storeOpenedDraft(new Blob(['bytes']), 'שם.docx')).toBe(result);
+    expect(activeEntry(h.keeper.state)?.draft).toBeNull();
+    expect(h.keeper.hasUnwrittenWork).toBe(true);
+  });
+
+  it('עריכה במהלך כתיבת המקור נשארת ממתינה לייצוא ושומרת את השם', async () => {
+    const h = harness();
+    h.dirty = true;
+    let finish!: (value: WorkspaceWrite) => void;
+    h.deps.writeDraft = () => new Promise((resolve) => { finish = resolve; });
+    const writing = h.keeper.storeOpenedDraft(new Blob(['bytes']), 'שם.docx');
+    await Promise.resolve();
+    h.keeper.noteChange();
+    finish('written');
+    await writing;
+    expect(h.keeper.hasUnwrittenWork).toBe(true);
+    h.deps.writeDraft = async () => 'written';
+    await h.keeper.flush();
+    expect(h.keeper.hasUnwrittenWork).toBe(false);
+    expect(activeEntry(h.keeper.state)?.draft?.name).toBe('שם.docx');
+  });
+
+  it('עריכה שקדמה לכתיבת המקור אינה נחשבת כאילו נכללה בבייטים שהתקבלו', async () => {
+    const h = harness();
+    h.dirty = true;
+    h.keeper.noteChange();
+    expect(await h.keeper.storeOpenedDraft(new Blob(['original']), 'שם.docx')).toBe('written');
+    expect(h.keeper.hasUnwrittenWork).toBe(true);
+    await h.keeper.flush();
+    expect(h.exports).toBe(1);
+    expect(h.keeper.hasUnwrittenWork).toBe(false);
+  });
+
+  it('כשל כתיבת הרשומה אינו מדווח הצלחה ואינו מתיר הרדמה', async () => {
+    const h = harness();
+    h.dirty = true;
+    h.deps.persist = async () => { throw new Error('storage unavailable'); };
+    expect(await h.keeper.storeOpenedDraft(new Blob(['bytes']), 'שם.docx')).toBe('failed');
+    expect(h.keeper.hasUnwrittenWork).toBe(true);
+    expect(activeEntry(h.keeper.state)?.draft?.name).toBe('שם.docx');
+  });
+
+  it('כתיבה שחזרה אחרי החלפת מסמך אינה מאומצת על המסמך החדש', async () => {
+    const h = harness();
+    let finish!: (value: WorkspaceWrite) => void;
+    h.deps.writeDraft = () => new Promise((resolve) => { finish = resolve; });
+    const writing = h.keeper.storeOpenedDraft(new Blob(['bytes']), 'שם.docx');
+    await Promise.resolve();
+    h.keeper.setDocument({ token: 'other', name: 'אחר.docx', writable: true });
+    finish('written');
+    expect(await writing).toBe('failed');
+    expect(activeEntry(h.keeper.state)?.draft).toBeNull();
+  });
+});
+
 describe('hasUnwrittenWork', () => {
   it('מסמך נקי — אין עבודה באוויר', () => {
     const h = harness();

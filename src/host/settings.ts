@@ -61,8 +61,11 @@ export async function loadSessionRecord(): Promise<unknown> {
   return tryCall<unknown>('storage.get', { key: SESSION_KEY });
 }
 
-export async function saveSessionRecord(value: unknown): Promise<void> {
-  await tryCall('storage.set', { key: SESSION_KEY, value });
+export async function saveSessionRecord(value: unknown, requireSuccess = false): Promise<void> {
+  // קבלה של בייטים ללא קובץ מקור חייבת לדעת אם יש רשומה לשחזור.
+  // הכתיבות הרגילות נשארות רשת ביטחון שקטה.
+  const write = requireSuccess ? call : tryCall;
+  await write('storage.set', { key: SESSION_KEY, value });
 }
 
 const AUTOSAVE_KEY = 'autosave-enabled';

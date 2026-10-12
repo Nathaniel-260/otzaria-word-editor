@@ -144,6 +144,10 @@ describe('רשומת ההפעלה', () => {
     await expect(loadSessionRecord()).resolves.toBeNull();
     await expect(saveSessionRecord({ version: 1 })).resolves.toBeUndefined();
   });
+
+  it('כתיבה שחייבת להצליח מדווחת על כשל גם כשהכתיבה הרגילה סובלת אותו', async () => {
+    await expect(saveSessionRecord({ version: 1 }, true)).rejects.toThrow();
+  });
 });
 
 describe('saveCanvasColor', () => {

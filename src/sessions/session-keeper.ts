@@ -96,7 +96,7 @@ export interface SessionKeeperDeps {
    */
   id: DocumentSessionId;
   /** כותבת את הרשומה. כשל אינו מדווח לממשק — הוא כבר בלוג. */
-  persist: (state: SessionState) => Promise<void>;
+  persist: (state: SessionState, requireSuccess?: boolean) => Promise<void>;
   /** מייצא את המסמך הפעיל, לטיוטה. */
   exportDocument: () => Promise<Blob>;
   /** כותבת את הטיוטה לנתיב שנבחר, ומדווחת אם לא נכתבה ומדוע. */
@@ -182,6 +182,8 @@ export interface SessionKeeper {
   adopt(state: SessionState | null): void;
   /** מסמך נפתח, נשמר בשם, או נסגר. מבטלת טיוטה של המסמך הקודם. */
   setDocument(document: SessionDocument | null, options?: SetDocumentOptions): void;
+  /** שומרת בייטים שנפתחו בלי קובץ מקור. אינה מייצאת ואינה תלויה בהקפאת autosave. */
+  storeOpenedDraft(content: Blob, name: string): Promise<WorkspaceWrite>;
   /** שינוי במצב התצוגה. */
   updateView(patch: Partial<SessionView>): void;
   /** **המסמך** השתנה. מתזמן גם את רשומת ההפעלה וגם את הטיוטה. */
@@ -418,6 +420,7 @@ export function createSessionKeeper(deps: SessionKeeperDeps): SessionKeeper {
     state = withActiveEntry(state, {
       [target]: {
         path,
+        ...(entry?.draft?.name ? { name: entry.draft.name } : {}),
         savedAt: Date.now(),
         documentToken: activeEntry(state)?.document?.token ?? null,
         sourceSize,
@@ -510,6 +513,48 @@ export function createSessionKeeper(deps: SessionKeeperDeps): SessionKeeper {
       schedule(async () => {
         await deps.persist(state);
       });
+    },
+
+    async storeOpenedDraft(content, name) {
+      // גם בייטים שהגיעו מבחוץ הם עבודה בזיכרון בלבד עד שהכתיבה הצליחה.
+      // בכשל אסור ל-hasUnwrittenWork להתיר להרדים ולפרק את המנוע.
+      const mine = epoch;
+      // המקור הוא גרסת הפתיחה, לא תוכן שכבר הוקלד בזמן סידור התצוגה.
+      const writing = revision === 0 ? 1 : 0;
+      if (revision === 0) revision = 1;
+      let result: WorkspaceWrite = 'failed';
+      await run(async () => {
+        if (disposed || mine !== epoch) return;
+        const entry = activeEntry(state);
+        const path = nextDraftPath(deps.draftPaths, entry?.draft ?? null, entry?.previousDraft ?? null);
+        result = await deps.writeDraft(content, path);
+        if (disposed || mine !== epoch) {
+          result = 'failed';
+          return;
+        }
+        if (result !== 'written') return;
+        state = withActiveEntry(state, {
+          draft: {
+            path,
+            name,
+            savedAt: Date.now(),
+            documentToken: entry?.document?.token ?? null,
+            sourceSize,
+          },
+        });
+        await deps.persist(state, true);
+        if (disposed || mine !== epoch) {
+          result = 'failed';
+          return;
+        }
+        // הבייטים והרשומה צריכים להיכתב לפני שמותר להרדים את המנוע.
+        // עריכה שהתרחשה בזמן הכתיבה עדיין זקוקה לייצוא משלה.
+        draftedRevision = writing;
+      }).catch((error: unknown) => {
+        console.warn('[otzaria-word] שמירת הטיוטה שנפתחה נכשלה', error);
+        result = 'failed';
+      });
+      return result;
     },
 
     /**
