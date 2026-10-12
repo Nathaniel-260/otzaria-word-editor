@@ -376,6 +376,20 @@ describe('applyDocumentStartCaret', () => {
     expect(applied).toEqual([{ start: 'b1', offset: 0 }]);
   });
 
+  it('טבלה ראשונה אינה מציבה סמן בפסקה שאחריה, גם כשהמנוע אינו יכול להציב סמן בטבלה', async () => {
+    const { ui, applied } = uiThatAccepts(['after-table', 'cell']);
+    const { doc, calls } = docWithBlocks(['tbl:1', 'after-table']);
+    const page = paintedPage([['body', 'after-table', 11], ['body', null, 1]]);
+    const cell = document.createElement('div');
+    cell.dataset.layoutStory = 'body';
+    cell.dataset.sourceNodeId = 'cell';
+    page.lastElementChild!.appendChild(cell);
+
+    await expect(applyDocumentStartCaret(ui, doc, page)).resolves.toBe(false);
+    expect(calls).toEqual([{ offset: 0, limit: 1 }]);
+    expect(applied).toEqual([]);
+  });
+
   it('קליק שהמשתמש הציב בזמן ההמתנה ל-blocks.list אינו נדרס', async () => {
     let clicked = false;
     const { ui, applied } = uiThatAccepts(['b1']);
@@ -412,14 +426,14 @@ describe('applyDocumentStartCaret', () => {
 });
 
 /** עמוד מצויר כמו של המנוע: `[story, sourceNodeId, pmStart]` לכל מקטע, בסדר ה-DOM. */
-function paintedPage(fragments: Array<[string, string, number]>): HTMLElement {
+function paintedPage(fragments: Array<[string, string | null, number | null]>): HTMLElement {
   const page = document.createElement('div');
   for (const [story, id, start] of fragments) {
     const fragment = document.createElement('div');
     fragment.className = 'superdoc-fragment';
     fragment.dataset.layoutStory = story;
-    fragment.dataset.sourceNodeId = id;
-    fragment.dataset.pmStart = String(start);
+    if (id !== null) fragment.dataset.sourceNodeId = id;
+    if (start !== null) fragment.dataset.pmStart = String(start);
     page.appendChild(fragment);
   }
   return page;
@@ -434,6 +448,33 @@ describe('paintedFirstBlockId', () => {
       ['footer', 'f1', 0],
     ]);
     expect(paintedFirstBlockId(page)).toBe('p1');
+  });
+
+  it('טבלה בלי מזהה שמתחילה לפני הפסקה חוסמת בחירה בפסקה, בכל סדר DOM', () => {
+    expect(paintedFirstBlockId(paintedPage([['body', null, 1], ['body', 'p2', 20]]))).toBeNull();
+    expect(paintedFirstBlockId(paintedPage([['body', 'p2', 20], ['body', null, 1]]))).toBeNull();
+  });
+
+  it('טבלה מאוחרת אינה מבטלת את המסלול המהיר של הפסקה הראשונה', () => {
+    expect(paintedFirstBlockId(paintedPage([['body', null, 20], ['body', 'p1', 1]]))).toBe('p1');
+  });
+
+  it('בלי טווח לטבלה אין דרך להוכיח שהפסקה ראשונה', () => {
+    expect(paintedFirstBlockId(paintedPage([['body', null, null], ['body', 'p2', 20]]))).toBeNull();
+  });
+
+  it('fragment בלי טווח או בלי מזהה אינו נעקף בדרך לפסקה מאוחרת', () => {
+    expect(paintedFirstBlockId(paintedPage([['body', 'p1', null], ['body', 'p2', 20]]))).toBeNull();
+    expect(paintedFirstBlockId(paintedPage([['body', '', 1], ['body', 'p2', 20]]))).toBeNull();
+  });
+
+  it('פסקה שנחצתה בין עמודים נבחרת לפי מקטע ההתחלה שלה', () => {
+    expect(paintedFirstBlockId(paintedPage([['body', 'p1', 40], ['body', 'p2', 70], ['body', 'p1', 1]]))).toBe('p1');
+  });
+
+  it('טווח ראשון עם מזהים סותרים חוזר למנוע, בלי תלות בסדר DOM', () => {
+    expect(paintedFirstBlockId(paintedPage([['body', 'p1', 1], ['body', null, 1]]))).toBeNull();
+    expect(paintedFirstBlockId(paintedPage([['body', null, 1], ['body', 'p1', 1]]))).toBeNull();
   });
 
   it('אין עמוד מצויר — null', () => {
