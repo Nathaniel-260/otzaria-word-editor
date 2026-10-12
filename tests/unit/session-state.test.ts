@@ -45,6 +45,12 @@ function session(patch: Partial<{
 }
 
 describe('normalizeSession', () => {
+  it('שומר שם של טיוטה ללא token בהפעלה חוזרת', () => {
+    const stored = session({ draft: {
+      path: 'received.docx', name: 'מקור.docm', savedAt: 17, documentToken: null, sourceSize: null,
+    } });
+    expect(normalizeSession(JSON.parse(JSON.stringify(stored)))).toEqual(stored);
+  });
   it('קורא רשומה מלאה', () => {
     const stored = session({
       document: { token: 'tok', name: 'א.docx', writable: true },

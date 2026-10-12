@@ -147,6 +147,8 @@ export interface SessionView {
  */
 export interface SessionDraft {
   path: string;
+  /** שם לקובץ שהגיע כבייטים בלבד, בלי token שממנו אפשר לשחזר את השם. */
+  name?: string;
   /** `Date.now()` בזמן הכתיבה, להצגה ולאבחון. */
   savedAt: number;
   documentToken: string | null;
@@ -333,6 +335,7 @@ function readDraft(value: unknown): SessionDraft | null {
   const size = readFiniteNumber(draft.sourceSize);
   return {
     path,
+    ...(readString(draft.name) ? { name: readString(draft.name)! } : {}),
     savedAt: readFiniteNumber(draft.savedAt) ?? 0,
     documentToken: readString(draft.documentToken),
     sourceSize: size !== null && size > 0 ? size : null,
