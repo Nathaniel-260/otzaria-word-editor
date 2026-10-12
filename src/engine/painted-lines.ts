@@ -580,3 +580,37 @@ export function blocksInside(fragment: Element): Element[] {
     (el) => linesOf(el).length > 0,
   );
 }
+
+/**
+ * מזהה הבלוק הראשון של גוף המסמך, כפי שהוא מצויר — או `null`.
+ *
+ * הצרכן: סמן הפתיחה (`applyDocumentStartCaret` ב-caret-anchor.ts). קריאות
+ * המסמך של המנוע ממתינות לשקט, ובמסמך ארוך המנוע ממשיך לעמד ברקע עוד זמן רב
+ * אחרי `onReady`, ואילו העמוד הראשון כבר מצויר בו.
+ *
+ * רק גוף המסמך (`data-layout-story="body"`) — כותרת עליונה ותחתונה מצוירות
+ * באותו עמוד. והמינימום לפי `data-pm-start` ולא הראשון ב-DOM: המקטעים ממוקמים
+ * באופן מוחלט, וסדר הצאצאים אינו מובטח להיות סדר המסמך. גם טבלה היא fragment,
+ * אך בלי מזהה מקור: אם היא הבלוק הראשון, הקורא נופל למסלול של המנוע ולא
+ * מדלג לפסקה שאחריה. פסקאות שבתאים אינן fragments של הגוף. כשחסר טווח
+ * ל-fragment אי אפשר להוכיח מי הראשון, ולכן חוזרים למנוע.
+ */
+export function paintedFirstBlockId(host: ParentNode | null | undefined): string | null {
+  if (typeof host?.querySelectorAll !== 'function') return null;
+  let firstId: string | null = null;
+  let firstStart = Infinity;
+  for (const fragment of Array.from(host.querySelectorAll('.superdoc-fragment[data-layout-story="body"]'))) {
+    const start = attr(fragment, 'data-pm-start');
+    if (!Number.isFinite(start)) return null;
+    const id = fragment.getAttribute('data-source-node-id');
+    if (start > firstStart) continue;
+    // טווח ראשון משותף בלי מזהה חד-משמעי אינו סיבה לבחור לפי סדר ה-DOM.
+    if (start === firstStart) {
+      if (id !== firstId) firstId = null;
+      continue;
+    }
+    firstStart = start;
+    firstId = id || null;
+  }
+  return firstId;
+}
