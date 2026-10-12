@@ -108,11 +108,8 @@ import {
   type Bytes,
   type ZipEntry,
 } from './docx-parts';
-import { markProofingDirty, mergeFragmentedRuns } from './docx-run-merge';
+import { mergeFragmentedRuns } from './docx-run-merge';
 import { NO_VBA, readDocumentVba, type DocumentVba } from './vba-import';
-
-/** מספר סימוני האיות בחלק — כדי לדעת אם האיחוד הסיר מהם. */
-const countProofMarks = (xml: string): number => xml.split('proofErr').length - 1;
 
 /** החלק שבו יושבות הגדרות המסמך. */
 export const SETTINGS_PART = 'word/settings.xml';
@@ -563,10 +560,6 @@ async function repairEntries(
   const notes: string[] = [];
   let notice: string | null = null;
   const patched = new Map<ZipEntry, ZipEntry>();
-  /** הטקסט אחרי התיקון, למי שצריך לתקן את אותו חלק שוב (`settings.xml` למטה). */
-  const patchedText = new Map<ZipEntry, string>();
-  /** האם איחוד הריצות הסיר סימוני איות מאיזשהו חלק. ראו engine/docx-run-merge.ts. */
-  let proofingRemoved = false;
 
   for (const entry of entries) {
     const repairs = REPAIRS.filter((candidate) => candidate.matches(entry.name));
@@ -579,29 +572,12 @@ async function repairEntries(
     for (const repair of repairs) {
       const next = repair.repair(xml);
       if (next === null) continue;
-      if (repair.repair === mergeFragmentedRuns && countProofMarks(next) < countProofMarks(xml)) {
-        proofingRemoved = true;
-      }
       xml = next;
       notes.push(repair.note(entry.name));
       notice ??= repair.notice;
     }
     if (xml !== original) {
       patched.set(entry, await rewriteEntry(entry, new TextEncoder().encode(xml)));
-      patchedText.set(entry, xml);
-    }
-  }
-
-  // Word אינו בודק איות מחדש במסמך שמוצהר „clean”; בלי זה הסימונים שהוסרו
-  // היו נעלמים מהמסך שלו. חלק ההגדרות יכול לבוא לפני הגוף בארכיון, ולכן זה
-  // אחרי הלולאה ולא בתוכה.
-  if (proofingRemoved) {
-    const settings = entries.find((entry) => entry.name.toLowerCase() === SETTINGS_PART);
-    const text = settings ? (patchedText.get(settings) ?? (await readEntryText(settings))) : null;
-    const dirty = text === null ? null : markProofingDirty(text);
-    if (settings && dirty !== null) {
-      patched.set(settings, await rewriteEntry(settings, new TextEncoder().encode(dirty)));
-      notes.push(`${settings.name}: proofState סומן dirty — סימוני איות הוסרו באיחוד הריצות, ו-Word יבדוק מחדש`);
     }
   }
 

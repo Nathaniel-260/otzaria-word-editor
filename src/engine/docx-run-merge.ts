@@ -10,9 +10,10 @@
  *
  * המנוע משלם על כל ריצה בכל הקשה. דווח (10.2026) על מסמך של משתמש — 42
  * פסקאות, 1,217 ריצות ו-270 `proofErr` — שבו הקלדה רצופה הייתה „איטית עד כדי
- * לא שמיש”: האותיות נערמו והופיעו יחד. ביסקציה על אותו מסמך: האיחוד כאן (264
- * ריצות) הוא מה שמשנה; הסרת `proofErr` לבדה לא שינתה דבר. מספרי הזמנים
- * פנימיים — רישיון המנוע אוסר לפרסם מדידות שלו.
+ * לא שמיש”: האותיות נערמו והופיעו יחד. ניסוי מקדים שאיחד גם דרך סימוני
+ * האיות צמצם אותו ל-264 ריצות; כאן הסימונים נשמרים כגבולות, ולכן המספר
+ * הסופי יכול להיות גבוה יותר. הסרת `proofErr` לבדה לא שינתה את התנהגות
+ * ההקלדה בניסוי. מספרי הזמנים פנימיים — רישיון המנוע אוסר לפרסם מדידות שלו.
  *
  * ## מה מאוחד, ובדיוק מה
  *
@@ -26,23 +27,18 @@
  *   במחרוזת נשאר נפרד, גם אם היה מוצג אותו דבר.
  * - המאפיינים על התג `r` עצמו הם מזהי עריכה בלבד (`rsid*`). כל מאפיין אחר
  *   עוצר.
- * - בין הריצות יש רק רווחים ו-`<w:proofErr …/>`. סימנייה, הערת XML, תחילת
- *   הערה (`commentRangeStart`), `ins`/`del` — כל דבר אחר באמצע עוצר.
+ * - בין הריצות יש רק רווחים. `proofErr`, סימנייה, הערת XML, תחילת הערה
+ *   (`commentRangeStart`), `ins`/`del` — כל דבר אחר באמצע עוצר.
  *
  * ## מה זה עושה לקובץ שיישמר
  *
- * המנוע מייצא מהמודל שלו, ולכן מה שנמסר לו כאן — כולל `proofErr` ו-
- * `w:proofState` — הוא מה שעשוי לצאת בשמירה. שני דברים יוצאים מהמסמך:
+ * המנוע מייצא מהמודל שלו, ולכן מזהי העריכה של הריצות שאוחדו אינם נשמרים
+ * מלבד זה של הראשונה. הם משמשים את „השוואת מסמכים” של Word לשיוך שינויים
+ * לשמירה; על מסמך שנפתח ונשמר בתוסף השיוך הזה ממילא אינו מדויק.
  *
- * - **מזהי העריכה** של הריצות שאוחדו (נשמר זה של הראשונה). הם משמשים את
- *   „השוואת מסמכים” של Word לשיוך שינויים לשמירה; על מסמך שנפתח ונשמר בתוסף
- *   השיוך הזה ממילא אינו מדויק.
- * - **`proofErr` שהיה בין הריצות האלה.** זה **כן** נראה, אם לא מטפלים בו:
- *   Word אינו בודק איות מחדש במסמך ש-`w:proofState` שלו אומר „clean” — הוא
- *   סומך על הסימונים השמורים. נמדד ב-Word על מסמך אמיתי: אחרי ההסרה ירד מספר
- *   שגיאות האיות המסומנות ב-יותר ממחצית. לכן מי שמסיר כאן סימון קורא גם
- *   ל-`markProofingDirty` על `settings.xml` (docx-preflight.ts), ו-Word בודק
- *   מחדש בפתיחה.
+ * `proofErr` נשמרים כגבול איחוד. מחיקת רק אחד מזוג start/end משאירה סימון
+ * תלוש, ואין תמיד settings.xml קריא כדי להכריח בדיקת איות מחדש. איחוד
+ * שכנים עם מזהי עריכה שונים עדיין מצמצם את הריצות בלי לשנות את גבולות האיות.
  *
  * ## רווחים
  *
@@ -52,12 +48,18 @@
  * מתאחדת**: קיצוץ היה מוחק רווח שאב שמר, והשארה הייתה מוסיפה רווח ש-Word לא
  * הציג. בקורפוס של 600 מסמכי Word המקרה לא הופיע אף פעם.
  *
+ * ## סופי שורה
+ *
+ * XML מנרמל CR ו-CRLF ל-LF בכל צומת בנפרד. מנרמלים לפני חיבור הטקסטים,
+ * כדי ש-CR בקצה ריצה ו-LF בתחילת הבאה יישארו שתי ירידות שורה. הפניות לתווים
+ * כמו `&#13;` נשארות כמות שהן: הן מפוענחות אחרי נרמול סופי השורה.
+ *
  * ## `]]>`
  *
  * `>` גלוי מותר בטקסט XML, אבל הרצף `]]>` אסור. ריצה שנגמרת ב-`]]` וריצה
  * שמתחילה ב-`>` יוצרות אותו בהדבקה, ולכן ה-`>` שבו נכתב כ-`&gt;`.
  */
-import { TOKEN_SOURCE, skippedCloser, wordPrefix } from './docx-parts';
+import { skippedCloser, wordPrefix } from './docx-parts';
 
 /** ריצה שאפשר לאחד: איפה היא, ומה שצריך כדי לכתוב אותה מחדש. */
 interface SimpleRun {
@@ -71,8 +73,12 @@ interface SimpleRun {
   text: string;
 }
 
-/** מאפיינים שמותרים על ריצה שמתאחדת: מזהי עריכה, ורווחים. */
-const RSID_ONLY = /^(?:\s+[\w.-]+:rsid\w*\s*=\s*(?:"[^"]*"|'[^']*'))*\s*$/;
+/** כולל אבות בלי קידומת, כדי לזהות גם הכרזת namespace מקומית עליהם. */
+const RUN_TOKEN_SOURCE =
+  /<!--|<!\[CDATA\[|<\?|<(\/?)(?:([\w.-]+):)?([\w.-]+)((?:[^>"']|"[^"]*"|'[^']*')*)>/;
+
+/** שמות וערכי מאפיינים, בלי להתבלבל ב־xmlns שכתוב בתוך ערך מצוטט. */
+const ATTRIBUTE_SOURCE = /([^\s=]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g;
 
 /** `xml:space="preserve"` בדיוק, או שום מאפיין. כל מאפיין אחר על `t` עוצר. */
 const PRESERVE = /^\s+xml:space\s*=\s*(?:"preserve"|'preserve')\s*$/;
@@ -96,9 +102,7 @@ export function mergeFragmentedRuns(xml: string): string | null {
   const first = xml.indexOf(runOpen);
   if (first < 0 || xml.indexOf(runOpen, first + runOpen.length) < 0) return null;
 
-  const between = new RegExp(
-    `^(?:\\s|<${prefix}:proofErr\\b(?:[^>"']|"[^"]*"|'[^']*')*/>)*$`,
-  );
+  const between = /^\s*$/;
   const runs = collectSimpleRuns(xml, prefix);
 
   let out = '';
@@ -119,7 +123,7 @@ export function mergeFragmentedRuns(xml: string): string | null {
       out +=
         `<${prefix}:r${group[0].attributes}>${group[0].props}` +
         `<${prefix}:t xml:space="preserve">${group
-          .map((run) => run.text)
+          .map((run) => run.text.replace(/\r\n?/g, '\n'))
           .join('')
           .split(']]>')
           .join(']]&gt;')}</${prefix}:t>` +
@@ -143,11 +147,14 @@ export function countRuns(xml: string): number {
 /**
  * כל הריצות במסמך שמתאימות לאיחוד, לפי הסדר. ריצה שאינה מתאימה אינה נכנסת
  * לרשימה, ולכן הבדיקה של מה שבין שתי ריצות סמוכות ברשימה (`between`) נכשלת
- * עליה — היא יושבת ביניהן כתג שאינו `proofErr`.
+ * עליה — היא יושבת ביניהן כתג ולא כרווח.
  */
 function collectSimpleRuns(xml: string, prefix: string): SimpleRun[] {
   const runs: SimpleRun[] = [];
-  const token = new RegExp(TOKEN_SOURCE.source, 'g');
+  const token = new RegExp(RUN_TOKEN_SOURCE.source, 'g');
+  const escapedPrefix = prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const rsidOnly = new RegExp(`^(?:\\s+${escapedPrefix}:rsid\\w*\\s*=\\s*(?:"[^"]*"|'[^']*'))*\\s*$`);
+  let rootSeen = false;
 
   /** הריצה הפתוחה כרגע, או `null` מחוץ לריצה. */
   let run: {
@@ -156,6 +163,9 @@ function collectSimpleRuns(xml: string, prefix: string): SimpleRun[] {
     ok: boolean;
     props: string | null;
     text: string | null;
+    /** טקסט פתוח נקרא עד הטוקן הבא, בלי חיפוש חוזר בשאר המסמך. */
+    textStart: number;
+    preserved: boolean;
     /** עומק אלמנטים בתוך הריצה. 0 = ילדים ישירים. */
     depth: number;
     /** איפה התחיל ה-`rPr` הפתוח, כשהוא הילד הנוכחי. */
@@ -181,14 +191,46 @@ function collectSimpleRuns(xml: string, prefix: string): SimpleRun[] {
     const attributes = selfClosing ? rawAttributes.slice(0, -1) : rawAttributes;
     const ours = tagPrefix === prefix;
 
+    // wordPrefix קורא את השורש בלבד. הכרזה חוזרת עמוק יותר יכולה לשנות גם
+    // את משמעות ה-rPr: לא מאחדים שום ריצה בחלק כזה, אפילו לפני ההכרזה.
+    if (!closing) {
+      let declaredWordPrefix = false;
+      for (const attribute of attributes.matchAll(ATTRIBUTE_SOURCE)) {
+        if (attribute[1] !== `xmlns:${prefix}`) continue;
+        if (rootSeen) return [];
+        declaredWordPrefix = (attribute[2] ?? attribute[3]) ===
+          'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+      }
+      // wordPrefix אינו מפרש מאפיינים. אימות נוסף מונע הכרזה מדומה בתוך ערך.
+      if (!rootSeen && !declaredWordPrefix) return [];
+      rootSeen = true;
+    }
+
+    if (run && run.textStart >= 0) {
+      const raw = xml.slice(run.textStart, match.index);
+      if (closing && ours && name === 't' && attributes.trim() === '' && !raw.includes('<')) {
+        if (!run.preserved && XML_EDGE_SPACE.test(raw)) run.ok = false;
+        run.text = raw;
+        run.textStart = -1;
+        run.lastEnd = token.lastIndex;
+        continue;
+      }
+      run.ok = false;
+      run.textStart = -1;
+      // הילד t עדיין פתוח; הסריקה הרגילה מטפלת במה שנמצא בתוכו.
+      run.depth = 1;
+    }
+
     if (!run) {
       if (ours && name === 'r' && !closing && !selfClosing) {
         run = {
           start: match.index,
           attributes,
-          ok: RSID_ONLY.test(attributes),
+          ok: rsidOnly.test(attributes),
           props: null,
           text: null,
+          textStart: -1,
+          preserved: false,
           depth: 0,
           propsStart: -1,
           lastEnd: token.lastIndex,
@@ -223,22 +265,9 @@ function collectSimpleRuns(xml: string, prefix: string): SimpleRun[] {
           run.depth = 1;
         }
       } else if (ours && name === 't' && !selfClosing && run.text === null) {
-        // הטקסט הוא כל מה שעד הסוגר הבא; אם יש שם תג, הערה או CDATA — לא מאחדים.
-        const close = `</${prefix}:t>`;
-        const end = xml.indexOf(close, token.lastIndex);
-        const raw = end < 0 ? null : xml.slice(token.lastIndex, end);
-        const preserved = attributes !== '' && PRESERVE.test(attributes);
-        if (
-          raw === null ||
-          raw.includes('<') ||
-          (attributes !== '' && !preserved) ||
-          (!preserved && XML_EDGE_SPACE.test(raw))
-        ) {
-          run.ok = false;
-        } else {
-          run.text = raw;
-          token.lastIndex = end + close.length;
-        }
+        run.preserved = PRESERVE.test(attributes);
+        if (attributes.trim() !== '' && !run.preserved) run.ok = false;
+        run.textStart = token.lastIndex;
       } else {
         // כל ילד אחר — טאב, שבירה, הפניה, טקסט מחוק, `rPr` שני — הריצה נשארת.
         run.ok = false;
@@ -268,37 +297,4 @@ function collectSimpleRuns(xml: string, prefix: string): SimpleRun[] {
     }
   }
   return runs;
-}
-
-/** מאפייני `w:proofState` שערכם „clean” — מה שגורם ל-Word לסמוך על הסימונים. */
-const CLEAN_PROOF_ATTRIBUTE = /(\s[\w.-]+:(?:spelling|grammar)\s*=\s*)(["'])clean\2/g;
-
-/**
- * `settings.xml` שבו `w:proofState` אומר ל-Word לבדוק איות ודקדוק מחדש, או
- * `null` כשאין מה לשנות (אין `proofState`, או שאינו „clean”).
- *
- * נקרא רק כשהאיחוד הסיר `proofErr` ממסמך — ראו „מה זה עושה לקובץ שיישמר”
- * למעלה. `dirty` הוא הערך שהסכמה מגדירה ל„הבדיקה אינה מעודכנת”; Word בודק
- * מחדש ומחליף את הסימונים.
- */
-export function markProofingDirty(xml: string): string | null {
-  const prefix = wordPrefix(xml);
-  if (prefix === null || !xml.includes('proofState')) return null;
-  const token = new RegExp(TOKEN_SOURCE.source, 'g');
-  for (let match = token.exec(xml); match; match = token.exec(xml)) {
-    const closer = skippedCloser(match[0]);
-    if (closer !== undefined) {
-      const end = xml.indexOf(closer, token.lastIndex);
-      if (end < 0) return null;
-      token.lastIndex = end + closer.length;
-      continue;
-    }
-    const [, closing, tagPrefix, name] = match;
-    if (closing || tagPrefix !== prefix || name !== 'proofState') continue;
-    const tag = match[0];
-    const dirty = tag.replace(CLEAN_PROOF_ATTRIBUTE, '$1$2dirty$2');
-    if (dirty === tag) return null;
-    return xml.slice(0, match.index) + dirty + xml.slice(token.lastIndex);
-  }
-  return null;
 }

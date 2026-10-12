@@ -1244,16 +1244,31 @@ describe('איחוד ריצות בתוך השלב המקדים', () => {
   const documentWith = (body: string) => `<w:document xmlns:w="${NS}"><w:body><w:p>${body}</w:p></w:body></w:document>`;
   const cleanSettings = `<w:settings xmlns:w="${NS}"><w:proofState w:spelling="clean" w:grammar="clean"/></w:settings>`;
 
-  it('סימוני איות שהוסרו מסמנים את proofState כ-dirty — גם כשההגדרות באות לפני הגוף בארכיון', async () => {
+  it('סימוני איות נשמרים במקומם והגדרות clean אינן משתנות', async () => {
+    const start = '<w:proofErr w:type="spellStart"/>';
+    const end = '<w:proofErr w:type="spellEnd"/>';
     const repaired = await preflightDocx(
       buildZip([
         { name: SETTINGS_PART, content: cleanSettings },
-        { name: 'word/document.xml', content: documentWith(run('א') + '<w:proofErr w:type="spellStart"/>' + run('ב')) },
+        { name: 'word/document.xml', content: documentWith(start + run('א') + run('ב') + end + run('ג')) },
       ]),
     );
     expect(repaired).not.toBeNull();
-    expect(await readDocxPart(repaired!.bytes, 'word/document.xml')).toContain('<w:t xml:space="preserve">אב</w:t>');
-    expect(await readDocxPart(repaired!.bytes, SETTINGS_PART)).toContain('w:spelling="dirty" w:grammar="dirty"');
+    const document = await readDocxPart(repaired!.bytes, 'word/document.xml');
+    expect(document).toContain(start + '<w:r w:rsidR="1"><w:rPr><w:rtl/></w:rPr><w:t xml:space="preserve">אב</w:t></w:r>' + end);
+    expect(await readDocxPart(repaired!.bytes, SETTINGS_PART)).toBe(cleanSettings);
+  });
+
+  it('גם בלי settings, איחוד rsid אינו מוחק גבולות איות', async () => {
+    const start = '<w:proofErr w:type="spellStart"/>';
+    const end = '<w:proofErr w:type="spellEnd"/>';
+    const repaired = await preflightDocx(
+      buildZip([{ name: 'word/document.xml', content: documentWith(run('א') + start + run('ב') + run('ג') + end) }]),
+    );
+    const document = await readDocxPart(repaired!.bytes, 'word/document.xml');
+    expect(document).toContain(run('א') + start);
+    expect(document).toContain('<w:t xml:space="preserve">בג</w:t></w:r>' + end);
+    expect(await readDocxPart(repaired!.bytes, SETTINGS_PART)).toBeNull();
   });
 
   it('איחוד שלא הסיר סימון איות אינו נוגע בהגדרות', async () => {
@@ -1267,7 +1282,7 @@ describe('איחוד ריצות בתוך השלב המקדים', () => {
     expect(await readDocxPart(repaired!.bytes, SETTINGS_PART)).toBe(cleanSettings);
   });
 
-  it('ההגדרות מקבלות גם את תיקון defaultTabStop וגם את dirty, בלי שאחד ידרוס את השני', async () => {
+  it('תיקון defaultTabStop אינו משנה מצב איות או גבולות סימון', async () => {
     const settings = `<w:settings xmlns:w="${NS}"><w:defaultTabStop w:val="0"/><w:proofState w:spelling="clean"/></w:settings>`;
     const repaired = await preflightDocx(
       buildZip([
@@ -1277,6 +1292,7 @@ describe('איחוד ריצות בתוך השלב המקדים', () => {
     );
     const out = await readDocxPart(repaired!.bytes, SETTINGS_PART);
     expect(out).toContain(`w:val="${DEFAULT_TAB_STOP_TWIPS}"`);
-    expect(out).toContain('w:spelling="dirty"');
+    expect(out).toContain('w:spelling="clean"');
+    expect(await readDocxPart(repaired!.bytes, 'word/document.xml')).toBe(documentWith(run('א') + '<w:proofErr w:type="spellEnd"/>' + run('ב')));
   });
 });
