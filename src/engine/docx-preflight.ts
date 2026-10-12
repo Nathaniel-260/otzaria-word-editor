@@ -6,6 +6,9 @@
  * הוא נכון (הדגשה שצריכה להיכנס לחישוב הפריסה). מה שמשותף לשניהם, וזה מה
  * שמצדיק שכן אחד: שניהם חייבים לקרות **לפני** שהבייטים נמסרים.
  *
+ * שלישי הצטרף אליהם מאותו טעם: איחוד ריצות זהות, שבלעדיו מסמך Word שנערך
+ * לאורך זמן מקליד לאט עד כדי לא שמיש (engine/docx-run-merge.ts).
+ *
  * ## התיקון הראשון: ערך שמקפיא את המנוע
  *
  * `<w:defaultTabStop w:val="0"/>` ב-`word/settings.xml` שולח את בונה עצירות
@@ -105,6 +108,7 @@ import {
   type Bytes,
   type ZipEntry,
 } from './docx-parts';
+import { mergeFragmentedRuns } from './docx-run-merge';
 import { NO_VBA, readDocumentVba, type DocumentVba } from './vba-import';
 
 /** החלק שבו יושבות הגדרות המסמך. */
@@ -373,8 +377,8 @@ interface PartRepair {
 }
 
 /**
- * התיקונים, בסדר שבו הם מוחלים. שניים כרגע; הרשימה קיימת כדי שהשלישי לא
- * יידרש להוסיף עוד מקרה פרטי ל-`preflightDocx`.
+ * התיקונים, בסדר שבו הם מוחלים. השלישי — איחוד ריצות — אינו תיקון של קריאה
+ * שגויה אלא של מחיר: ראו engine/docx-run-merge.ts.
  */
 const REPAIRS: PartRepair[] = [
   {
@@ -395,6 +399,15 @@ const REPAIRS: PartRepair[] = [
     repair: repairComplexScriptBold,
     note: (name) => `${name}: <w:b/> הושלם לצד <w:bCs/> — בלעדיו הדגשת עברית אינה מגיעה למסך`,
     notice: COMPLEX_SCRIPT_BOLD_NOTICE,
+  },
+  {
+    // אחרון, ובכוונה: ההשוואה בין ריצות היא על ה-`rPr` כמחרוזת, ולכן היא
+    // צריכה לראות את ה-`rPr` אחרי שהתיקון הקודם השלים בו `w:b`.
+    matches: (name) => CONTENT_PARTS.test(name),
+    repair: mergeFragmentedRuns,
+    note: (name) => `${name}: ריצות סמוכות בעיצוב זהה אוחדו — המנוע משלם על כל ריצה בכל הקשה`,
+    // אינו נראה: אותו טקסט, אותו עיצוב. ראו engine/docx-run-merge.ts.
+    notice: null,
   },
 ];
 
@@ -563,7 +576,9 @@ async function repairEntries(
       notes.push(repair.note(entry.name));
       notice ??= repair.notice;
     }
-    if (xml !== original) patched.set(entry, await rewriteEntry(entry, new TextEncoder().encode(xml)));
+    if (xml !== original) {
+      patched.set(entry, await rewriteEntry(entry, new TextEncoder().encode(xml)));
+    }
   }
 
   if (patched.size === 0) return null;
