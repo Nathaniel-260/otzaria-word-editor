@@ -72,10 +72,16 @@ describe('גבולות מול SuperDoc', () => {
     expect(hits(/execCommand|contentEditable|contenteditable/)).toEqual([]);
   });
 
-  it('אין selector אל ה-DOM הפנימי של SuperDoc', () => {
-    expect(hits(/(querySelector|querySelectorAll|closest)\s*\(\s*['"][^'"]*(\.sd-|superdoc)/i)).toEqual(
-      [],
-    );
+  it('אין selector פנימי מחוץ לקריאת מקטעי הגוף בקורא המורשה', () => {
+    // החריגה של painted-lines מתירה קריאה בלבד (נאכף למטה). למחלקת
+    // fragment צריך להבחין בין בלוק גוף לבין פסקה בתוך תא: לטבלה אין
+    // source-node-id, ולפסקת התא אין pm-start. סינון לפי שניהם מדלג
+    // בטעות אל הפסקה שאחרי הטבלה. רק selector הגוף המדויק מותר כאן.
+    const bodyFragments = hits(/querySelectorAll\s*\(\s*'\.superdoc-fragment\[data-layout-story="body"\]'\s*\)/)
+      .filter((hit) => hit.startsWith(`engine${sep}painted-lines.ts:`));
+    const offenders = hits(/(querySelector|querySelectorAll|closest)\s*\(\s*['"][^'"]*(\.sd-|superdoc)/i)
+      .filter((hit) => !bodyFragments.includes(hit));
+    expect(offenders).toEqual([]);
   });
 
   /**
