@@ -4,9 +4,21 @@
 import { describe, expect, it } from 'vitest';
 import { mount } from '@vue/test-utils';
 import AutoCorrectDialog from '../../src/ui/panels/AutoCorrectDialog.vue';
-import { DEFAULT_AUTOCORRECT, DEFAULT_REPLACEMENTS, type AutoCorrectOptions } from '../../src/engine/autocorrect';
+import {
+  BUILT_IN_REPLACEMENTS,
+  DEFAULT_AUTOCORRECT,
+  type AutoCorrectOptions,
+} from '../../src/engine/autocorrect';
 
-function open(options: AutoCorrectOptions = DEFAULT_AUTOCORRECT) {
+/**
+ * הסמלים המובנים בלבד. הרשימה שנשלחת עם המוצר (`src/data/autocorrect-word.tsv`) היא
+ * נתונים שמתחלפים, ובדיקה שמניחה מה יש בה — שאין בה `teh`, כמה שורות — נשברת
+ * כשמחליפים אותה.
+ */
+const BASE: AutoCorrectOptions = { ...DEFAULT_AUTOCORRECT, replacements: BUILT_IN_REPLACEMENTS };
+const DEFAULT_REPLACEMENTS = BUILT_IN_REPLACEMENTS;
+
+function open(options: AutoCorrectOptions = BASE) {
   return mount(AutoCorrectDialog, {
     props: { isOpen: true, options },
     attachTo: document.body,
@@ -87,7 +99,7 @@ describe('AutoCorrectDialog', () => {
 
     const emitted = wrapper.emitted('apply')![0][0] as AutoCorrectOptions;
     expect(emitted.replacements).toContainEqual({ from: 'teh', to: 'the' });
-    expect(DEFAULT_AUTOCORRECT.replacements).toBe(DEFAULT_REPLACEMENTS);
+    expect(BASE.replacements).toBe(BUILT_IN_REPLACEMENTS);
     wrapper.unmount();
   });
 
@@ -103,7 +115,7 @@ describe('AutoCorrectDialog', () => {
   });
 
   it('מתג ראשי כבוי מנטרל את שתי הקבוצות', async () => {
-    const wrapper = open({ ...DEFAULT_AUTOCORRECT, enabled: false });
+    const wrapper = open({ ...BASE, enabled: false });
 
     const groups = [...dialog().querySelectorAll<HTMLFieldSetElement>('fieldset')];
     expect(groups.length).toBe(2);

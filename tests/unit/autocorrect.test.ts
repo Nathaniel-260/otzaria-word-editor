@@ -8,18 +8,29 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  BUILT_IN_REPLACEMENTS,
   DEFAULT_AUTOCORRECT,
   DEFAULT_REPLACEMENTS,
+  mergeEntries,
   normalizeAutoCorrect,
   normalizeEntries,
+  parseWordList,
   planAutoCorrect,
+  sameEntries,
   transferCase,
   type AutoCorrectOptions,
 } from '../../src/engine/autocorrect';
 
+/**
+ * בסיס הבדיקות: ההגדרות הרגילות, עם **הסמלים המובנים בלבד**. הרשימה שנשלחת עם
+ * המוצר (`src/data/autocorrect-word.tsv`) היא נתונים שמתחלפים, ובדיקת לוגיקה שתלויה
+ * בתוכנה נשברת כשמחליפים אותה — למשל כשהרשימה מגדירה `(c)` אחרת.
+ */
+const BASE: AutoCorrectOptions = { ...DEFAULT_AUTOCORRECT, replacements: BUILT_IN_REPLACEMENTS };
+
 /** מחיל את התיקונים על הטקסט — כמו שהמתקין עושה, מהסוף להתחלה. */
 function apply(text: string, options: Partial<AutoCorrectOptions> = {}, atBlockStart = false): string {
-  const fixes = planAutoCorrect(text, { ...DEFAULT_AUTOCORRECT, ...options }, { atBlockStart });
+  const fixes = planAutoCorrect(text, { ...BASE, ...options }, { atBlockStart });
   return fixes.reduce(
     (result, fix) => result.slice(0, fix.start) + fix.replacement + result.slice(fix.end),
     text,
@@ -229,12 +240,12 @@ describe('כללי יסוד', () => {
   });
 
   it('טקסט ריק או טקסט תקין: אין תיקונים', () => {
-    expect(planAutoCorrect('', DEFAULT_AUTOCORRECT)).toEqual([]);
-    expect(planAutoCorrect('שלום עולם, מה שלומך?', DEFAULT_AUTOCORRECT)).toEqual([]);
+    expect(planAutoCorrect('', BASE)).toEqual([]);
+    expect(planAutoCorrect('שלום עולם, מה שלומך?', BASE)).toEqual([]);
   });
 
   it('התיקונים ממוינים מההיסט הגבוה לנמוך, כדי שהחלה לא תזיז היסטים', () => {
-    const fixes = planAutoCorrect('(c) ו-(r) ו-(tm)', DEFAULT_AUTOCORRECT);
+    const fixes = planAutoCorrect('(c) ו-(r) ו-(tm)', BASE);
     const starts = fixes.map((fix) => fix.start);
 
     expect(starts).toEqual([...starts].sort((a, b) => b - a));
@@ -248,7 +259,7 @@ describe('כללי יסוד', () => {
 
   it('החלפה ששווה למקור אינה נחשבת תיקון', () => {
     const options = { replacements: [{ from: 'aaa', to: 'aaa' }] };
-    expect(planAutoCorrect('aaa ', { ...DEFAULT_AUTOCORRECT, ...options })).toEqual([]);
+    expect(planAutoCorrect('aaa ', { ...BASE, ...options })).toEqual([]);
   });
 });
 
@@ -308,5 +319,110 @@ describe('normalizeEntries', () => {
 
   it('החלפה לריק מותרת — מחיקת טקסט היא שימוש לגיטימי', () => {
     expect(normalizeEntries([{ from: 'xx', to: '' }])).toEqual([{ from: 'xx', to: '' }]);
+  });
+});
+
+describe('parseWordList', () => {
+  it('הקובץ שהמאקרו מוציא: שורה לכל רשומה, טאב באמצע, CRLF', () => {
+    const { entries, skipped } = parseWordList('teh\tthe\r\nבס"ד\tבסייעתא דשמיא\r\n');
+
+    expect(entries).toEqual([
+      { from: 'teh', to: 'the' },
+      { from: 'בס"ד', to: 'בסייעתא דשמיא' },
+    ]);
+    expect(skipped).toBe(0);
+  });
+
+  it('BOM בראש הקובץ (ש-ADODB מוסיף) אינו נכנס לדפוס הראשון', () => {
+    expect(parseWordList('\uFEFFteh\tthe\n').entries[0].from).toBe('teh');
+  });
+
+  it('הערות וריקות אינן נספרות; שורה בלי טאב נספרת כמדולגת', () => {
+    const { entries, skipped } = parseWordList('# הערה\n\nteh\tthe\nשורה בלי טאב\n');
+
+    expect(entries).toHaveLength(1);
+    expect(skipped).toBe(1);
+  });
+
+  it('ערך שנגמר ברווח נשמר, ורשומה שערכה ריק היא החלפה למחיקה', () => {
+    // בלי `trim()` על כל הקובץ: הוא חותך את הרווח והטאב בסוף השורה האחרונה.
+    expect(parseWordList('x\ty \n').entries).toEqual([{ from: 'x', to: 'y ' }]);
+    expect(parseWordList('xx\t\n').entries).toEqual([{ from: 'xx', to: '' }]);
+    expect(parseWordList('xx\t').entries).toEqual([{ from: 'xx', to: '' }]);
+  });
+
+  it('קובץ שמתחיל בסוגר — (c) — נקרא כרגיל', () => {
+    expect(parseWordList('(c)\t©\n').entries).toEqual([{ from: '(c)', to: '©' }]);
+  });
+
+  it('כפילויות ופגומים נספרים כמדולגים, והראשון מנצח', () => {
+    const { entries, skipped } = parseWordList('a\t1\na\t2\n\tx\n');
+
+    expect(entries).toEqual([{ from: 'a', to: '1' }]);
+    expect(skipped).toBe(2);
+  });
+
+  it('רשימה בגודל של Word — אלפי רשומות — נקראת בשלמותה', () => {
+    const lines = Array.from({ length: 3000 }, (_, i) => `w${i}\tv${i}`).join('\n');
+    expect(parseWordList(lines).entries).toHaveLength(3000);
+  });
+});
+
+describe('mergeEntries', () => {
+  it('העליון גובר על הבסיס באותו „החלף” ונשאר במקומו; חדש נוסף בסוף', () => {
+    expect(
+      mergeEntries(
+        [{ from: 'a', to: '1' }, { from: 'b', to: '2' }],
+        [{ from: 'a', to: 'X' }, { from: 'c', to: '3' }],
+      ),
+    ).toEqual([
+      { from: 'a', to: 'X' },
+      { from: 'b', to: '2' },
+      { from: 'c', to: '3' },
+    ]);
+  });
+
+  it('אינו משנה את הקלט', () => {
+    const base = [{ from: 'a', to: '1' }];
+    mergeEntries(base, [{ from: 'a', to: '2' }]);
+    expect(base).toEqual([{ from: 'a', to: '1' }]);
+  });
+});
+
+describe('ברירת המחדל מכילה את הסמלים המובנים', () => {
+  it('(c) ו-... נמצאים בה, כך שהם פועלים גם כשהקובץ ריק', () => {
+    const froms = DEFAULT_REPLACEMENTS.map((entry) => entry.from);
+    expect(froms).toContain('(c)');
+    expect(froms).toContain('...');
+  });
+});
+
+describe('sameEntries', () => {
+  it('שווה באורך, בסדר ובתוכן', () => {
+    const a = [{ from: 'a', to: '1' }, { from: 'b', to: '2' }];
+    expect(sameEntries(a, a.map((entry) => ({ ...entry })))).toBe(true);
+    expect(sameEntries(a, [a[1], a[0]])).toBe(false);
+    expect(sameEntries(a, [a[0]])).toBe(false);
+    expect(sameEntries(a, [a[0], { from: 'b', to: 'X' }])).toBe(false);
+  });
+});
+
+describe('העברת הגדרות שמורות לרשימה החדשה', () => {
+  const BUILT_IN_ONLY = BUILT_IN_REPLACEMENTS;
+
+  it('טבלה שמורה ששווה לברירת המחדל הישנה מוחלפת בנוכחית — מי שלחץ „אישור” בלי לגעת בה', () => {
+    const result = normalizeAutoCorrect({ replacements: BUILT_IN_ONLY });
+
+    expect(result.replacements).toBe(DEFAULT_REPLACEMENTS);
+  });
+
+  it('טבלה ששונתה נשמרת כמו שהיא', () => {
+    const edited = [...BUILT_IN_ONLY, { from: 'teh', to: 'the' }];
+
+    expect(normalizeAutoCorrect({ replacements: edited }).replacements).toEqual(edited);
+  });
+
+  it('טבלה ריקה נשארת ריקה ואינה חוזרת לברירת המחדל', () => {
+    expect(normalizeAutoCorrect({ replacements: [] }).replacements).toEqual([]);
   });
 });

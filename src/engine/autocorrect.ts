@@ -34,6 +34,8 @@
  * כאן כל קריאה היא מחדש.
  */
 
+import wordListRaw from '../data/autocorrect-word.tsv?raw';
+
 /** צמד „החלף” → „ב”. */
 export interface AutoCorrectEntry {
   readonly from: string;
@@ -88,7 +90,30 @@ export interface AutoCorrectContext {
   readonly atBlockStart?: boolean;
 }
 
-export const DEFAULT_REPLACEMENTS: readonly AutoCorrectEntry[] = [
+/**
+ * תקרות הטבלה. התקרה היא 5,000 ולא פחות: הרשימה של Word עצמה מונה אלפים, והיא
+ * חלק מברירת המחדל (ראו `WORD_LIST` למטה). חמשת-האלפים נשארים זולים — חוקי
+ * המילה במפה, וחוקי הסמל נסרקים על חלון של מאות תווים לכל היותר.
+ */
+const MAX_ENTRIES = 5000;
+const MAX_FROM = 64;
+const MAX_TO = 255;
+
+/**
+ * הרשימה שנשלחה עם המוצר, בשני חלקים: הסמלים המובנים כאן, והרשימה שיוצאה מ-Word
+ * ב-`src/data/autocorrect-word.tsv`.
+ *
+ * ## למה קובץ טקסט ולא מערך בקוד
+ *
+ * הרשימה היא נתונים, לא לוגיקה: מי שמעדכן אותה מחליף קובץ, לא עורך TypeScript.
+ * והקובץ הוא **בדיוק** מה שהמאקרו `scripts/word/ExportAutoCorrect.bas` מוציא מ-Word
+ * (שורה לכל רשומה: ההחלפה, טאב, ומה שיבוא במקומה), כך שאין שלב המרה שאפשר לטעות
+ * בו. `tests/unit/autocorrect-word-list.test.ts` נכשל אם שורה בו פגומה או כפולה.
+ *
+ * רשומה בקובץ **גוברת** על מובנית עם אותו „החלף” — היא הרשימה שבחרו, והמובנות הן
+ * מה שיש כשאין.
+ */
+export const BUILT_IN_REPLACEMENTS: readonly AutoCorrectEntry[] = [
   { from: '(c)', to: '©' },
   { from: '(r)', to: '®' },
   { from: '(tm)', to: '™' },
@@ -101,6 +126,11 @@ export const DEFAULT_REPLACEMENTS: readonly AutoCorrectEntry[] = [
   { from: '1/4', to: '¼' },
   { from: '3/4', to: '¾' },
 ];
+
+export const DEFAULT_REPLACEMENTS: readonly AutoCorrectEntry[] = mergeEntries(
+  BUILT_IN_REPLACEMENTS,
+  parseWordList(wordListRaw).entries,
+);
 
 /**
  * ברירות המחדל. כבויים בכוונה: האותיות הסופיות, הגרשיים והמקף עם רווחים — כולם
@@ -124,10 +154,6 @@ export const DEFAULT_AUTOCORRECT: AutoCorrectOptions = {
 /* ------------------------------------------------------------------ */
 /* נרמול ממה שנשמר                                                      */
 /* ------------------------------------------------------------------ */
-
-const MAX_ENTRIES = 500;
-const MAX_FROM = 64;
-const MAX_TO = 255;
 
 /**
  * הגדרות מהאחסון → הגדרות תקינות.
@@ -153,7 +179,7 @@ export function normalizeAutoCorrect(raw: unknown): AutoCorrectOptions {
     capitalizeSentences: flag('capitalizeSentences'),
     capitalizeDays: flag('capitalizeDays'),
     replacements: Array.isArray(source.replacements)
-      ? normalizeEntries(source.replacements)
+      ? migrateReplacements(normalizeEntries(source.replacements))
       : DEFAULT_REPLACEMENTS,
   };
 }
@@ -176,6 +202,70 @@ export function normalizeEntries(list: readonly unknown[]): AutoCorrectEntry[] {
     if (out.length >= MAX_ENTRIES) break;
   }
   return out;
+}
+
+/**
+ * טבלה שמורה שזהה לברירת המחדל **הישנה** (הסמלים המובנים בלבד) לא נבחרה על ידי
+ * המשתמש — היא נשמרה כשלחץ „אישור” בלי לגעת בה. אותה מחליפים בברירת המחדל
+ * הנוכחית, אחרת מי שפתח את הדיאלוג פעם אחת לא היה מקבל לעולם את הרשימה שנוספה.
+ * טבלה ששונתה נשמרת כמו שהיא.
+ */
+function migrateReplacements(saved: AutoCorrectEntry[]): readonly AutoCorrectEntry[] {
+  return sameEntries(saved, BUILT_IN_REPLACEMENTS) ? DEFAULT_REPLACEMENTS : saved;
+}
+
+/** שוות באורך, בסדר ובתוכן. */
+export function sameEntries(a: readonly AutoCorrectEntry[], b: readonly AutoCorrectEntry[]): boolean {
+  return a.length === b.length && a.every((entry, index) => entry.from === b[index].from && entry.to === b[index].to);
+}
+
+export interface WordListReport {
+  readonly entries: AutoCorrectEntry[];
+  /** שורות שלא נכנסו: בלי טאב, פגומות או כפולות. הערות וריקות אינן נספרות. */
+  readonly skipped: number;
+}
+
+/**
+ * הקובץ שהמאקרו מוציא מ-Word → רשומות. שורה לכל רשומה, טאב בין ההחלפה למה שיבוא
+ * במקומה. שורה שמתחילה ב-`#` היא הערה, ושורה ריקה נבלעת.
+ *
+ * ‏`trim()` על ה„החלף” בלבד ולא על כל הקובץ: ערך שנגמר ברווח נשמר, ורשומה
+ * שערכה ריק (`xx`, טאב) היא החלפה למחיקה ולא שורה בלי טאב.
+ */
+export function parseWordList(raw: string): WordListReport {
+  const candidates = raw
+    .replace(/^\uFEFF/, '')
+    .split(/\r?\n/)
+    .filter((line) => line.trim() !== '' && !line.startsWith('#'))
+    .map((line) => {
+      const tab = line.indexOf('\t');
+      return tab < 0 ? null : { from: line.slice(0, tab).trim(), to: line.slice(tab + 1) };
+    });
+
+  const entries = normalizeEntries(candidates);
+  return { entries, skipped: candidates.length - entries.length };
+}
+
+/**
+ * מיזוג: רשומה ב„עליון” גוברת על רשומה ב„בסיס” עם אותו „החלף” ונשארת במקומה,
+ * וחדשה נוספת בסוף.
+ */
+export function mergeEntries(
+  base: readonly AutoCorrectEntry[],
+  top: readonly AutoCorrectEntry[],
+): AutoCorrectEntry[] {
+  const out = base.map((entry) => ({ ...entry }));
+  const index = new Map(out.map((entry, position) => [entry.from, position]));
+  for (const entry of top) {
+    const at = index.get(entry.from);
+    if (at === undefined) {
+      index.set(entry.from, out.length);
+      out.push({ ...entry });
+    } else {
+      out[at] = { ...entry };
+    }
+  }
+  return normalizeEntries(out);
 }
 
 /* ------------------------------------------------------------------ */
@@ -265,13 +355,43 @@ const DAYS = new Set(['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 's
 /* החוקים                                                               */
 /* ------------------------------------------------------------------ */
 
+interface CompiledTable {
+  /** חוקי סמל, הארוך ראשון — `-->` לפני `--`. */
+  readonly symbols: readonly AutoCorrectEntry[];
+  /** חוקי מילה, מותאמים בדיוק. */
+  readonly exact: ReadonlyMap<string, string>;
+  /** דפוסים באותיות קטנות, מותאמים בלי רגישות לרישיות. */
+  readonly folded: ReadonlyMap<string, string>;
+}
+
+/**
+ * הטבלה מפוצלת ומסודרת פעם אחת לכל רשימה, לא בכל הערכה. ההערכה רצה אחרי כל
+ * הקלדה, והרשימה שנשלחת עם המוצר היא אלפי רשומות — בנייה מחדש של שתי מפות וסינון
+ * שלה בכל פעם היא עבודה שהתוצאה שלה זהה. המפתח הוא **הרשימה עצמה** (הפניה), ולכן
+ * עריכה בדיאלוג, שמחליפה את המערך, מתחילה מטמון חדש מאליה.
+ */
+const compiledTables = new WeakMap<readonly AutoCorrectEntry[], CompiledTable>();
+
+function compileTable(entries: readonly AutoCorrectEntry[]): CompiledTable {
+  const cached = compiledTables.get(entries);
+  if (cached) return cached;
+
+  const words = entries.filter((entry) => !isSymbolPattern(entry.from));
+  const compiled: CompiledTable = {
+    symbols: entries.filter((entry) => isSymbolPattern(entry.from)).sort((a, b) => b.from.length - a.from.length),
+    exact: new Map(words.map((entry) => [entry.from, entry.to])),
+    // דפוס שיש בו אות גדולה מותאם בדיוק בלבד.
+    folded: new Map(words.filter((entry) => entry.from === entry.from.toLowerCase()).map((entry) => [entry.from, entry.to])),
+  };
+  compiledTables.set(entries, compiled);
+  return compiled;
+}
+
 function tableFixes(text: string, tokens: readonly Token[], entries: readonly AutoCorrectEntry[]): AutoCorrectFix[] {
   const fixes: AutoCorrectFix[] = [];
+  const { symbols, exact, folded } = compileTable(entries);
 
-  // חוקי סמל: מופע שלם בכל מקום, הארוך ראשון — `-->` לפני `--`.
-  const symbols = entries
-    .filter((entry) => isSymbolPattern(entry.from))
-    .sort((a, b) => b.from.length - a.from.length);
+  // חוקי סמל: מופע שלם בכל מקום, הארוך ראשון.
   for (let index = 0; index < text.length; ) {
     const hit = symbols.find((entry) => text.startsWith(entry.from, index));
     if (hit) {
@@ -289,13 +409,7 @@ function tableFixes(text: string, tokens: readonly Token[], entries: readonly Au
   }
 
   // חוקי מילה: ליבת הטוקן שווה לדפוס, רק אחרי שהושלמה.
-  const words = entries.filter((entry) => !isSymbolPattern(entry.from));
-  if (words.length > 0) {
-    const exact = new Map(words.map((entry) => [entry.from, entry.to]));
-    // דפוס שיש בו אות גדולה מותאם בדיוק; דפוס באותיות קטנות מותאם בלי רגישות לרישיות.
-    const folded = new Map(
-      words.filter((entry) => entry.from === entry.from.toLowerCase()).map((entry) => [entry.from, entry.to]),
-    );
+  if (exact.size > 0) {
     for (const token of tokens) {
       if (!token.completed) continue;
       const direct = exact.get(token.core);

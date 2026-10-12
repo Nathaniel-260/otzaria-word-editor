@@ -12,7 +12,14 @@ import {
   touchesTyped,
   type AutoCorrectHandle,
 } from '../../src/engine/autocorrect-install';
-import { DEFAULT_AUTOCORRECT, type AutoCorrectOptions } from '../../src/engine/autocorrect';
+import {
+  BUILT_IN_REPLACEMENTS,
+  DEFAULT_AUTOCORRECT,
+  type AutoCorrectOptions,
+} from '../../src/engine/autocorrect';
+
+/** הסמלים המובנים בלבד — ראו `BASE` ב-`autocorrect.test.ts`: הרשימה שנשלחת היא נתונים שמתחלפים. */
+const BASE: AutoCorrectOptions = { ...DEFAULT_AUTOCORRECT, replacements: BUILT_IN_REPLACEMENTS };
 
 interface Model {
   text: string;
@@ -90,7 +97,7 @@ function install(
   handle = installAutoCorrect({
     container,
     host: engine.host as never,
-    getOptions: () => ({ ...DEFAULT_AUTOCORRECT, ...options }),
+    getOptions: () => ({ ...BASE, ...options }),
     ...extra,
   });
   return handle;
@@ -264,7 +271,7 @@ describe('installAutoCorrect', () => {
     handle = installAutoCorrect({
       container,
       host: engine.host as never,
-      getOptions: () => ({ ...DEFAULT_AUTOCORRECT, enabled }),
+      getOptions: () => ({ ...BASE, enabled }),
     });
 
     type(engine, '(c)');
@@ -380,7 +387,7 @@ describe('installAutoCorrect', () => {
     handle = installAutoCorrect({
       container,
       host: {} as never,
-      getOptions: () => DEFAULT_AUTOCORRECT,
+      getOptions: () => BASE,
     });
 
     expect(() => {
@@ -431,7 +438,7 @@ describe('installAutoCorrect — מנוע שאינו משגר input', () => {
     handle = installAutoCorrect({
       container,
       host: host as never,
-      getOptions: () => DEFAULT_AUTOCORRECT,
+      getOptions: () => BASE,
     });
 
     host.activeEditor = { doc: engine.doc };
@@ -447,7 +454,7 @@ describe('installAutoCorrect — מנוע שאינו משגר input', () => {
     handle = installAutoCorrect({
       container,
       host: engine.host as never,
-      getOptions: () => DEFAULT_AUTOCORRECT,
+      getOptions: () => BASE,
       debug: () => true,
     });
     engine.doc.ranges.resolve = async () =>

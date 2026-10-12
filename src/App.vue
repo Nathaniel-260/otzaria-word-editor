@@ -507,7 +507,13 @@ import { installPasteIntercept } from './engine/paste-intercept';
 import { loadPasteDefault, pasteDefaultMode } from './composables/paste-default';
 import { installListAutoformat } from './engine/list-autoformat-install';
 import { installAutoCorrect } from './engine/autocorrect-install';
-import { DEFAULT_AUTOCORRECT, normalizeAutoCorrect, type AutoCorrectOptions } from './engine/autocorrect';
+import {
+  DEFAULT_AUTOCORRECT,
+  DEFAULT_REPLACEMENTS,
+  normalizeAutoCorrect,
+  sameEntries,
+  type AutoCorrectOptions,
+} from './engine/autocorrect';
 import { installOtzariaLinkClicks } from './engine/otzaria-link-click';
 import { preflightSource } from './engine/docx-preflight';
 import { installDocumentFontAliases } from './engine/docx-fonts';
@@ -1496,7 +1502,10 @@ provide(AUTOCORRECT, {
   options: autoCorrectOptions,
   apply: (options: AutoCorrectOptions) => {
     autoCorrectOptions.value = options;
-    void saveAutoCorrect(options);
+    // טבלה שזהה לברירת המחדל אינה נשמרת: כך עדכון של הרשימה שנשלחת עם המוצר
+    // מגיע גם למי שכבר לחץ „אישור” בדיאלוג, ולא רק למי שלא פתח אותו מעולם.
+    const { replacements, ...rest } = options;
+    void saveAutoCorrect(sameEntries(replacements, DEFAULT_REPLACEMENTS) ? rest : options);
   },
 });
 
