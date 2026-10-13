@@ -614,3 +614,128 @@ export function paintedFirstBlockId(host: ParentNode | null | undefined): string
   }
   return firstId;
 }
+
+/* ------------------------------------------------------------------ */
+/* מיקום טקסט שהוחלף — לסימון התיקון האוטומטי                           */
+/* ------------------------------------------------------------------ */
+
+export interface Box {
+  readonly left: number;
+  readonly right: number;
+  readonly top: number;
+  readonly bottom: number;
+}
+
+export interface LocatedWord {
+  /** האות הראשונה של הטקסט — מתחתיה יושב הפס. */
+  readonly first: Box;
+  /** כל מלבני המילה (יותר מאחד כשהיא נשברת בין שורות). */
+  readonly rects: readonly Box[];
+  /** ההיסט בבלוק שבו הטקסט נמצא עכשיו. שונה מהמבוקש כשעריכה לפניו הזיזה אותו. */
+  readonly start: number;
+}
+
+/** מה שהיה סביב הטקסט ברגע ההחלפה, כדי למצוא אותו שוב אחרי עריכה לפניו. */
+export interface TextContext {
+  readonly before: string;
+  readonly after: string;
+}
+
+function rectsOf(node: Node, offset: number, length: number): { first: Box; rects: Box[] } | null {
+  const range = document.createRange();
+  range.setStart(node, offset);
+  range.setEnd(node, offset + length);
+  const rects = Array.from(range.getClientRects()).filter((r) => r.width > 0 && r.height > 0);
+  range.setEnd(node, offset + 1);
+  const first = Array.from(range.getClientRects()).find((r) => r.width > 0 && r.height > 0);
+  return first && rects.length > 0 ? { first, rects } : null;
+}
+
+/**
+ * היכן טקסט מסוים מצויר עכשיו, או `null`: הבלוק, ההיסט בו, והטקסט שאמור להיות שם.
+ *
+ * המנוע מצייר כל פסקה כ-fragment עם `data-source-node-id` ו-`data-pm-start`, וכל
+ * רצף טקסט בה כאלמנט עם `data-pm-start`/`data-pm-end` (נמדד; אותו מבנה ש-
+ * `rtl-line-end.ts` קורא). ההמרה להיסט בבלוק היא חיסור אחד: `offset = pm −
+ * fragmentPmStart`.
+ *
+ * ## שני שלבים, והשני נוקשה
+ *
+ * 1. **ההיסט שנרשם.** הטקסט שבו נבדק מול מה שהוחלף. התאמה = זה הוא.
+ * 2. **חיפוש בפסקה**, כשההיסט נשבר — מי שהקליד או מחק **לפני** המילה הזיז אותה.
+ *    מחפשים את הטקסט בכל הפסקה, ומקבלים רק מופע ש**גם** מה שלפניו ומה שאחריו
+ *    (`context`) זהה למה שנרשם; בין כמה כאלה — הקרוב להיסט הרשום. בלי הקשר, או
+ *    כשאין מופע שמתאים, **אין סימון** — לא סימון על מילה זהה אחרת.
+ */
+export function locateText(
+  blockId: string,
+  start: number,
+  expected: string,
+  root: ParentNode = document,
+  context?: TextContext,
+): LocatedWord | null {
+  const fragments = root.querySelectorAll<HTMLElement>('[data-source-node-id][data-pm-start]');
+  for (const fragment of Array.from(fragments)) {
+    if (fragment.getAttribute('data-source-node-id') !== blockId) continue;
+    const base = attr(fragment, 'data-pm-start');
+    const end = attr(fragment, 'data-pm-end');
+    if (!Number.isFinite(base)) continue;
+
+    // הרצפים של הפסקה לפי הסדר, ומהם הטקסט שלה. רצף שאורכו אינו טווח ה-pm שלו
+    // (תו שהמנוע מייצג אחרת) מפסיק את הניחוש: אין מיפוי מהימן.
+    const runs: { node: Node; pmStart: number; text: string }[] = [];
+    let reliable = true;
+    for (const run of Array.from(fragment.querySelectorAll<HTMLElement>('[data-pm-start]'))) {
+      if (run.children.length > 0) continue;
+      const runStart = attr(run, 'data-pm-start');
+      const runEnd = attr(run, 'data-pm-end');
+      const node = run.firstChild;
+      if (!node || node.nodeType !== Node.TEXT_NODE || !Number.isFinite(runStart)) continue;
+      const text = node.nodeValue ?? '';
+      if (runEnd - runStart !== text.length) reliable = false;
+      runs.push({ node, pmStart: runStart, text });
+    }
+    if (runs.length === 0) continue;
+
+    const at = (blockOffset: number): LocatedWord | null => {
+      const pm = base + blockOffset;
+      if (Number.isFinite(end) && (pm < base || pm >= end)) return null;
+      for (const run of runs) {
+        const offset = pm - run.pmStart;
+        if (offset < 0 || offset >= run.text.length) continue;
+        // מילה שחוצה גבול רצף נבדקת רק עד סוף הרצף שבו היא מתחילה.
+        const length = Math.min(expected.length, run.text.length - offset);
+        if (run.text.slice(offset, offset + length) !== expected.slice(0, length)) return null;
+        const found = rectsOf(run.node, offset, length);
+        return found ? { ...found, start: blockOffset } : null;
+      }
+      return null;
+    };
+
+    const exact = at(start);
+    if (exact) return exact;
+    if (!context || !reliable) continue;
+
+    // שלב 2: הטקסט של הפסקה כולה, מה-pm הראשון שלה.
+    const first = runs[0]!.pmStart;
+    let paragraph = '';
+    for (const run of runs) {
+      const gap = run.pmStart - first - paragraph.length;
+      if (gap > 0) paragraph += '\u0000'.repeat(gap);
+      paragraph += run.text;
+    }
+    let best = -1;
+    for (let from = paragraph.indexOf(expected); from >= 0; from = paragraph.indexOf(expected, from + 1)) {
+      // סיומת וקידומת: מה שנרשם היה קצר כשנרשם (סוף הטקסט שנקרא), ומאז נוסף אחריו.
+      if (!paragraph.slice(0, from).endsWith(context.before)) continue;
+      if (!paragraph.slice(from + expected.length).startsWith(context.after)) continue;
+      const blockOffset = first - base + from;
+      if (best < 0 || Math.abs(blockOffset - start) < Math.abs(best - start)) best = blockOffset;
+    }
+    if (best >= 0) {
+      const moved = at(best);
+      if (moved) return moved;
+    }
+  }
+  return null;
+}

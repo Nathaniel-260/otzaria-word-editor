@@ -44,6 +44,7 @@
  */
 import type { CompletionDoc, CompletionTarget } from './book-completion-overlay';
 import { planAutoCorrect, type AutoCorrectFix, type AutoCorrectOptions } from './autocorrect';
+import { applyFixesToText, createAutoCorrectIndicator, type IndicatorEntry } from './autocorrect-indicator';
 import type { DocReceipt } from './document-api';
 import type { ResolvedRangeLike, SelectionPointLike, SelectionTargetLike } from './word-selection';
 
@@ -69,6 +70,10 @@ export interface AutoCorrectInstallOptions {
   getOptions: () => AutoCorrectOptions;
   /** האם משהו אחר מחזיק את ההקלדה כרגע (למשל דיאלוג מודאלי). */
   isSuppressed?: () => boolean;
+  /** „הפסק לתקן אוטומטית” בתפריט הסימון: ההגדרות החדשות נשמרות אצל הקורא. */
+  onStopCorrecting?: (fix: { rule: AutoCorrectFix['rule']; original: string; replacement: string }) => void;
+  /** „שליטה באפשרויות התיקון האוטומטי…” בתפריט הסימון. */
+  onOpenOptions?: () => void;
   /** האם לדווח לקונסולה על כל שלב. ברירת המחדל: `isAutoCorrectDebug`. */
   debug?: () => boolean;
   now?: () => number;
@@ -198,6 +203,12 @@ export function installAutoCorrect(options: AutoCorrectInstallOptions): AutoCorr
     if (isDebug()) console.info('[otzaria-word][תיקון אוטומטי]', stage, detail ?? '');
   };
 
+  const indicator = createAutoCorrectIndicator(container, {
+    changeBack: (entry) => changeBack(entry),
+    stop: options.onStopCorrecting ? (entry) => options.onStopCorrecting?.(entry) : undefined,
+    openOptions: options.onOpenOptions,
+  });
+
   let disposed = false;
   let composing = false;
   let typed = 0;
@@ -233,6 +244,70 @@ export function installAutoCorrect(options: AutoCorrectInstallOptions): AutoCorr
         entry.original === original &&
         at - entry.at < SUPPRESS_TTL_MS,
     );
+  }
+
+  /**
+   * „חזור ל…”: מחליפה את מה שהוחלף בחזרה למקור. הטקסט שבהיסט נקרא ונבדק קודם —
+   * אם אינו מה שהוחלף (המסמך זז), לא נוגעים בו.
+   */
+  async function changeBack(entry: IndicatorEntry): Promise<void> {
+    const doc = getDoc();
+    if (!doc || typeof doc.insert !== 'function' || typeof doc.ranges?.resolve !== 'function') return;
+    const story = entry.story;
+    const request: Record<string, unknown> = {
+      start: { kind: 'point', point: pointAt(entry.blockId, entry.start, story) },
+      end: { kind: 'point', point: pointAt(entry.blockId, entry.start + entry.replacement.length, story) },
+    };
+    if (story) request.in = story;
+    const resolved = await doc.ranges.resolve(request);
+    if (resolved?.preview?.text !== entry.replacement) {
+      log('חזרה: הטקסט שבהיסט אינו מה שהוחלף', resolved?.preview ?? null);
+      return;
+    }
+    const target: SelectionTargetLike = {
+      kind: 'selection',
+      start: pointAt(entry.blockId, entry.start, story),
+      end: pointAt(entry.blockId, entry.start + entry.replacement.length, story),
+      ...(story ? { story } : {}),
+    };
+    const receipt = await doc.insert({ value: entry.original, type: 'text', target });
+    if (receipt?.success === false) {
+      console.warn('[otzaria-word] תיקון אוטומטי: החזרה למקור נדחתה', receipt.failure ?? receipt);
+      return;
+    }
+    // המקור נרשם כבר ב-`remember`, ולכן ההקשה הבאה לא תתקן אותו שוב.
+    remember(entry.blockId, entry.start, entry.original);
+    log('חזרה למקור', { from: entry.replacement, to: entry.original });
+  }
+
+  /**
+   * רושמת את המילים שהוחלפו אצל הסימון. כאן רק **היכן הן בבלוק** (לפי הטקסט
+   * שאחרי ההחלפה); המיקום על המסך נקרא מה-DOM בכל ריחוף. ללא מלבן סמן, ללא
+   * המתנה למנוע — ולכן הסימון אינו תלוי בתזמון של ציור הסמן.
+   */
+  function registerIndicators(
+    window_: { text: string; base: number; blockId: string; story: unknown },
+    fixes: readonly AutoCorrectFix[],
+  ): void {
+    const { text, base, blockId, story } = window_;
+    const result = applyFixesToText(text, fixes);
+    const entries: IndicatorEntry[] = fixes.map((fix, index) => ({
+      rule: fix.rule,
+      original: fix.original,
+      replacement: fix.replacement,
+      blockId,
+      story,
+      start: base + result.starts[index]!,
+      context: {
+        before: result.text.slice(Math.max(0, result.starts[index]! - 3), result.starts[index]!),
+        after: result.text.slice(
+          result.starts[index]! + fix.replacement.length,
+          result.starts[index]! + fix.replacement.length + 3,
+        ),
+      },
+    }));
+    log('סימון', { count: entries.length });
+    indicator.show(entries);
   }
 
   async function evaluate(token: number): Promise<void> {
@@ -272,6 +347,7 @@ export function installAutoCorrect(options: AutoCorrectInstallOptions): AutoCorr
 
     // מההיסט הגבוה לנמוך (כך `planAutoCorrect` מחזירה): החלפה לא מזיזה היסט
     // של מה שלפניה. כל הקשה בדרך פוסלת את הנותרים — הם יחושבו מחדש בשקט הבא.
+    let completed = 0;
     for (const fix of fixes) {
       if (token !== evalToken || disposed) return;
 
@@ -302,7 +378,11 @@ export function installAutoCorrect(options: AutoCorrectInstallOptions): AutoCorr
       log('הוחלף', { from: fix.original, to: fix.replacement, start: base + fix.start });
 
       remember(blockId, base + fix.start, fix.original);
+      completed += 1;
     }
+
+    // רק אם כל התיקונים הוחלו: הסימון מחשב היסטים מהטקסט הסופי, וחלקי אינו מתיישב.
+    if (completed === fixes.length && !disposed) registerIndicators(result.window, fixes);
   }
 
   function scheduleEvaluate(): void {
@@ -396,11 +476,13 @@ export function installAutoCorrect(options: AutoCorrectInstallOptions): AutoCorr
 
   return {
     reset() {
+      indicator.clear();
       resetTyped();
       applied = [];
     },
     dispose() {
       disposed = true;
+      indicator.dispose();
       cancelPending();
       container.removeEventListener('keydown', onKeyDown, true);
       container.removeEventListener('input', onInput);

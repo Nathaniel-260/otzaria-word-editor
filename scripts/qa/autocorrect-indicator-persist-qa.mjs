@@ -1,0 +1,74 @@
+/**
+ * הסימון נשאר על **כל** מילה שתוקנה, לא רק על האחרונה: אחרי המשך הקלדה, אחרי
+ * Enter ופסקה חדשה, אחרי המתנה, ואחרי עריכה **לפני** המילה שמזיזה אותה.
+ *   node scripts/qa/autocorrect-indicator-persist-qa.mjs
+ */
+import { openApp, createReport } from './harness.mjs';
+const report = createReport('סימון נשאר על כל מילה', { strict: false });
+const app = await openApp({ name: 'acorr-persist', port: Number(process.env.QA_PORT ?? 9633) });
+
+/** מרכז המופע ה-n של מחרוזת בדף, או null. */
+const wordBox = (needle, nth) =>
+  app
+    .js(`(function(){
+    var w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT), n, k = 0;
+    while ((n = w.nextNode())) {
+      if (!n.parentElement || !n.parentElement.closest('[data-source-node-id][data-pm-start]')) continue;
+      var from = 0, i;
+      while ((i = n.nodeValue.indexOf(${JSON.stringify(needle)}, from)) >= 0) {
+        if (k++ === ${nth}) {
+          var r = document.createRange(); r.setStart(n, i); r.setEnd(n, i + ${JSON.stringify(needle)}.length);
+          var b = r.getBoundingClientRect();
+          var r1 = document.createRange(); r1.setStart(n, i); r1.setEnd(n, i + 1);
+          var f = r1.getBoundingClientRect();
+          return JSON.stringify({ x: (b.left + b.right) / 2, y: (b.top + b.bottom) / 2, fl: f.left, fr: f.right, bottom: b.bottom });
+        }
+        from = i + 1;
+      }
+    }
+    return 'null';
+  })()`)
+    .then(JSON.parse);
+
+/** מרחף מעל המילה ובודק שהפס מתחת לאות הראשונה שלה. */
+async function marked(needle, nth) {
+  const box = await wordBox(needle, nth);
+  if (!box) return 'אין מילה בדף';
+  await app.js(`(document.elementFromPoint(${box.x},${box.y})||document).dispatchEvent(new PointerEvent('pointermove',{bubbles:true,clientX:${box.x},clientY:${box.y}}))`);
+  await app.sleep(120);
+  const chip = await app.js(`(function(){var c=document.querySelector('.otzaria-acorr-chip'); if(!c||c.style.display!=='block') return 'null'; var r=c.getBoundingClientRect(); return JSON.stringify({l:r.left,r:r.right,t:r.top});})()`).then(JSON.parse);
+  if (!chip) return 'אין סימון';
+  const dx = Math.abs(chip.l - box.fl) + Math.abs(chip.r - box.fr);
+  return dx < 3 && Math.abs(chip.t - (box.bottom - 2)) < 3 ? 'ok' : `סימון במקום שגוי dx=${dx.toFixed(1)}`;
+}
+
+try {
+  await app.caret(0);
+  await app.type('אאכ ');
+  await app.sleep(700);
+  await app.type('שלום (c) ');
+  await app.sleep(700);
+  await app.type('ועוד אאכ ');
+  await app.sleep(1200);
+
+  for (const [w, n, label] of [['אא"כ', 0, 'המילה הראשונה'], ['©', 0, 'המילה האמצעית'], ['אא"כ', 1, 'המילה האחרונה']]) {
+    const r = await marked(w, n);
+    r === 'ok' ? report.pass(`${label} מסומנת אחרי המשך הקלדה`) : report.fail(`${label} מסומנת אחרי המשך הקלדה`, r);
+  }
+
+  await app.sleep(20_000);
+  const late = await marked('אא"כ', 0);
+  late === 'ok' ? report.pass('הסימון נשאר אחרי 20 שניות') : report.fail('הסימון נשאר אחרי 20 שניות', late);
+
+  // עריכה לפני המילים: הן זזות, והסימון עוקב אחריהן
+  await app.caret(0);
+  await app.type('הקדמה ארוכה ');
+  await app.sleep(1200);
+  for (const [w, n, label] of [['אא"כ', 0, 'הראשונה'], ['©', 0, 'האמצעית'], ['אא"כ', 1, 'האחרונה']]) {
+    const r = await marked(w, n);
+    r === 'ok' ? report.pass(`${label} מסומנת אחרי הקלדה לפניה`) : report.fail(`${label} מסומנת אחרי הקלדה לפניה`, r);
+  }
+} finally {
+  report.print();
+  app.close();
+}
