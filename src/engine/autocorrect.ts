@@ -300,6 +300,8 @@ interface Token {
   readonly core: string;
   /** הליבה נסגרה: אחריה רווח או פיסוק. */
   readonly completed: boolean;
+  /** הפיסוק שאחרי הליבה מתחיל בגרש (`'`) — כמו ב-`לכאו'`, שהגרש הוא חלק מהקיצור. */
+  readonly geresh: boolean;
 }
 
 function tokenize(text: string): Token[] {
@@ -308,7 +310,8 @@ function tokenize(text: string): Token[] {
     const raw = match[0];
     const start = match.index ?? 0;
     const lead = raw.match(LEADING_PUNCT)?.[0].length ?? 0;
-    const tail = raw.slice(lead).match(TRAILING_PUNCT)?.[0].length ?? 0;
+    const tailText = raw.slice(lead).match(TRAILING_PUNCT)?.[0] ?? '';
+    const tail = tailText.length;
     const core = raw.slice(lead, raw.length - tail);
     if (core.length === 0) continue;
 
@@ -320,6 +323,7 @@ function tokenize(text: string): Token[] {
       core,
       // רווח אחריה, או פיסוק שהוקלד אחרי הליבה. טוקן שהסמן נוגע בו — לא.
       completed: tokenEnd < text.length || tail > 0,
+      geresh: tailText.startsWith("'"),
     });
   }
   return tokens;
@@ -412,6 +416,23 @@ function tableFixes(text: string, tokens: readonly Token[], entries: readonly Au
   if (exact.size > 0) {
     for (const token of tokens) {
       if (!token.completed) continue;
+
+      // קיצור שהגרש בסופו הוא חלק ממנו (`לכאו'`): הגרש נחתך מהליבה, ולכן מחפשים אותו גם איתו.
+      const withGeresh = token.geresh ? exact.get(`${token.core}'`) : undefined;
+      if (withGeresh !== undefined) {
+        const original = `${token.core}'`;
+        if (withGeresh !== original) {
+          fixes.push({
+            start: token.coreStart,
+            end: token.coreEnd + 1,
+            original,
+            replacement: withGeresh,
+            rule: 'table',
+          });
+        }
+        continue;
+      }
+
       const direct = exact.get(token.core);
       const to = direct ?? folded.get(token.core.toLowerCase());
       if (to === undefined) continue;

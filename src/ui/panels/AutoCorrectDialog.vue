@@ -69,6 +69,7 @@
               <input
                 v-model="draft.replaceAsYouType"
                 type="checkbox"
+                :disabled="!draft.enabled"
               >
               <span>החלף טקסט תוך כדי הקלדה</span>
             </label>

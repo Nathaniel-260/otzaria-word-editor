@@ -59,6 +59,8 @@ export const AUTOCORRECT_CONTEXT_CHARS = 32;
 
 /** תקרת התווים שנספרים. מעבר לה הספירה אינה מחמירה דבר, ורק מרחיבה את הקריאה. */
 export const AUTOCORRECT_TYPED_CAP = 200;
+/** הגבול של `preview.text` ב-`ranges.resolve`: מעליו התוצאה קטומה ונדחית (נמדד, ראו `word-selection.ts`). */
+export const AUTOCORRECT_WINDOW_MAX = 200;
 
 const SUPPRESS_TTL_MS = 10 * 60 * 1000;
 const SUPPRESS_MAX = 60;
@@ -320,7 +322,9 @@ export function installAutoCorrect(options: AutoCorrectInstallOptions): AutoCorr
       return;
     }
 
-    const length = Math.min(typed, AUTOCORRECT_TYPED_CAP) + AUTOCORRECT_CONTEXT_CHARS;
+    // `ranges.resolve` חותך את `preview.text` ב-200 תווים ומסמן `truncated`, ותוצאה קטומה נדחית.
+    // לכן החלון כולו (מה שהוקלד + ההקשר) לא עובר את הגבול — אחרת אחרי ~170 תווים רצופים התיקון נעצר.
+    const length = Math.min(Math.min(typed, AUTOCORRECT_TYPED_CAP) + AUTOCORRECT_CONTEXT_CHARS, AUTOCORRECT_WINDOW_MAX);
     let result: WindowResult;
     try {
       result = await readCaretWindow(doc, length);
@@ -406,6 +410,8 @@ export function installAutoCorrect(options: AutoCorrectInstallOptions): AutoCorr
 
     if (event.key === 'Backspace') {
       typed = Math.max(0, typed - 1);
+      // בדיקה שכבר מתוזמנת או רצה חושבה על הטקסט שלפני המחיקה.
+      cancelPending();
       return;
     }
 

@@ -8,7 +8,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import wordListRaw from '../../src/data/autocorrect-word.tsv?raw';
-import { DEFAULT_REPLACEMENTS, parseWordList } from '../../src/engine/autocorrect';
+import { DEFAULT_AUTOCORRECT, DEFAULT_REPLACEMENTS, parseWordList, planAutoCorrect } from '../../src/engine/autocorrect';
 
 describe('src/data/autocorrect-word.tsv', () => {
   const { entries, skipped } = parseWordList(wordListRaw);
@@ -30,5 +30,32 @@ describe('src/data/autocorrect-word.tsv', () => {
     const byFrom = new Map(DEFAULT_REPLACEMENTS.map((entry) => [entry.from, entry.to]));
 
     for (const entry of entries) expect(byFrom.get(entry.from), entry.from).toBe(entry.to);
+  });
+  it('כל כלל מילה באמת מתקן כשמקלידים אותו ורווח — אין כללים שלא יפעלו לעולם', () => {
+    const options = {
+      ...DEFAULT_AUTOCORRECT,
+      enabled: true,
+      replaceAsYouType: true,
+      replacements: entries,
+      capitalizeSentences: false,
+      capitalizeDays: false,
+      twoInitialCaps: false,
+    };
+    const dead = entries
+      .filter((entry) => entry.from !== entry.to)
+      .filter((entry) => !planAutoCorrect(`${entry.from} `, options, {}).some((fix) => fix.replacement === entry.to))
+      .map((entry) => entry.from);
+
+    expect(dead).toEqual([]);
+  });
+
+  it('בנתהמ משמר את ה-ב', () => {
+    expect(new Map(entries.map((entry) => [entry.from, entry.to])).get('בנתהמ')).toBe('בנתה"מ');
+  });
+
+  it('מילים עבריות רגילות אינן מוחלפות', () => {
+    const froms = new Set(entries.map((entry) => entry.from));
+    expect(froms.has('שלד')).toBe(false);
+    expect(froms.has('ושור')).toBe(false);
   });
 });

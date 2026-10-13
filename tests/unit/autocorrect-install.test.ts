@@ -219,6 +219,36 @@ describe('installAutoCorrect', () => {
     expect(engine.model.text).toBe('xx tehy');
   });
 
+  it('אחרי הקלדה ארוכה ברצף החלון אינו עובר את גבול ה-200 של המנוע, והתיקון ממשיך', async () => {
+    // פסקה ארוכה שכבר קיימת: אחרת החלון מוגבל בגודל הבלוק עצמו ולא בגבול של המנוע.
+    const engine = fakeEngine('y'.repeat(300));
+    install(engine);
+    // כמו המנוע האמיתי: טווח ארוך מ-200 תווים חוזר קטום, וקטום נדחה.
+    const resolve = engine.doc.ranges.resolve;
+    engine.doc.ranges.resolve = async (request) => {
+      const result = await resolve(request);
+      const text = result.preview.text;
+      return text.length > 200 ? { ...result, preview: { text: text.slice(0, 200), truncated: true } } : result;
+    };
+
+    type(engine, 'x'.repeat(190));
+    type(engine, '(c)');
+    await settle();
+
+    expect(engine.model.text.endsWith('©')).toBe(true);
+  });
+
+  it('Backspace מבטל בדיקה שכבר מתוזמנת', async () => {
+    const engine = fakeEngine('');
+    install(engine);
+
+    type(engine, '(c)');
+    key('Backspace');
+    await settle();
+
+    expect(engine.inserts).toHaveLength(0);
+  });
+
   it('חץ מאפס את הספירה ומבטל קריאה תלויה', async () => {
     const engine = fakeEngine('');
     install(engine);
