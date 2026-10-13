@@ -502,6 +502,8 @@ import { registerShulchanTools } from './engine/shulchan/tools-registration';
 import MacrosDialog from './ui/panels/MacrosDialog.vue';
 import { installBookCompletion } from './engine/book-completion-overlay';
 import { installAtMention } from './engine/at-mention-overlay';
+import { installPasteIntercept } from './engine/paste-intercept';
+import { loadPasteDefault, pasteDefaultMode } from './composables/paste-default';
 import { installListAutoformat } from './engine/list-autoformat-install';
 import { installOtzariaLinkClicks } from './engine/otzaria-link-click';
 import { preflightSource } from './engine/docx-preflight';
@@ -4644,6 +4646,24 @@ watch([activeEditorContainer, activeSuperdoc, documentGeneration], () => {
 watch(listAutoformatEnabled, (value) => listAutoformat?.setEnabled(value));
 
 /**
+ * Ctrl+V לפי ברירת המחדל שנבחרה ב„הדבק” (engine/paste-intercept.ts). אותו
+ * container ואותו תנאי כמו השכבות שמעליו; המצב נקרא בכל אירוע, ולכן החלפת
+ * ברירת המחדל אינה מתקינה מחדש.
+ */
+let pasteIntercept: ReturnType<typeof installPasteIntercept> | null = null;
+watch([activeEditorContainer, activeSuperdoc, documentGeneration], () => {
+  pasteIntercept?.dispose();
+  pasteIntercept = null;
+  if (!activeEditorContainer.value || !activeSuperdoc.value) return;
+  pasteIntercept = installPasteIntercept({
+    container: activeEditorContainer.value,
+    host: activeSuperdoc.value,
+    mode: () => pasteDefaultMode.value,
+    report: (outcome) => reportCommand(outcome, 'clipboard-paste'),
+  });
+});
+
+/**
  * לחיצה על קישור `otzaria://` במסמך (engine/otzaria-link-click.ts).
  *
  * אותו container ואותו תנאי כמו שתי השכבות שמעליו. זה אינו כפל של
@@ -4767,6 +4787,16 @@ function onCustomActionFromTellMe(action: TellMeCustomAction): void {
       break;
     case 'clipboard-paste':
       void pasteFromClipboard(activeSuperdoc.value).then((outcome) => reportCommand(outcome, 'clipboard-paste'));
+      break;
+    case 'clipboard-paste-merge':
+      void pasteFromClipboard(activeSuperdoc.value, { mode: 'merge' }).then((outcome) =>
+        reportCommand(outcome, 'clipboard-paste-merge'),
+      );
+      break;
+    case 'clipboard-paste-text':
+      void pasteFromClipboard(activeSuperdoc.value, { mode: 'text-only' }).then((outcome) =>
+        reportCommand(outcome, 'clipboard-paste-text'),
+      );
       break;
     case 'exit-app':
       void onExit();
@@ -5755,6 +5785,9 @@ onMounted(async () => {
     // העץ של „פתח מסמך” מהמטמון — עכשיו, ולא בפתיחה הראשונה של הדיאלוג, כדי
     // שהוא ייפתח מלא. אינו חוסם את העלייה: אין לו חלק בפתיחת המסמך.
     void openSources.init();
+    // ברירת המחדל של Ctrl+V. לא חוסמת: עד שהיא נקראת Ctrl+V הוא של המנוע,
+    // וזו בדיוק ברירת המחדל.
+    void loadPasteDefault();
     // צבע הבד מוחל כאן ולא בלשונית „תצוגה”: הפקד שמשנה אותו יושב בלשונית
     // שמורכבת רק כשהיא הפעילה (`v-else-if` ב-Ribbon.vue), והבד נראה מהרגע
     // הראשון. `applyCanvasColor` ולא `setCanvasColor` — זו קריאה, ואין טעם

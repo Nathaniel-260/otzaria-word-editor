@@ -31,9 +31,13 @@
 import type { CommandId } from '../../engine/capabilities';
 import type { DocCapabilityQuestion } from '../../engine/doc-capabilities';
 import type { ShellAction, ShortcutId } from '../shortcuts/registry';
+import type { PasteMode } from '../../engine/paste-formatting';
 
-/** פעולת לוח. אינה `CommandId` — הלוח עובר ב-Document API, ראו engine/clipboard.ts. */
-export type ClipboardOp = 'cut' | 'copy' | 'paste';
+/**
+ * פעולת לוח. אינה `CommandId` — הלוח עובר ב-Document API, ראו engine/clipboard.ts.
+ * שלוש ההדבקות הן „אפשרויות הדבקה” של Word (engine/paste-formatting.ts).
+ */
+export type ClipboardOp = 'cut' | 'copy' | 'paste' | 'paste-merge' | 'paste-text';
 
 /**
  * איך הפריט רץ. שלושת הראשונים הם המסלולים שכבר קיימים בתוסף: פקודה של
@@ -102,6 +106,12 @@ export interface ContextMenuSnapshot {
    */
   readonly misspelledWord: string | null;
   readonly can: (question: DocCapabilityQuestion) => boolean;
+  /**
+   * מה ש-Ctrl+V עושה עכשיו (composables/paste-default.ts). קובע איזו משלוש
+   * ההדבקות נושאת את תווית הקיצור — אחרת „Ctrl+V” היה מוצג על אפשרות שאינה
+   * זו שהוא מריץ. חסר = „שמירה על עיצוב המקור”.
+   */
+  readonly pasteDefault?: PasteMode;
 }
 
 /** הבחירה בגוף המסמך, ולא בכותרת עליונה או תחתונה. */
@@ -116,6 +126,10 @@ function inBody(snapshot: ContextMenuSnapshot): boolean {
 function clipboardSection(snapshot: ContextMenuSnapshot): ContextMenuSection {
   const canCopy = snapshot.hasRange && snapshot.can('canCopySelection');
   const canCut = canCopy && snapshot.can('canDeleteSelection');
+  const canPaste = snapshot.can('canPasteContent');
+  const pasteDefault = snapshot.pasteDefault ?? 'keep-source';
+  const pasteShortcut = (mode: PasteMode): { shortcutId?: ShortcutId } =>
+    mode === pasteDefault ? { shortcutId: 'paste' } : {};
 
   return {
     id: 'clipboard',
@@ -124,7 +138,9 @@ function clipboardSection(snapshot: ContextMenuSnapshot): ContextMenuSection {
     entries: [
       { id: 'cut', label: 'גזירה', icon: 'cut', shortcutId: 'cut', run: { kind: 'clipboard', op: 'cut' }, disabled: !canCut },
       { id: 'copy', label: 'העתקה', icon: 'copy', shortcutId: 'copy', run: { kind: 'clipboard', op: 'copy' }, disabled: !canCopy },
-      { id: 'paste', label: 'הדבקה', icon: 'paste', shortcutId: 'paste', run: { kind: 'clipboard', op: 'paste' }, disabled: !snapshot.can('canPasteContent') },
+      { id: 'paste', label: 'הדבקה — שמירה על עיצוב המקור', icon: 'paste', ...pasteShortcut('keep-source'), run: { kind: 'clipboard', op: 'paste' }, disabled: !canPaste },
+      { id: 'paste-merge', label: 'הדבקה — מיזוג עיצוב', icon: 'pasteMerge', ...pasteShortcut('merge'), run: { kind: 'clipboard', op: 'paste-merge' }, disabled: !canPaste },
+      { id: 'paste-text', label: 'הדבקה — שמירת טקסט בלבד', icon: 'pasteText', ...pasteShortcut('text-only'), run: { kind: 'clipboard', op: 'paste-text' }, disabled: !canPaste },
       { id: 'format-painter', label: 'מברשת עיצוב', icon: 'formatPainter', shortcutId: 'format-painter', run: { kind: 'command', command: 'copy-format' }, toggle: true },
     ],
   };

@@ -56,6 +56,15 @@ import type { SuperDoc } from 'superdoc';
 import type { SelectionTarget } from 'superdoc/ui';
 import { reasonText, type CommandOutcome } from './command-adapter';
 import { receiptFailureText, thrownText, type DocReceipt, type MaybePromise } from './document-api';
+import { readDocRunDefaults } from './doc-style-defaults';
+import { readFormat, type FormatReadingSource } from './format-reading';
+import {
+  destinationMarks,
+  mergeFragment,
+  textOnlyFragment,
+  type PasteFragment,
+  type PasteMode,
+} from './paste-formatting';
 
 /* ------------------------------------------------------------------ */
 /* צורת המנוע כפי שהמודול צורך אותה                                    */
@@ -163,9 +172,18 @@ export interface SelectionSurface {
   apply?: (target: SelectionTarget) => MaybePromise<{ ok?: boolean; reason?: string } | undefined>;
 }
 
+/**
+ * מצבי הפקודות של המנוע — מה שהרצועה קוראת. „מזג עיצוב” קורא מהם את העיצוב
+ * שבסמן (ההנמקה ב-engine/paste-formatting.ts).
+ */
+export interface CommandsSurface {
+  has?: (id: string) => boolean;
+  get?: (id: string) => { getState?: () => { value?: unknown; active?: boolean } | undefined } | undefined;
+}
+
 export interface ClipboardHost {
   activeEditor?: { doc?: ClipboardDocumentApi | null } | null;
-  ui?: { selection?: SelectionSurface | null } | null;
+  ui?: { selection?: SelectionSurface | null; commands?: CommandsSurface | null } | null;
 }
 
 /** ה-union מאפשר גם את המופע האמיתי וגם כפיל. ההסבר המלא ב-page-setup.ts. */
@@ -266,7 +284,8 @@ function failed(failedAction: string, reason: string): CommandOutcome {
   return { ok: false, message: `${failedAction}: ${reasonText(reason)}`, reason };
 }
 
-type SelectionRead = { ok: true; target: SelectionTarget } | { ok: false; reason: string };
+/** `empty` = סמן בלי טווח, כפי שהתצלום מדווח. */
+type SelectionRead = { ok: true; target: SelectionTarget; empty: boolean } | { ok: false; reason: string };
 
 /**
  * הטווח שהמשתמש סימן, כ-`SelectionTarget` — הצורה שפעולות הכתיבה של המנוע
@@ -309,7 +328,7 @@ function readSelection(
     return { ok: false, reason: slice?.status === 'ready' ? 'range-selection-required' : 'not-ready' };
   }
 
-  return { ok: true, target };
+  return { ok: true, target, empty: slice?.empty === true };
 }
 
 /** כמה פעמים, ובאיזה מרווח, מותר להמתין שהבחירה תתייצב. ר' `readSelectionSettled`. */
@@ -898,9 +917,20 @@ function pasteFailureText(failure: ClipboardFailure | undefined): string {
  * „יש למקם את הסמן במסמך”, ולא מוסיפה בשקט בסוף המסמך.
  *
  * ההדבקה המקורית של המנוע אינה נוגעת בזה: המודול הזה אינו רושם מאזינים
- * ואינו חוטף אירועי `paste`.
+ * ואינו חוטף אירועי `paste`. מי שכן — כשברירת המחדל של Ctrl+V אינה „שמירה
+ * על עיצוב המקור” — הוא engine/paste-intercept.ts, והוא מעביר לכאן את התוכן
+ * של האירוע ב-`payload`, במקום קריאה מלוח המערכת.
+ *
+ * ## `mode`
+ *
+ * „שמירה על עיצוב המקור” הוא המסלול שתואר למעלה, כמות שהוא. „מזג עיצוב”
+ * ו„שמירת טקסט בלבד” משכתבים את ה-fragment שה-`parse` בנה לפני ה-`insert` —
+ * למה בעצמנו ולא ב-`formattingMode` של המנוע, ב-engine/paste-formatting.ts.
  */
-export async function pasteFromClipboard(host: ClipboardHostTarget): Promise<CommandOutcome> {
+export async function pasteFromClipboard(
+  host: ClipboardHostTarget,
+  { mode = 'keep-source', payload: given }: { mode?: PasteMode; payload?: ClipboardPayload } = {},
+): Promise<CommandOutcome> {
   const clipboard = docOf(host)?.clipboard;
   const insert = clipboard?.insert;
   if (typeof insert !== 'function') {
@@ -912,14 +942,22 @@ export async function pasteFromClipboard(host: ClipboardHostTarget): Promise<Com
   const at = readSelection(selectionOf(host), { allowCollapsed: true });
   if (!at.ok) return failed(PASTE_FAILED, at.reason);
 
-  const read = await readSystemClipboard();
+  // העיצוב שבסמן נקרא **עכשיו**, באותו רגע כמו המקום: שניהם המצב ברגע
+  // הלחיצה, וקריאת הלוח שמתחת היא `await` שבמהלכו הסמן יכול לזוז.
+  const caret = mode === 'keep-source' ? null : readCaretFormat(host, at.empty);
+
+  const read: SystemRead = given ? { kind: 'payload', payload: given } : await readSystemClipboard();
   // `readUnmirrored` ולא `read`: כשלוח המערכת קריא-אך-חסום, תוכן שכבר נשלח אליו
   // אינו „מה שבלוח עכשיו”. ההסבר — `internalClipboard`.
-  const payload =
+  const raw =
     read.kind === 'payload' ? read.payload : read.kind === 'blocked' ? internalClipboard.readUnmirrored() : null;
+  const payload = raw && mode === 'text-only' ? textOnlyPayload(raw) : raw;
 
   if (!payload) {
     if (read.kind === 'blocked') return readBlocked();
+    if (raw) {
+      return { ok: false, message: `${PASTE_FAILED}: אין בלוח טקסט להדבקה`, reason: 'paste-empty' };
+    }
     return {
       ok: false,
       message: 'ההדבקה נכשלה: לוח המערכת ריק, או שהתוכן שבו אינו נתמך כאן. Ctrl+V מדביק אותו דרך המנוע.',
@@ -940,7 +978,12 @@ export async function pasteFromClipboard(host: ClipboardHostTarget): Promise<Com
       const failure = parsed?.success === false ? parsed.failure : undefined;
       return { ok: false, message: pasteFailureText(failure), reason: failure?.code ?? 'parse-failed' };
     }
-    input = { plan: parsed.plan, target: at.target };
+    const plan = caret ? await reformatPlan(host, parsed.plan, mode, caret) : parsed.plan;
+    input = { plan, target: at.target };
+  } else if (mode !== 'keep-source') {
+    // בלי `parse` אין fragment לשכתב, ו-`insert` על payload גולמי היה מדביק
+    // את עיצוב המקור — כלומר בדיוק את מה שהמשתמש ביקש שלא.
+    return { ok: false, message: `${PASTE_FAILED}: ${UNAVAILABLE}`, reason: 'command-unsupported' };
   } else {
     // גרסה שאינה חושפת `parse`: `insert` מקבל payload גולמי ומפרק אותו בעצמו.
     input = { payload, target: at.target };
@@ -968,6 +1011,68 @@ export async function pasteFromClipboard(host: ClipboardHostTarget): Promise<Com
   }
 
   return { ok: true };
+}
+
+/* ------------------------------------------------------------------ */
+/* מזג עיצוב ושמירת טקסט בלבד                                         */
+/* ------------------------------------------------------------------ */
+
+/**
+ * „שמירת טקסט בלבד” מתחיל מהטקסט עצמו: `text/plain` בלבד. HTML, תמונות
+ * וה-fragment הפרטי של המנוע נזרקים כבר כאן, כך שגם טבלה מגיעה כשורות טקסט
+ * ולא כטבלה ריקה מעיצוב — כמו ב-Word. `null` = אין בלוח טקסט.
+ */
+function textOnlyPayload(payload: ClipboardPayload): ClipboardPayload | null {
+  const text = textItem(payload, 'text/plain');
+  if (!text) return null;
+  return { source: payload.source, items: [{ type: 'text/plain', kind: 'string', data: text }] };
+}
+
+/**
+ * העיצוב שבסמן, כפי שהרצועה מציגה אותו — דרך `readFormat`, אותה קריאה שמתג
+ * הקיצורים האישיים משתמש בה. `empty` הוא צורת הבחירה: על טווח מעורב צבע שלא
+ * דווח אינו „אין צבע” (ההנמקה שם).
+ */
+function readCaretFormat(host: ClipboardHostTarget, empty: boolean) {
+  let commands: CommandsSurface | null | undefined;
+  try {
+    commands = (host as ClipboardHost | null | undefined)?.ui?.commands;
+  } catch {
+    commands = undefined;
+  }
+
+  const source: FormatReadingSource = {
+    has: (id) => {
+      try {
+        return commands?.has?.(id) === true;
+      } catch {
+        return false;
+      }
+    },
+    getState: (id) => {
+      try {
+        return (commands?.get?.(id)?.getState?.() ?? {}) as ReturnType<FormatReadingSource['getState']>;
+      } catch {
+        return {} as ReturnType<FormatReadingSource['getState']>;
+      }
+    },
+  };
+
+  return readFormat(source, { empty, settled: true });
+}
+
+/** ה-fragment, אחרי „מזג עיצוב” או „שמירת טקסט בלבד”. */
+async function reformatPlan(
+  host: ClipboardHostTarget,
+  plan: ClipboardPlan,
+  mode: PasteMode,
+  caret: ReturnType<typeof readCaretFormat>,
+): Promise<ClipboardPlan> {
+  const defaults = await readDocRunDefaults(host as Parameters<typeof readDocRunDefaults>[0]);
+  const destination = destinationMarks(caret, defaults);
+  const fragment = plan.fragment as unknown as PasteFragment;
+  const rewritten = mode === 'merge' ? mergeFragment(fragment, destination) : textOnlyFragment(fragment, destination);
+  return { ...plan, fragment: rewritten as unknown as ClipboardPlan['fragment'] };
 }
 
 /* ------------------------------------------------------------------ */

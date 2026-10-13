@@ -110,6 +110,8 @@
 | שם ב־`ICONS` | פקד | אייקון מקורי |
 |---|---|---|
 | `paste` | הדבק | `clipboard_paste` |
+| `pasteMerge` | הדבקה עם מיזוג עיצוב | `clipboard_text_edit` |
+| `pasteText` | הדבקת טקסט בלבד | `clipboard_text_rtl` |
 | `cut` | גזור | `cut` |
 | `copy` | העתק | `copy` |
 | `formatPainter` | מברשת עיצוב | `paint_brush` |
@@ -276,7 +278,7 @@ MDL2 היא הספרייה של Office UI Fabric שיצאה משימוש, System
   ואף אחד מהם אינו עדכון של דף — הסימן צריך להיות רענון גנרי. `arrow_sync`,
   המועמד השני, יוצא 93.5% לגובה ונחתך.
 
-> **81 מתוך 87 האייקונים** ב־`icons.ts` הם Fluent System Icons, וזו אינה
+> **83 מתוך 89 האייקונים** ב־`icons.ts` הם Fluent System Icons, וזו אינה
 > הצהרת כוונות: `npm run check:icons` מוריד את `@fluentui/svg-icons@1.1.338`
 > מ־npm ומשווה כל `d=` בקובץ מול הגליף המקורי — byte-for-byte — וגם מאמת שהטבלה
 > למעלה נוקבת בשם הגליף הנכון. השער נכשל על סטייה, על אייקון מצויר בבית שאינו

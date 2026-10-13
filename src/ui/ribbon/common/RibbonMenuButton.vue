@@ -24,6 +24,7 @@
         :variant="variant"
         :tooltip="tooltip"
         :description="description"
+        :shortcut-id="shortcutId"
         :active="active"
         :disabled="actionDisabled ?? disabled"
         @click="$emit('action')"
@@ -142,6 +143,7 @@ import RibbonButton from './RibbonButton.vue';
 import SvgIcon from '../../icons/SvgIcon.vue';
 import { menuString } from '../i18n';
 import { usePopoverPosition } from '../../../composables/popover-position';
+import type { ShortcutId } from '../../shortcuts/registry';
 
 /** פריט בתפריט. מקומי בכוונה: `<script setup>` אינו מייצא, והצרכן מעביר literal. */
 interface MenuItem {
@@ -201,6 +203,8 @@ const props = withDefaults(
     actionDisabled?: boolean;
     /** שורת ההסבר בטולטיפ של כפתור הפעולה — בדיוק כמו ב-`RibbonButton`. */
     description?: string;
+    /** הקיצור של כפתור הפעולה, לטולטיפ — בדיוק כמו ב-`RibbonButton`. במצב מפוצל בלבד. */
+    shortcutId?: ShortcutId;
     /**
      * שם החץ — הכותרת בטולטיפ וגם השם הנגיש שלו (החץ הוא אייקון בלבד).
      * חסר = ה-`label` של הפקד.

@@ -302,7 +302,9 @@ describe('החוזה מול המקור', () => {
     const ids = new Set<string>(ENTRIES.map((shortcut) => shortcut.id));
     const used = new Set<string>();
     for (const { text } of sources) {
-      for (const match of text.matchAll(/shortcut-id="([^"]+)"/g)) used.add(match[1]!);
+      // מחרוזת מילולית בלבד: `:shortcut-id="shortcutId"` הוא העברה של prop
+      // (RibbonMenuButton → RibbonButton), והערך שלו נבדק באתר הקריאה.
+      for (const match of text.matchAll(/(?<!:)shortcut-id="([^"]+)"/g)) used.add(match[1]!);
     }
 
     expect([...used].filter((id) => !ids.has(id))).toEqual([]);

@@ -41,6 +41,8 @@ export type TellMeCustomAction =
   | 'clipboard-copy'
   | 'clipboard-cut'
   | 'clipboard-paste'
+  | 'clipboard-paste-merge'
+  | 'clipboard-paste-text'
   | 'shortcuts-manage';
 
 export interface TellMeAction {
@@ -224,6 +226,24 @@ export const TELL_ME_ACTIONS: readonly TellMeAction[] = [
     shortcut: 'Ctrl+V',
     icon: 'paste',
     customAction: 'clipboard-paste',
+  },
+  {
+    id: 'clipboard-paste-merge',
+    title: 'הדבקה עם מיזוג עיצוב',
+    category: 'בית > לוח',
+    description: 'הדבקה בעיצוב של המקום שאליו מדביקים, עם המודגש, הנטוי והקו התחתון של המקור',
+    keywords: ['מזג עיצוב', 'מיזוג עיצוב', 'הדבקה', 'הדבק', 'עיצוב יעד', 'merge formatting', 'paste'],
+    icon: 'pasteMerge',
+    customAction: 'clipboard-paste-merge',
+  },
+  {
+    id: 'clipboard-paste-text',
+    title: 'הדבקת טקסט בלבד',
+    category: 'בית > לוח',
+    description: 'הדבקה בלי שום עיצוב מהמקור — הטקסט מקבל את העיצוב של המקום שאליו מדביקים',
+    keywords: ['טקסט בלבד', 'שמור טקסט בלבד', 'הדבקה ללא עיצוב', 'הדבקה', 'הדבק', 'plain text', 'paste'],
+    icon: 'pasteText',
+    customAction: 'clipboard-paste-text',
   },
   {
     id: 'clipboard-copy',
