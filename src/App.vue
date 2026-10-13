@@ -1507,8 +1507,6 @@ provide(SPELLCHECK, {
  * נשמר ב-`storage` ולא בזיכרון: זו העדפה של המשתמש, לא של המסמך.
  */
 const autoCorrectOptions = ref<AutoCorrectOptions>(DEFAULT_AUTOCORRECT);
-/** עולה בכל בקשה לפתוח את דיאלוג התיקון האוטומטי מתוך המסמך (תפריט הסימון). */
-const autoCorrectDialogRequest = ref(0);
 const autoCorrectControl: AutoCorrectControl = {
   options: autoCorrectOptions,
   apply: (options: AutoCorrectOptions) => {
@@ -1522,9 +1520,6 @@ const autoCorrectControl: AutoCorrectControl = {
 provide(AUTOCORRECT, autoCorrectControl);
 /** דיאלוג שנפתח מתפריט הסימון; זה של לשונית „סקירה” נפרד ונפתח רק משם. */
 const autoCorrectDialogOpen = ref(false);
-watch(autoCorrectDialogRequest, () => {
-  autoCorrectDialogOpen.value = true;
-});
 function onAutoCorrectDialogApply(options: AutoCorrectOptions): void {
   autoCorrectControl.apply(options);
   autoCorrectDialogOpen.value = false;
@@ -4734,7 +4729,7 @@ watch([activeEditorContainer, activeSuperdoc, documentGeneration], () => {
       if (next !== autoCorrectOptions.value) autoCorrectControl.apply(next);
     },
     onOpenOptions: () => {
-      autoCorrectDialogRequest.value += 1;
+      autoCorrectDialogOpen.value = true;
     },
   });
 });

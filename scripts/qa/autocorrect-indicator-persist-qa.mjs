@@ -4,7 +4,7 @@
  *   node scripts/qa/autocorrect-indicator-persist-qa.mjs
  */
 import { openApp, createReport } from './harness.mjs';
-const report = createReport('סימון נשאר על כל מילה', { strict: false });
+const report = createReport('סימון נשאר על כל מילה', { strict: true });
 const app = await openApp({ name: 'acorr-persist', port: Number(process.env.QA_PORT ?? 9633) });
 
 /** מרכז המופע ה-n של מחרוזת בדף, או null. */
@@ -61,9 +61,12 @@ try {
   late === 'ok' ? report.pass('הסימון נשאר אחרי 20 שניות') : report.fail('הסימון נשאר אחרי 20 שניות', late);
 
   // עריכה לפני המילים: הן זזות, והסימון עוקב אחריהן
-  await app.caret(0);
+  await app.press('Home', 'Home', 36);
+  await app.sleep(400);
   await app.type('הקדמה ארוכה ');
   await app.sleep(1200);
+  const text = await app.js("document.querySelector('[data-source-node-id][data-pm-start]').textContent");
+  text.startsWith('הקדמה') ? report.pass('ההקלדה נכנסה לתחילת הפסקה', text) : report.fail('ההקלדה נכנסה לתחילת הפסקה', text);
   for (const [w, n, label] of [['אא"כ', 0, 'הראשונה'], ['©', 0, 'האמצעית'], ['אא"כ', 1, 'האחרונה']]) {
     const r = await marked(w, n);
     r === 'ok' ? report.pass(`${label} מסומנת אחרי הקלדה לפניה`) : report.fail(`${label} מסומנת אחרי הקלדה לפניה`, r);

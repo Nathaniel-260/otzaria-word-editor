@@ -5,7 +5,7 @@
  */
 import { openApp, createReport } from './harness.mjs';
 
-const report = createReport('סימון תיקון אוטומטי', { strict: false });
+const report = createReport('סימון תיקון אוטומטי', { strict: true });
 const app = await openApp({ name: 'acorr-ind', port: Number(process.env.QA_PORT ?? 9631) });
 
 const state = () =>

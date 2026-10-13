@@ -28,7 +28,7 @@
  */
 import type { AutoCorrectFix, AutoCorrectOptions, AutoCorrectRule } from './autocorrect';
 import { ICONS } from '../ui/icons/icons';
-import { locateText, type LocatedWord, type TextContext } from './painted-lines';
+import { blockIdAt, locateText, type LocatedWord, type TextContext } from './painted-lines';
 
 /* ------------------------------------------------------------------ */
 /* החלק הטהור: מה כתוב בתפריט, ומה „הפסק לתקן” משנה                       */
@@ -310,8 +310,16 @@ export function createAutoCorrectIndicator(
   }
 
   /** המילה שמתחת לעכבר, מתוך הסימונים החיים. כל מיקום נקרא עכשיו מה-DOM. */
-  function entryAt(x: number, y: number): { entry: IndicatorEntry; found: LocatedWord } | null {
+  function entryAt(
+    x: number,
+    y: number,
+    target: Node | null,
+  ): { entry: IndicatorEntry; found: LocatedWord } | null {
+    // רק סימונים של הבלוק שמתחת לעכבר: אחרת כל תזוזה סורקת את כל הסימונים החיים.
+    const block = blockIdAt(target);
+    if (block === null) return null;
     for (const item of entries) {
+      if (item.entry.blockId !== block) continue;
       const found = locateWord(item.entry);
       if (!found || !isOver(found, x, y)) continue;
       // עריכה לפני המילה הזיזה אותה: ההיסט החדש נשמר, ו"חזור" פועל עליו.
@@ -336,7 +344,7 @@ export function createAutoCorrectIndicator(
       if (current) hideChip();
       return;
     }
-    const hit = entryAt(move.x, move.y);
+    const hit = entryAt(move.x, move.y, move.target);
     if (hit) placeChip(hit.entry, hit.found);
     else if (current) hideChip();
   }

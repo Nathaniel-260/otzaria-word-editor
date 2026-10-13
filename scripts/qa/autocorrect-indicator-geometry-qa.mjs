@@ -4,7 +4,7 @@
  * לאות הראשונה של **המילה הנכונה**.
  */
 import { openApp, createReport } from './harness.mjs';
-const report = createReport('גיאומטריית סימון', { strict: false });
+const report = createReport('גיאומטריית סימון', { strict: true });
 const app = await openApp({ name: 'acorr-geo', port: Number(process.env.QA_PORT ?? 9632) });
 
 /** כל המופעים המצוירים של מחרוזת, בסדר ה-DOM. */

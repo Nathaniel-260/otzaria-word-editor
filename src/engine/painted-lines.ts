@@ -619,6 +619,16 @@ export function paintedFirstBlockId(host: ParentNode | null | undefined): string
 /* מיקום טקסט שהוחלף — לסימון התיקון האוטומטי                           */
 /* ------------------------------------------------------------------ */
 
+/**
+ * הבלוק המצויר שהצומת נמצא בו (הפסקה הקרובה ביותר, גם בתוך תא טבלה), או `null`.
+ * מי שרוצה לבדוק רק מה שנוגע לבלוק שמתחת לעכבר, בלי לסרוק את המסמך כולו.
+ */
+export function blockIdAt(node: Node | null): string | null {
+  const el = node instanceof Element ? node : (node?.parentElement ?? null);
+  const fragment = el?.closest('[data-source-node-id]') ?? null;
+  return fragment ? fragment.getAttribute('data-source-node-id') : null;
+}
+
 export interface Box {
   readonly left: number;
   readonly right: number;
@@ -712,23 +722,32 @@ export function locateText(
       return null;
     };
 
-    const exact = at(start);
+    // הטקסט של הפסקה כולה, מה-pm הראשון שלה — לבדיקת ההקשר ולחיפוש.
+    const first = runs[0]!.pmStart;
+    let paragraph = '';
+    if (context && reliable) {
+      for (const run of runs) {
+        const gap = run.pmStart - first - paragraph.length;
+        if (gap > 0) paragraph += '\u0000'.repeat(gap);
+        paragraph += run.text;
+      }
+    }
+    // סיומת וקידומת: מה שנרשם היה קצר כשנרשם (סוף הטקסט שנקרא), ומאז נוסף אחריו.
+    const contextOk = (from: number): boolean =>
+      !context ||
+      !reliable ||
+      (paragraph.slice(0, from).endsWith(context.before) &&
+        paragraph.slice(from + expected.length).startsWith(context.after));
+
+    // שלב 1 כולל גם את ההקשר: מילה זהה אחרת שנחתה על ההיסט הרשום אינה "היא".
+    const exact = contextOk(start - (first - base)) ? at(start) : null;
     if (exact) return exact;
     if (!context || !reliable) continue;
 
-    // שלב 2: הטקסט של הפסקה כולה, מה-pm הראשון שלה.
-    const first = runs[0]!.pmStart;
-    let paragraph = '';
-    for (const run of runs) {
-      const gap = run.pmStart - first - paragraph.length;
-      if (gap > 0) paragraph += '\u0000'.repeat(gap);
-      paragraph += run.text;
-    }
+    // שלב 2: חיפוש בכל הפסקה.
     let best = -1;
     for (let from = paragraph.indexOf(expected); from >= 0; from = paragraph.indexOf(expected, from + 1)) {
-      // סיומת וקידומת: מה שנרשם היה קצר כשנרשם (סוף הטקסט שנקרא), ומאז נוסף אחריו.
-      if (!paragraph.slice(0, from).endsWith(context.before)) continue;
-      if (!paragraph.slice(from + expected.length).startsWith(context.after)) continue;
+      if (!contextOk(from)) continue;
       const blockOffset = first - base + from;
       if (best < 0 || Math.abs(blockOffset - start) < Math.abs(best - start)) best = blockOffset;
     }
