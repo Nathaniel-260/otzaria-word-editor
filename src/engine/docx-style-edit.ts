@@ -3,13 +3,11 @@
  *
  * ## למה ב-XML ולא במנוע
  *
- * למנוע אין API לסגנון בעל שם: `styles.apply` מקבל `scope: 'docDefaults'`
- * בלבד (ראו `doc-style-defaults.ts`), ו-`ui.styles` הוא קטלוג לקריאה. כלומר
- * „שנה את כותרת 1 בכל המסמך” אינו אפשרי דרך המנוע בשום צורה. מה שכן אפשרי:
- * לכתוב את ההגדרה לגיליון הסגנונות של הקובץ, ולפתוח את המסמך מחדש — המנוע
- * קורא את `styles.xml` בפתיחה, והסגנון חל על כל פסקה שנושאת אותו. וזה גם מה
- * שהופך את השינוי לשמור **בתוך המסמך**: הוא חלק מהקובץ, ו-Word רואה אותו כמו
- * כל סגנון אחר.
+ * `styles.apply` משנה docDefaults בלבד. את הגדרות הסגנונות משנים כאן
+ * ומעבירים רק את ההגדרות שהשתנו ל-templates.apply הציבורי (SuperDoc 2.20).
+ * המנוע מחיל אותן על המסמך החי כטרנזקציה: בלי פתיחה מחדש, בלי החלפת תוכן,
+ * ובלי איפוס היסטוריית הביטול. מחיקת סגנון נשארת כלי XML בלבד ואינה מוצעת
+ * בממשק החי, משום שאימוץ תבנית אינו מוחק סגנונות קיימים.
  *
  * ## מה המודול מבטיח
  *
@@ -23,7 +21,7 @@
  *   נראה נכון בעורך ושגוי ב-Word, ולכן כל שדה נכתב לשני הצדדים יחד.
  *
  * המודול טהור — מחרוזת נכנסת, מחרוזת יוצאת — ולכן כל ההכרעות כאן נבדקות
- * ב-tests/unit בלי מנוע. ההרכבה עם ה-zip ועם הטעינה מחדש ב-`style-reload.ts`.
+ * ב-tests/unit בלי מנוע. ההחלה החיה ב-`live-style-edit.ts` ועריכת חבילה ב-`docx-style-package.ts`.
  */
 import { TOKEN_SOURCE, attribute, isOn, skippedCloser, valueOf, wordPrefix } from './docx-parts';
 
@@ -129,14 +127,14 @@ export const JC_FOR_ALIGNMENT: Readonly<Record<StyleAlignment, string>> = {
   justify: 'both',
 };
 
-function alignmentOfJc(jc: string): StyleAlignment | undefined {
+function alignmentOfJc(jc: string, rtl: boolean): StyleAlignment | undefined {
   switch (jc) {
     case 'left':
     case 'start':
-      return 'right';
+      return rtl ? 'right' : 'left';
     case 'right':
     case 'end':
-      return 'left';
+      return rtl ? 'left' : 'right';
     case 'center':
       return 'center';
     case 'both':
@@ -219,7 +217,7 @@ function parseElement(text: string): Element | null {
   const nodes = childrenOf(text, 0, text.length);
   const node = nodes[0];
   if (!node) return null;
-  const head = new RegExp(TOKEN_SOURCE.source).exec(text);
+  const head = new RegExp(TOKEN_SOURCE.source).exec(text.slice(node.start, node.end));
   return {
     prefix: head?.[2] ?? 'w',
     name: node.name,
@@ -399,7 +397,7 @@ function replaceRange(sheet: Sheet, start: number, end: number, text: string): s
 /* ------------------------------------------------------------------ */
 
 /** ההצהרות של רמה אחת — `rPr` ו-`pPr` — כ-`StyleFormat` חלקי. */
-function formatOfLevel(rPr: Element | null, pPr: Element | null): StyleFormat {
+function formatOfLevel(rPr: Element | null, pPr: Element | null, rtl = false, complex = true): StyleFormat {
   const format: StyleFormat = {};
   if (rPr) {
     const fonts = childText(rPr, 'rFonts');
@@ -415,7 +413,7 @@ function formatOfLevel(rPr: Element | null, pPr: Element | null): StyleFormat {
     const size = childValue(rPr, 'szCs') ?? childValue(rPr, 'sz');
     if (size !== null && Number.isFinite(Number(size))) format.fontSizePt = Number(size) / 2;
     const toggle = (cs: string, latin: string): boolean | undefined => {
-      const text = childText(rPr, cs) ?? childText(rPr, latin);
+      const text = childText(rPr, complex ? cs : latin);
       return text === null ? undefined : isOn(parseElement(text)?.attrs ?? '');
     };
     const bold = toggle('bCs', 'b');
@@ -429,7 +427,7 @@ function formatOfLevel(rPr: Element | null, pPr: Element | null): StyleFormat {
   }
   if (pPr) {
     const jc = childValue(pPr, 'jc');
-    const alignment = jc === null ? undefined : alignmentOfJc(jc);
+    const alignment = jc === null ? undefined : alignmentOfJc(jc, rtl);
     if (alignment) format.alignment = alignment;
     const spacing = childText(pPr, 'spacing');
     if (spacing) {
@@ -467,13 +465,49 @@ function levelsOf(element: Element | null): { rPr: Element | null; pPr: Element 
   return { rPr: rPr ? parseElement(rPr) : null, pPr: pPr ? parseElement(pPr) : null };
 }
 
+/** Effective bidi follows docDefaults and the basedOn chain, including explicit false. */
+function styleIsRtl(sheet: Sheet, id: string | null): boolean {
+  const chain: Node[] = [];
+  const seen = new Set<string>();
+  for (let current = id; current && !seen.has(current); ) {
+    seen.add(current);
+    const node = findStyle(sheet, current);
+    if (!node) break;
+    chain.unshift(node);
+    current = infoOf(sheet, node).basedOn;
+  }
+  const root = parseElement(sheet.xml);
+  const defaults = root && childText(root, 'docDefaults');
+  const wrapper = defaults && childText(parseElement(defaults)!, 'pPrDefault');
+  const defaultsPr = wrapper && childText(parseElement(wrapper)!, 'pPr');
+  let rtl = false;
+  for (const pPr of [defaultsPr && parseElement(defaultsPr), ...chain.map(node =>
+    levelsOf(parseElement(sheet.xml.slice(node.start, node.end))).pPr)]) {
+    const bidi = pPr && childText(pPr, 'bidi');
+    if (bidi) rtl = isOn(parseElement(bidi)?.attrs ?? '');
+  }
+  return rtl;
+}
+
+/** Only changed style definitions are imported; defaults and unrelated styles stay live. */
+export function changedStyleDefinitions(before: string, after: string): string | null {
+  const oldSheet = readSheet(before);
+  const sheet = readSheet(after);
+  if (!oldSheet || !sheet) return null;
+  const originals = new Map(oldSheet.styles.map(node => [styleIdOf(node), before.slice(node.start, node.end)]));
+  const changed = sheet.styles.filter(node => originals.get(styleIdOf(node)) !== after.slice(node.start, node.end));
+  const root = parseElement(after);
+  if (!root) return null;
+  return serialize({ ...root, inner: changed.map(node => after.slice(node.start, node.end)).join('') });
+}
+
 /** מה שהסגנון עצמו מצהיר, בלי ירושה. */
 export function readOwnFormat(stylesXml: string, id: string): StyleFormat | null {
   const sheet = readSheet(stylesXml);
   const node = sheet ? findStyle(sheet, id) : undefined;
   if (!sheet || !node) return null;
   const { rPr, pPr } = levelsOf(parseElement(sheet.xml.slice(node.start, node.end)));
-  return formatOfLevel(rPr, pPr);
+  return formatOfLevel(rPr, pPr, styleIsRtl(sheet, id));
 }
 
 /**
@@ -481,7 +515,7 @@ export function readOwnFormat(stylesXml: string, id: string): StyleFormat | null
  * מהשורש אל הסגנון. זה מה שהדיאלוג מציג — „גודל: 16” של כותרת שאינה מצהירה
  * גודל ויורשת אותו מ„רגיל” הוא מה שהמשתמש רואה בעמוד.
  */
-export function resolveFormat(stylesXml: string, id: string): StyleFormat {
+function resolveScriptFormat(stylesXml: string, id: string, complex: boolean): StyleFormat {
   const sheet = readSheet(stylesXml);
   if (!sheet) return {};
 
@@ -496,6 +530,7 @@ export function resolveFormat(stylesXml: string, id: string): StyleFormat {
   }
 
   let format: StyleFormat = {};
+  const rtl = styleIsRtl(sheet, id);
   const defaults = childrenOf(sheet.xml, sheet.innerStart, sheet.innerEnd).find((node) => node.name === 'docDefaults');
   if (defaults) {
     const parts = childrenOf(sheet.xml, defaults.innerStart, defaults.innerEnd);
@@ -506,13 +541,110 @@ export function resolveFormat(stylesXml: string, id: string): StyleFormat {
       const text = element ? childText(element, child) : null;
       return text ? parseElement(text) : null;
     };
-    format = formatOfLevel(inner('rPrDefault', 'rPr'), inner('pPrDefault', 'pPr'));
+    format = formatOfLevel(inner('rPrDefault', 'rPr'), inner('pPrDefault', 'pPr'), rtl, complex);
   }
   for (const node of chain) {
     const { rPr, pPr } = levelsOf(parseElement(sheet.xml.slice(node.start, node.end)));
-    format = { ...format, ...formatOfLevel(rPr, pPr) };
+    const own = formatOfLevel(rPr, pPr, rtl, complex);
+    // In named styles, true toggles inherited bold/italic; false leaves them unchanged (§17.7.3).
+    for (const key of ['bold', 'italic'] as const) {
+      if (own[key] !== undefined) own[key] = own[key] ? !format[key] : (format[key] ?? false);
+    }
+    format = { ...format, ...own };
   }
   return format;
+}
+
+export function resolveFormat(stylesXml: string, id: string): StyleFormat {
+  return resolveScriptFormat(stylesXml, id, true);
+}
+
+interface InheritedRuns { latin: StyleFormat; complex: StyleFormat }
+function inheritedRuns(xml: string, basedOn: string | null): InheritedRuns {
+  return { latin: resolveScriptFormat(xml, basedOn ?? '', false), complex: resolveScriptFormat(xml, basedOn ?? '', true) };
+}
+
+/** The pinned browser renderer uses last-write-wins for named-style toggles.
+ * Refuse NEW Word/renderer disagreements before importing any definitions.
+ * Resolve both graphs with memoization: work scales with stylesheet size, not body size.
+ */
+export function liveStyleTogglesSupported(beforeXml: string, afterXml: string, edit: StyleEdit, editedId: string): boolean {
+  const before = readSheet(beforeXml);
+  const after = readSheet(afterXml);
+  if (!before || !after) return false;
+  type Toggle = 'b' | 'bCs' | 'i' | 'iCs';
+  type State = Record<Toggle, { word: boolean; renderer: boolean }>;
+  const keys: Toggle[] = ['b', 'bCs', 'i', 'iCs'];
+  const raw = (rPr: Element | null, key: Toggle): boolean | undefined => {
+    const text = rPr && childText(rPr, key);
+    return text ? isOn(parseElement(text)?.attrs ?? '') : undefined;
+  };
+  const graph = (sheet: Sheet) => {
+    const root = parseElement(sheet.xml);
+    const defaultsXml = root && childText(root, 'docDefaults');
+    const defaults = defaultsXml && parseElement(defaultsXml);
+    const wrapperXml = defaults && childText(defaults, 'rPrDefault');
+    const wrapper = wrapperXml && parseElement(wrapperXml);
+    const rPrXml = wrapper && childText(wrapper, 'rPr');
+    const rPr = rPrXml ? parseElement(rPrXml) : null;
+    const initial = Object.fromEntries(keys.map(key => {
+      const value = raw(rPr, key) ?? false;
+      return [key, { word: value, renderer: value }];
+    })) as State;
+    const definitions = new Map(sheet.styles.map(node => {
+      const element = parseElement(sheet.xml.slice(node.start, node.end));
+      return [styleIdOf(node), { parent: element ? childValue(element, 'basedOn') : null, rPr: levelsOf(element).rPr }];
+    }));
+    const cached = new Map<string, State | null>();
+    const resolve = (id: string, path = new Set<string>()): State | null => {
+      if (cached.has(id)) return cached.get(id)!;
+      if (path.has(id)) return null;
+      const own = definitions.get(id);
+      if (!own) return initial;
+      const next = new Set(path).add(id);
+      const parent = own.parent ? resolve(own.parent, next) : initial;
+      if (!parent) { cached.set(id, null); return null; }
+      const state = Object.fromEntries(keys.map(key => {
+        const value = raw(own.rPr, key);
+        return [key, {
+          word: value === true ? !parent[key].word : parent[key].word,
+          renderer: value === undefined ? parent[key].renderer : value,
+        }];
+      })) as State;
+      cached.set(id, state);
+      return state;
+    };
+    return { definitions, resolve };
+  };
+  const old = graph(before);
+  const current = graph(after);
+  const originals = new Map(before.styles.map(node => [styleIdOf(node), beforeXml.slice(node.start, node.end)]));
+  const affected = new Set(after.styles.filter(node => originals.get(styleIdOf(node)) !== afterXml.slice(node.start, node.end)).map(styleIdOf));
+  // A base edit can introduce a disagreement in a descendant that wasn't written.
+  const children = new Map<string, string[]>();
+  for (const [id, definition] of current.definitions) {
+    if (definition.parent) {
+      const siblings = children.get(definition.parent) ?? [];
+      if (!children.has(definition.parent)) children.set(definition.parent, siblings);
+      siblings.push(id);
+    }
+  }
+  const pending = [...affected];
+  while (pending.length) for (const id of children.get(pending.pop()!) ?? []) {
+    if (!affected.has(id)) { affected.add(id); pending.push(id); }
+  }
+  for (const id of affected) {
+    const wanted = current.resolve(id);
+    if (!wanted) return false;
+    const previous = old.definitions.has(id) ? old.resolve(id) : null;
+    for (const key of keys) {
+      if (wanted[key].word === wanted[key].renderer) continue;
+      const requested = id === editedId && (edit.kind === 'create' || edit.kind === 'modify') &&
+        has(edit.format, key.startsWith('b') ? 'bold' : 'italic');
+      if (requested || !previous || previous[key].word !== wanted[key].word || previous[key].renderer !== wanted[key].renderer) return false;
+    }
+  }
+  return true;
 }
 
 /* ------------------------------------------------------------------ */
@@ -532,7 +664,7 @@ function has(format: StyleFormat, key: keyof StyleFormat): boolean {
 }
 
 /** מחילה את שדות הריצה על `rPr`. */
-function patchRunProperties(rPr: Element, format: StyleFormat): Element {
+function patchRunProperties(rPr: Element, format: StyleFormat, inherited: InheritedRuns): Element {
   const p = rPr.prefix;
   let out = rPr;
   const set = (name: string, text: string | null): void => {
@@ -567,10 +699,11 @@ function patchRunProperties(rPr: Element, format: StyleFormat): Element {
   for (const [key, latin, complex] of toggles) {
     if (!has(format, key)) continue;
     const value = format[key];
-    const text = (name: string): string | null =>
-      value === null ? null : value ? leaf(p, name) : leaf(p, name, '0');
-    set(latin, text(latin));
-    set(complex, text(complex));
+    const text = (name: string, baseline: StyleFormat): string | null =>
+      value === null || (value === true && baseline[key] === true) ? null
+        : value !== (baseline[key] ?? false) ? leaf(p, name) : leaf(p, name, '0');
+    set(latin, text(latin, inherited.latin));
+    set(complex, text(complex, inherited.complex));
   }
 
   if (has(format, 'underline')) {
@@ -585,7 +718,7 @@ function patchRunProperties(rPr: Element, format: StyleFormat): Element {
 }
 
 /** מחילה את שדות הפסקה על `pPr`. */
-function patchParagraphProperties(pPr: Element, format: StyleFormat): Element {
+function patchParagraphProperties(pPr: Element, format: StyleFormat, rtl: boolean): Element {
   const p = pPr.prefix;
   let out = pPr;
 
@@ -593,7 +726,7 @@ function patchParagraphProperties(pPr: Element, format: StyleFormat): Element {
     out = withChild(
       out,
       'jc',
-      format.alignment === null ? null : leaf(p, 'jc', JC_FOR_ALIGNMENT[format.alignment as StyleAlignment]),
+      format.alignment === null ? null : leaf(p, 'jc', rtl ? JC_FOR_ALIGNMENT[format.alignment as StyleAlignment] : ({ right: 'right', left: 'left', center: 'center', justify: 'both' } as const)[format.alignment as StyleAlignment]),
       PPR_ORDER,
     );
   }
@@ -669,16 +802,16 @@ function hasRunFields(format: StyleFormat): boolean {
 }
 
 /** מחילה עיצוב על אלמנט `w:style` שלם. `rPr`/`pPr` ריקים נמחקים. */
-function patchStyleElement(style: Element, format: StyleFormat, kind: string): Element {
+function patchStyleElement(style: Element, format: StyleFormat, kind: string, rtl = false, inherited: InheritedRuns = { latin: {}, complex: {} }): Element {
   let out = style;
   if (hasRunFields(format)) {
     const text = childText(out, 'rPr');
-    const rPr = patchRunProperties((text && parseElement(text)) || emptyElement(out.prefix, 'rPr'), format);
+    const rPr = patchRunProperties((text && parseElement(text)) || emptyElement(out.prefix, 'rPr'), format, inherited);
     out = withChild(out, 'rPr', rPr.inner ? serialize(rPr) : null, STYLE_ORDER);
   }
   if (kind === 'paragraph' && hasParagraphFields(format)) {
     const text = childText(out, 'pPr');
-    const pPr = patchParagraphProperties((text && parseElement(text)) || emptyElement(out.prefix, 'pPr'), format);
+    const pPr = patchParagraphProperties((text && parseElement(text)) || emptyElement(out.prefix, 'pPr'), format, rtl);
     out = withChild(out, 'pPr', pPr.inner ? serialize(pPr) : null, STYLE_ORDER);
   }
   return out;
@@ -740,7 +873,7 @@ export function editStyles(stylesXml: string, edit: StyleEdit): StyleEditResult 
       };
       style = setReference(style, 'basedOn', edit.basedOn);
       if (edit.type === 'paragraph') style = setReference(style, 'next', edit.next ?? id);
-      style = patchStyleElement(style, edit.format, edit.type);
+      style = patchStyleElement(style, edit.format, edit.type, styleIsRtl(sheet, edit.basedOn), inheritedRuns(stylesXml, edit.basedOn));
       const xml = replaceRange(sheet, sheet.innerEnd, sheet.innerEnd, serialize(style));
       return { ok: true, xml, id, removed: [] };
     }
@@ -752,7 +885,10 @@ export function editStyles(stylesXml: string, edit: StyleEdit): StyleEditResult 
       if (edit.basedOn && edit.basedOn !== info.basedOn) {
         if (!findStyle(sheet, edit.basedOn)) return fail('סגנון הבסיס אינו במסמך');
         // מעגל בשרשרת: Word מסרב לו, ומנוע שמתעלם ממנו נתקע בלולאה.
+        const visited = new Set<string>();
         for (let current: string | null = edit.basedOn; current; ) {
+          if (visited.has(current)) return fail('שרשרת סגנונות הבסיס מכילה מעגל');
+          visited.add(current);
           if (current === edit.id) return fail('סגנון אינו יכול להיות מבוסס על עצמו');
           const parent = findStyle(sheet, current);
           current = parent ? infoOf(sheet, parent).basedOn : null;
@@ -763,7 +899,7 @@ export function editStyles(stylesXml: string, edit: StyleEdit): StyleEditResult 
       if (!style) return fail('הסגנון אינו קריא');
       style = setReference(style, 'basedOn', edit.basedOn);
       if (info.type === 'paragraph') style = setReference(style, 'next', edit.next);
-      style = patchStyleElement(style, edit.format, info.type);
+      style = patchStyleElement(style, edit.format, info.type, styleIsRtl(readSheet(replaceRange(sheet, node.start, node.end, serialize(style)))!, edit.id), inheritedRuns(stylesXml, edit.basedOn === undefined ? info.basedOn : edit.basedOn));
       let xml = replaceRange(sheet, node.start, node.end, serialize(style));
 
       // הסגנון המקושר (`Heading1Char` של `Heading1`) נושא את אותם מאפייני
@@ -778,7 +914,7 @@ export function editStyles(stylesXml: string, edit: StyleEdit): StyleEditResult 
           for (const key of ['fontFamily', 'fontSizePt', 'bold', 'italic', 'underline', 'color'] as const) {
             if (has(edit.format, key)) (runOnly as Record<string, unknown>)[key] = edit.format[key];
           }
-          xml = replaceRange(linkedSheet, linkedNode.start, linkedNode.end, serialize(patchStyleElement(linked, runOnly, 'character')));
+          xml = replaceRange(linkedSheet, linkedNode.start, linkedNode.end, serialize(patchStyleElement(linked, runOnly, 'character', false, inheritedRuns(xml, infoOf(linkedSheet, linkedNode).basedOn))));
         }
       }
       return { ok: true, xml, id: edit.id, removed: [] };

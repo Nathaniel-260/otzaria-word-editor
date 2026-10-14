@@ -59,18 +59,17 @@ export const STYLE_GALLERY: InjectionKey<Ref<StyleGalleryState>> = Symbol('style
 /**
  * גיליון הסגנונות של המסמך הפעיל — קריאה וכתיבה של סגנון בעל שם.
  *
- * למנוע אין API לכך (ראו engine/docx-style-edit.ts), ולכן הכתיבה היא ייצוא,
- * עריכת `styles.xml`, ופתיחה מחדש של המסמך באותו טאב עם הסמן והזום. רק
- * המעטפת יודעת לפתוח מסמך לתוך הטאב, ולכן זה מפתח ולא מודול שהרצועה קוראת.
+ * המעטפת קוראת את הגיליון הטרי ומחילה רק הגדרות שהשתנו דרך templates.apply,
+ * כטרנזקציה על המופע המקורי, עם הגנת revision. תוכן והיסטוריה נשמרים.
  */
 export interface StyleDocumentHandle {
   /** ‏`styles.xml` של המסמך כפי שהוא עכשיו, או `null` כשאין מסמך או שהייצוא נכשל. */
   readStyles(): Promise<string | null>;
   /**
-   * מחילה עריכה וטוענת את המסמך מחדש. `applyToSelection` — אחרי הטעינה, להחיל
+   * מחילה עריכה בלי להחליף תוכן או היסטוריה. `applyToSelection` — להחיל
    * את הסגנון על הפסקה שבסמן (סגנון חדש מהבחירה).
    */
-  applyEdit(edit: StyleEdit, options?: { applyToSelection?: boolean }): Promise<CommandOutcome>;
+  applyEdit(edit: StyleEdit, options?: { applyToSelection?: boolean }): Promise<CommandOutcome & { styleId?: string }>;
 }
 
 export const STYLE_DOCUMENT: InjectionKey<StyleDocumentHandle> = Symbol('styleDocument');

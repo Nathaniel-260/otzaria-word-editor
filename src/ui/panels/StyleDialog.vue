@@ -32,15 +32,6 @@
       </div>
 
       <div class="sd-body">
-        <!-- מחיקה: שורה אחת ושני כפתורים. -->
-        <p
-          v-if="mode === 'delete'"
-          class="sd-line"
-        >
-          למחוק את „{{ styleName }}”? פסקאות בסגנון הזה יחזרו ל„רגיל”.
-        </p>
-
-        <template v-else>
           <div class="sd-row">
             <label
               for="sd-name"
@@ -348,10 +339,9 @@
               </div>
             </div>
             <p class="sd-note">
-              השינוי חל על כל הפסקאות בסגנון ונשמר במסמך. היסטוריית הביטול מתאפסת.
+              השינוי חל על כל הפסקאות בסגנון ונשמר במסמך. אפשר לבטל אותו באמצעות „בטל”.
             </p>
           </template>
-        </template>
 
         <p
           v-if="error || invalid"
@@ -371,7 +361,7 @@
           @pointerdown.prevent
           @click="onSubmit"
         >
-          {{ mode === 'delete' ? 'מחק' : 'אישור' }}
+          אישור
         </button>
         <button
           type="button"
@@ -388,7 +378,7 @@
 
 <script setup lang="ts">
 /**
- * „שנה סגנון” / „צור סגנון” / שינוי שם / מחיקה — הדיאלוג בלבד.
+ * „שנה סגנון” / „צור סגנון” / שינוי שם — הדיאלוג בלבד.
  *
  * הדיאלוג מציג ערכים שלמים (העיצוב האפקטיבי, כולל ירושה) ומחזיר ערכים
  * שלמים. מה מתוכם נכתב לסגנון — רק מה ששונה מהירושה — מחושב אצל מי שפתח
@@ -404,7 +394,7 @@ import { useFamilyPicker } from '../../composables/font-family-options';
 import { BODY_TEXT_LEVEL, type StyleAlignment, type StyleFormat } from '../../engine/docx-style-edit';
 import { comboFromEvent, comboLabel, type KeyCombo } from '../shortcuts/combo';
 
-export type StyleDialogMode = 'modify' | 'create' | 'rename' | 'delete';
+export type StyleDialogMode = 'modify' | 'create' | 'rename';
 
 export interface StyleChoice {
   id: string;
@@ -535,7 +525,7 @@ function onRecorderKey(event: KeyboardEvent): void {
 let shownColor = '';
 let shownAlignment: StyleAlignment = 'right';
 
-const short = computed(() => props.mode === 'rename' || props.mode === 'delete');
+const short = computed(() => props.mode === 'rename');
 
 const title = computed(() => {
   switch (props.mode) {
@@ -543,8 +533,6 @@ const title = computed(() => {
       return 'סגנון חדש';
     case 'rename':
       return 'שינוי שם סגנון';
-    case 'delete':
-      return 'מחיקת סגנון';
     default:
       return `שינוי הסגנון „${props.styleName}”`;
   }
@@ -611,7 +599,6 @@ function parse(value: string | number): number | null {
 }
 
 const invalid = computed<string | null>(() => {
-  if (props.mode === 'delete') return null;
   if (name.value.trim() === '') return 'לסגנון חייב להיות שם.';
   if (short.value) return null;
   const size = parse(fontSize.value);
@@ -690,7 +677,12 @@ function onSubmit(): void {
 <style scoped>
 .style-dialog {
   position: fixed;
-  top: 120px;
+  --dialog-top: min(120px, 15vh);
+  top: var(--dialog-top);
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - var(--dialog-top) - 16px);
+  overflow: hidden;
   inset-inline-start: 40px;
   z-index: 2000;
   background: var(--color-surface);
@@ -708,6 +700,7 @@ function onSubmit(): void {
 }
 
 .sd-header {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -742,6 +735,8 @@ function onSubmit(): void {
 }
 
 .sd-body {
+  min-height: 0;
+  overflow-y: auto;
   padding: 12px;
   display: flex;
   flex-direction: column;
@@ -897,6 +892,7 @@ function onSubmit(): void {
 }
 
 .sd-footer {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: flex-end;

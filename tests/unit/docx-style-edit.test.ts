@@ -24,7 +24,7 @@ const HEADING1 =
   '<w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/><w:basedOn w:val="Normal"/>' +
   '<w:next w:val="Normal"/><w:link w:val="Heading1Char"/><w:qFormat/>' +
   '<w:pPr><w:keepNext/><w:spacing w:before="240"/><w:outlineLvl w:val="0"/></w:pPr>' +
-  '<w:rPr><w:rFonts w:asciiTheme="majorHAnsi" w:hAnsiTheme="majorHAnsi"/><w:b/><w:sz w:val="32"/></w:rPr></w:style>';
+  '<w:rPr><w:rFonts w:asciiTheme="majorHAnsi" w:hAnsiTheme="majorHAnsi"/><w:b/><w:bCs/><w:sz w:val="32"/></w:rPr></w:style>';
 const HEADING1_CHAR =
   '<w:style w:type="character" w:customStyle="1" w:styleId="Heading1Char"><w:name w:val="Heading 1 Char"/>' +
   '<w:link w:val="Heading1"/><w:rPr><w:b/><w:sz w:val="32"/></w:rPr></w:style>';

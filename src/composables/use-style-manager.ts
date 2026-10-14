@@ -1,12 +1,12 @@
 /**
  * ניהול סגנונות מהגלריה — „שנה”, „צור”, „עדכן כך שיתאים לבחירה”, שינוי שם
- * ומחיקה. הלשונית מחזיקה רק את הדיאלוג; כל השאר כאן.
+ * לסגנון מותאם. הלשונית מחזיקה רק את הדיאלוג; כל השאר כאן.
  *
  * כל פעולה מתחילה בקריאת `styles.xml` הטרי (`readStyles`), ולא ממטמון:
  * „ברירות מחדל למסמך” ופעולות אחרות כותבות לגיליון בלי לעבור כאן, ודיאלוג
  * שנפתח על גיליון ישן היה כותב בחזרה ערכים שכבר אינם נכונים.
  */
-import { computed, inject, shallowRef } from 'vue';
+import { computed, inject, shallowRef, watch } from 'vue';
 import type { StyleCatalogItem } from 'superdoc/ui';
 import {
   COMMAND_ADAPTER,
@@ -34,6 +34,8 @@ import type { StyleChoice, StyleDialogMode, StyleDialogResult } from '../ui/pane
 import type { CommandOutcome } from '../engine/command-adapter';
 
 export interface StyleDialogState {
+  /** The originating instance; a dialog never follows the active tab. */
+  origin: object;
   mode: StyleDialogMode;
   styleId: string | null;
   styleName: string;
@@ -91,6 +93,7 @@ export function useStyleManager(activeStyleId: () => string | null) {
   const dialog = shallowRef<StyleDialogState | null>(null);
   const busy = shallowRef(false);
   const error = shallowRef<string | null>(null);
+  watch(superdoc, () => close(), { flush: 'sync' });
 
   const available = computed(() => handle !== null && superdoc.value !== null);
 
@@ -121,14 +124,19 @@ export function useStyleManager(activeStyleId: () => string | null) {
     return xml;
   }
 
+  let appliedStyleId: string | undefined;
   async function apply(edit: StyleEdit, success: string, options?: { applyToSelection?: boolean }): Promise<boolean> {
     if (!handle) return false;
+    appliedStyleId = undefined;
+    const origin = superdoc.value;
     const outcome = await handle.applyEdit(edit, options);
+    if (superdoc.value !== origin) return false;
     report(outcome, `style-${edit.kind}`);
     if (!outcome.ok) {
       error.value = outcome.message;
       return false;
     }
+    appliedStyleId = outcome.styleId;
     notify(success);
     return true;
   }
@@ -136,10 +144,11 @@ export function useStyleManager(activeStyleId: () => string | null) {
   /** פעולה מהתפריט של הגלריה. */
   async function onAction(action: StyleAction, styleId: string | null): Promise<void> {
     if (!available.value) return;
+    const origin = superdoc.value!;
     error.value = null;
     await run(async () => {
       const xml = await readSheet();
-      if (xml === null) return;
+      if (xml === null || superdoc.value !== origin) return;
       const styles = listStyles(xml);
       const id = styleId ?? activeStyleId() ?? styles.find((s) => s.type === 'paragraph' && s.isDefault)?.id ?? null;
       const info = id ? styles.find((style) => style.id === id) : undefined;
@@ -147,7 +156,10 @@ export function useStyleManager(activeStyleId: () => string | null) {
       if (action === 'create') {
         const base = info && info.type === 'paragraph' ? info : styles.find((s) => s.type === 'paragraph' && s.isDefault);
         const baseline = base ? resolveFormat(xml, base.id) : {};
+        const selection = await readSelection();
+        if (superdoc.value !== origin) return;
         dialog.value = {
+          origin,
           mode: 'create',
           styleId: null,
           styleName: nextStyleName(styles),
@@ -155,7 +167,7 @@ export function useStyleManager(activeStyleId: () => string | null) {
           styles: choicesOf(styles),
           basedOn: base?.id ?? null,
           next: null,
-          format: { ...baseline, ...withoutThemedFont(await readSelection(), baseline) },
+          format: { ...baseline, ...withoutThemedFont(selection, baseline) },
           baseline,
           xml,
           shortcut: null,
@@ -170,7 +182,9 @@ export function useStyleManager(activeStyleId: () => string | null) {
       const resolved = resolveFormat(xml, info.id);
 
       if (action === 'update') {
-        const patch = formatPatch(withoutThemedFont(await readSelection(), resolved), resolved);
+        const selection = await readSelection();
+        if (superdoc.value !== origin) return;
+        const patch = formatPatch(withoutThemedFont(selection, resolved), resolved);
         if (Object.keys(patch).length === 0) {
           notify(`„${labelOf(info)}” כבר תואם לבחירה`);
           return;
@@ -180,6 +194,7 @@ export function useStyleManager(activeStyleId: () => string | null) {
       }
 
       dialog.value = {
+        origin,
         mode: action as StyleDialogMode,
         styleId: info.id,
         styleName: action === 'rename' ? info.name : labelOf(info),
@@ -197,10 +212,9 @@ export function useStyleManager(activeStyleId: () => string | null) {
 
   async function onSubmit(result: StyleDialogResult): Promise<void> {
     const state = dialog.value;
-    if (!state) return;
+    if (!state || state.origin !== superdoc.value) { close(); return; }
     error.value = null;
-    // קיצור תפוס נבדק **לפני** שהמסמך נטען מחדש: אחרי הטעינה כבר אין דרך
-    // להחזיר את הסגנון, וחצי פעולה היא מה שהמשתמש לא ביקש.
+    // Validate the shortcut before making any document transaction.
     const comboChanged = !sameCombo(result.combo, state.shortcut);
     if (comboChanged && result.combo) {
       const problem = comboProblem(state.styleId, result.combo);
@@ -234,7 +248,7 @@ export function useStyleManager(activeStyleId: () => string | null) {
             `נוצר הסגנון „${result.name}”`,
             { applyToSelection: true },
           );
-          if (done) assignCombo(createdId, result.name);
+          if (done) assignCombo(appliedStyleId ?? createdId, result.name);
           break;
         }
         case 'modify': {
@@ -267,11 +281,6 @@ export function useStyleManager(activeStyleId: () => string | null) {
             `שם הסגנון שונה ל„${result.name}”`,
           );
           if (done) shortcuts?.renamed(state.styleId as string, result.name);
-          break;
-        case 'delete':
-          done = await apply({ kind: 'delete', id: state.styleId as string }, `הסגנון „${state.styleName}” נמחק`);
-          // כמו ב-Word: קיצור של סגנון שנמחק נמחק איתו.
-          if (done) shortcuts?.removed(state.styleId as string);
           break;
       }
       if (done) dialog.value = null;

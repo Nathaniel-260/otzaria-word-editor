@@ -127,7 +127,7 @@ import {
 } from '../../../engine/style-gallery';
 
 /** מה שהתפריט מבקש מהלשונית. „החל” מטופל כאן — הוא `select-style`. */
-export type StyleAction = 'apply' | 'update' | 'modify' | 'rename' | 'delete' | 'create';
+export type StyleAction = 'apply' | 'update' | 'modify' | 'rename' | 'create';
 
 const props = withDefaults(
   defineProps<{
@@ -138,7 +138,7 @@ const props = withDefaults(
      */
     currentStyle?: string;
     disabled?: boolean;
-    /** ניהול סגנונות (שינוי, יצירה, מחיקה) — דורש מסמך פתוח לעריכה. */
+    /** ניהול סגנונות (שינוי, יצירה ושינוי שם) — דורש מסמך פתוח לעריכה. */
     manageDisabled?: boolean;
   }>(),
   {
@@ -204,7 +204,6 @@ function cardEntries(item: StyleGalleryItem): MenuEntry[] {
     { action: 'modify', label: menuString('שנה סגנון…'), disabled: props.manageDisabled },
     // רק סגנון שהמשתמש יצר — Word אינו מוחק סגנון מובנה ואינו משנה את שמו.
     { action: 'rename', label: menuString('שנה שם…'), disabled: props.manageDisabled || !item.custom },
-    { action: 'delete', label: menuString('מחק סגנון'), disabled: props.manageDisabled || !item.custom },
   ];
 }
 

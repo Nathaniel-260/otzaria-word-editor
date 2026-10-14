@@ -1,16 +1,16 @@
 /**
  * שער סקר: ניהול סגנונות מהגלריה — „שנה”, „צור”, „עדכן כך שיתאים לבחירה”,
- * שינוי שם ומחיקה (composables/use-style-manager.ts, engine/docx-style-edit.ts).
+ * שינוי שם (composables/use-style-manager.ts, engine/docx-style-edit.ts).
  *
  * המסלול שנבדק הוא המסלול של המשתמש: לחצן ימני על כרטיס בגלריה, הדיאלוג,
- * „אישור”, ואז הייצוא-עריכה-פתיחה-מחדש באותו טאב (`applyStyleEdit` ב-App.vue).
+ * „אישור”, ואז עריכת הגדרות סגנון דרך templates.apply באותו טאב (`applyStyleEdit` ב-App.vue).
  * ההוכחות הן שלוש, ואף אחת אינה „הפקודה דיווחה הצלחה”:
  *  - הגאומטריה המצוירת (גודל מחושב, מיקום הטקסט בשורה ביחס לעמוד);
  *  - ה-OOXML: `styles.xml` ו-`document.xml` מהייצוא;
  *  - מצב המעטפת: זום, סמן, „לא נשמר”, היסטוריית ביטול.
  *
  * כל שלב רץ בדפדפן משלו: המנוע מתדרדר אחרי עשרות ייצואים באותו דף
- * (home-paragraph-qa.mjs), וכל שינוי סגנון הוא שני ייצואים ופתיחה.
+ * (home-paragraph-qa.mjs), אין פתיחה מחדש בעת עריכת סגנון.
  *
  * `QA_SAVE_DIR` — כששמור, קבצי ה-docx שנשמרו בשמירה האמיתית (Ctrl+S) נכתבים
  * לשם, לבדיקה ב-Word.
@@ -110,7 +110,7 @@ const paraBy = (files, text) => paragraphsOf(files).find((p) => p.text.includes(
 /* ------------------------------------------------------------------ */
 
 /**
- * הפסקאות המצוירות **הנראות**: פתיחה מחדש עלולה להשאיר את המסמך הקודם ב-DOM
+ * הפסקאות המצוירות **הנראות**: החלה חיה עלולה להשאיר את המסמך הקודם ב-DOM
  * (נמדד בשערים אחרים), ולכן הסינון על `offsetParent`.
  */
 const MEASURE = `(() => {
@@ -187,10 +187,10 @@ function ctxOf(app) {
   }
   const sameInstance = (tag) => js(`!!(window.__otzariaEditor && window.__otzariaEditor.superdoc && window.__otzariaEditor.superdoc.__qaTag === ${JSON.stringify(tag)})`);
 
-  async function waitReload(tag, ms = 120_000) {
+  async function waitApply(tag, ms = 120_000) {
     const r = await until(async () => {
       const same = await sameInstance(tag);
-      if (same) return false;
+      if (!same) throw new Error("style edit unexpectedly replaced the engine instance");
       const ready = await js(`!!(window.__qa && window.__qa.ready() && document.querySelector('.editor-stack .superdoc-fragment'))`);
       const dialog = await app.exists('[data-testid="style-dialog"]');
       return ready && !dialog;
@@ -273,7 +273,7 @@ function ctxOf(app) {
     for (const label of edits.buttons ?? []) await dialogButton(label);
     const tag = await markInstance();
     await ok();
-    const reload = await waitReload(tag);
+    const reload = await waitApply(tag);
     return { menu, opened: true, openMs: opened.ms, shown, reload };
   }
 
@@ -341,7 +341,7 @@ function ctxOf(app) {
     return null;
   }
 
-  return { js, J, measure, para, until, engineExport, markInstance, sameInstance, waitReload, clickSel, cardSel, gallery, activeCard,
+  return { js, J, measure, para, until, engineExport, markInstance, sameInstance, waitApply, clickSel, cardSel, gallery, activeCard,
     clickCard, cardMenu, moreMenu, menuOpen, pickMenu, waitDialog, dialogValues, fill, dialogButton, ok, modify, caretIn, selection,
     selectPara, shell, type, installSaveCapture, save };
 }
@@ -392,7 +392,7 @@ await phase('A', 'שינוי סגנון מובנה, עדכון לפי הבחיר
   await c.clickCard('כותרת 1');
   log('אחרי הקלקה על כותרת 1 — כרטיס פעיל:', await c.activeCard());
 
-  // זום 120% — כדי לראות שהוא נשמר בפתיחה מחדש.
+  // זום 120% — כדי לראות שהוא נשמר בהחלה חיה.
   await app.click('הגדל תצוגה', { after: 600 });
   await app.click('הגדל תצוגה', { after: 600 });
 
@@ -412,8 +412,8 @@ await phase('A', 'שינוי סגנון מובנה, עדכון לפי הבחיר
   const menu = await c.cardMenu('כותרת 1');
   log('תפריט כותרת 1:', JSON.stringify(menu));
   const disabled = Object.fromEntries((menu ?? []).map((m) => [m.action, m.disabled]));
-  if (menu && menu.length === 5 && disabled.rename && disabled.delete && !disabled.modify && !disabled.update && !disabled.apply)
-    report.pass('תפריט כרטיס מובנה', 'apply/update/modify זמינים, rename/delete מושבתים');
+  if (menu && menu.length === 4 && disabled.rename && !("delete" in disabled) && !disabled.modify && !disabled.update && !disabled.apply)
+    report.pass('תפריט כרטיס מובנה', 'apply/update/modify זמינים, rename מושבת; מחיקה אינה מוצגת');
   else report.fail('תפריט כרטיס מובנה', JSON.stringify(menu));
   await app.press('Escape', 'Escape', 27);
   await sleep(400);
@@ -450,8 +450,8 @@ await phase('A', 'שינוי סגנון מובנה, עדכון לפי הבחיר
   const noop = { same: await c.sameInstance(tag0), dialog: await app.exists('[data-testid="style-dialog"]'), shell: await c.shell(), msgs: await app.messages() };
   log('אישור בלי שינוי:', JSON.stringify(noop), 'undo לפני:', undoBefore);
   noop.same && !noop.dialog && noop.shell.undo === undoBefore
-    ? report.pass('אישור בלי שינוי — אין פתיחה מחדש', `אותו מופע מנוע אחרי 8s, הדיאלוג נסגר, undo=${noop.shell.undo}`)
-    : report.fail('אישור בלי שינוי — אין פתיחה מחדש', JSON.stringify(noop));
+    ? report.pass('אישור בלי שינוי — אין החלה חיה', `אותו מופע מנוע אחרי 8s, הדיאלוג נסגר, undo=${noop.shell.undo}`)
+    : report.fail('אישור בלי שינוי — אין החלה חיה', JSON.stringify(noop));
 
   /* ---- 1: שינוי כותרת 1 — 22pt, מרכז ---- */
   // הסמן הוזז ע"י הלחיצות בתפריט? מחזירים אותו למקום הידוע לפני השינוי.
@@ -468,10 +468,10 @@ await phase('A', 'שינוי סגנון מובנה, עדכון לפי הבחיר
   const r1 = await c.modify('כותרת 1', { fields: [['input[aria-label="גודל, בנקודות"]', '22']], buttons: ['מרכז'] });
   log('שינוי כותרת 1:', JSON.stringify(r1), 'סה"כ', Date.now() - t0, 'ms');
   if (!r1.reload?.ok) {
-    report.fail('שינוי כותרת 1 — פתיחה מחדש', `המסמך לא נפתח מחדש בתוך ${r1.reload?.ms}ms; הודעות: ${JSON.stringify(await app.messages())}`);
+    report.fail('שינוי כותרת 1 — החלה חיה', `המסמך לא הוחל בתוך ${r1.reload?.ms}ms; הודעות: ${JSON.stringify(await app.messages())}`);
     return;
   }
-  report.pass('שינוי כותרת 1 — פתיחה מחדש', `מופע מנוע חדש אחרי ${r1.reload.ms}ms`);
+  report.pass('שינוי כותרת 1 — החלה חיה', `אותו מופע מנוע אחרי ${r1.reload.ms}ms`);
 
   const after = { paras: await c.measure(), shell: await c.shell(), sel: await c.selection(), active: await c.activeCard() };
   log('אחרי:', JSON.stringify(after));
@@ -496,7 +496,7 @@ await phase('A', 'שינוי סגנון מובנה, עדכון לפי הבחיר
   const zoomOk = after.shell.zoom === shellBefore.zoom;
   zoomOk ? report.pass('שינוי כותרת 1 — זום נשמר', after.shell.zoom) : report.fail('שינוי כותרת 1 — זום נשמר', `${shellBefore.zoom} → ${after.shell.zoom}`);
   after.shell.dirty ? report.pass('שינוי כותרת 1 — מסומן „לא נשמר”', `dirty-indicator קיים; status=${after.shell.status}`) : report.fail('שינוי כותרת 1 — מסומן „לא נשמר”', JSON.stringify(after.shell));
-  log(`undo: לפני=${shellBefore.undo} אחרי=${after.shell.undo} (צפוי להתאפס)`);
+  log(`undo: לפני=${shellBefore.undo} אחרי=${after.shell.undo} (נשמר)`);
 
   // הסמן: אותה פסקה (לפי טקסט) ואותו היסט.
   const seg = (s) => (s?.target?.segments ?? [])[0] ?? null;
@@ -546,9 +546,9 @@ await phase('A', 'שינוי סגנון מובנה, עדכון לפי הבחיר
   const menu5 = await c.cardMenu('כותרת 1');
   const tag5 = await c.markInstance();
   await c.pickMenu('update');
-  const r5 = await c.waitReload(tag5, 120_000);
+  const r5 = await c.waitApply(tag5, 120_000);
   const after5 = await c.measure();
-  log('„עדכן”: פתיחה מחדש', JSON.stringify(r5), 'מדידה:', JSON.stringify(after5.map((p) => [p.text, p.fontSize, classify(p.lines[0])])), 'הודעות:', JSON.stringify(await app.messages()));
+  log('„עדכן”: החלה חיה', JSON.stringify(r5), 'מדידה:', JSON.stringify(after5.map((p) => [p.text, p.fontSize, classify(p.lines[0])])), 'הודעות:', JSON.stringify(await app.messages()));
   const s5 = (await c.engineExport('אחרי עדכן'))['word/styles.xml'];
   const h15 = styleXml(s5, 'Heading1');
   log('Heading1 לפני „עדכן”:', styleXml(stylesBeforeUpdate, 'Heading1'));
@@ -610,7 +610,7 @@ await phase('B', 'יישור בסגנון מול יישור ברצועה', async
     await c.caretIn(P3);
     const r = await c.modify('כותרת 1', { buttons: [label] });
     if (!r.reload?.ok) {
-      report.fail(`סגנון „${label}”`, `לא נפתח מחדש (${JSON.stringify(r)}); הודעות ${JSON.stringify(await app.messages())}`);
+      report.fail(`סגנון „${label}”`, `לא הוחל (${JSON.stringify(r)}); הודעות ${JSON.stringify(await app.messages())}`);
       continue;
     }
     const p = await c.para(P2);
@@ -654,7 +654,7 @@ await phase('C', 'הזחות בסגנון (start / שורה ראשונה / תל�
   for (const [name, fields] of cases) {
     await c.caretIn(P3);
     const r = await c.modify('כותרת 1', { fields });
-    if (!r.reload?.ok) { report.fail(`הזחה ${name}`, `לא נפתח מחדש: ${JSON.stringify(r)}`); continue; }
+    if (!r.reload?.ok) { report.fail(`הזחה ${name}`, `לא הוחל: ${JSON.stringify(r)}`); continue; }
     const p = await c.para(P2_LONG);
     const p1 = await c.para(P1);
     const files = await c.engineExport(name);
@@ -676,10 +676,10 @@ await phase('C', 'הזחות בסגנון (start / שורה ראשונה / תל�
 });
 
 /* ================================================================== */
-/* D — צור מהבחירה, שינוי שם, מחיקה                                    */
+/* D — צור מהבחירה, שינוי שם                                    */
 /* ================================================================== */
 
-await phase('D', 'צור סגנון מהבחירה, שינוי שם, מחיקה', async (app, c) => {
+await phase('D', 'צור סגנון מהבחירה, שינוי שם', async (app, c) => {
   await c.caretIn(0);
   await c.type([P1, P2, P3]);
 
@@ -722,9 +722,9 @@ await phase('D', 'צור סגנון מהבחירה, שינוי שם, מחיקה'
   await c.fill('#sd-name', 'ציטוט מקור');
   const tag = await c.markInstance();
   await c.ok();
-  const r = await c.waitReload(tag);
+  const r = await c.waitApply(tag);
   if (!r.ok) {
-    report.fail('צור — פתיחה מחדש', `לא נפתח מחדש בתוך ${r.ms}ms; דיאלוג=${JSON.stringify(await c.dialogValues())} הודעות=${JSON.stringify(await app.messages())}`);
+    report.fail('צור — החלה חיה', `לא הוחל בתוך ${r.ms}ms; דיאלוג=${JSON.stringify(await c.dialogValues())} הודעות=${JSON.stringify(await app.messages())}`);
     return;
   }
   await sleep(1500);
@@ -756,7 +756,7 @@ await phase('D', 'צור סגנון מהבחירה, שינוי שם, מחיקה'
   const m = await c.cardMenu('ציטוט מקור');
   log('תפריט הסגנון החדש:', JSON.stringify(m));
   (m ?? []).every((e) => !e.disabled)
-    ? report.pass('תפריט כרטיס מותאם', 'rename/delete זמינים')
+    ? report.pass('תפריט כרטיס מותאם', 'rename זמין; מחיקה אינה מוצגת')
     : report.fail('תפריט כרטיס מותאם', JSON.stringify(m));
   await c.pickMenu('rename');
   await c.waitDialog();
@@ -764,7 +764,7 @@ await phase('D', 'צור סגנון מהבחירה, שינוי שם, מחיקה'
   await c.fill('#sd-name', 'ציטוט מקור חדש');
   const tagR = await c.markInstance();
   await c.ok();
-  const rr = await c.waitReload(tagR);
+  const rr = await c.waitApply(tagR);
   const cardsR = await c.gallery();
   const filesR = await c.engineExport('אחרי שינוי שם');
   const renamed = styleXml(filesR['word/styles.xml'], id);
@@ -773,27 +773,7 @@ await phase('D', 'צור סגנון מהבחירה, שינוי שם, מחיקה'
     ? report.pass('שינוי שם', `אותו id (${id}), שם חדש בגיליון ובגלריה, הפסקה עדיין בסגנון`)
     : report.fail('שינוי שם', `reload=${rr.ok}; ${renamed}; כרטיסים ${cardsR.map((g) => g.label).join(', ')}; pStyle=${paraBy(filesR, P3)?.pStyle}`);
 
-  /* ---- מחיקה ---- */
-  await c.cardMenu('ציטוט מקור חדש');
-  await c.pickMenu('delete');
-  await c.waitDialog();
-  const dd = await c.dialogValues();
-  log('דיאלוג מחיקה:', JSON.stringify(dd), await c.J(`JSON.stringify(document.querySelector('[data-testid="style-dialog"] .sd-line')?.textContent?.trim() ?? null)`));
-  const tagD = await c.markInstance();
-  await c.ok();
-  const rd = await c.waitReload(tagD);
-  await sleep(1500);
-  const cardsD = await c.gallery();
-  const filesD = await c.engineExport('אחרי מחיקה');
-  const p3d = paraBy(filesD, P3);
-  const left = (filesD['word/document.xml'].match(new RegExp(`w:val="${id}"`, 'g')) ?? []).length;
-  await c.caretIn(P3);
-  const activeD = await c.activeCard();
-  log('אחרי מחיקה:', JSON.stringify(rd), 'כרטיסים', JSON.stringify(cardsD.map((g) => g.label)), 'P3', p3d?.pPr, 'הפניות שנותרו', left, 'פעיל', activeD);
-  rd.ok && !styleXml(filesD['word/styles.xml'], id) && !cardsD.some((g) => g.label.startsWith('ציטוט מקור')) && left === 0 && !p3d?.pStyle
-    ? report.pass('מחיקה', `הסגנון נמחק מהגיליון ומהגלריה, אין pStyle="${id}" ב-document.xml, P3 ללא pStyle (רגיל), כרטיס פעיל „${activeD}”`)
-    : report.fail('מחיקה', `reload=${rd.ok}; style נשאר=${!!styleXml(filesD['word/styles.xml'], id)}; כרטיסים ${cardsD.map((g) => g.label).join(', ')}; הפניות ${left}; P3 pStyle=${p3d?.pStyle}`);
-  await c.save('D-after-delete');
+
 });
 
 /* ================================================================== */
@@ -877,7 +857,7 @@ await phase('F', '„צור” על „רגיל” עם ריווח של Word —
   await c.fill('#sd-name', 'בדיקת ריווח');
   const tag = await c.markInstance();
   await c.ok();
-  const r = await c.waitReload(tag);
+  const r = await c.waitApply(tag);
   const files = await c.engineExport('F');
   const created = styleByName(files['word/styles.xml'], 'בדיקת ריווח');
   const after = await c.measure();
@@ -975,8 +955,8 @@ await phase('G', 'רמת חלוקה בסגנון מותאם — styles.xml ות�
   await c.fill('#sd-outline', '0');
   const tag = await c.markInstance();
   await c.ok();
-  const r = await c.waitReload(tag);
-  if (!r.ok) { report.fail('רמת חלוקה — יצירה', `לא נפתח מחדש: ${JSON.stringify(await c.dialogValues())}`); return; }
+  const r = await c.waitApply(tag);
+  if (!r.ok) { report.fail('רמת חלוקה — יצירה', `לא הוחל: ${JSON.stringify(await c.dialogValues())}`); return; }
   const files = await c.engineExport('G');
   const st = styleByName(files['word/styles.xml'], 'כותרת מקור');
   const id = idOf(st);
@@ -1122,10 +1102,10 @@ if (savedShortcutStorage) {
 }
 
 /* ================================================================== */
-/* I — שינוי שם ומחיקה מסנכרנים את הקיצור                               */
+/* I — שינוי שם מסנכרנים את הקיצור                               */
 /* ================================================================== */
 
-await phase('I', 'קיצור לסגנון מותאם — שינוי שם ומחיקה', async (app, c) => {
+await phase('I', 'קיצור לסגנון מותאם — שינוי שם', async (app, c) => {
   await c.caretIn(0);
   await c.type([P1, P2, P3]);
   await c.caretIn(P3);
@@ -1137,7 +1117,7 @@ await phase('I', 'קיצור לסגנון מותאם — שינוי שם ומח�
   log('הקלטה ביצירה:', JSON.stringify(rec));
   let tag = await c.markInstance();
   await c.ok();
-  let r = await c.waitReload(tag);
+  let r = await c.waitApply(tag);
   let list = await managerList(app, c);
   log('אחרי יצירה:', JSON.stringify(r), JSON.stringify(list), JSON.stringify(await storedShortcuts(c)));
   const created = (list ?? []).find((e) => e.combo === COMBO_W.label);
@@ -1162,7 +1142,7 @@ await phase('I', 'קיצור לסגנון מותאם — שינוי שם ומח�
   await c.fill('#sd-name', 'ציטוט מקור חדש');
   tag = await c.markInstance();
   await c.ok();
-  r = await c.waitReload(tag);
+  r = await c.waitApply(tag);
   list = await managerList(app, c);
   log('אחרי שינוי שם:', JSON.stringify(r), JSON.stringify(list));
   const renamed = (list ?? []).find((e) => e.combo === COMBO_W.label);
@@ -1170,18 +1150,7 @@ await phase('I', 'קיצור לסגנון מותאם — שינוי שם ומח�
     ? report.pass('קיצור — עוקב אחרי שינוי שם', `${renamed.name} | ${renamed.summary}`)
     : report.fail('קיצור — עוקב אחרי שינוי שם', JSON.stringify(renamed ?? list));
 
-  await c.cardMenu('ציטוט מקור חדש');
-  await c.pickMenu('delete');
-  await c.waitDialog();
-  tag = await c.markInstance();
-  await c.ok();
-  r = await c.waitReload(tag);
-  list = await managerList(app, c);
-  const stored = await storedShortcuts(c);
-  log('אחרי מחיקה:', JSON.stringify(r), JSON.stringify(list), JSON.stringify(stored));
-  !(list ?? []).some((e) => e.combo === COMBO_W.label) && !JSON.stringify(stored ?? '').includes('KeyW')
-    ? report.pass('קיצור — נמחק עם הסגנון', `הרשימה: ${JSON.stringify(list)}; באחסון: ${JSON.stringify(stored)}`)
-    : report.fail('קיצור — נמחק עם הסגנון', `הרשימה: ${JSON.stringify(list)}; באחסון: ${JSON.stringify(stored)}`);
+
 });
 
 process.exit(report.print() > 0 ? 1 : 0);

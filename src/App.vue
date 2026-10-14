@@ -401,8 +401,9 @@ import {
   STYLE_GALLERY,
   STYLE_SHORTCUTS,
 } from './composables/keys';
-import { editDocxStyles, readDocxStyles } from './engine/docx-style-package';
+import { readDocxStyles } from './engine/docx-style-package';
 import type { StyleEdit } from './engine/docx-style-edit';
+import { applyLiveStyleEdit, styleRevision } from './engine/live-style-edit';
 import { ACTIVE_SUPERDOC } from './engine/document-api';
 import { readDocSelection } from './engine/doc-selection';
 import { layOutTocRows } from './engine/toc';
@@ -2012,60 +2013,50 @@ async function guardHeavyAction<T>(action: () => Promise<T>): Promise<T> {
 
 provide(HEAVY_ACTION_GUARD, guardHeavyAction);
 
-/**
- * „שנה סגנון” ברמת המסמך. ראו `STYLE_DOCUMENT` ב-composables/keys.ts.
- *
- * הבייטים יוצאים בלי postflight — הם חוזרים לעורך ולא ל-Word, בדיוק כמו
- * טיוטת השחזור — ונפתחים במסלול של טיוטה: אותו קובץ, אותו יעד שמירה,
- * מסומן „לא נשמר”. זה המסלול של טאב שנרדם והתעורר (`sleepTab`), והמחיר שלו
- * זהה: היסטוריית הביטול מתאפסת. את הסמן והזום מחזיר `restoreDocumentView`.
- */
+/** Named style edits are template transactions on the originating instance, never a reopen. */
+const styleEditsInFlight = new Set<DocumentSession>();
 async function applyStyleEdit(
   edit: StyleEdit,
   options: { applyToSelection?: boolean } = {},
-): Promise<CommandOutcome> {
+): Promise<CommandOutcome & { styleId?: string }> {
   const session = activeSession.value;
   const current = swap?.current;
   if (!session || !current) return { ok: false, message: 'אין מסמך פתוח', reason: 'not-ready' };
-  if (isOpenBusy()) return { ok: false, message: 'המסמך עדיין נפתח', reason: 'not-ready' };
-
-  return guardHeavyAction(async () => {
-    let edited;
-    let caret: CaretAnchor | null = null;
-    try {
-      caret = await readCaretAnchor(current.ui, current.superdoc, null);
-      const exported = await exportDocx(current.superdoc, { postflight: false });
-      edited = await editDocxStyles(exported, edit);
-    } catch (error) {
-      console.warn('[otzaria-word] עריכת הסגנון נכשלה', error);
-      return { ok: false, message: 'עריכת הסגנון נכשלה', reason: 'threw' };
-    }
-    if (!edited.ok) return { ok: false, message: edited.message, reason: 'style-edit-refused' };
-
-    // הטאב עשוי היה להתחלף בזמן הייצוא — ואז פתיחה כאן הייתה דורסת מסמך אחר.
+  if (isOpenBusy() || styleEditsInFlight.has(session)) return { ok: false, message: 'המסמך עסוק', reason: 'not-ready' };
+  const selectionAtStart = options.applyToSelection ? JSON.stringify(current.ui.selection.getSnapshot().selectionTarget) : null;
+  styleEditsInFlight.add(session);
+  const release = session.save.hold({ maxMs: HEAVY_ACTION_HOLD_MAX_MS });
+  try {
+    // A revision protects every definition read during export, including a concurrent defaults/style edit.
+    const revision = await styleRevision(current.superdoc);
+    if (revision === null) return { ok: false, message: 'גרסת המסמך אינה זמינה', reason: 'not-ready' };
+    const xml = await readDocxStyles(await exportDocx(current.superdoc, { postflight: false }));
+    if (xml === null) return { ok: false, message: 'גיליון הסגנונות אינו קריא', reason: 'style-edit-refused' };
     if (activeSession.value !== session || swap?.current !== current) {
       return { ok: false, message: 'המסמך הוחלף באמצע הפעולה', reason: 'superseded' };
     }
-
-    const remembered = activeEntry(session.keeper.state)?.document ?? null;
-    const file = remembered ? await resolveRememberedFile(remembered) : null;
-    const opened = await openDocument(file ?? undefined, {
-      draft: edited.docx,
-      name: title.value,
-      restore: { zoom: zoom.value.value, caret },
-    });
-    if (!opened) return { ok: false, message: 'טעינת המסמך אחרי שינוי הסגנון נכשלה', reason: 'reopen-failed' };
-
-    // `markRestored` של מסלול הטיוטה מקפיא את השמירה האוטומטית עד העריכה
-    // הבאה. כאן זו **כן** עריכה של המשתמש, ולכן היא מסומנת ככזו.
-    activeSession.value?.save.markDirty();
-
-    if (options.applyToSelection && commandAdapter.value) {
+    if (options.applyToSelection && JSON.stringify(current.ui.selection.getSnapshot().selectionTarget) !== selectionAtStart) {
+      return { ok: false, message: 'הבחירה השתנתה באמצע הפעולה', reason: 'superseded' };
+    }
+    const edited = await applyLiveStyleEdit(current.superdoc, xml, edit, revision);
+    if (!edited.outcome.ok) return edited.outcome;
+    // Even if a tab changed while the worker processed the transaction, it belongs to this session.
+    session.save.markDirty();
+    if (options.applyToSelection && edited.id && activeSession.value === session && swap?.current === current && commandAdapter.value) {
+      if (JSON.stringify(current.ui.selection.getSnapshot().selectionTarget) !== selectionAtStart) {
+        return { ok: false, message: 'הסגנון נוצר, אך לא הוחל משום שהבחירה השתנתה', reason: 'selection-changed' };
+      }
       const outcome = await commandAdapter.value.run('linked-style', stylePayload(edited.id));
       if (!outcome.ok) return outcome;
     }
-    return { ok: true };
-  });
+    return { ok: true, styleId: edited.id };
+  } catch (error) {
+    console.warn('[otzaria-word] עריכת הסגנון נכשלה', error);
+    return { ok: false, message: 'עריכת הסגנון נכשלה', reason: 'threw' };
+  } finally {
+    styleEditsInFlight.delete(session);
+    release();
+  }
 }
 
 provide(STYLE_DOCUMENT, {
@@ -2430,7 +2421,7 @@ function sleepCandidate(session: DocumentSession, hasUnwrittenWork: boolean): Sl
     isActive: session === activeSession.value,
     isPending: session.pendingRestore,
     hasEngine: session.swap.current !== null,
-    isOpening: session.swap.isOpening,
+    isOpening: session.swap.isOpening || styleEditsInFlight.has(session),
     isSaving: session.save.snapshot.isSaving === true,
     hasFile: activeEntry(session.keeper.state)?.document != null,
     hasUnwrittenWork,
@@ -2603,7 +2594,7 @@ interface OpenOptions {
  * באותה שורה של 24 פיקסלים, ואין טעם שיאמרו את אותו דבר פעמיים.
  */
 async function openDocument(file?: UserFile, options: OpenOptions = {}): Promise<boolean> {
-  if (!swap) return false;
+  if (!swap || (activeSession.value && styleEditsInFlight.has(activeSession.value))) return false;
   const attempt = documentLoad.begin(
     file?.name ?? options.name ?? 'מסמך חדש',
     file || options.draft ? 'קורא את הקובץ…' : 'מכין מסמך ריק…',
@@ -3944,7 +3935,7 @@ async function onExit(): Promise<void> {
   // בזמן פתיחה אין לסגור: `openDocumentInto` כותב לטאב הפעיל לכל אורך ריצתו
   // (ראו `isOpenBusy`), וסגירתו באמצע הייתה משאירה אותה כותבת לתוך מסמך
   // מפורק. הפקד עצמו מנוטרל אז; זה הגיבוי למסלול שיגיע שלא דרכו.
-  if (isExiting.value || isOpenBusy()) return;
+  if (isExiting.value || isOpenBusy() || styleEditsInFlight.size > 0) return;
   isExiting.value = true;
   try {
 
@@ -4364,7 +4355,7 @@ async function resolveUnsavedBeforeClose(
 async function onDocumentTabClose(id: DocumentSessionId): Promise<void> {
   if (isOpenBusy()) return;
   const session = sessions.get(id);
-  if (!session) return;
+  if (!session || styleEditsInFlight.has(session)) return;
   tabClosePending = true;
   try {
     const resolution = await resolveUnsavedBeforeClose(session, 'close-tab');

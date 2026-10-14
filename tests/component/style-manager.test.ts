@@ -7,7 +7,7 @@
 import { describe, expect, it } from 'vitest';
 import HomeTab from '../../src/ui/ribbon/tabs/HomeTab.vue';
 import type { StyleGalleryState } from '../../src/engine/style-gallery';
-import { autoUnmount, mountUi, settle } from './harness';
+import { autoUnmount, mountUi, settle, createSuperdocDouble } from './harness';
 
 autoUnmount();
 
@@ -51,14 +51,14 @@ async function primary(): Promise<void> {
 }
 
 describe('תפריט הסגנון בגלריה', () => {
-  it('מחיקה ושינוי שם זמינים רק לסגנון שהמשתמש יצר', async () => {
+  it('שינוי שם זמין רק לסגנון מותאם, ומחיקה אינה מוצגת', async () => {
     const harness = mount();
     await settle();
 
     await rightClick(harness, 1);
     expect(menuItem('modify').disabled).toBe(false);
     expect(menuItem('rename').disabled).toBe(true);
-    expect(menuItem('delete').disabled).toBe(true);
+    expect(menu()?.querySelector('[data-action=delete]')).toBeNull();
 
     document.body.dispatchEvent(new Event('pointerdown', { bubbles: true }));
     await settle();
@@ -66,7 +66,7 @@ describe('תפריט הסגנון בגלריה', () => {
 
     await rightClick(harness, 2);
     expect(menuItem('rename').disabled).toBe(false);
-    expect(menuItem('delete').disabled).toBe(false);
+    expect(menu()?.querySelector('[data-action=delete]')).toBeNull();
   });
 
   it('„שנה” פותח את הדיאלוג על העיצוב האפקטיבי, ושולח רק את מה ששונה', async () => {
@@ -134,19 +134,6 @@ describe('תפריט הסגנון בגלריה', () => {
     const { edit, options } = harness.styleEdits[0];
     expect(edit).toMatchObject({ kind: 'create', name: 'ציטוט מקור', type: 'paragraph', basedOn: 'Normal' });
     expect(options).toEqual({ applyToSelection: true });
-  });
-
-  it('מחיקה מבקשת אישור, ואז שולחת', async () => {
-    const harness = mount();
-    await settle();
-    await rightClick(harness, 2);
-    menuItem('delete').click();
-    await settle();
-    await settle();
-
-    expect(dialog()?.textContent).toContain('למחוק את');
-    await primary();
-    expect(harness.styleEdits.map((entry) => entry.edit)).toEqual([{ kind: 'delete', id: 'Mine' }]);
   });
 
   it('שינוי שם שולח את השם החדש', async () => {
@@ -250,7 +237,7 @@ describe('תפריט הסגנון בגלריה', () => {
     expect(harness.shortcuts.list).toHaveLength(1);
   });
 
-  it('מחיקת סגנון מוחקת את הקיצור שלו, ושינוי שם מעדכן אותו', async () => {
+  it('שינוי שם מעדכן את הקיצור שלו', async () => {
     const combo = { code: 'KeyQ', ctrl: true, shift: true, alt: true };
     const harness = mountUi(HomeTab, {
       styleGallery: GALLERY,
@@ -269,11 +256,17 @@ describe('תפריט הסגנון בגלריה', () => {
     await primary();
     expect(harness.shortcuts.list[0]).toMatchObject({ name: 'שלי החדש', style: { id: 'Mine', name: 'שלי החדש' } });
 
-    await rightClick(harness, 2);
-    menuItem('delete').click();
-    await settle();
-    await settle();
-    await primary();
-    expect(harness.shortcuts.list).toEqual([]);
   });
+  it('a dialog closes when the document changes and cannot mutate the new document', async () => {
+    const harness = mount();
+    await settle();
+    await rightClick(harness, 1);
+    menuItem('modify').click();
+    await settle(); await settle();
+    expect(dialog()).not.toBeNull();
+    await harness.setSuperdoc(createSuperdocDouble());
+    expect(dialog()).toBeNull();
+    expect(harness.styleEdits).toEqual([]);
+  });
+
 });
