@@ -4,6 +4,7 @@
  *   node scripts/qa/autocorrect-indicator-qa.mjs
  */
 import { openApp, createReport } from './harness.mjs';
+import { loadHebrewPreset } from './autocorrect-helpers.mjs';
 
 const report = createReport('סימון תיקון אוטומטי', { strict: true });
 const app = await openApp({ name: 'acorr-ind', port: Number(process.env.QA_PORT ?? 9631) });
@@ -31,6 +32,7 @@ const state = () =>
     .then(JSON.parse);
 
 try {
+  await loadHebrewPreset(app);
   await app.js("window.otzariaAutocorrectDebug = true; window.__logs = []; var o = console.info; console.info = function(){ window.__logs.push(Array.prototype.slice.call(arguments).map(function(a){return typeof a==='string'?a:JSON.stringify(a)}).join(' ')); o.apply(console, arguments); }");
   await app.caret(0);
   await app.type('(c) ');

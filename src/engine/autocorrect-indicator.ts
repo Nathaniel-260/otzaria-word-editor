@@ -15,20 +15,19 @@
  *
  * ## המיקום נקרא מה-DOM המצויר, בכל ריחוף
  *
- * הסימון שומר רק היכן המילה בבלוק (בלוק + היסט). בכל ריחוף `locateWord` מוצא את
- * הרצף המצויר שמכיל אותה (`data-pm-start`) ומודד את האות הראשונה שלו עם `Range`.
+ * הסימון שומר היכן המילה בבלוק (בלוק + היסט). בכל ריחוף נאספים נתוני הבלוק פעם
+ * אחת, וכל מחוון בודק את מלוא הטקסט שלו ומודד אותו עם `Range`.
  * ‏`ui.selection.getAnchorRect` מחזיר מלבן של הסמן בלבד, ולכן אינו משמש כאן.
  *
  * ## מתי הסימון נעלם
  *
  * לא כשממשיכים להקליד. מילה שעדיין במקומה נשארת מסומנת (כמו ב-Word) עד שהיא
- * משתנה או נעקרת מהמקום (`locateWord` בודק את הטקסט בהיסט ואז אין סימון), או
- * שעברו עשר דקות, או שהמסמך הוחלף. עריכה לפניה שמזיזה את ההיסט מסירה אותה
- * בשקט: חוסר סימון, ולא סימון במקום שגוי. ‏„חזור” בודק שוב לפני שהוא מחליף.
+ * משתנה או שאי אפשר לאתר אותה בהקשר שנשמר, או שהמסמך הוחלף. עריכה לפניה
+ * שמזיזה את ההיסט נבדקת מול ההקשר שלה. ‏„חזור” בודק שוב לפני שהוא מחליף.
  */
 import type { AutoCorrectFix, AutoCorrectOptions, AutoCorrectRule } from './autocorrect';
 import { ICONS } from '../ui/icons/icons';
-import { blockIdAt, locateText, type LocatedWord, type TextContext } from './painted-lines';
+import { blockIdAt, createTextLocator, locateText, type LocatedWord, type TextContext } from './painted-lines';
 
 /* ------------------------------------------------------------------ */
 /* החלק הטהור: מה כתוב בתפריט, ומה „הפסק לתקן” משנה                       */
@@ -318,9 +317,11 @@ export function createAutoCorrectIndicator(
     // רק סימונים של הבלוק שמתחת לעכבר: אחרת כל תזוזה סורקת את כל הסימונים החיים.
     const block = blockIdAt(target);
     if (block === null) return null;
-    for (const item of entries) {
-      if (item.entry.blockId !== block) continue;
-      const found = locateWord(item.entry);
+    const matching = entries.filter((item) => item.entry.blockId === block);
+    if (matching.length === 0) return null;
+    const locate = createTextLocator(block, container);
+    for (const item of matching) {
+      const found = locate(item.entry.start, item.entry.replacement, item.entry.context);
       if (!found || !isOver(found, x, y)) continue;
       // עריכה לפני המילה הזיזה אותה: ההיסט החדש נשמר, ו"חזור" פועל עליו.
       if (found.start !== item.entry.start) item.entry = { ...item.entry, start: found.start };

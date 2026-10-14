@@ -238,6 +238,38 @@ describe('installAutoCorrect', () => {
     expect(engine.model.text.endsWith('©')).toBe(true);
   });
 
+  it('חלון שמתחיל באמצע מילה אינו מתקן את הסיומת שלה, גם בטבלה אישית', async () => {
+    const engine = fakeEngine();
+    install(engine, { replacements: [{ from: 'למד', to: 'למ"ד' }] });
+    const text = 'מלמד ' + 'x'.repeat(196);
+    type(engine, text);
+    await settle();
+    expect(engine.model.text).toBe(text);
+    expect(engine.inserts).toHaveLength(0);
+  });
+
+  it('קיצור שהוקלד אינו מזיז את אזור ההקלדה אל מילה קיימת', async () => {
+    const engine = fakeEngine('teh ');
+    install(engine, { replacements: [...BUILT_IN_REPLACEMENTS, { from: 'teh', to: 'the' }] });
+    type(engine, '(c)');
+    await settle();
+    expect(engine.model.text).toBe('teh ©');
+    type(engine, ' ');
+    await settle();
+    expect(engine.model.text).toBe('teh © ');
+  });
+
+  it('מילה קיימת שהושלמה ברווח עדיין מתוקנת, ואפשר לתקן גם את ההקלדה הבאה', async () => {
+    const engine = fakeEngine('longword');
+    install(engine, { replacements: [{ from: 'longword', to: 'x' }, { from: 'teh', to: 'the' }] });
+    type(engine, ' ');
+    await settle();
+    expect(engine.model.text).toBe('x ');
+    type(engine, 'teh ');
+    await settle();
+    expect(engine.model.text).toBe('x the ');
+  });
+
   it('Backspace מבטל בדיקה שכבר מתוזמנת', async () => {
     const engine = fakeEngine('');
     install(engine);

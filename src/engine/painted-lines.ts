@@ -684,6 +684,15 @@ export function locateText(
   root: ParentNode = document,
   context?: TextContext,
 ): LocatedWord | null {
+  return createTextLocator(blockId, root)(start, expected, context);
+}
+
+/** נתוני בלוק נאספים פעם אחת לסריקת ריחוף; אין לשמור את הקורא בין פריימים. */
+export function createTextLocator(
+  blockId: string,
+  root: ParentNode = document,
+): (start: number, expected: string, context?: TextContext) => LocatedWord | null {
+  const readers: Array<(start: number, expected: string, context?: TextContext) => LocatedWord | null> = [];
   const fragments = root.querySelectorAll<HTMLElement>('[data-source-node-id][data-pm-start]');
   for (const fragment of Array.from(fragments)) {
     if (fragment.getAttribute('data-source-node-id') !== blockId) continue;
@@ -707,54 +716,81 @@ export function locateText(
     }
     if (runs.length === 0) continue;
 
-    const at = (blockOffset: number): LocatedWord | null => {
-      const pm = base + blockOffset;
-      if (Number.isFinite(end) && (pm < base || pm >= end)) return null;
-      for (const run of runs) {
-        const offset = pm - run.pmStart;
-        if (offset < 0 || offset >= run.text.length) continue;
-        // מילה שחוצה גבול רצף נבדקת רק עד סוף הרצף שבו היא מתחילה.
-        const length = Math.min(expected.length, run.text.length - offset);
-        if (run.text.slice(offset, offset + length) !== expected.slice(0, length)) return null;
-        const found = rectsOf(run.node, offset, length);
-        return found ? { ...found, start: blockOffset } : null;
-      }
-      return null;
-    };
-
     // הטקסט של הפסקה כולה, מה-pm הראשון שלה — לבדיקת ההקשר ולחיפוש.
     const first = runs[0]!.pmStart;
     let paragraph = '';
-    if (context && reliable) {
+    if (reliable) {
       for (const run of runs) {
         const gap = run.pmStart - first - paragraph.length;
+        if (gap < 0) {
+          reliable = false;
+          break;
+        }
         if (gap > 0) paragraph += '\u0000'.repeat(gap);
         paragraph += run.text;
       }
     }
-    // סיומת וקידומת: מה שנרשם היה קצר כשנרשם (סוף הטקסט שנקרא), ומאז נוסף אחריו.
-    const contextOk = (from: number): boolean =>
-      !context ||
-      !reliable ||
-      (paragraph.slice(0, from).endsWith(context.before) &&
-        paragraph.slice(from + expected.length).startsWith(context.after));
 
-    // שלב 1 כולל גם את ההקשר: מילה זהה אחרת שנחתה על ההיסט הרשום אינה "היא".
-    const exact = contextOk(start - (first - base)) ? at(start) : null;
-    if (exact) return exact;
-    if (!context || !reliable) continue;
+    readers.push((start, expected, context) => {
+      if (expected.length === 0) return null;
+      const at = (blockOffset: number): LocatedWord | null => {
+        let pm = base + blockOffset;
+        if (Number.isFinite(end) && (pm < base || pm >= end)) return null;
+        const segments: { node: Node; offset: number; length: number }[] = [];
+        let matched = 0;
+        for (const run of runs) {
+          if (matched === expected.length) break;
+          const offset = pm - run.pmStart;
+          if (offset < 0) return null; // רווח PM או סוף fragment אינם המשך טקסט.
+          if (offset >= run.text.length) continue;
+          const length = Math.min(expected.length - matched, run.text.length - offset);
+          if (run.text.slice(offset, offset + length) !== expected.slice(matched, matched + length)) return null;
+          segments.push({ node: run.node, offset, length });
+          matched += length;
+          pm += length;
+        }
+        if (matched !== expected.length) return null;
+        let firstBox: Box | null = null;
+        const rects: Box[] = [];
+        for (const segment of segments) {
+          const found = rectsOf(segment.node, segment.offset, segment.length);
+          if (!found) return null;
+          firstBox ??= found.first;
+          rects.push(...found.rects);
+        }
+        return firstBox ? { first: firstBox, rects, start: blockOffset } : null;
+      };
+      // סיומת וקידומת: מה שנרשם היה קצר כשנרשם (סוף הטקסט שנקרא), ומאז נוסף אחריו.
+      const contextOk = (from: number): boolean =>
+        !context ||
+        !reliable ||
+        (paragraph.slice(0, from).endsWith(context.before) &&
+          paragraph.slice(from + expected.length).startsWith(context.after));
 
-    // שלב 2: חיפוש בכל הפסקה.
-    let best = -1;
-    for (let from = paragraph.indexOf(expected); from >= 0; from = paragraph.indexOf(expected, from + 1)) {
-      if (!contextOk(from)) continue;
-      const blockOffset = first - base + from;
-      if (best < 0 || Math.abs(blockOffset - start) < Math.abs(best - start)) best = blockOffset;
-    }
-    if (best >= 0) {
-      const moved = at(best);
-      if (moved) return moved;
-    }
+      // שלב 1 כולל גם את ההקשר: מילה זהה אחרת שנחתה על ההיסט הרשום אינה "היא".
+      const exact = contextOk(start - (first - base)) ? at(start) : null;
+      if (exact) return exact;
+      if (!context || !reliable) return null;
+
+      // שלב 2: חיפוש בכל הפסקה.
+      let best = -1;
+      for (let from = paragraph.indexOf(expected); from >= 0; from = paragraph.indexOf(expected, from + 1)) {
+        if (!contextOk(from)) continue;
+        const blockOffset = first - base + from;
+        if (best < 0 || Math.abs(blockOffset - start) < Math.abs(best - start)) best = blockOffset;
+      }
+      if (best >= 0) {
+        const moved = at(best);
+        if (moved) return moved;
+      }
+      return null;
+    });
   }
-  return null;
+  return (start, expected, context) => {
+    for (const read of readers) {
+      const found = read(start, expected, context);
+      if (found) return found;
+    }
+    return null;
+  };
 }

@@ -40,7 +40,7 @@
  *
  * - **Enter אינו מתקן את המילה האחרונה.** אחריו הסמן כבר בבלוק החדש, והמילה
  *   בבלוק הקודם. קריאה ממנו דורשת ללמוד את הבלוק הקודם מהמנוע, וזו הרחבה.
- * - **אין ביטול אחרי תיקון בלחיצה** (כפתור „בטל תיקון” של Word). Ctrl+Z הוא הדרך.
+ * ביטול בלחיצה על המחוון נעשה ב-`changeBack`, אחרי בדיקת הטקסט העדכני.
  */
 import type { CompletionDoc, CompletionTarget } from './book-completion-overlay';
 import { planAutoCorrect, type AutoCorrectFix, type AutoCorrectOptions } from './autocorrect';
@@ -118,6 +118,7 @@ interface CaretWindow {
   readonly base: number;
   readonly blockId: string;
   readonly story: unknown;
+  readonly startsInsideToken: boolean;
 }
 
 function pointAt(blockId: string, offset: number, story: unknown): SelectionPointLike {
@@ -182,7 +183,19 @@ async function readCaretWindow(doc: CompletionDoc, length: number): Promise<Wind
     };
   }
 
-  return { ok: true, window: { text, base, blockId: seed.blockId, story: seed.story } };
+  // כשהחלון אינו מתחיל בבלוק, התו הראשון הוא שומר גבול. הוא נכלל באותה
+  // קריאה של עד 200 תווים, אך אינו חלק מהטקסט שמתכננים עליו תיקונים.
+  const guarded = base > 0 && text.length > 0;
+  return {
+    ok: true,
+    window: {
+      text: guarded ? text.slice(1) : text,
+      base: base + (guarded ? 1 : 0),
+      blockId: seed.blockId,
+      story: seed.story,
+      startsInsideToken: guarded && !/\s/u.test(text[0]!),
+    },
+  };
 }
 
 /** האם התיקון נוגע באזור שהוקלד או צמוד אליו. הסף הוא תו אחד לפני תחילת האזור. */
@@ -341,8 +354,8 @@ export function installAutoCorrect(options: AutoCorrectInstallOptions): AutoCorr
       return;
     }
 
-    const { text, base, blockId, story } = result.window;
-    const planned = planAutoCorrect(text, settings, { atBlockStart: base === 0 });
+    const { text, base, blockId, story, startsInsideToken } = result.window;
+    const planned = planAutoCorrect(text, settings, { atBlockStart: base === 0, startsInsideToken });
     const fixes = planned.filter(
       (fix) => touchesTyped(fix, text.length, typed) && !wasUndone(blockId, base + fix.start, fix.original),
     );
@@ -352,6 +365,7 @@ export function installAutoCorrect(options: AutoCorrectInstallOptions): AutoCorr
     // מההיסט הגבוה לנמוך (כך `planAutoCorrect` מחזירה): החלפה לא מזיזה היסט
     // של מה שלפניה. כל הקשה בדרך פוסלת את הנותרים — הם יחושבו מחדש בשקט הבא.
     let completed = 0;
+    let currentLength = text.length;
     for (const fix of fixes) {
       if (token !== evalToken || disposed) return;
 
@@ -382,6 +396,14 @@ export function installAutoCorrect(options: AutoCorrectInstallOptions): AutoCorr
       log('הוחלף', { from: fix.original, to: fix.replacement, start: base + fix.start });
 
       remember(blockId, base + fix.start, fix.original);
+      if (token === evalToken) {
+        const delta = fix.replacement.length - (fix.end - fix.start);
+        const typedStart = currentLength - typed;
+        if (fix.start >= typedStart) typed = Math.min(AUTOCORRECT_TYPED_CAP, Math.max(0, typed + delta));
+        else if (fix.end > typedStart) typed = Math.max(0, currentLength - fix.end);
+        // תיקון שכולו לפני אזור ההקלדה מזיז את שני קצות האזור באותה מידה.
+        currentLength += delta;
+      }
       completed += 1;
     }
 

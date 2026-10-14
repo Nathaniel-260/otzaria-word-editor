@@ -79,6 +79,19 @@ describe('טבלת ההחלפות — חוקי מילה', () => {
     ],
   };
 
+  it('תומך בביטויים ומעדיף ביטוי שלם על מילה בתוכו', () => {
+    const phrases = { replacements: [{ from: 'foo', to: 'wrong' }, { from: 'foo bar', to: 'baz' }] };
+    expect(apply('foo bar ', phrases)).toBe('baz ');
+    expect(apply('foo bar', phrases)).toBe('wrong bar'); // המילה השנייה עדיין לא הושלמה.
+    expect(apply('(Foo bar), ', phrases)).toBe('(Baz), ');
+    expect(apply('xfoo bar ', phrases)).toBe('xfoo bar ');
+  });
+
+  it('סיומת של טוקן קטום אינה מילה או תחילת ביטוי', () => {
+    const phrases = { ...BASE, replacements: [{ from: 'foo bar', to: 'baz' }, { from: 'foo', to: 'bad' }] };
+    expect(planAutoCorrect('foo bar ', phrases, { startsInsideToken: true })).toEqual([]);
+  });
+
   it('מתקן רק אחרי רווח', () => {
     expect(apply('teh ', options)).toBe('the ');
   });

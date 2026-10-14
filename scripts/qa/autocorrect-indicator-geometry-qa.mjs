@@ -4,6 +4,7 @@
  * לאות הראשונה של **המילה הנכונה**.
  */
 import { openApp, createReport } from './harness.mjs';
+import { loadHebrewPreset } from './autocorrect-helpers.mjs';
 const report = createReport('גיאומטריית סימון', { strict: true });
 const app = await openApp({ name: 'acorr-geo', port: Number(process.env.QA_PORT ?? 9632) });
 
@@ -57,6 +58,7 @@ function check(name, word, chip) {
 }
 
 try {
+  await loadHebrewPreset(app);
   await app.js("window.otzariaAutocorrectDebug = true; window.__logs = []; var o = console.info; console.info = function(){ window.__logs.push(Array.prototype.slice.call(arguments).map(function(a){return typeof a==='string'?a:JSON.stringify(a)}).join(' ')); o.apply(console, arguments); }");
   await app.caret(0);
   // שתי החלפות זהות ועוד שתיים, ואז המשך הקלדה

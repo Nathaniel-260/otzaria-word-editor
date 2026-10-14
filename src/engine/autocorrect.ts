@@ -88,11 +88,12 @@ export type AutoCorrectRule =
 export interface AutoCorrectContext {
   /** הטקסט מתחיל בתחילת הבלוק — מילה ראשונה בו פותחת משפט. */
   readonly atBlockStart?: boolean;
+  /** החלון מתחיל באמצע טוקן; אין להתייחס לסיומת שלו כמילה שלמה. */
+  readonly startsInsideToken?: boolean;
 }
 
 /**
- * תקרות הטבלה. התקרה היא 5,000 ולא פחות: הרשימה של Word עצמה מונה אלפים, והיא
- * חלק מברירת המחדל (ראו `WORD_LIST` למטה). חמשת-האלפים נשארים זולים — חוקי
+ * תקרות הטבלה. התקרה מאפשרת גם רשימות אישיות גדולות שיוצאות מ-Word. חוקי
  * המילה במפה, וחוקי הסמל נסרקים על חלון של מאות תווים לכל היותר.
  */
 const MAX_ENTRIES = 5000;
@@ -110,8 +111,8 @@ const MAX_TO = 255;
  * (שורה לכל רשומה: ההחלפה, טאב, ומה שיבוא במקומה), כך שאין שלב המרה שאפשר לטעות
  * בו. `tests/unit/autocorrect-word-list.test.ts` נכשל אם שורה בו פגומה או כפולה.
  *
- * רשומה בקובץ **גוברת** על מובנית עם אותו „החלף” — היא הרשימה שבחרו, והמובנות הן
- * מה שיש כשאין.
+ * הסמלים מצורפים לברירת המחדל. הקיצורים העבריים הם רשימה אישית, ונטענים רק
+ * בבחירה מפורשת: למשל „למד” יכול להיות מילה תקינה ולא למ״ד.
  */
 export const BUILT_IN_REPLACEMENTS: readonly AutoCorrectEntry[] = [
   { from: '(c)', to: '©' },
@@ -127,9 +128,14 @@ export const BUILT_IN_REPLACEMENTS: readonly AutoCorrectEntry[] = [
   { from: '3/4', to: '¾' },
 ];
 
+/** רשימה אישית שיוצאה מ-Word. נטענת רק בבחירה מפורשת בדיאלוג. */
+export const WORD_REPLACEMENTS: readonly AutoCorrectEntry[] = parseWordList(wordListRaw).entries;
+
+// קיצורים אישיים כמו למד/טס/סל הם גם מילים תקינות. משאירים אותם לבחירה
+// מפורשת; הסמלים נשארים זמינים כברירת מחדל.
 export const DEFAULT_REPLACEMENTS: readonly AutoCorrectEntry[] = mergeEntries(
   BUILT_IN_REPLACEMENTS,
-  parseWordList(wordListRaw).entries,
+  WORD_REPLACEMENTS.filter((entry) => !/[\u05D0-\u05EA]/u.test(entry.from)),
 );
 
 /**
@@ -304,7 +310,7 @@ interface Token {
   readonly geresh: boolean;
 }
 
-function tokenize(text: string): Token[] {
+function tokenize(text: string, startsInsideToken = false): Token[] {
   const tokens: Token[] = [];
   for (const match of text.matchAll(/\S+/gu)) {
     const raw = match[0];
@@ -322,7 +328,7 @@ function tokenize(text: string): Token[] {
       coreEnd: start + lead + core.length,
       core,
       // רווח אחריה, או פיסוק שהוקלד אחרי הליבה. טוקן שהסמן נוגע בו — לא.
-      completed: tokenEnd < text.length || tail > 0,
+      completed: (tokenEnd < text.length || tail > 0) && !(startsInsideToken && start === 0),
       geresh: tailText.startsWith("'"),
     });
   }
@@ -366,6 +372,7 @@ interface CompiledTable {
   readonly exact: ReadonlyMap<string, string>;
   /** דפוסים באותיות קטנות, מותאמים בלי רגישות לרישיות. */
   readonly folded: ReadonlyMap<string, string>;
+  readonly hasPhrases: boolean;
 }
 
 /**
@@ -386,6 +393,7 @@ function compileTable(entries: readonly AutoCorrectEntry[]): CompiledTable {
     exact: new Map(words.map((entry) => [entry.from, entry.to])),
     // דפוס שיש בו אות גדולה מותאם בדיוק בלבד.
     folded: new Map(words.filter((entry) => entry.from === entry.from.toLowerCase()).map((entry) => [entry.from, entry.to])),
+    hasPhrases: words.some((entry) => /\s/u.test(entry.from)),
   };
   compiledTables.set(entries, compiled);
   return compiled;
@@ -393,7 +401,7 @@ function compileTable(entries: readonly AutoCorrectEntry[]): CompiledTable {
 
 function tableFixes(text: string, tokens: readonly Token[], entries: readonly AutoCorrectEntry[]): AutoCorrectFix[] {
   const fixes: AutoCorrectFix[] = [];
-  const { symbols, exact, folded } = compileTable(entries);
+  const { symbols, exact, folded, hasPhrases } = compileTable(entries);
 
   // חוקי סמל: מופע שלם בכל מקום, הארוך ראשון.
   for (let index = 0; index < text.length; ) {
@@ -413,16 +421,39 @@ function tableFixes(text: string, tokens: readonly Token[], entries: readonly Au
   }
 
   // חוקי מילה: ליבת הטוקן שווה לדפוס, רק אחרי שהושלמה.
+  const wordFixes: AutoCorrectFix[] = [];
   if (exact.size > 0) {
-    for (const token of tokens) {
+    for (const [position, token] of tokens.entries()) {
       if (!token.completed) continue;
+
+      // ביטויים נבדקים בין גבולות טוקנים, עד MAX_FROM תווים. המפות נשארות
+      // תלויות בטבלה, אך מספר המועמדים תלוי רק בחלון הטקסט המוגבל.
+      if (hasPhrases) {
+        for (let first = 0; first <= position; first += 1) {
+          const startToken = tokens[first]!;
+          if (first < position && !startToken.completed) continue;
+          const start = startToken.coreStart;
+          if (token.coreEnd - start > MAX_FROM) continue;
+          const ends = token.geresh ? [token.coreEnd + 1, token.coreEnd] : [token.coreEnd];
+          for (const end of ends) {
+            const original = text.slice(start, end);
+            const direct = exact.get(original);
+            const to = direct ?? folded.get(original.toLowerCase());
+            if (to === undefined) continue;
+            const replacement = direct === undefined ? transferCase(original, original.toLowerCase(), to) : to;
+            if (replacement !== original) wordFixes.push({ start, end, original, replacement, rule: 'table' });
+            break;
+          }
+        }
+        continue;
+      }
 
       // קיצור שהגרש בסופו הוא חלק ממנו (`לכאו'`): הגרש נחתך מהליבה, ולכן מחפשים אותו גם איתו.
       const withGeresh = token.geresh ? exact.get(`${token.core}'`) : undefined;
       if (withGeresh !== undefined) {
         const original = `${token.core}'`;
         if (withGeresh !== original) {
-          fixes.push({
+          wordFixes.push({
             start: token.coreStart,
             end: token.coreEnd + 1,
             original,
@@ -438,7 +469,7 @@ function tableFixes(text: string, tokens: readonly Token[], entries: readonly Au
       if (to === undefined) continue;
       const replacement = direct === undefined ? transferCase(token.core, token.core.toLowerCase(), to) : to;
       if (replacement === token.core) continue;
-      fixes.push({
+      wordFixes.push({
         start: token.coreStart,
         end: token.coreEnd,
         original: token.core,
@@ -448,7 +479,8 @@ function tableFixes(text: string, tokens: readonly Token[], entries: readonly Au
     }
   }
 
-  return fixes;
+  // ביטוי ארוך קודם להחלפה של מילה בתוכו. הסמלים שומרים על העדיפות הקיימת.
+  return [...fixes, ...wordFixes.sort((a, b) => (b.end - b.start) - (a.end - a.start))];
 }
 
 function dashFixes(text: string, spacedHyphen: boolean): AutoCorrectFix[] {
@@ -537,7 +569,7 @@ function capsFixes(
       const opensSentence =
         previous === undefined
           ? context.atBlockStart === true && token.start === 0
-          : startsSentenceAfter(text, previous);
+          : previous.completed && startsSentenceAfter(text, previous);
       if (opensSentence) fix(core[0].toUpperCase() + core.slice(1), 'capitalize-sentence');
     }
   });
@@ -574,7 +606,7 @@ export function planAutoCorrect(
 ): AutoCorrectFix[] {
   if (!options.enabled || text.length === 0) return [];
 
-  const tokens = tokenize(text);
+  const tokens = tokenize(text, context.startsInsideToken);
   const candidates: AutoCorrectFix[] = [];
 
   if (options.replaceAsYouType) candidates.push(...tableFixes(text, tokens, options.replacements));

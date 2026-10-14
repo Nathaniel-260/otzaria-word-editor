@@ -114,6 +114,19 @@ describe('AutoCorrectDialog', () => {
     wrapper.unmount();
   });
 
+  it('רשימת הקיצורים נטענת רק בבחירה מפורשת ונשמרת רק באישור', async () => {
+    const wrapper = open({ ...BASE, replacements: [...BASE.replacements, { from: 'למד', to: 'בחירה אישית' }] });
+    expect(rows().some((row) => row.textContent?.includes('טס'))).toBe(false);
+    buttonByText('טען קיצורים בעברית').click();
+    await wrapper.vm.$nextTick();
+    expect(rows().some((row) => row.textContent?.includes('טס'))).toBe(true);
+    expect(wrapper.emitted('apply')).toBeUndefined();
+    buttonByText('אישור').click();
+    const options = wrapper.emitted('apply')![0][0] as AutoCorrectOptions;
+    expect(options.replacements).toContainEqual({ from: 'למד', to: 'בחירה אישית' });
+    wrapper.unmount();
+  });
+
   it('מתג ראשי כבוי מנטרל את שתי הקבוצות', async () => {
     const wrapper = open({ ...BASE, enabled: false });
 

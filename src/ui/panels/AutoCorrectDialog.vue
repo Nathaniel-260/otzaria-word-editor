@@ -178,7 +178,17 @@
             >
               שחזר ברירת מחדל
             </button>
+            <button
+              type="button"
+              class="acorr-btn acorr-load-hebrew"
+              :disabled="!draft.replaceAsYouType"
+              @pointerdown.prevent
+              @click="onLoadHebrew"
+            >
+              טען קיצורים בעברית
+            </button>
           </div>
+          <small class="acorr-hint">רשימת הקיצורים אישית וכוללת גם למד ← למ״ד וטס ← ט״ס. הטעינה תחול רק לאחר אישור.</small>
         </fieldset>
       </div>
 
@@ -227,6 +237,8 @@
 import { computed, reactive, ref, watch } from 'vue';
 import {
   DEFAULT_REPLACEMENTS,
+  WORD_REPLACEMENTS,
+  mergeEntries,
   normalizeEntries,
   type AutoCorrectEntry,
   type AutoCorrectOptions,
@@ -342,6 +354,11 @@ function onResetTable(): void {
   draftFrom.value = '';
   draftTo.value = '';
   selectedFrom.value = null;
+  message.value = '';
+}
+
+function onLoadHebrew(): void {
+  draft.replacements = mergeEntries(WORD_REPLACEMENTS, draft.replacements);
   message.value = '';
 }
 
@@ -544,6 +561,7 @@ function onOk(): void {
 
 .acorr-table-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
 }
 

@@ -8,7 +8,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import wordListRaw from '../../src/data/autocorrect-word.tsv?raw';
-import { DEFAULT_AUTOCORRECT, DEFAULT_REPLACEMENTS, parseWordList, planAutoCorrect } from '../../src/engine/autocorrect';
+import { DEFAULT_AUTOCORRECT, WORD_REPLACEMENTS, parseWordList, planAutoCorrect } from '../../src/engine/autocorrect';
 
 describe('src/data/autocorrect-word.tsv', () => {
   const { entries, skipped } = parseWordList(wordListRaw);
@@ -26,8 +26,8 @@ describe('src/data/autocorrect-word.tsv', () => {
     expect(skipped).toBe(0);
   });
 
-  it('כל רשומה בקובץ נמצאת בברירת המחדל ומחליפה את המקור', () => {
-    const byFrom = new Map(DEFAULT_REPLACEMENTS.map((entry) => [entry.from, entry.to]));
+  it('כל רשומה בקובץ זמינה ברשימה האישית שניתן לטעון', () => {
+    const byFrom = new Map(WORD_REPLACEMENTS.map((entry) => [entry.from, entry.to]));
 
     for (const entry of entries) expect(byFrom.get(entry.from), entry.from).toBe(entry.to);
   });
@@ -54,8 +54,6 @@ describe('src/data/autocorrect-word.tsv', () => {
   });
 
   it('מילים עבריות רגילות אינן מוחלפות', () => {
-    const froms = new Set(entries.map((entry) => entry.from));
-    expect(froms.has('שלד')).toBe(false);
-    expect(froms.has('ושור')).toBe(false);
+    expect(planAutoCorrect('הילד למד תורה והמטוס טס ליד סל עם עש ', DEFAULT_AUTOCORRECT)).toEqual([]);
   });
 });

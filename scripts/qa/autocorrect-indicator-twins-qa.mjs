@@ -4,6 +4,7 @@
  *   node scripts/qa/autocorrect-indicator-twins-qa.mjs
  */
 import { openApp, createReport } from './harness.mjs';
+import { loadHebrewPreset } from './autocorrect-helpers.mjs';
 const report = createReport('מילים זהות', { strict: true });
 const app = await openApp({ name: 'acorr-twins', port: Number(process.env.QA_PORT ?? 9634) });
 
@@ -41,6 +42,7 @@ async function marked(needle, nth) {
 }
 
 try {
+  await loadHebrewPreset(app);
   await app.caret(0);
   await app.type('אאכ ');
   await app.sleep(700);
