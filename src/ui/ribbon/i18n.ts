@@ -257,7 +257,6 @@ const EN: Readonly<Record<string, string>> = {
   'עדכן כך שיתאים לבחירה': 'Update to match selection',
   'שנה סגנון…': 'Modify…',
   'שנה שם…': 'Rename…',
-  'מחק סגנון': 'Delete style',
   'צור סגנון…': 'Create a style…',
   'שנה את הסגנון הנוכחי…': 'Modify current style…',
   'עריכה': 'Editing',
