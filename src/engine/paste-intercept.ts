@@ -27,15 +27,14 @@
  * לכן, כשברירת המחדל אינה של המנוע, ה-`keydown` של Ctrl+V נעצר על ה-container
  * לפני שהוא יורד אליו — **בלי** `preventDefault`. הדפדפן ממשיך לפעולת ברירת
  * המחדל שלו, שהיא הדבקה: אירוע `paste` trusted, עם `clipboardData` מלא ובלי
- * צורך בהרשאת `clipboard-read` — והוא נתפס כאן למטה.
+ * צורך בהרשאת `clipboard-read` — והוא נתפס כאן למטה. ב-macOS זה Cmd+V;
+ * Ctrl+V, שהמנוע קיבל גם שם, משתמש בקריאה מפורשת כי אינו יוצר paste מקורי.
  *
- * ## למה `capture` על ה-container, ו-`stopPropagation` ולא `Immediate`
- *
- * המאזין הזה חייב לרוץ לפני המנוע, שמאזין על האלמנט שבתוך ה-container.
- * `stopPropagation` עוצר את האירוע לפני שהוא יורד אליו, אבל משאיר את שאר
- * מאזיני ה-capture על אותו container — זיהוי הרשימות (list-autoformat-install)
- * ו-@ (at-mention-overlay) מאזינים שם ל-`paste` כדי לדעת שהייתה עריכה, והם
- * צריכים לדעת גם על הדבקה שעברה כאן.
+ * ## Capture and application notifications
+ * Native paste is stopped before the engine to avoid duplicate insertion.
+ * Clipboard operations dispatch PASTE_STARTED/PASTE_FINISHED on the container:
+ * overlays invalidate immediately and re-evaluate only after insertion and caret
+ * restoration finish. A native bubble listener must not read the old document.
  */
 import type { CommandOutcome } from './command-adapter';
 import {
@@ -63,8 +62,8 @@ const EVENT_TEXT_TYPES = [
  *
  * טקסט בלבד, בכוונה: `getData` סינכרוני ותקף רק בתוך האירוע, ותמונה דורשת
  * `arrayBuffer()` — קריאה א-סינכרונית. „שמירת טקסט בלבד” ממילא זורקת אותה,
- * ו„מזג עיצוב” של תמונה בלבד אינו שונה מ„שמירה על עיצוב המקור” — ולכן אירוע
- * שאין בו טקסט כלל נשאר למנוע (`null`).
+ * `null` מציין שאין ייצוג טקסט. המצבים החדשים מסרבים לזה בהודעה לפני כתיבה;
+ * „שמירה על עיצוב המקור” אינה נכנסת למיירט ונשארת במסלול המנוע.
  */
 export function payloadFromEvent(data: DataTransfer | null): ClipboardPayload | null {
   if (!data) return null;
@@ -102,7 +101,18 @@ export function installPasteIntercept({ container, host, mode, report }: PasteIn
     if (event.target instanceof HTMLInputElement) return;
 
     const payload = payloadFromEvent(event.clipboardData);
-    if (!payload) return;
+    const types = Array.from(event.clipboardData?.types ?? []);
+    const privateFragment = types.some((type) => type.startsWith('application/x-superdoc-v2-fragment'));
+    const unsupportedRichSource = current === 'merge' && !privateFragment && types.some((type) => type === 'Files' || type.startsWith('image/') || type === 'text/rtf' || type === 'application/rtf');
+    if (!payload || unsupportedRichSource) {
+      // Ctrl+V's engine keydown has already been intercepted. Returning this
+      // native event to the engine is not a reliable fallback (it normally reads
+      // the clipboard from keydown). Refuse visibly, without losing mixed media.
+      event.preventDefault();
+      event.stopPropagation();
+      report({ ok: false, reason: 'paste-source-unsupported', message: 'ההדבקה לא בוצעה: תוכן הלוח אינו נתמך במצב זה. אפשר להשתמש בשמירה על עיצוב המקור.' });
+      return;
+    }
 
     event.preventDefault();
     event.stopPropagation();
@@ -113,6 +123,15 @@ export function installPasteIntercept({ container, host, mode, report }: PasteIn
     if (mode() === 'keep-source' || event.defaultPrevented) return;
     if (!isPasteChord(event)) return;
     if (event.target instanceof HTMLInputElement) return;
+    // The engine accepts Ctrl+V on macOS too, but Chrome's native paste chord
+    // there is Cmd+V. Ctrl+V would never produce the clipboardData event after
+    // we stop the engine, so retain its explicit clipboard-read path on that chord.
+    if (event.ctrlKey && !event.metaKey && /Mac|iPhone|iPad/.test(navigator.platform)) {
+      event.preventDefault();
+      event.stopPropagation();
+      void pasteFromClipboard(host, { mode: mode() }).then(report);
+      return;
+    }
     // בלי `preventDefault`: ההדבקה של הדפדפן היא מה שמביא את אירוע ה-`paste`.
     event.stopPropagation();
   };

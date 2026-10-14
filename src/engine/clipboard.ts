@@ -56,7 +56,8 @@ import type { SuperDoc } from 'superdoc';
 import type { SelectionTarget } from 'superdoc/ui';
 import { reasonText, type CommandOutcome } from './command-adapter';
 import { receiptFailureText, thrownText, type DocReceipt, type MaybePromise } from './document-api';
-import { readDocRunDefaults } from './doc-style-defaults';
+import { destinationSample, marksFromDestinationCapture, marksFromEmptyDocument, type DestinationCapture } from './paste-destination';
+import { PASTE_STARTED, PASTE_FINISHED } from './paste-events';
 import { readFormat, type FormatReadingSource } from './format-reading';
 import {
   destinationMarks,
@@ -64,6 +65,7 @@ import {
   textOnlyFragment,
   type PasteFragment,
   type PasteMode,
+  type PasteRunMarks,
 } from './paste-formatting';
 
 /* ------------------------------------------------------------------ */
@@ -129,6 +131,9 @@ export interface ClipboardInsertReceipt extends DocReceipt {
 
 /** מה שנצרך מ-`activeEditor.doc`. כל שדה אופציונלי: גרסה אחרת עשויה לא לחשוף אותו. */
 export interface ClipboardDocumentApi {
+  info?: () => MaybePromise<{ revision?: string; counts?: { characters?: number; paragraphs?: number; tables?: number; images?: number; lists?: number; sdtFields?: number } }>;
+  export?: { toDocx?: (input: Record<string, never>) => MaybePromise<{ contentBase64?: string }> };
+  selection?: { extractOoxml?: (input: { at: SelectionTarget }) => MaybePromise<DestinationCapture> };
   clipboard?: {
     serializeSelection?: (input?: {
       target?: SelectionTarget;
@@ -182,7 +187,8 @@ export interface CommandsSurface {
 }
 
 export interface ClipboardHost {
-  activeEditor?: { doc?: ClipboardDocumentApi | null } | null;
+  element?: Element | null;
+  activeEditor?: { doc?: ClipboardDocumentApi | null; container?: HTMLElement } | null;
   ui?: { selection?: SelectionSurface | null; commands?: CommandsSurface | null } | null;
 }
 
@@ -285,7 +291,7 @@ function failed(failedAction: string, reason: string): CommandOutcome {
 }
 
 /** `empty` = סמן בלי טווח, כפי שהתצלום מדווח. */
-type SelectionRead = { ok: true; target: SelectionTarget; empty: boolean } | { ok: false; reason: string };
+type SelectionRead = { ok: true; target: SelectionTarget; empty: boolean; ready: boolean } | { ok: false; reason: string };
 
 /**
  * הטווח שהמשתמש סימן, כ-`SelectionTarget` — הצורה שפעולות הכתיבה של המנוע
@@ -328,7 +334,7 @@ function readSelection(
     return { ok: false, reason: slice?.status === 'ready' ? 'range-selection-required' : 'not-ready' };
   }
 
-  return { ok: true, target, empty: slice?.empty === true };
+  return { ok: true, target, empty: slice?.empty === true, ready: slice?.status === 'ready' };
 }
 
 /** כמה פעמים, ובאיזה מרווח, מותר להמתין שהבחירה תתייצב. ר' `readSelectionSettled`. */
@@ -356,16 +362,19 @@ const SELECTION_SETTLE_INTERVAL_MS = 100;
  * ולא המנגנון עצמו: נמדד ש-820ms הוא הזמן הארוך ביותר שבו הבחירה עדיין לא
  * התיישבה.
  */
-async function readSelectionSettled(surface: SelectionSurface | undefined): Promise<SelectionRead> {
+async function readSelectionSettled(
+  surface: SelectionSurface | undefined,
+  { allowCollapsed = false, requireReady = false }: { allowCollapsed?: boolean; requireReady?: boolean } = {},
+): Promise<SelectionRead> {
   for (let attempt = 0; attempt <= SELECTION_SETTLE_RETRIES; attempt += 1) {
     if (attempt > 0) await wait(SELECTION_SETTLE_INTERVAL_MS);
-
-    const result = readSelection(surface);
-    if (result.ok || result.reason !== 'not-ready') return result;
-    if (attempt === SELECTION_SETTLE_RETRIES) return result;
+    const result = readSelection(surface, { allowCollapsed });
+    if (result.ok) {
+      if (!requireReady || result.ready) return result;
+    } else if (result.reason !== 'not-ready') return result;
+    if (attempt === SELECTION_SETTLE_RETRIES) return { ok: false, reason: 'not-ready' };
   }
-  // בלתי מגיע: הלולאה תמיד חוזרת מבפנים בסיבוב האחרון.
-  return readSelection(surface);
+  return { ok: false, reason: 'not-ready' };
 }
 
 /**
@@ -929,9 +938,27 @@ function pasteFailureText(failure: ClipboardFailure | undefined): string {
  */
 export async function pasteFromClipboard(
   host: ClipboardHostTarget,
+  options: { mode?: PasteMode; payload?: ClipboardPayload } = {},
+): Promise<CommandOutcome> {
+  const editor = (host as ClipboardHost | null | undefined)?.activeEditor;
+  const operation = {};
+  const container = (host as ClipboardHost | null | undefined)?.element ?? editor?.container;
+  container?.dispatchEvent(new CustomEvent(PASTE_STARTED, { bubbles: true, detail: { operation } }));
+  try {
+    return await performPaste(host, options);
+  } catch (error) {
+    return { ok: false, message: thrownText(PASTE_FAILED, error), reason: 'threw' };
+  } finally {
+    container?.dispatchEvent(new CustomEvent(PASTE_FINISHED, { bubbles: true, detail: { operation, evaluate: (host as ClipboardHost | null | undefined)?.activeEditor === editor } }));
+  }
+}
+
+async function performPaste(
+  host: ClipboardHostTarget,
   { mode = 'keep-source', payload: given }: { mode?: PasteMode; payload?: ClipboardPayload } = {},
 ): Promise<CommandOutcome> {
-  const clipboard = docOf(host)?.clipboard;
+  const destinationDoc = docOf(host);
+  const clipboard = destinationDoc?.clipboard;
   const insert = clipboard?.insert;
   if (typeof insert !== 'function') {
     return { ok: false, message: `${PASTE_FAILED}: ${UNAVAILABLE}`, reason: 'command-unsupported' };
@@ -939,12 +966,28 @@ export async function pasteFromClipboard(
 
   // `allowCollapsed`: סמן בלי טווח הוא המצב הרגיל של הדבקה. טווח מסומן גם הוא
   // חוקי — המנוע מחליף אותו בתוכן שהודבק, כמו ב-Word.
-  const at = readSelection(selectionOf(host), { allowCollapsed: true });
+  let at = readSelection(selectionOf(host), { allowCollapsed: true });
   if (!at.ok) return failed(PASTE_FAILED, at.reason);
+  if (mode !== 'keep-source' && !at.ready) {
+    const originalTarget = at.target;
+    const before = await destinationDoc?.info?.();
+    const settled = await readSelectionSettled(selectionOf(host), { allowCollapsed: true, requireReady: true });
+    const after = await destinationDoc?.info?.();
+    const latest = readSelection(selectionOf(host), { allowCollapsed: true });
+    if (!settled.ok || !latest.ok || !latest.ready || docOf(host) !== destinationDoc || before?.revision === undefined || before.revision !== after?.revision ||
+        JSON.stringify(settled.target) !== JSON.stringify(originalTarget) ||
+        JSON.stringify(latest.target) !== JSON.stringify(originalTarget)) return failed(PASTE_FAILED, 'not-ready');
+    at = latest;
+  }
+  if (mode !== 'keep-source' && (!at.empty || at.target.start.kind !== 'text' || at.target.end.kind !== 'text' || at.target.start.blockId !== at.target.end.blockId || at.target.start.offset !== at.target.end.offset)) {
+    return { ok: false, reason: 'paste-destination-unsupported', message: 'ההדבקה לא בוצעה: יש לבטל את הבחירה ולמקם סמן במסמך, או להשתמש בשמירה על עיצוב המקור.' };
+  }
 
   // העיצוב שבסמן נקרא **עכשיו**, באותו רגע כמו המקום: שניהם המצב ברגע
   // הלחיצה, וקריאת הלוח שמתחת היא `await` שבמהלכו הסמן יכול לזוז.
   const caret = mode === 'keep-source' ? null : readCaretFormat(host, at.empty);
+  // Invoke the capture now, before awaiting clipboard IO or parsing.
+  const destinationRead = caret ? readDestination(host, at.target, caret) : null;
 
   const read: SystemRead = given ? { kind: 'payload', payload: given } : await readSystemClipboard();
   // `readUnmirrored` ולא `read`: כשלוח המערכת קריא-אך-חסום, תוכן שכבר נשלח אליו
@@ -965,6 +1008,8 @@ export async function pasteFromClipboard(
     };
   }
 
+  const destination = destinationRead && await destinationRead;
+  if (destination && !destination.ok) return destination.outcome;
   let input: { payload?: ClipboardPayload; plan?: ClipboardPlan; target: SelectionTarget };
   const parse = clipboard?.parse;
   if (typeof parse === 'function') {
@@ -978,7 +1023,7 @@ export async function pasteFromClipboard(
       const failure = parsed?.success === false ? parsed.failure : undefined;
       return { ok: false, message: pasteFailureText(failure), reason: failure?.code ?? 'parse-failed' };
     }
-    const plan = caret ? await reformatPlan(host, parsed.plan, mode, caret) : parsed.plan;
+    const plan = destination?.ok ? reformatPlan(parsed.plan, mode, destination.marks) : parsed.plan;
     input = { plan, target: at.target };
   } else if (mode !== 'keep-source') {
     // בלי `parse` אין fragment לשכתב, ו-`insert` על payload גולמי היה מדביק
@@ -989,6 +1034,14 @@ export async function pasteFromClipboard(
     input = { payload, target: at.target };
   }
 
+  if (mode !== 'keep-source') {
+    const current = await readSelectionSettled(selectionOf(host), { allowCollapsed: true, requireReady: true });
+    const revision = await destinationDoc?.info?.();
+    const latest = readSelection(selectionOf(host), { allowCollapsed: true });
+    if (!latest.ok || !latest.ready || JSON.stringify(latest.target) !== JSON.stringify(at.target) || docOf(host) !== destinationDoc || !current.ok || !current.ready || JSON.stringify(current.target) !== JSON.stringify(at.target) || !destination?.ok || revision?.revision !== destination.revision) {
+      return failed(PASTE_FAILED, 'not-ready');
+    }
+  }
   let receipt: ClipboardInsertReceipt | undefined;
   try {
     receipt = await insert(input);
@@ -1002,7 +1055,7 @@ export async function pasteFromClipboard(
 
   // הסמן עובר לסוף מה שהודבק — אחרת ההדבקה הבאה נכנסת לפני זו. ההנמקה
   // המלאה ב-`caretAfterPaste`.
-  await moveCaretAfterPaste(selectionOf(host), receipt);
+  if (docOf(host) === destinationDoc) await moveCaretAfterPaste(selectionOf(host), receipt);
 
   // הדבקה שנפלה לטקסט בלבד היא **הצלחה** עם אובדן עיצוב. אין לה ערוץ נפרד
   // אל המשתמש (המדווח מציג כשלים), ולכן היא נרשמת ללוג ולא נצבעת כשגיאה.
@@ -1061,17 +1114,59 @@ function readCaretFormat(host: ClipboardHostTarget, empty: boolean) {
   return readFormat(source, { empty, settled: true });
 }
 
-/** ה-fragment, אחרי „מזג עיצוב” או „שמירת טקסט בלבד”. */
-async function reformatPlan(
+type DestinationRead = { ok: true; marks: PasteRunMarks; revision: string } | { ok: false; outcome: CommandOutcome };
+
+async function readDestination(
   host: ClipboardHostTarget,
-  plan: ClipboardPlan,
-  mode: PasteMode,
+  target: SelectionTarget,
   caret: ReturnType<typeof readCaretFormat>,
-): Promise<ClipboardPlan> {
-  const defaults = await readDocRunDefaults(host as Parameters<typeof readDocRunDefaults>[0]);
-  const destination = destinationMarks(caret, defaults);
+): Promise<DestinationRead> {
+  try {
+    const doc = docOf(host);
+    const sample = destinationSample(target);
+    if (!sample || !doc?.selection?.extractOoxml) throw new Error('Destination capture unavailable');
+    const revisionRead = doc.info?.();
+    const captureRead = Promise.resolve(doc.selection.extractOoxml({ at: sample })).then((capture) => ({ ok: true as const, capture }), (error: unknown) => ({ ok: false as const, error }));
+    const info = await revisionRead;
+    const revision = info?.revision;
+    if (typeof revision !== 'string') throw new Error('Destination revision unavailable');
+    let marks: PasteRunMarks;
+    try {
+      const result = await captureRead;
+      if (!result.ok) throw result.error;
+      if (result.capture.evaluatedRevision && result.capture.evaluatedRevision !== revision) throw new Error('Destination changed during capture');
+      marks = marksFromDestinationCapture(result.capture);
+    } catch (error) {
+      // Export only a wholly empty, small standalone document. This reads
+      // actual styles/default-character properties, never assumes missing CS
+      // channels equal a Latin toolbar value. Populated documents are not exported.
+      if (!info?.counts || info.counts.characters !== 0 || info.counts.paragraphs !== 1 || info.counts.tables !== 0 ||
+          info.counts.images !== 0 || info.counts.lists !== 0 || info.counts.sdtFields !== 0 || !doc.export?.toDocx) throw error;
+      if ((target.story && target.story.storyType !== 'body') || (target.start.kind === 'text' && target.start.story && target.start.story.storyType !== 'body')) throw error;
+      const packageRead = await doc.export.toDocx({});
+      if (!packageRead.contentBase64) throw error;
+      marks = await marksFromEmptyDocument(packageRead.contentBase64, sample.start.kind === 'text' ? sample.start.blockId : '');
+    }
+    // A scalar toolbar size cannot tell a pending uniform override apart from
+    // either channel of an inherited split size. Fail before writing in that case.
+    if (marks.fontSizePt === undefined || marks.fontSizeCsPt === undefined || marks.fontSizePt !== marks.fontSizeCsPt) throw new Error('Split destination sizes');
+    if (marks.bold !== undefined && marks.boldCs !== undefined && marks.bold !== marks.boldCs) throw new Error('Split destination bold state');
+    if (marks.italic !== undefined && marks.italicCs !== undefined && marks.italic !== marks.italicCs) throw new Error('Split destination italic state');
+    if (marks.highlight && caret.highlight == null) throw new Error('Pending highlight cancellation unsupported');
+    if (marks.boldCs !== undefined) marks.boldCs = caret.bold;
+    if (marks.italicCs !== undefined) marks.italicCs = caret.italic;
+    if (caret.fontFamily) marks.fontFamily = caret.fontFamily;
+    if (caret.fontSizePt) marks.fontSizePt = marks.fontSizeCsPt = caret.fontSizePt;
+    return { ok: true, marks: { ...marks, ...destinationMarks(caret) }, revision };
+  } catch {
+    return { ok: false, outcome: { ok: false, reason: 'paste-destination-unsupported', message: 'ההדבקה לא בוצעה: אי אפשר לשמר בבטחה את עיצוב התווים בנקודה זו. אפשר להשתמש בשמירה על עיצוב המקור.' } };
+  }
+}
+
+/** Rewriting is pure: no additional history/format mutations after insertion. */
+function reformatPlan(plan: ClipboardPlan, mode: PasteMode, destination: PasteRunMarks): ClipboardPlan {
   const fragment = plan.fragment as unknown as PasteFragment;
-  const rewritten = mode === 'merge' ? mergeFragment(fragment, destination) : textOnlyFragment(fragment, destination);
+  const rewritten = mode === 'merge' ? mergeFragment(fragment, destination, { mirrorHtmlEmphasis: plan.summary?.sourceKind === 'html' }) : textOnlyFragment(fragment, destination);
   return { ...plan, fragment: rewritten as unknown as ClipboardPlan['fragment'] };
 }
 

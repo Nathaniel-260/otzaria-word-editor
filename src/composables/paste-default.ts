@@ -13,15 +13,18 @@ import { isPasteMode, type PasteMode } from '../engine/paste-formatting';
 
 /** מה ש-Ctrl+V עושה עכשיו. משותף לרצועה, לתפריט ההקשר ולמיירט. */
 export const pasteDefaultMode = ref<PasteMode>('keep-source');
+let userChoiceVersion = 0;
 
 /** נקראת פעם אחת בעלייה. ערך לא מוכר מ-storage נופל לברירת המחדל. */
 export async function loadPasteDefault(): Promise<void> {
+  const version = userChoiceVersion;
   const stored = await loadStored();
+  if (version !== userChoiceVersion) return;
   pasteDefaultMode.value = isPasteMode(stored) ? stored : 'keep-source';
 }
 
 export function setPasteDefault(mode: PasteMode): void {
-  if (pasteDefaultMode.value === mode) return;
+  userChoiceVersion += 1;
   pasteDefaultMode.value = mode;
   void savePasteDefault(mode);
 }

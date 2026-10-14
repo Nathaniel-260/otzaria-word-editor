@@ -178,35 +178,48 @@ describe('textOnlyFragment — „שמור טקסט בלבד”', () => {
   });
 });
 
-describe('destinationMarks — העיצוב שבסמן', () => {
-  const defaults = { fontFamilies: ['Arial', 'David'], fontSizesPt: [12] };
-
-  it('ערך ששווה לברירת המחדל של המסמך הוא ירושה, ואינו נכתב', () => {
-    // מה שנמדד על טקסט שלא עוצב כלל: Arial, 12, #000000.
-    expect(
-      destinationMarks({ fontFamily: 'Arial', fontSizePt: 12, color: '#000000', bold: false, italic: false, underline: false, strikethrough: false }, defaults),
-    ).toEqual({});
+describe('HTML emphasis script semantics', () => {
+  const source: PasteFragment = { blocks: [{ kind: 'paragraph', runs: [
+    { text: 'plain' }, { text: 'bold', marks: { bold: true } }, { text: 'italic', marks: { italic: true } },
+  ] }] };
+  it('HTML local emphasis overrides destination off for both script channels', () => {
+    const output = mergeFragment(source, { bold: false, boldCs: false, italic: false, italicCs: false }, { mirrorHtmlEmphasis: true });
+    expect(runs(blocks(output)[0]!).map((run) => run.marks)).toEqual([
+      { bold: false, boldCs: false, italic: false, italicCs: false },
+      { bold: true, boldCs: true, italic: false, italicCs: false },
+      { bold: false, boldCs: false, italic: true, italicCs: true },
+    ]);
   });
-
-  it('עיצוב ישיר נכתב — והגודל לשני הערוצים', () => {
-    expect(
-      destinationMarks({ fontFamily: 'Narkisim', fontSizePt: 18, color: '#0000FF', bold: true, italic: false, underline: false, strikethrough: false }, defaults),
-    ).toEqual({ fontFamily: 'Narkisim', fontSizePt: 18, fontSizeCsPt: 18, color: '#0000FF', bold: true });
+  it('private fragments retain independent Latin-only emphasis', () => {
+    const output = mergeFragment(source, { boldCs: false, italicCs: false });
+    expect(runs(blocks(output)[0]!)[1]!.marks).toEqual({ boldCs: false, italicCs: false, bold: true });
   });
-
-  it('משפחה שהיא ברירת המחדל של הכתב המורכב אינה „ישירה” — גם אם הלטינית אחרת', () => {
-    expect(destinationMarks({ fontFamily: 'david', bold: false, italic: false, underline: false, strikethrough: false }, defaults)).toEqual({});
+  it('uniform HTML bold is still discarded in both channels', () => {
+    const output = mergeFragment({ blocks: [{ kind: 'paragraph', runs: [{ text: 'all', marks: { bold: true } }] }] }, {}, { mirrorHtmlEmphasis: true });
+    expect(runs(blocks(output)[0]!)[0]!.marks).toBeUndefined();
   });
+});
 
-  it('סימון בצבע של Word נשלח בשמו — אחרת המנוע כותב הצללה ולא סימון', () => {
-    const toggles = { bold: false, italic: false, underline: false, strikethrough: false };
-    expect(destinationMarks({ ...toggles, highlight: '#ffff00' }, defaults)).toEqual({ highlight: 'yellow' });
-    expect(destinationMarks({ ...toggles, highlight: '#123456' }, defaults)).toEqual({ highlight: '#123456' });
+describe('destinationMarks — explicit destination states', () => {
+  it('retains black and every explicit false rather than falling back to inherited defaults', () => {
+    expect(destinationMarks({ color: '#000000', bold: false, italic: false, underline: false, strikethrough: false }))
+      .toEqual({ color: '#000000', bold: false, italic: false, underline: false, strike: false });
   });
-
-  it('בלי ברירות המחדל — גופן וגודל אינם נכתבים (עדיף לרשת מלנחש)', () => {
-    expect(
-      destinationMarks({ fontFamily: 'Narkisim', fontSizePt: 18, bold: false, italic: false, underline: false, strikethrough: false }, null),
-    ).toEqual({});
+  it('does not flatten font/size channels from the toolbar', () => {
+    expect(destinationMarks({ fontFamily: 'Arial', fontSizePt: 12 })).toEqual({});
+  });
+  it('keeps actual underline/highlight and leaves unknown states unknown', () => {
+    expect(destinationMarks({ underline: true, highlight: '#ffff00' })).toEqual({ underline: true, highlight: 'yellow' });
+  });
+  it('rewrites nested content-control text and counts it for partial emphasis', () => {
+    const source: PasteFragment = { blocks: [{ kind: 'paragraph', runs: [], inlines: [
+      { kind: 'sdt', tag: 'keep-me', inlines: [{ kind: 'sdt', inlines: [{ kind: 'text', text: 'bold', marks: { bold: true, fontFamily: 'Source' } }] }] },
+      { kind: 'text', text: 'plain', marks: { fontFamily: 'Source' } },
+    ] }] };
+    const output = mergeFragment(source, { color: '#000000', bold: false });
+    expect(JSON.stringify(output)).not.toContain('Source');
+    expect(JSON.stringify(output)).toContain('keep-me');
+    expect(JSON.stringify(output)).toContain('"bold":true');
+    expect(JSON.stringify(textOnlyFragment(source, { bold: false }))).not.toContain('"bold":true');
   });
 });

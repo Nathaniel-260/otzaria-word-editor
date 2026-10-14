@@ -120,6 +120,7 @@
  * המשתמש לא ביקש רשימה — הוא הקליד. כשל בין מחיקת הסמן ליצירת הרשימה מחזיר
  * את הטקסט שנמחק ושותק.
  */
+import { PASTE_STARTED } from './paste-events';
 import type { SuperDoc } from 'superdoc';
 import type { DocReceipt, MaybePromise } from './document-api';
 import { planListAutoformat, type ListAutoformat } from './list-autoformat';
@@ -154,7 +155,7 @@ const MODIFIER_KEYS = new Set(['Shift', 'Control', 'Alt', 'AltGraph', 'Meta', 'C
 /** מזיזים סמן בלי לשנות אף בלוק — מאפסים את הרצף, לא את הזיכרון. */
 const NAVIGATION_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown']);
 
-const EDIT_EVENTS = ['paste', 'cut', 'drop', 'compositionstart'];
+const EDIT_EVENTS = [PASTE_STARTED, 'paste', 'cut', 'drop', 'compositionstart'];
 
 /** כמה תווים נשמרים מאז האיפוס לבדיקת `ENGINE_MARKER`. */
 const ENGINE_MARKER_MAX = 12;

@@ -1,61 +1,7 @@
-/**
- * אפשרויות ההדבקה של Word: „שמור על עיצוב המקור”, „מזג עיצוב” ו„שמור טקסט
- * בלבד”.
- *
- * ## מה המנוע נותן, ולמה זה לא מספיק
- *
- * `clipboard.insert` מקבל `formattingMode: 'match-destination'`, והחוזה מתאר
- * אותו כ„paste-and-match-style”. נמדד מול המנוע האמיתי (Chrome על ה-dist
- * הארוז, superdoc 2.20), עם HTML שנושא
- * Arial 20 אדום, מודגש, נטוי, קו תחתון, סימון, יישור למרכז וכותרת:
- *
- * | מצב | מה נכתב ל-OOXML |
- * |---|---|
- * | `preserve-source` | הכול: `rFonts`, `sz`, `color`, `b`/`i`/`u`, `highlight`, `jc`, `Heading1` |
- * | `match-destination` | **שום** `rPr` — גם `b`, `i` ו-`u` נמחקו |
- *
- * כלומר `match-destination` הוא „שמור טקסט בלבד”, ולא „מזג עיצוב”: ב-Word
- * המיזוג מוותר על רוב העיצוב הישיר של המקור, אבל **שומר את ההדגשות** —
- * מודגש, נטוי, קו תחתון — כשהן חלות רק על חלק מהטקסט.
- *
- * ויש פער שני, בשני המצבים: היעד היה ריצה ב-David 18 כחול, והטקסט שהודבק
- * לידה יצא **בלי עיצוב בכלל** — כלומר בסגנון הפסקה, ולא כמו הטקסט שסביבו.
- * ב-Word גם „מזג” וגם „טקסט בלבד” מאמצים את עיצוב נקודת ההדבקה — בדיוק כמו
- * הקלדה. בעורך עברי זה המקרה הנפוץ: מסמך שבו המשתמש סימן הכול וקבע David 14
- * הוא מסמך שכל עיצובו ישיר.
- *
- * ## מה המודול עושה במקום
- *
- * את שני השלבים בעצמו, על ה-fragment שה-`parse` של המנוע כבר בנה, ואז מוסר
- * אותו ל-`insert` במצב `preserve-source` — המצב שנמדד ככותב בדיוק את מה
- * שב-fragment:
- *
- * 1. **ניקוי המקור** (`mergeFragment`, `textOnlyFragment`). נמדד שפסקה
- *    שהוסרו ממנה `styleRef`/`paragraphProps`/`pPrXml` יורשת את סגנון פסקת
- *    היעד — שם הסמן היה — כמו ב-Word.
- * 2. **עיצוב היעד** (`destinationMarks`) נכתב על כל ריצה, וההדגשות של המקור
- *    מעליו.
- *
- * ## למה עיצוב היעד נקרא מהפקודות, ולמה מושווה לברירות המחדל
- *
- * שלושה משטחים נבדקו כמקור ל„עיצוב שבסמן”, ושניים נפסלו במדידה:
- *
- * - `getNodeById` / `find` עם `includeResolved` — ה-`run` חוזר בלי `props`
- *   בכלל, ואף מאחד ריצה מודגשת ולא-מודגשת לריצה אחת.
- * - `query.match` בתוך הבלוק — `items: []` גם על טקסט שקיים בו.
- * - **`ui.commands`** — עונה, ומיד: `font-family`, `font-size`, `text-color`
- *   ו-`highlight-color` כערכים, ו-`bold`/`italic`/`underline`/`strikethrough`
- *   כ-`active`. זה גם מה שהרצועה מציגה למשתמש, ולכן „עיצוב היעד” כאן הוא
- *   בדיוק מה שהוא רואה בבורר הגופן ובבורר הגודל.
- *
- * אבל הערכים שם **אפקטיביים** ולא ישירים: על טקסט שלא עוצב כלל נמדד
- * `Arial`, `12`, `#000000`. לכתוב אותם כעיצוב ישיר היה עיוור לעברית — המנוע
- * כותב משפחת גופן גם ל-`w:rFonts@cs`, ומסמך שבו הכתב המורכב מוגדר בגופן אחר
- * (David לעברית ו-Times לאנגלית, צירוף שכיח במסמכי Word) היה מקבל טקסט עברי
- * בגופן הלטיני. לכן גופן וגודל נכתבים רק כשהם **שונים מברירת המחדל של
- * המסמך** (`docDefaults`, ר' `readDocRunDefaults` ב-doc-style-defaults.ts), וצבע רק כשאינו
- * שחור. מה שנשאר הוא בדיוק מה שנקבע במסמך במפורש — ומה שאינו נכתב יורש את
- * אותו ערך ממילא.
+/** Three paste modes. Merge keeps local emphasis from the source, while both
+ * merge and text-only adopt destination run formatting. Script-specific fonts
+ * and sizes come from the authored destination OOXML (paste-destination.ts),
+ * never by comparing a toolbar value against document defaults.
  */
 
 /* ------------------------------------------------------------------ */
@@ -93,7 +39,7 @@ interface PasteText {
 
 type PasteInline =
   | ({ kind: 'text' } & PasteText)
-  | { kind: 'hyperlink'; inlines: readonly PasteInline[]; [key: string]: unknown }
+  | { kind: 'hyperlink' | 'sdt'; inlines: readonly PasteInline[]; [key: string]: unknown }
   | { kind: string; [key: string]: unknown };
 
 export interface PasteParagraph {
@@ -148,11 +94,20 @@ export function isPasteMode(value: unknown): value is PasteMode {
 const EMPHASIS = ['bold', 'boldCs', 'italic', 'italicCs', 'underline'] as const;
 type Emphasis = (typeof EMPHASIS)[number];
 
-function emphasisOf(marks: PasteRunMarks | undefined, dropped: ReadonlySet<Emphasis>): PasteRunMarks {
+/** HTML bold/italic applies to Hebrew and Latin alike. The SDK parses HTML
+ * into Latin flags only; private DOCX fragments may intentionally split scripts.
+ */
+function emphasisValue(marks: PasteRunMarks | undefined, key: Emphasis, html: boolean): boolean | undefined {
+  if (html && key === 'boldCs' && marks?.boldCs === undefined) return marks?.bold;
+  if (html && key === 'italicCs' && marks?.italicCs === undefined) return marks?.italic;
+  return marks?.[key];
+}
+
+function emphasisOf(marks: PasteRunMarks | undefined, dropped: ReadonlySet<Emphasis>, html: boolean): PasteRunMarks {
   const kept: PasteRunMarks = {};
   if (!marks) return kept;
   for (const key of EMPHASIS) {
-    if (marks[key] === true && !dropped.has(key)) kept[key] = true;
+    if (emphasisValue(marks, key, html) === true && !dropped.has(key)) kept[key] = true;
   }
   if (marks.verticalAlign === 'superscript' || marks.verticalAlign === 'subscript') {
     kept.verticalAlign = marks.verticalAlign;
@@ -176,10 +131,8 @@ function* textRuns(blocks: readonly PasteBlock[]): Generator<PasteText> {
     if (Array.isArray(paragraph.inlines)) {
       for (const inline of paragraph.inlines) {
         if (inline.kind === 'text') yield inline as PasteText;
-        else if (inline.kind === 'hyperlink') {
-          for (const inner of (inline as { inlines: readonly PasteInline[] }).inlines ?? []) {
-            if (inner.kind === 'text') yield inner as PasteText;
-          }
+        else if (inline.kind === 'hyperlink' || inline.kind === 'sdt') {
+          yield* textRuns([{ kind: 'paragraph', runs: [], inlines: (inline as { inlines: readonly PasteInline[] }).inlines }]);
         }
       }
     } else {
@@ -199,14 +152,14 @@ function* textRuns(blocks: readonly PasteBlock[]): Generator<PasteText> {
  * ריצות של רווחים בלבד אינן מכריעות: רווח בין שתי מילים מודגשות אינו מודגש
  * לרוב, וזה לא הופך את המשפט ל„מודגש בחלקו”.
  */
-function uniformEmphasis(blocks: readonly PasteBlock[]): Set<Emphasis> {
+function uniformEmphasis(blocks: readonly PasteBlock[], html: boolean): Set<Emphasis> {
   const uniform = new Set<Emphasis>(EMPHASIS);
   let any = false;
   for (const run of textRuns(blocks)) {
     if (typeof run.text !== 'string' || run.text.trim() === '') continue;
     any = true;
     for (const key of EMPHASIS) {
-      if (run.marks?.[key] !== true) uniform.delete(key);
+      if (emphasisValue(run.marks, key, html) !== true) uniform.delete(key);
     }
   }
   return any ? uniform : new Set();
@@ -241,8 +194,8 @@ function rewriteText<T extends PasteText>(run: T, rewrite: Rewrite): T {
 
 function rewriteInline(inline: PasteInline, rewrite: Rewrite): PasteInline {
   if (inline.kind === 'text') return rewriteText(inline as PasteText & { kind: 'text' }, rewrite);
-  if (inline.kind === 'hyperlink') {
-    const link = inline as { kind: 'hyperlink'; inlines: readonly PasteInline[] };
+  if (inline.kind === 'hyperlink' || inline.kind === 'sdt') {
+    const link = inline as { kind: 'hyperlink' | 'sdt'; inlines: readonly PasteInline[] };
     return { ...link, inlines: (link.inlines ?? []).map((inner) => rewriteInline(inner, rewrite)) };
   }
   return inline;
@@ -302,10 +255,10 @@ function rewriteFragment<T extends PasteFragment>(fragment: T, rewrite: Rewrite)
  * הסדר הוא ההכרעה: הדגשה של המקור **מוסיפה** על היעד ואינה מוחקת ממנו. טקסט
  * רגיל שהודבק לתוך משפט מודגש יוצא מודגש — כמו הקלדה באותו מקום.
  */
-export function mergeFragment<T extends PasteFragment>(fragment: T, destination: PasteRunMarks): T {
-  const dropped = uniformEmphasis(fragment.blocks ?? []);
+export function mergeFragment<T extends PasteFragment>(fragment: T, destination: PasteRunMarks, { mirrorHtmlEmphasis = false }: { mirrorHtmlEmphasis?: boolean } = {}): T {
+  const dropped = uniformEmphasis(fragment.blocks ?? [], mirrorHtmlEmphasis);
   return rewriteFragment(fragment, {
-    marks: (source) => ({ ...destination, ...emphasisOf(source, dropped) }),
+    marks: (source) => ({ ...destination, ...emphasisOf(source, dropped, mirrorHtmlEmphasis) }),
     keepLists: true,
   });
 }
@@ -337,14 +290,6 @@ export interface CaretFormat {
   strikethrough?: boolean;
 }
 
-/** ברירות המחדל של המסמך (`docDefaults`), לפי ערוץ. */
-export interface DocumentRunDefaults {
-  fontFamilies: readonly string[];
-  fontSizesPt: readonly number[];
-}
-
-const AUTO_COLOR = '#000000';
-
 /**
  * שש-עשרה צבעי הסימון של Word (`ST_HighlightColor`), לפי ה-hex שהרצועה מדווחת.
  *
@@ -373,49 +318,25 @@ const HIGHLIGHT_NAMES: Record<string, string> = {
   '#FFFFFF': 'white',
 };
 
-function sameFamily(a: string, b: string): boolean {
-  return a.trim().toLowerCase() === b.trim().toLowerCase();
-}
-
-/**
- * העיצוב שהטקסט המודבק מקבל מנקודת ההדבקה.
- *
- * ההנמקה המלאה בראש הקובץ; בקצרה — הערכים שהמנוע מדווח אפקטיביים, ולכן
- * נכתבים רק מה שאינו ברירת המחדל של המסמך. כשברירות המחדל אינן ידועות
- * (`defaults` חסר), גופן וגודל **אינם** נכתבים: עדיף טקסט שיורש מהפסקה על
- * פני גופן לטיני שנכפה על עברית.
- *
- * הגודל נכתב לשני הערוצים יחד. הטקסט שהרצועה מציגה כגודל הוא הגודל של מה
- * שהמשתמש רואה, ו-`szCs` שנשאר מאחור היה מציג ב-Word עברית בגודל אחר מזה
- * שבעורך.
+/** Scalar states explicitly include black and false: omission would re-enable
+ * a paragraph/document default that the destination run has turned off. Fonts
+ * and sizes are supplied independently from the destination OOXML capture.
  */
 export function destinationMarks(
   caret: CaretFormat,
-  defaults: DocumentRunDefaults | null,
 ): PasteRunMarks {
   const marks: PasteRunMarks = {};
 
-  const family = caret.fontFamily?.trim();
-  if (family && defaults && !defaults.fontFamilies.some((known) => sameFamily(known, family))) {
-    marks.fontFamily = family;
-  }
-
-  const size = caret.fontSizePt;
-  if (typeof size === 'number' && size > 0 && defaults && !defaults.fontSizesPt.includes(size)) {
-    marks.fontSizePt = size;
-    marks.fontSizeCsPt = size;
-  }
-
   const color = caret.color?.toUpperCase();
-  if (color && /^#[0-9A-F]{6}$/.test(color) && color !== AUTO_COLOR) marks.color = color;
+  if (color && /^#[0-9A-F]{6}$/.test(color)) marks.color = color;
 
   const highlight = caret.highlight?.toUpperCase();
   if (highlight && /^#[0-9A-F]{6}$/.test(highlight)) marks.highlight = HIGHLIGHT_NAMES[highlight] ?? highlight;
 
-  if (caret.bold) marks.bold = true;
-  if (caret.italic) marks.italic = true;
-  if (caret.underline) marks.underline = true;
-  if (caret.strikethrough) marks.strike = true;
+  if (typeof caret.bold === 'boolean') marks.bold = caret.bold;
+  if (typeof caret.italic === 'boolean') marks.italic = caret.italic;
+  if (typeof caret.underline === 'boolean') marks.underline = caret.underline;
+  if (typeof caret.strikethrough === 'boolean') marks.strike = caret.strikethrough;
 
   return marks;
 }

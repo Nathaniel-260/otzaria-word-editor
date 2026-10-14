@@ -138,63 +138,6 @@ export async function readDefaultFontSizePt(host: DocDefaultsTarget): Promise<nu
   return typeof ascii === 'number' ? halfPointsToPoints(ascii) : null;
 }
 
-/** ברירות המחדל של ערוץ ה-run, בכל הערוצים שהמסמך מחזיק. */
-export interface DocRunDefaults {
-  /** כל משפחות הגופן שב-`w:rFonts` (ascii, hAnsi, cs…), בלי כפילויות. */
-  fontFamilies: string[];
-  /** `w:sz` ו-`w:szCs` בנקודות — אחד, שניים, או אף אחד. */
-  fontSizesPt: number[];
-}
-
-/**
- * קוראת את משפחות הגופן והגדלים של `docDefaults`, דרך אותו dryRun.
- *
- * הצרכן הוא „מזג עיצוב” (engine/paste-formatting.ts): עיצוב שבסמן ששווה
- * לאחד הערכים כאן אינו עיצוב ישיר אלא ירושה, ולכן אינו נכתב על הטקסט המודבק.
- * כל הערוצים מוחזרים ולא רק אחד, מאותה סיבה שב-`readDefaultFontSizePt`:
- * מסמך מ-Word מחזיק לעתים גופן וגודל שונים לעברית וללטינית, ושניהם „ברירת
- * מחדל”.
- *
- * `null` = המנוע אינו עונה. אז הקורא אינו יודע מה ישיר, וזה מצב אחר מ„אין
- * ברירות מחדל” (רשימות ריקות).
- */
-export async function readDocRunDefaults(host: DocDefaultsTarget): Promise<DocRunDefaults | null> {
-  const apply = docOf(host)?.styles?.apply;
-  if (typeof apply !== 'function') return null;
-
-  let receipt: StyleApplyReceipt;
-  try {
-    receipt = await apply(
-      {
-        target: { scope: 'docDefaults', channel: 'run' },
-        patch: { fontFamily: { ascii: 'Arial', hAnsi: 'Arial', cs: 'Arial' }, fontSize: 0, fontSizeCs: 0 },
-      },
-      { dryRun: true },
-    );
-  } catch {
-    return null;
-  }
-  if (!receipt || receipt.success === false || !receipt.before) return null;
-
-  const before = receipt.before;
-  const families = new Set<string>();
-  const family = before.fontFamily;
-  if (typeof family === 'string' && family.trim()) families.add(family.trim());
-  else if (family && typeof family === 'object') {
-    for (const value of Object.values(family as Record<string, unknown>)) {
-      if (typeof value === 'string' && value.trim()) families.add(value.trim());
-    }
-  }
-
-  const sizes = new Set<number>();
-  for (const key of ['fontSize', 'fontSizeCs']) {
-    const value = before[key];
-    if (typeof value === 'number' && value > 0) sizes.add(halfPointsToPoints(value));
-  }
-
-  return { fontFamilies: [...families], fontSizesPt: [...sizes] };
-}
-
 /**
  * מחילה ברירות מחדל לגופן על המסמך כולו (docDefaults/run).
  *

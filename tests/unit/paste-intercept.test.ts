@@ -76,12 +76,21 @@ describe('installPasteIntercept — Ctrl+V לפי ברירת המחדל', () => 
     expect(sibling).toHaveBeenCalledTimes(1);
   });
 
-  it('אירוע בלי טקסט (תמונה בלבד) נשאר למנוע', () => {
-    const { editor } = setup('merge');
+  it('אירוע תמונה בלבד מדווח על אי-תמיכה בלי לשנות את המסמך', () => {
+    const { editor, report } = setup('merge');
     const { event, engine } = paste(editor, transfer({ Files: '' }));
 
-    expect(event.defaultPrevented).toBe(false);
-    expect(engine).toHaveBeenCalledTimes(1);
+    expect(event.defaultPrevented).toBe(true);
+    expect(engine).not.toHaveBeenCalled();
+    expect(report).toHaveBeenCalledWith(expect.objectContaining({ ok: false }));
+  });
+
+  it('merge rejects mixed external media rather than silently dropping the image', () => {
+    const { editor, report } = setup('merge');
+    const { event } = paste(editor, transfer({ Files: '', 'text/plain': 'caption', 'text/html': '<p>caption<img src="cid:image"></p>' }));
+    expect(event.defaultPrevented).toBe(true);
+    expect(pasteFromClipboard).not.toHaveBeenCalled();
+    expect(report).toHaveBeenCalledWith(expect.objectContaining({ ok: false }));
   });
 
   it('שדה קלט בתוך ה-container מדביק לעצמו', () => {
@@ -119,6 +128,20 @@ describe('installPasteIntercept — ה-keydown של Ctrl+V', () => {
     expect(engine).not.toHaveBeenCalled();
     // בלי `preventDefault` — אחרת הדפדפן אינו שולח את אירוע ה-`paste`.
     expect(event.defaultPrevented).toBe(false);
+  });
+
+  it('Ctrl+V on macOS uses the explicit reader because the native browser chord is Cmd+V', () => {
+    const platform = navigator.platform;
+    Object.defineProperty(navigator, 'platform', { configurable: true, value: 'MacIntel' });
+    try {
+      const { editor } = setup('merge');
+      const { event, engine } = keydown(editor, { code: 'KeyV', ctrlKey: true });
+      expect(event.defaultPrevented).toBe(true);
+      expect(engine).not.toHaveBeenCalled();
+      expect(pasteFromClipboard).toHaveBeenCalledWith(null, { mode: 'merge' });
+    } finally {
+      Object.defineProperty(navigator, 'platform', { configurable: true, value: platform });
+    }
   });
 
   it('בברירת המחדל, ב-Ctrl+Shift+V ובמקשים אחרים — המנוע מקבל את ה-keydown', () => {
