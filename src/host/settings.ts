@@ -198,6 +198,20 @@ export async function saveCanvasColor(color: string | null): Promise<void> {
   await tryCall('storage.set', { key: CANVAS_COLOR_KEY, value: color });
 }
 
+const PASTE_DEFAULT_KEY = 'paste-default-mode';
+
+/**
+ * מה ש-Ctrl+V עושה — „הגדר הדבקת ברירת מחדל” של Word. מוחזר גולמי, והאימות
+ * אצל הקורא (composables/paste-default.ts), מאותה סיבה כמו צבע הבד.
+ */
+export async function loadPasteDefault(): Promise<unknown> {
+  return tryCall<unknown>('storage.get', { key: PASTE_DEFAULT_KEY });
+}
+
+export async function savePasteDefault(mode: string): Promise<void> {
+  await tryCall('storage.set', { key: PASTE_DEFAULT_KEY, value: mode });
+}
+
 const SPELLCHECK_WORDS_KEY = 'spellcheck-user-words';
 
 /**
