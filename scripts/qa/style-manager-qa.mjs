@@ -352,12 +352,12 @@ function ctxOf(app) {
 
 const PHASE_MS = 900_000;
 
-async function phase(key, label, body) {
+async function phase(key, label, body, { extra = '' } = {}) {
   if (ONLY && !ONLY.has(key)) return;
   console.log(`\n########## ${key}: ${label} ##########`);
   let app;
   try {
-    app = await openApp({ name: `style-mgr-${key}`, port: PORT });
+    app = await openApp({ name: `style-mgr-${key}`, port: PORT, extra });
     await app.cdp.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
     await sleep(2000);
     await app.tab('בית');
@@ -888,6 +888,300 @@ await phase('F', '„צור” על „רגיל” עם ריווח של Word —
   !sp
     ? report.pass('„צור” אינו כותב ריווח שלא שונה', 'אין w:spacing בסגנון החדש — יורש מ„רגיל”')
     : report.fail('„צור” אינו כותב ריווח שלא שונה', `המשתמש לא נגע בריווח, אבל נכתב ${sp} (הבסיס: after=160 line=259); הדיאלוג הציג לפני=${shown?.before} אחרי=${shown?.after} שורות=${shown?.line}`);
+});
+
+/* ================================================================== */
+/* עזרים לקיצורים                                                      */
+/* ================================================================== */
+
+/** Ctrl=2, Alt=1, Shift=8 ב-CDP. */
+const MOD = { alt: 1, ctrl: 2, shift: 8 };
+const COMBO_Q = { key: 'Q', code: 'KeyQ', vk: 81, mods: MOD.ctrl | MOD.alt | MOD.shift, label: 'Ctrl+Shift+Alt+Q' };
+const COMBO_W = { key: 'W', code: 'KeyW', vk: 87, mods: MOD.ctrl | MOD.alt | MOD.shift, label: 'Ctrl+Shift+Alt+W' };
+const COMBO_B = { key: 'b', code: 'KeyB', vk: 66, mods: MOD.ctrl, label: 'Ctrl+B' };
+const pressCombo = (app, k) => app.press(k.key, k.code, k.vk, k.mods);
+
+/**
+ * לחיצה אמיתית על הלוכד ואז הצירוף. מחזירה מה שנמדד: מי במיקוד אחרי הלחיצה,
+ * ומה הלוכד מציג אחרי הצירוף. בלי עקיפה — אם הלחיצה לא נותנת מיקוד, זה ממצא.
+ */
+async function record(app, c, k) {
+  const r = await c.clickSel('[data-testid="style-shortcut-recorder"]', { after: 300 });
+  const focus = await c.J(`JSON.stringify({ active: document.activeElement?.getAttribute('data-testid') || document.activeElement?.className || document.activeElement?.tagName,
+    label: document.querySelector('[data-testid="style-shortcut-recorder"]')?.getAttribute('aria-label') })`);
+  await pressCombo(app, k);
+  await sleep(400);
+  const read = () => c.J(`JSON.stringify(document.querySelector('[data-testid="style-shortcut-recorder"]')?.textContent?.trim() ?? null)`);
+  const shown = await read();
+  if (shown === k.label) return { found: !!r, focus, shown, mouseOnly: true };
+  // עקיפה כדי למדוד את ההמשך: מיקוד כמו Tab, ואז אותה לחיצה. המסלול בעכבר בלבד כבר נמדד ונכשל.
+  await c.js(`document.querySelector('[data-testid="style-shortcut-recorder"]')?.focus()`);
+  await c.clickSel('[data-testid="style-shortcut-recorder"]', { after: 300 });
+  await pressCombo(app, k);
+  await sleep(400);
+  return { found: !!r, focus, shown, mouseOnly: false, withFocus: await read() };
+}
+
+const dialogState = (c) => c.J(`(() => { const d = document.querySelector('[data-testid="style-dialog"]'); if (!d) return 'null';
+  return JSON.stringify({ okDisabled: !!d.querySelector('.sd-btn-primary')?.disabled, error: d.querySelector('.sd-error')?.textContent?.trim() ?? null,
+    recorder: d.querySelector('[data-testid="style-shortcut-recorder"]')?.textContent?.trim() ?? null }); })()`);
+
+/** File → „ניהול קיצורים” → הרשימה. סוגר אחרי הקריאה. */
+async function managerList(app, c) {
+  await app.tab('קובץ');
+  await app.click('ניהול קיצורים', { after: 1200 });
+  const list = await c.J(`JSON.stringify([...document.querySelectorAll('.sm-item')].map((b) => ({
+    name: b.querySelector('.sm-item-name')?.textContent?.trim(), combo: b.querySelector('.sm-item-combo')?.textContent?.trim(),
+    summary: b.querySelector('.sm-item-preset')?.textContent?.trim() })))`);
+  await app.escape();
+  await sleep(400);
+  await app.tab('בית');
+  return list;
+}
+
+/** File → „קיצורים” → השורות שמזכירות סגנון. */
+async function helpRows(app, c) {
+  await app.tab('קובץ');
+  await app.click('קיצורים', { after: 1200, exact: true });
+  const rows = await c.J(`JSON.stringify([...document.querySelectorAll('.shortcuts-dialog .shortcut-desc')]
+    .map((e) => ((e.previousElementSibling?.textContent || '') + ' | ' + (e.textContent || '')).replace(/\\s+/g, ' ').trim()).filter((t) => t.includes('סגנון')))`);
+  const open = await app.exists('.shortcuts-dialog');
+  await app.escape();
+  await sleep(400);
+  await app.tab('בית');
+  return { open, rows: rows ?? [] };
+}
+
+const storedShortcuts = (c) => c.J(`JSON.stringify(window.__qaHost.storage['custom-shortcuts'] ?? null)`);
+
+/* ================================================================== */
+/* G — רמת חלוקה בסגנון מותאם, ותוכן עניינים                           */
+/* ================================================================== */
+
+const PG = ['פתיחה רגילה', 'פרק בכותרת אחת', 'פרק בסגנון מותאם', 'סיום רגיל'];
+
+await phase('G', 'רמת חלוקה בסגנון מותאם — styles.xml ותוכן עניינים', async (app, c) => {
+  await c.caretIn(0);
+  await c.type(PG);
+  await c.caretIn(PG[1]);
+  await c.clickCard('כותרת 1');
+  await c.caretIn(PG[2]);
+  await c.moreMenu();
+  await c.pickMenu('create');
+  await c.waitDialog();
+  const opts = await c.J(`JSON.stringify([...document.querySelectorAll('#sd-outline option')].map((o) => [o.value, o.textContent.trim()]))`);
+  log('אפשרויות רמת חלוקה:', JSON.stringify(opts), 'ערך בפתיחה:', await c.js(`document.querySelector('#sd-outline')?.value`));
+  await c.fill('#sd-name', 'כותרת מקור');
+  await c.fill('#sd-outline', '0');
+  const tag = await c.markInstance();
+  await c.ok();
+  const r = await c.waitReload(tag);
+  if (!r.ok) { report.fail('רמת חלוקה — יצירה', `לא נפתח מחדש: ${JSON.stringify(await c.dialogValues())}`); return; }
+  const files = await c.engineExport('G');
+  const st = styleByName(files['word/styles.xml'], 'כותרת מקור');
+  const id = idOf(st);
+  const p = paraBy(files, PG[2]);
+  log('הסגנון:', st, 'פסקה:', p?.pPr);
+  const sc = schemaCheck(st);
+  /<w:outlineLvl w:val="0"\/>/.test(st ?? '') && !sc && p?.pStyle === id
+    ? report.pass('רמת חלוקה — styles.xml', `<w:outlineLvl w:val="0"/>, pPr[${childNames(sub(st, 'pPr'))}], הפסקה בסגנון ${id}`)
+    : report.fail('רמת חלוקה — styles.xml', `schema=${sc} pStyle=${p?.pStyle}: ${st}`);
+
+  // הדיאלוג קורא את הרמה בחזרה.
+  await c.cardMenu('כותרת מקור');
+  await c.pickMenu('modify');
+  await c.waitDialog();
+  const back = await c.js(`document.querySelector('#sd-outline')?.value`);
+  await app.escape();
+  back === '0' ? report.pass('רמת חלוקה — הדיאלוג קורא בחזרה', 'רמה 1') : report.fail('רמת חלוקה — הדיאלוג קורא בחזרה', `value=${back}`);
+
+  // תוכן עניינים בעורך — מראש המסמך.
+  await c.caretIn(PG[0]);
+  await app.press('Home', 'Home', 36);
+  await sleep(300);
+  await app.tab('הפניות');
+  const clicked = await app.click('תוכן עניינים', { after: 4000, exact: true });
+  await sleep(2000);
+  const text = await app.screenText();
+  const count = (t) => (text.match(new RegExp(t, 'g')) ?? []).length;
+  log('תוכן עניינים: נלחץ', clicked, '| מופעים על המסך:', JSON.stringify({ h1: count(PG[1]), custom: count(PG[2]), normal: count(PG[0]) }));
+  log('טקסט המסך:', text.slice(0, 400));
+  const saved = await c.save('G-outline-toc');
+  const doc = saved?.['word/document.xml'] ?? '';
+  const instr = doc.match(/TOC [^<]*/)?.[0] ?? null;
+  const tocTexts = (doc.match(/<w:hyperlink\b[\s\S]*?<\/w:hyperlink>/g) ?? []).map((h) => h.replace(/<[^>]+>/g, ''));
+  log('instrText:', instr, '| ערכי TOC בקובץ:', JSON.stringify(tocTexts));
+  const h1In = count(PG[1]) >= 2;
+  const customIn = count(PG[2]) >= 2;
+  if (!h1In) report.fail('רמת חלוקה — תוכן עניינים בעורך', `גם כותרת 1 לא נאספה (מופעים ${count(PG[1])}) — המדידה אינה תקפה`);
+  else customIn
+    ? report.pass('רמת חלוקה — תוכן עניינים בעורך', `הפסקה בסגנון המותאם נאספה (${count(PG[2])} מופעים על המסך, כותרת 1: ${count(PG[1])}); instr=${instr}`)
+    : report.fail('רמת חלוקה — תוכן עניינים בעורך', `כותרת 1 נאספה (${count(PG[1])} מופעים), הפסקה בסגנון המותאם לא (${count(PG[2])}); instr=${instr}`);
+});
+
+/* ================================================================== */
+/* H — קיצור מקשים לסגנון                                               */
+/* ================================================================== */
+
+let savedShortcutStorage = null;
+
+await phase('H', 'קיצור מקשים לסגנון מובנה — הקלטה, החלה, רשימות, התנגשות', async (app, c) => {
+  await c.caretIn(0);
+  await c.type([P1, P2, P3]);
+  await c.caretIn(P2);
+  await c.cardMenu('כותרת 1');
+  await c.pickMenu('modify');
+  await c.waitDialog();
+  const rec = await record(app, c, COMBO_Q);
+  const ds = await dialogState(c);
+  log('הקלטה:', JSON.stringify(rec), JSON.stringify(ds));
+  rec.shown === COMBO_Q.label
+    ? report.pass('קיצור — הלוכד מקליט בלחיצה אמיתית', `מוצג „${rec.shown}”; מיקוד אחרי הלחיצה: ${rec.focus?.active}`)
+    : report.fail('קיצור — הלוכד מקליט בלחיצה אמיתית', `אחרי לחיצה ו-${COMBO_Q.label} הלוכד מציג „${rec.shown}”; מיקוד: ${JSON.stringify(rec.focus)}`);
+  if (!rec.mouseOnly) {
+    rec.withFocus === COMBO_Q.label
+      ? report.pass('קיצור — הלוכד מקליט כשהוא במיקוד (Tab ואז לחיצה)', `מוצג „${rec.withFocus}” — ההמשך נמדד דרך המסלול הזה`)
+      : report.fail('קיצור — הלוכד מקליט כשהוא במיקוד (Tab ואז לחיצה)', `מוצג „${rec.withFocus}”`);
+  }
+  const undoBefore = (await c.shell()).undo;
+  const tag = await c.markInstance();
+  await c.ok();
+  await sleep(6000);
+  const after = { same: await c.sameInstance(tag), dialog: await app.exists('[data-testid="style-dialog"]'), shell: await c.shell() };
+  log('אחרי אישור (רק קיצור):', JSON.stringify(after), 'אחסון:', JSON.stringify(await storedShortcuts(c)));
+  after.same && !after.dialog && after.shell.undo === undoBefore
+    ? report.pass('קיצור — אין טעינה מחדש כשרק הקיצור השתנה', `אותו מופע אחרי 6s, undo נשאר ${after.shell.undo}; סטטוס „${after.shell.status}”`)
+    : report.fail('קיצור — אין טעינה מחדש כשרק הקיצור השתנה', JSON.stringify(after));
+  /נשמר/.test(after.shell.status ?? '')
+    ? report.pass('קיצור — הודעת סטטוס', after.shell.status)
+    : report.fail('קיצור — הודעת סטטוס', `status=${after.shell.status}`);
+
+  // החלה בצירוף אמיתי על פסקה רגילה.
+  await c.caretIn(P3);
+  const beforeCard = await c.activeCard();
+  await pressCombo(app, COMBO_Q);
+  await sleep(2500);
+  const card = await c.activeCard();
+  const p3 = paraBy(await c.engineExport('H החלה'), P3);
+  const st = await c.shell();
+  log(`צירוף על P3: כרטיס ${beforeCard} → ${card}; pStyle=${p3?.pStyle}; status=${st.status}`);
+  p3?.pStyle === 'Heading1' && card === 'כותרת 1'
+    ? report.pass('קיצור — הצירוף מחיל את הסגנון', `P3: ${beforeCard} → ${card}, pStyle=Heading1; סטטוס „${st.status}”`)
+    : report.fail('קיצור — הצירוף מחיל את הסגנון', `pStyle=${p3?.pStyle}, כרטיס ${card}, סטטוס ${st.status}`);
+
+  const list = await managerList(app, c);
+  log('ניהול קיצורים:', JSON.stringify(list));
+  const entry = (list ?? []).find((e) => e.summary === 'החלת הסגנון „כותרת 1”');
+  entry && entry.combo === COMBO_Q.label
+    ? report.pass('קיצור — ב„ניהול קיצורים”', `${entry.name} | ${entry.combo} | ${entry.summary}`)
+    : report.fail('קיצור — ב„ניהול קיצורים”', JSON.stringify(list));
+  const help = await helpRows(app, c);
+  log('דיאלוג הקיצורים:', JSON.stringify(help));
+  help.rows.some((t) => t.includes('החלת הסגנון „כותרת 1”'))
+    ? report.pass('קיצור — בדיאלוג רשימת הקיצורים', help.rows.find((t) => t.includes('החלת הסגנון „כותרת 1”')))
+    : report.fail('קיצור — בדיאלוג רשימת הקיצורים', `נפתח=${help.open}; ${JSON.stringify(help.rows)}`);
+
+  // התנגשות: מובנה (Ctrl+B), וקיצור של סגנון אחר.
+  for (const [what, k] of [['פעולה מובנית', COMBO_B], ['קיצור של סגנון אחר', COMBO_Q]]) {
+    await c.cardMenu('כותרת 2');
+    await c.pickMenu('modify');
+    await c.waitDialog();
+    const rr = await record(app, c, k);
+    const d = await dialogState(c);
+    log(`התנגשות (${what}):`, JSON.stringify(rr), JSON.stringify(d));
+    d?.okDisabled && /[א-ת]/.test(d.error ?? '')
+      ? report.pass(`קיצור — התנגשות עם ${what}`, `„אישור” מושבת: ${d.error}`)
+      : report.fail(`קיצור — התנגשות עם ${what}`, `הלוכד „${rr.withFocus ?? rr.shown}”, אישור מושבת=${d?.okDisabled}, הודעה=${d?.error}`);
+    await app.press('Escape', 'Escape', 27);
+    await sleep(300);
+    if (await app.exists('[data-testid="style-dialog"]')) await c.clickSel('[data-testid="style-dialog"] .sd-close-btn');
+  }
+
+  savedShortcutStorage = await storedShortcuts(c);
+  log('נשמר באחסון המאחז:', JSON.stringify(savedShortcutStorage));
+});
+
+/* H2 — אותו אחסון בטעינה חדשה של התוסף (המאחז מחזיק אותו, כמו אוצריא). */
+if (savedShortcutStorage) {
+  const seed = `<script>window.__qaHost.storage['custom-shortcuts']=${JSON.stringify(savedShortcutStorage)};</script>`;
+  await phase('H', 'קיצור מקשים — אחרי טעינה מחדש של התוסף', async (app, c) => {
+    const list = await managerList(app, c);
+    await c.caretIn(0);
+    await c.type([P1]);
+    await c.caretIn(P1);
+    await pressCombo(app, COMBO_Q);
+    await sleep(2500);
+    const p1 = paraBy(await c.engineExport('H2'), P1);
+    log('אחרי טעינה:', JSON.stringify(list), 'pStyle=', p1?.pStyle);
+    (list ?? []).some((e) => e.summary === 'החלת הסגנון „כותרת 1”') && p1?.pStyle === 'Heading1'
+      ? report.pass('קיצור — שורד טעינה מחדש', 'נטען מהאחסון, מופיע ברשימה, והצירוף מחיל כותרת 1')
+      : report.fail('קיצור — שורד טעינה מחדש', `רשימה ${JSON.stringify(list)}, pStyle=${p1?.pStyle}`);
+  }, { extra: seed });
+} else if (!ONLY || ONLY.has('H')) {
+  report.skip('קיצור — שורד טעינה מחדש', 'לא נשמר דבר באחסון המאחז בשלב הקודם');
+}
+
+/* ================================================================== */
+/* I — שינוי שם ומחיקה מסנכרנים את הקיצור                               */
+/* ================================================================== */
+
+await phase('I', 'קיצור לסגנון מותאם — שינוי שם ומחיקה', async (app, c) => {
+  await c.caretIn(0);
+  await c.type([P1, P2, P3]);
+  await c.caretIn(P3);
+  await c.moreMenu();
+  await c.pickMenu('create');
+  await c.waitDialog();
+  await c.fill('#sd-name', 'ציטוט מקור');
+  const rec = await record(app, c, COMBO_W);
+  log('הקלטה ביצירה:', JSON.stringify(rec));
+  let tag = await c.markInstance();
+  await c.ok();
+  let r = await c.waitReload(tag);
+  let list = await managerList(app, c);
+  log('אחרי יצירה:', JSON.stringify(r), JSON.stringify(list), JSON.stringify(await storedShortcuts(c)));
+  const created = (list ?? []).find((e) => e.combo === COMBO_W.label);
+  created?.summary === 'החלת הסגנון „ציטוט מקור”'
+    ? report.pass('קיצור — נוצר עם הסגנון', `${created.name} | ${created.combo} | ${created.summary}`)
+    : report.fail('קיצור — נוצר עם הסגנון', JSON.stringify(list));
+
+  // הצירוף מחיל את הסגנון המותאם על פסקה אחרת.
+  await c.caretIn(P1);
+  await pressCombo(app, COMBO_W);
+  await sleep(2500);
+  const files = await c.engineExport('I החלה');
+  const id = idOf(styleByName(files['word/styles.xml'], 'ציטוט מקור'));
+  const p1 = paraBy(files, P1);
+  p1?.pStyle && p1.pStyle === id
+    ? report.pass('קיצור — מחיל סגנון מותאם', `P1 pStyle=${id}`)
+    : report.fail('קיצור — מחיל סגנון מותאם', `P1 pStyle=${p1?.pStyle}, id=${id}`);
+
+  await c.cardMenu('ציטוט מקור');
+  await c.pickMenu('rename');
+  await c.waitDialog();
+  await c.fill('#sd-name', 'ציטוט מקור חדש');
+  tag = await c.markInstance();
+  await c.ok();
+  r = await c.waitReload(tag);
+  list = await managerList(app, c);
+  log('אחרי שינוי שם:', JSON.stringify(r), JSON.stringify(list));
+  const renamed = (list ?? []).find((e) => e.combo === COMBO_W.label);
+  renamed?.summary === 'החלת הסגנון „ציטוט מקור חדש”' && renamed?.name === 'ציטוט מקור חדש'
+    ? report.pass('קיצור — עוקב אחרי שינוי שם', `${renamed.name} | ${renamed.summary}`)
+    : report.fail('קיצור — עוקב אחרי שינוי שם', JSON.stringify(renamed ?? list));
+
+  await c.cardMenu('ציטוט מקור חדש');
+  await c.pickMenu('delete');
+  await c.waitDialog();
+  tag = await c.markInstance();
+  await c.ok();
+  r = await c.waitReload(tag);
+  list = await managerList(app, c);
+  const stored = await storedShortcuts(c);
+  log('אחרי מחיקה:', JSON.stringify(r), JSON.stringify(list), JSON.stringify(stored));
+  !(list ?? []).some((e) => e.combo === COMBO_W.label) && !JSON.stringify(stored ?? '').includes('KeyW')
+    ? report.pass('קיצור — נמחק עם הסגנון', `הרשימה: ${JSON.stringify(list)}; באחסון: ${JSON.stringify(stored)}`)
+    : report.fail('קיצור — נמחק עם הסגנון', `הרשימה: ${JSON.stringify(list)}; באחסון: ${JSON.stringify(stored)}`);
 });
 
 process.exit(report.print() > 0 ? 1 : 0);
