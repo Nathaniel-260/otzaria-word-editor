@@ -527,6 +527,8 @@
       :next="styleManager.dialog.value?.next ?? null"
       :format="styleManager.dialog.value?.format ?? {}"
       :error="styleManager.error.value"
+      :shortcut="styleManager.dialog.value?.shortcut ?? null"
+      :combo-problem="(combo) => styleManager.comboProblem(styleManager.dialog.value?.styleId ?? null, combo)"
       @close="styleManager.close"
       @submit="styleManager.onSubmit"
     />

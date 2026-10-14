@@ -11,7 +11,7 @@
       :aria-label="title"
       tabindex="-1"
       data-testid="style-dialog"
-      @keydown.esc.stop="$emit('close')"
+      @keydown.esc.stop="onEscape"
       @keydown.enter="onDialogEnter"
     >
       <div
@@ -269,7 +269,71 @@
                 >
                 <span class="sd-unit">ס"מ (שלילי = תלויה)</span>
               </div>
+              <div class="sd-row">
+                <label
+                  for="sd-outline"
+                  class="sd-label"
+                >רמת חלוקה:</label>
+                <select
+                  id="sd-outline"
+                  v-model.number="outlineLevel"
+                  class="sd-input"
+                  data-tip-title="רמת חלוקה"
+                  data-tip-desc="מה ש-Word קורא כדי לזהות כותרת — בחלונית הניווט ובתוכן העניינים"
+                >
+                  <option :value="BODY_TEXT_LEVEL">
+                    גוף טקסט
+                  </option>
+                  <option
+                    v-for="level in 9"
+                    :key="level"
+                    :value="level - 1"
+                  >
+                    רמה {{ level }}
+                  </option>
+                </select>
+              </div>
             </fieldset>
+
+            <div class="sd-row">
+              <span class="sd-label">קיצור מקשים:</span>
+              <!-- לוכד ולא שדה טקסט, כמו ב„ניהול קיצורים”: נשמר המקש הפיזי. -->
+              <button
+                type="button"
+                class="sd-input sd-recorder"
+                :class="{ 'sd-recorder--armed': recording }"
+                data-testid="style-shortcut-recorder"
+                :aria-label="recording ? 'ממתין לצירוף מקשים' : 'קיצור מקשים לסגנון'"
+                @pointerdown.prevent
+                @click="recording = true"
+                @keydown="onRecorderKey"
+                @blur="recording = false"
+              >
+                <span
+                  v-if="recording"
+                  class="sd-recorder-hint"
+                >לחצו על הצירוף…</span>
+                <span
+                  v-else-if="combo"
+                  dir="ltr"
+                >{{ comboLabel(combo) }}</span>
+                <span
+                  v-else
+                  class="sd-recorder-hint"
+                >ללא — לחצו כאן כדי להגדיר</span>
+              </button>
+              <button
+                v-if="combo"
+                type="button"
+                class="sd-toggle"
+                data-tip-title="הסר את הקיצור"
+                aria-label="הסר את הקיצור"
+                @pointerdown.prevent
+                @click="combo = null"
+              >
+                ✕
+              </button>
+            </div>
 
             <div
               class="sd-preview"
@@ -336,7 +400,8 @@ import RibbonCombo from '../ribbon/common/RibbonCombo.vue';
 import { useDialogDrag } from '../../composables/dialog-drag';
 import { useDialogDefaultAction } from '../../composables/dialog-default-action';
 import { useFamilyPicker } from '../../composables/font-family-options';
-import type { StyleAlignment, StyleFormat } from '../../engine/docx-style-edit';
+import { BODY_TEXT_LEVEL, type StyleAlignment, type StyleFormat } from '../../engine/docx-style-edit';
+import { comboFromEvent, comboLabel, type KeyCombo } from '../shortcuts/combo';
 
 export type StyleDialogMode = 'modify' | 'create' | 'rename' | 'delete';
 
@@ -351,6 +416,8 @@ export interface StyleDialogResult {
   basedOn: string | null;
   next: string | null;
   format: StyleFormat;
+  /** קיצור המקשים שנבחר (`null` = אין). נבדק מול `shortcut` בפתיחה כדי לדעת אם שונה. */
+  combo: KeyCombo | null;
 }
 
 const { dragStyle, startDialogDrag } = useDialogDrag();
@@ -369,6 +436,10 @@ const props = withDefaults(
     next?: string | null;
     format?: StyleFormat;
     error?: string | null;
+    /** קיצור המקשים של הסגנון כרגע. */
+    shortcut?: KeyCombo | null;
+    /** למה צירוף אינו זמין (תפוס, או בלי Ctrl/Alt), או `null`. */
+    comboProblem?: (combo: KeyCombo) => string | null;
   }>(),
   {
     busy: false,
@@ -380,6 +451,8 @@ const props = withDefaults(
     next: null,
     format: () => ({}),
     error: null,
+    shortcut: null,
+    comboProblem: () => null,
   },
 );
 
@@ -422,6 +495,24 @@ const lineSpacing = ref('1');
 const indentStart = ref<string | number>('0');
 const indentEnd = ref<string | number>('0');
 const firstLine = ref<string | number>('0');
+const outlineLevel = ref<number>(BODY_TEXT_LEVEL);
+const combo = ref<KeyCombo | null>(null);
+const recording = ref(false);
+
+function onRecorderKey(event: KeyboardEvent): void {
+  if (!recording.value || event.key === 'Tab') return;
+  event.stopPropagation();
+  event.preventDefault();
+  if (event.key === 'Escape') {
+    recording.value = false;
+    return;
+  }
+  const captured = comboFromEvent(event);
+  // מודיפייר לבדו: הלכידה נשארת פתוחה עד שיגיע מקש.
+  if (!captured) return;
+  combo.value = captured;
+  recording.value = false;
+}
 
 /**
  * מה שהוצג בפתיחה לשדות שאין להם ערך „לא מוצהר” בפקד: צבע ויישור. סגנון
@@ -486,6 +577,9 @@ watch(
     indentStart.value = text(format.indentStartCm, '0');
     indentEnd.value = text(format.indentEndCm, '0');
     firstLine.value = text(format.firstLineCm, '0');
+    outlineLevel.value = format.outlineLevel ?? BODY_TEXT_LEVEL;
+    combo.value = props.shortcut;
+    recording.value = false;
     await nextTick();
     if (props.mode === 'create' || props.mode === 'rename') {
       nameRef.value?.focus();
@@ -514,6 +608,7 @@ const invalid = computed<string | null>(() => {
     if (parsed === null || parsed < 0) return 'הערכים שהוקלדו אינם תקינים.';
   }
   if (parse(firstLine.value) === null) return 'הערכים שהוקלדו אינם תקינים.';
+  if (combo.value && combo.value !== props.shortcut) return props.comboProblem(combo.value);
   return null;
 });
 
@@ -530,6 +625,14 @@ const previewStyle = computed<CSSProperties>(() => {
     textAlign: alignment.value === 'justify' ? 'justify' : alignment.value,
   };
 });
+
+function onEscape(): void {
+  if (recording.value) {
+    recording.value = false;
+    return;
+  }
+  emit('close');
+}
 
 function onSubmit(): void {
   if (props.busy || invalid.value !== null) return;
@@ -557,6 +660,7 @@ function onSubmit(): void {
               indentStartCm: parse(indentStart.value) ?? 0,
               indentEndCm: parse(indentEnd.value) ?? 0,
               firstLineCm: parse(firstLine.value) ?? 0,
+              outlineLevel: outlineLevel.value,
             }
           : {}),
       };
@@ -565,6 +669,7 @@ function onSubmit(): void {
     basedOn: basedOn.value || null,
     next: next.value || null,
     format,
+    combo: short.value ? props.shortcut : combo.value,
   });
 }
 </script>
@@ -819,5 +924,21 @@ function onSubmit(): void {
 .sd-btn:disabled {
   opacity: 0.4;
   cursor: default;
+}
+
+.sd-recorder {
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: start;
+  cursor: pointer;
+}
+
+.sd-recorder--armed {
+  border-color: var(--word-blue);
+  box-shadow: 0 0 0 1px var(--word-blue);
+}
+
+.sd-recorder-hint {
+  color: var(--color-on-surface-variant);
 }
 </style>

@@ -13,11 +13,14 @@ import {
   COMMAND_REPORTER,
   STATUS_NOTIFIER,
   STYLE_DOCUMENT,
+  STYLE_SHORTCUTS,
   type CommandReporter,
 } from './keys';
+import { comboSignature, type KeyCombo } from '../ui/shortcuts/combo';
 import { ACTIVE_SUPERDOC } from '../engine/document-api';
 import {
   listStyles,
+  newStyleId,
   resolveFormat,
   type StyleEdit,
   type StyleFormat,
@@ -43,6 +46,13 @@ export interface StyleDialogState {
   baseline: StyleFormat;
   /** גיליון הסגנונות כפי שנקרא בפתיחה. */
   xml: string;
+  /** קיצור המקשים של הסגנון בפתיחה. */
+  shortcut: KeyCombo | null;
+}
+
+function sameCombo(a: KeyCombo | null, b: KeyCombo | null): boolean {
+  if (a === null || b === null) return a === b;
+  return comboSignature(a) === comboSignature(b);
 }
 
 /** השם של הסגנון החדש הבא: „סגנון1”, „סגנון2”… — כמו ב-Word. */
@@ -72,6 +82,11 @@ export function useStyleManager(activeStyleId: () => string | null) {
   const superdoc = inject(ACTIVE_SUPERDOC, () => shallowRef(null), true);
   const report = inject(COMMAND_REPORTER, silentReporter);
   const notify = inject(STATUS_NOTIFIER, () => {});
+  const shortcuts = inject(STYLE_SHORTCUTS, null);
+
+  function comboProblem(styleId: string | null, combo: KeyCombo): string | null {
+    return shortcuts ? shortcuts.problem(styleId ?? '', combo) : null;
+  }
 
   const dialog = shallowRef<StyleDialogState | null>(null);
   const busy = shallowRef(false);
@@ -143,6 +158,7 @@ export function useStyleManager(activeStyleId: () => string | null) {
           format: { ...baseline, ...withoutThemedFont(await readSelection(), baseline) },
           baseline,
           xml,
+          shortcut: null,
         };
         return;
       }
@@ -174,6 +190,7 @@ export function useStyleManager(activeStyleId: () => string | null) {
         format: resolved,
         baseline: resolved,
         xml,
+        shortcut: shortcuts?.comboFor(info.id) ?? null,
       };
     });
   }
@@ -182,10 +199,27 @@ export function useStyleManager(activeStyleId: () => string | null) {
     const state = dialog.value;
     if (!state) return;
     error.value = null;
+    // קיצור תפוס נבדק **לפני** שהמסמך נטען מחדש: אחרי הטעינה כבר אין דרך
+    // להחזיר את הסגנון, וחצי פעולה היא מה שהמשתמש לא ביקש.
+    const comboChanged = !sameCombo(result.combo, state.shortcut);
+    if (comboChanged && result.combo) {
+      const problem = comboProblem(state.styleId, result.combo);
+      if (problem) {
+        error.value = problem;
+        return;
+      }
+    }
+    const assignCombo = (id: string, name: string): void => {
+      if (!comboChanged || !shortcuts) return;
+      const failure = shortcuts.assign({ id, name }, result.combo);
+      if (failure) fail(failure, 'style-shortcut');
+    };
+
     await run(async () => {
       let done = false;
       switch (state.mode) {
         case 'create': {
+          const createdId = newStyleId(state.xml, result.name);
           // הטלאי ביחס לבסיס **שנבחר בדיאלוג**, ולא לזה שהדיאלוג נפתח עליו.
           const baseline = result.basedOn ? resolveFormat(state.xml, result.basedOn) : {};
           done = await apply(
@@ -200,6 +234,7 @@ export function useStyleManager(activeStyleId: () => string | null) {
             `נוצר הסגנון „${result.name}”`,
             { applyToSelection: true },
           );
+          if (done) assignCombo(createdId, result.name);
           break;
         }
         case 'modify': {
@@ -207,6 +242,9 @@ export function useStyleManager(activeStyleId: () => string | null) {
           const patch = formatPatch(result.format, state.baseline);
           const changedNext = state.styleType === 'paragraph' && result.next !== state.next;
           if (!changedBase && !changedNext && Object.keys(patch).length === 0) {
+            // רק הקיצור השתנה — אין מה לכתוב למסמך, ואין טעינה מחדש.
+            assignCombo(state.styleId as string, state.styleName);
+            if (comboChanged) notify(`קיצור המקשים של „${state.styleName}” נשמר`);
             done = true;
             break;
           }
@@ -220,6 +258,7 @@ export function useStyleManager(activeStyleId: () => string | null) {
             },
             `הסגנון „${state.styleName}” עודכן`,
           );
+          if (done) assignCombo(state.styleId as string, state.styleName);
           break;
         }
         case 'rename':
@@ -227,9 +266,12 @@ export function useStyleManager(activeStyleId: () => string | null) {
             { kind: 'rename', id: state.styleId as string, name: result.name },
             `שם הסגנון שונה ל„${result.name}”`,
           );
+          if (done) shortcuts?.renamed(state.styleId as string, result.name);
           break;
         case 'delete':
           done = await apply({ kind: 'delete', id: state.styleId as string }, `הסגנון „${state.styleName}” נמחק`);
+          // כמו ב-Word: קיצור של סגנון שנמחק נמחק איתו.
+          if (done) shortcuts?.removed(state.styleId as string);
           break;
       }
       if (done) dialog.value = null;
@@ -241,5 +283,5 @@ export function useStyleManager(activeStyleId: () => string | null) {
     error.value = null;
   }
 
-  return { dialog, busy, error, available, onAction, onSubmit, close };
+  return { dialog, busy, error, available, onAction, onSubmit, close, comboProblem };
 }

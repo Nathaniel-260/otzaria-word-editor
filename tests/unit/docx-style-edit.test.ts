@@ -134,6 +134,19 @@ describe('editStyles — modify', () => {
     expect(resolveFormat(result.xml, 'Normal').firstLineCm).toBe(-0.5);
   });
 
+  it('writes the outline level where Word reads headings, in schema order', () => {
+    const result = editStyles(BASE, { kind: 'modify', id: 'Normal', format: { outlineLevel: 1, alignment: 'center' } });
+    if (!result.ok) throw new Error(result.message);
+    const style = styleXml(result.xml, 'Normal');
+    expect(style).toContain('<w:jc w:val="center"/><w:outlineLvl w:val="1"/>');
+    expect(resolveFormat(result.xml, 'Normal').outlineLevel).toBe(1);
+    // ‏`Heading1` יורש מ„רגיל” אבל מצהיר רמה משלו.
+    expect(resolveFormat(result.xml, 'Heading1').outlineLevel).toBe(0);
+    const body = editStyles(result.xml, { kind: 'modify', id: 'Normal', format: { outlineLevel: null } });
+    if (!body.ok) throw new Error(body.message);
+    expect(styleXml(body.xml, 'Normal')).not.toContain('outlineLvl');
+  });
+
   it('refuses a basedOn cycle', () => {
     const result = editStyles(BASE, { kind: 'modify', id: 'Normal', basedOn: 'Heading1', format: {} });
     expect(result).toMatchObject({ ok: false });

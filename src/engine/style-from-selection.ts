@@ -96,6 +96,7 @@ const IMPLICIT: StyleFormat = {
   indentStartCm: 0,
   indentEndCm: 0,
   firstLineCm: 0,
+  outlineLevel: 9,
 };
 
 /**

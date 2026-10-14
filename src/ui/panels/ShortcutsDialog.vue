@@ -101,8 +101,7 @@
 import { computed, nextTick, ref, watch } from 'vue';
 import { SHORTCUT_GROUP_TITLES, shortcutsByGroup, type Shortcut } from '../shortcuts/registry';
 import { comboAsShortcut } from '../shortcuts/combo';
-import { presetSummary } from '../shortcuts/format-preset';
-import type { CustomShortcut } from '../shortcuts/custom-shortcuts';
+import { shortcutSummary, type CustomShortcut } from '../shortcuts/custom-shortcuts';
 
 /** מקשר את החלון לכותרת שלו — השם הנגיש. */
 const TITLE_ID = 'shortcuts-dialog-title';
@@ -151,7 +150,7 @@ const groups = computed<{ group: string; title: string; items: Shortcut[] }[]>((
           // השם שהמשתמש נתן, ואחריו מה שהקיצור מחיל: השם לבדו („כותרת”)
           // אינו אומר מה יקרה, וסיכום לבדו אינו מזהה את הרשומה בדיאלוג
           // הניהול.
-          description: `${entry.name} — ${presetSummary(entry.preset)}`,
+          description: `${entry.name} — ${shortcutSummary(entry)}`,
         }),
       ),
     },

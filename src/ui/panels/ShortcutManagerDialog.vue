@@ -53,7 +53,7 @@
                 class="sm-item-combo"
                 dir="ltr"
               >{{ comboLabel(entry.combo) }}</span>
-              <span class="sm-item-preset">{{ presetSummary(entry.preset) }}</span>
+              <span class="sm-item-preset">{{ shortcutSummary(entry) }}</span>
             </button>
             <p
               v-if="list.length === 0"
@@ -122,6 +122,16 @@
             </button>
           </div>
 
+          <!-- קיצור „החל סגנון” אין לו ערכת עיצוב: הסגנון עצמו נערך בגלריה. -->
+          <p
+            v-if="editingStyle"
+            class="sm-style-note"
+            role="note"
+          >
+            הקיצור מחיל את הסגנון „{{ editingStyle.name }}”. את הסגנון עצמו משנים בגלריית הסגנונות.
+          </p>
+
+          <template v-else>
           <div class="sm-section">עיצוב</div>
 
           <div class="sm-row">
@@ -198,6 +208,7 @@
               </select>
             </div>
           </div>
+          </template>
 
           <!--
             שלושה מצבים ולא שניים — ראו „שלושת המצבים של השורה” ב-<script>.
@@ -292,7 +303,6 @@ import {
   FIELD_TITLES,
   TOGGLE_FIELDS,
   isEmptyPreset,
-  presetSummary,
   type FormatPreset,
   type ToggleField,
 } from '../shortcuts/format-preset';
@@ -302,6 +312,8 @@ import {
   type CustomShortcut,
   type CustomShortcutDraft,
   type TakenCombos,
+  shortcutSummary,
+  type StyleRef,
 } from '../shortcuts/custom-shortcuts';
 
 const { dragStyle, startDialogDrag } = useDialogDrag();
@@ -344,6 +356,8 @@ const recorderRef = ref<HTMLButtonElement | null>(null);
 
 /** `null` = הוספה; מזהה = עריכה של רשומה קיימת. */
 const editingId = ref<string | null>(null);
+/** הסגנון של הרשומה שבעריכה, כשהיא קיצור „החל סגנון”. */
+const editingStyle = ref<StyleRef | null>(null);
 const name = ref('');
 const combo = ref<KeyCombo | null>(null);
 const fontFamily = ref('');
@@ -407,6 +421,7 @@ const draft = computed<CustomShortcutDraft>(() => ({
   name: name.value,
   combo: combo.value,
   preset: preset.value,
+  ...(editingStyle.value ? { style: editingStyle.value } : {}),
 }));
 
 /**
@@ -488,6 +503,7 @@ function onEsc(): void {
 
 function reset(): void {
   editingId.value = null;
+  editingStyle.value = null;
   name.value = '';
   combo.value = null;
   fontFamily.value = '';
@@ -508,6 +524,10 @@ function edit(entry: CustomShortcut): void {
   editingId.value = entry.id;
   name.value = entry.name;
   combo.value = entry.combo;
+  if (entry.kind === 'apply-style') {
+    editingStyle.value = entry.style;
+    return;
+  }
   fontFamily.value = entry.preset.fontFamily ?? '';
   fontSize.value = entry.preset.fontSizePt === undefined ? '' : String(entry.preset.fontSizePt);
 
@@ -871,5 +891,12 @@ watch(
 .sm-btn:disabled {
   opacity: 0.4;
   cursor: default;
+}
+
+.sm-style-note {
+  margin: 4px 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--color-on-surface-variant);
 }
 </style>

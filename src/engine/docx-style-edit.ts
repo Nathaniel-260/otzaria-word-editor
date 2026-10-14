@@ -57,7 +57,16 @@ export interface StyleFormat {
   indentEndCm?: number | null;
   /** שורה ראשונה: חיובי = הזחה, שלילי = תלויה. */
   firstLineCm?: number | null;
+  /**
+   * רמת חלוקה (`w:outlineLvl`): 0–8 = כותרת ברמה 1–9, ‏9 = גוף טקסט. זה מה
+   * ש-Word קורא כדי לזהות כותרת — בחלונית הניווט ובתוכן העניינים — ולכן
+   * סגנון מותאם בלעדיה אינו כותרת שם, גם אם הוא נראה כמו כותרת.
+   */
+  outlineLevel?: number | null;
 }
+
+/** גוף טקסט — הערך של `w:outlineLvl` כשאין רמה. */
+export const BODY_TEXT_LEVEL = 9;
 
 export type StyleKind = 'paragraph' | 'character';
 
@@ -433,6 +442,8 @@ function formatOfLevel(rPr: Element | null, pPr: Element | null): StyleFormat {
       if (after !== null) format.spaceAfterPt = Number(after) / TWIPS_PER_PT;
       if (line !== null && rule === 'auto') format.lineSpacing = Math.round((Number(line) / LINE_UNITS) * 100) / 100;
     }
+    const outline = childValue(pPr, 'outlineLvl');
+    if (outline !== null && /^\d$/.test(outline)) format.outlineLevel = Number(outline);
     const ind = childText(pPr, 'ind');
     if (ind) {
       const attrs = parseElement(ind)?.attrs ?? '';
@@ -610,6 +621,12 @@ function patchParagraphProperties(pPr: Element, format: StyleFormat): Element {
     out = withChild(out, 'spacing', empty ? null : serialize(spacing), PPR_ORDER);
   }
 
+  if (has(format, 'outlineLevel')) {
+    const level = format.outlineLevel;
+    const valid = typeof level === 'number' && Number.isInteger(level) && level >= 0 && level <= BODY_TEXT_LEVEL;
+    out = withChild(out, 'outlineLvl', valid ? leaf(p, 'outlineLvl', String(level)) : null, PPR_ORDER);
+  }
+
   const indentKeys = has(format, 'indentStartCm') || has(format, 'indentEndCm') || has(format, 'firstLineCm');
   if (indentKeys) {
     const existing = childText(out, 'ind');
@@ -643,7 +660,7 @@ function patchParagraphProperties(pPr: Element, format: StyleFormat): Element {
 }
 
 function hasParagraphFields(format: StyleFormat): boolean {
-  return (['alignment', 'spaceBeforePt', 'spaceAfterPt', 'lineSpacing', 'indentStartCm', 'indentEndCm', 'firstLineCm'] as const)
+  return (['alignment', 'spaceBeforePt', 'spaceAfterPt', 'lineSpacing', 'indentStartCm', 'indentEndCm', 'firstLineCm', 'outlineLevel'] as const)
     .some((key) => has(format, key));
 }
 

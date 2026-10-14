@@ -56,10 +56,20 @@ import {
   SPELLCHECK,
   STYLE_DOCUMENT,
   STYLE_GALLERY,
+  STYLE_SHORTCUTS,
   type HeavyActionGuard,
   type SpellcheckHandle,
   type StyleDocumentHandle,
+  type StyleShortcutsHandle,
 } from '../../src/composables/keys';
+import {
+  comboConflict,
+  conflictMessage,
+  removeShortcut,
+  styleShortcutFor,
+  upsertShortcut,
+  type CustomShortcut,
+} from '../../src/ui/shortcuts/custom-shortcuts';
 import type { StyleEdit } from '../../src/engine/docx-style-edit';
 import { createFontMemory, type FontMemory } from '../../src/composables/use-font-controls';
 import { ACTIVE_SUPERDOC } from '../../src/engine/document-api';
@@ -1278,6 +1288,8 @@ export interface HarnessOptions {
   styleGallery?: StyleGalleryState;
   /** ‏`styles.xml` שכפיל גיליון הסגנונות מחזיר. ברירת המחדל: `STYLE_SHEET_DOUBLE`. */
   stylesXml?: string;
+  /** הקיצורים האישיים בהרכבה. */
+  customShortcuts?: CustomShortcut[];
   /**
    * מצב הבחירה שהחזקת החיווי נשענת עליו. ברירת המחדל היא סמן שהתיישב —
    * המצב שרצועה במסמך פתוח נמצאת בו רוב הזמן. ראו engine/readout-hold.ts.
@@ -1299,6 +1311,8 @@ export interface Harness {
   wrapper: VueWrapper;
   /** העריכות שנשלחו לגיליון הסגנונות, בסדר שבו נשלחו. */
   styleEdits: { edit: StyleEdit; options?: { applyToSelection?: boolean } }[];
+  /** הקיצורים האישיים אחרי מה שהרכיב הצמיד או הסיר — אותה לוגיקה של המעטפת. */
+  shortcuts: { list: CustomShortcut[] };
   adapter: CommandDouble;
   superdoc: SuperdocDouble;
   /** מה שהמדווח קיבל — המסלול שמגיע למשתמש כהודעה בעברית. */
@@ -1405,6 +1419,45 @@ export function mountUi(component: Component, options: HarnessOptions = {}): Har
     },
   } satisfies StyleDocumentHandle;
 
+  /**
+   * קיצורי הסגנונות: כפיל **מתפקד** על אותן פונקציות שהמעטפת קוראת להן
+   * (`upsertShortcut`, `comboConflict`), כדי שהתנגשות תיבדק כמו באמת.
+   */
+  const shortcuts = { list: [...(options.customShortcuts ?? [])] };
+  provide[STYLE_SHORTCUTS as unknown as symbol] = {
+    comboFor: (styleId) => styleShortcutFor(shortcuts.list, styleId)?.combo ?? null,
+    problem: (styleId, combo) => {
+      const conflict = comboConflict(combo, shortcuts.list, styleShortcutFor(shortcuts.list, styleId)?.id);
+      return conflict ? conflictMessage(conflict) : null;
+    },
+    assign: (style, combo) => {
+      const existing = styleShortcutFor(shortcuts.list, style.id);
+      if (combo === null) {
+        if (existing) shortcuts.list = removeShortcut(shortcuts.list, existing.id);
+        return null;
+      }
+      const result = upsertShortcut(shortcuts.list, {
+        ...(existing ? { id: existing.id } : {}),
+        name: style.name,
+        combo,
+        preset: {},
+        style,
+      });
+      if (!result.ok) return result.message;
+      shortcuts.list = result.list;
+      return null;
+    },
+    renamed: (styleId, name) => {
+      shortcuts.list = shortcuts.list.map((entry) =>
+        entry.kind === 'apply-style' && entry.style.id === styleId ? { ...entry, name, style: { id: styleId, name } } : entry,
+      );
+    },
+    removed: (styleId) => {
+      const existing = styleShortcutFor(shortcuts.list, styleId);
+      if (existing) shortcuts.list = removeShortcut(shortcuts.list, existing.id);
+    },
+  } satisfies StyleShortcutsHandle;
+
   const wrapper = mount(component, {
     props: options.props,
     attachTo: document.body,
@@ -1414,6 +1467,7 @@ export function mountUi(component: Component, options: HarnessOptions = {}): Har
   return {
     wrapper,
     styleEdits,
+    shortcuts,
     // הכפילים מוחזרים גם כשלא הוזרקו, כדי שבדיקה תוכל לאשר שלא נגעו בהם.
     adapter: adapter ?? createCommandDouble(),
     superdoc: superdoc ?? createSuperdocDouble(),

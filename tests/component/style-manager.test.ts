@@ -171,4 +171,104 @@ describe('תפריט הסגנון בגלריה', () => {
     await settle();
     expect(harness.wrapper.find('[data-testid="style-gallery-more"]').attributes('disabled')).toBeDefined();
   });
+
+  it('רמת חלוקה נכתבת לסגנון — מה ש-Word קורא כדי לזהות כותרת', async () => {
+    const harness = mount();
+    await settle();
+    await rightClick(harness, 2);
+    menuItem('modify').click();
+    await settle();
+    await settle();
+
+    const select = dialog()!.querySelector<HTMLSelectElement>('#sd-outline')!;
+    // „שלי” אינו מצהיר רמה — גוף טקסט.
+    expect(select.value).toBe('9');
+    select.value = '0';
+    select.dispatchEvent(new Event('change'));
+    await settle();
+    await primary();
+
+    expect(harness.styleEdits.map((entry) => entry.edit)).toEqual([
+      { kind: 'modify', id: 'Mine', basedOn: undefined, next: undefined, format: { outlineLevel: 0 } },
+    ]);
+  });
+
+  /** לוכד הצירוף בדיאלוג: לחיצה ואז הקשה. */
+  async function recordCombo(init: KeyboardEventInit): Promise<void> {
+    const recorder = dialog()!.querySelector<HTMLButtonElement>('[data-testid="style-shortcut-recorder"]')!;
+    recorder.click();
+    await settle();
+    recorder.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init }));
+    await settle();
+  }
+
+  it('קיצור מקשים בלבד נשמר בלי לגעת במסמך', async () => {
+    const harness = mount();
+    await settle();
+    await rightClick(harness, 1);
+    menuItem('modify').click();
+    await settle();
+    await settle();
+
+    await recordCombo({ key: 'q', code: 'KeyQ', ctrlKey: true, altKey: true, shiftKey: true });
+    expect(dialog()!.textContent).toContain('Ctrl');
+    await primary();
+
+    expect(harness.styleEdits).toHaveLength(0);
+    expect(harness.shortcuts.list).toEqual([
+      expect.objectContaining({
+        kind: 'apply-style',
+        style: { id: 'Heading1', name: 'כותרת 1' },
+        combo: { code: 'KeyQ', ctrl: true, shift: true, alt: true },
+      }),
+    ]);
+    expect(dialog()).toBeNull();
+  });
+
+  it('צירוף תפוס חוסם את „אישור” ואינו נשמר', async () => {
+    const harness = mountUi(HomeTab, {
+      styleGallery: GALLERY,
+      customShortcuts: [
+        { id: 'cs-1', name: 'אחר', kind: 'apply-style', combo: { code: 'KeyQ', ctrl: true, shift: true, alt: true }, style: { id: 'Mine', name: 'שלי' } },
+      ],
+    });
+    await settle();
+    await rightClick(harness, 1);
+    menuItem('modify').click();
+    await settle();
+    await settle();
+
+    await recordCombo({ key: 'q', code: 'KeyQ', ctrlKey: true, altKey: true, shiftKey: true });
+    const button = dialog()!.querySelector<HTMLButtonElement>('.sd-btn-primary')!;
+    expect(button.disabled).toBe(true);
+    expect(dialog()!.textContent).toContain('הצירוף הזה משמש כבר');
+    expect(harness.shortcuts.list).toHaveLength(1);
+  });
+
+  it('מחיקת סגנון מוחקת את הקיצור שלו, ושינוי שם מעדכן אותו', async () => {
+    const combo = { code: 'KeyQ', ctrl: true, shift: true, alt: true };
+    const harness = mountUi(HomeTab, {
+      styleGallery: GALLERY,
+      customShortcuts: [{ id: 'cs-1', name: 'שלי', kind: 'apply-style', combo, style: { id: 'Mine', name: 'שלי' } }],
+    });
+    await settle();
+
+    await rightClick(harness, 2);
+    menuItem('rename').click();
+    await settle();
+    await settle();
+    const name = dialog()!.querySelector<HTMLInputElement>('#sd-name')!;
+    name.value = 'שלי החדש';
+    name.dispatchEvent(new Event('input'));
+    await settle();
+    await primary();
+    expect(harness.shortcuts.list[0]).toMatchObject({ name: 'שלי החדש', style: { id: 'Mine', name: 'שלי החדש' } });
+
+    await rightClick(harness, 2);
+    menuItem('delete').click();
+    await settle();
+    await settle();
+    await primary();
+    expect(harness.shortcuts.list).toEqual([]);
+  });
 });

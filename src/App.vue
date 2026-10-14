@@ -399,6 +399,7 @@ import {
   SPELLCHECK,
   STYLE_DOCUMENT,
   STYLE_GALLERY,
+  STYLE_SHORTCUTS,
 } from './composables/keys';
 import { editDocxStyles, readDocxStyles } from './engine/docx-style-package';
 import type { StyleEdit } from './engine/docx-style-edit';
@@ -665,15 +666,19 @@ import { startParagraphOnNewPage, pageBreakTracker } from './engine/page-break';
 import { createFontMemory } from './composables/use-font-controls';
 import { createLinkDialog } from './composables/use-link-dialog';
 import { createShellActionRunner } from './ui/shortcuts/actions';
-import { comboLabel, reservationText, shortcutTextOwners } from './ui/shortcuts/combo';
+import { comboLabel, isBindableCombo, reservationText, shortcutTextOwners } from './ui/shortcuts/combo';
 import {
+  comboConflict,
+  conflictMessage,
   customMatchers,
   dropMessage,
   normalizeCustomShortcuts,
   removeShortcut,
+  styleShortcutFor,
   upsertShortcut,
   type CustomShortcut,
   type CustomShortcutDraft,
+  type PresetShortcut,
 } from './ui/shortcuts/custom-shortcuts';
 import { createPresetToggles } from './ui/shortcuts/preset-toggle';
 import { readFormat } from './engine/format-reading';
@@ -1066,6 +1071,11 @@ function runCustomShortcut(id: string): boolean {
    * הקלדה רציפה אינה חוזרת עד שהמנוע נרגע, ואין שום סיבה לשלם אותה כשהסמן
    * ממילא במסמך.
    */
+  if (entry.kind === 'apply-style') {
+    void applyStyleShortcut(entry, adapter);
+    return true;
+  }
+
   if (isDocumentSurface(document.activeElement)) {
     applyCustomPreset(entry, adapter);
     return true;
@@ -1074,6 +1084,68 @@ function runCustomShortcut(id: string): boolean {
   void applyCustomPresetOutsideDocument(entry, adapter);
   return true;
 }
+
+/**
+ * קיצור „החל סגנון”: אותה פקודה של כרטיס בגלריה (`linked-style`), ואותו
+ * דיווח. סגנון שאינו במסמך הפתוח — הקיצורים אינם של מסמך אחד — נכשל בהודעה
+ * של המנוע ולא בשקט.
+ */
+async function applyStyleShortcut(
+  entry: Extract<CustomShortcut, { kind: 'apply-style' }>,
+  adapter: CommandAdapter,
+): Promise<void> {
+  const payload = stylePayload(entry.style.id);
+  if (payload === null) return;
+  const outcome = await adapter.run('linked-style', payload);
+  reportCommand(outcome, 'linked-style');
+  if (outcome.ok) setStatus(`הוחל הסגנון „${entry.style.name}”`);
+}
+
+/** קיצורי הסגנונות — ראו `STYLE_SHORTCUTS` ב-composables/keys.ts. */
+provide(STYLE_SHORTCUTS, {
+  comboFor(styleId) {
+    return styleShortcutFor(customShortcuts.value, styleId)?.combo ?? null;
+  },
+  problem(styleId, combo) {
+    const existing = styleShortcutFor(customShortcuts.value, styleId);
+    const conflict = comboConflict(combo, customShortcuts.value, existing?.id, currentMacroHeldCombos());
+    if (conflict) return conflictMessage(conflict);
+    if (!isBindableCombo(combo)) return 'צירוף חייב לכלול Ctrl או Alt, או להיות מקש פונקציה';
+    return null;
+  },
+  assign(style, combo) {
+    const existing = styleShortcutFor(customShortcuts.value, style.id);
+    if (combo === null) {
+      if (!existing) return null;
+      customShortcuts.value = removeShortcut(customShortcuts.value, existing.id);
+      persistCustomShortcuts();
+      return null;
+    }
+    const result = upsertShortcut(
+      customShortcuts.value,
+      { ...(existing ? { id: existing.id } : {}), name: style.name, combo, preset: {}, style },
+      currentMacroHeldCombos(),
+    );
+    if (!result.ok) return result.message;
+    customShortcuts.value = result.list;
+    persistCustomShortcuts();
+    return null;
+  },
+  renamed(styleId, name) {
+    const existing = styleShortcutFor(customShortcuts.value, styleId);
+    if (!existing || existing.kind !== 'apply-style') return;
+    customShortcuts.value = customShortcuts.value.map((entry) =>
+      entry.id === existing.id ? { ...existing, name, style: { id: styleId, name } } : entry,
+    );
+    persistCustomShortcuts();
+  },
+  removed(styleId) {
+    const existing = styleShortcutFor(customShortcuts.value, styleId);
+    if (!existing) return;
+    customShortcuts.value = removeShortcut(customShortcuts.value, existing.id);
+    persistCustomShortcuts();
+  },
+});
 
 /**
  * החלה כשהמיקוד **מחוץ** למסמך — ורק אחרי שנמדד שיש בחירה להחיל עליה.
@@ -1091,7 +1163,7 @@ function runCustomShortcut(id: string): boolean {
  * ש-engine/doc-selection.ts נכתב בשבילו.
  */
 async function applyCustomPresetOutsideDocument(
-  entry: CustomShortcut,
+  entry: PresetShortcut,
   adapter: CommandAdapter,
 ): Promise<void> {
   const selection = await readDocSelection(activeSuperdoc.value);
@@ -1103,7 +1175,7 @@ async function applyCustomPresetOutsideDocument(
 }
 
 /** ההכרעה וההרצה עצמן. משותפות לשני המסלולים כדי שלא ייפרדו בשקט. */
-function applyCustomPreset(entry: CustomShortcut, adapter: CommandAdapter): void {
+function applyCustomPreset(entry: PresetShortcut, adapter: CommandAdapter): void {
   const decision = presetToggles.decide({
     id: entry.id,
     name: entry.name,
