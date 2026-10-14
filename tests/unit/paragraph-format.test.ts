@@ -73,7 +73,15 @@ function fakeDoc(options: {
   const doc = {
     selection: { current: vi.fn(async () => options.selection ?? CARET) },
     format: { paragraph },
-    ...(options.get === undefined ? {} : { get: async () => options.get }),
+    // כמו superdoc 2.23: `get()` בלי קלט זורק, ו-`get({})` מחזיר את המסמך.
+    ...(options.get === undefined
+      ? {}
+      : {
+          get: async (input?: unknown) => {
+            if (input === undefined) throw new TypeError("Cannot read properties of undefined (reading 'options')");
+            return options.get;
+          },
+        }),
     ...(options.blocks === undefined ? {} : { blocks: { list: async () => ({ blocks: options.blocks }) } }),
     ...(options.listState === undefined
       ? {}
