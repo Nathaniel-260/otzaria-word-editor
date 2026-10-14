@@ -1,8 +1,4 @@
-/**
- * שתי מילים זהות שתוקנו, והקלדה לפניהן שמזיזה את הראשונה בדיוק למקום שבו הייתה
- * השנייה. הסימון של השנייה חייב להישאר על השנייה — לא לקפוץ אל הראשונה.
- *   node scripts/qa/autocorrect-indicator-twins-qa.mjs
- */
+/** מילים זהות מזוהות בהקשר לפני עריכה; אחרי שינוי טקסט לא משייכים מחוון למופע אחר. */
 import { openApp, createReport } from './harness.mjs';
 import { loadHebrewPreset } from './autocorrect-helpers.mjs';
 const report = createReport('מילים זהות', { strict: true });
@@ -44,20 +40,22 @@ async function marked(needle, nth) {
 try {
   await loadHebrewPreset(app);
   await app.caret(0);
-  await app.type('אאכ ');
-  await app.sleep(700);
-  await app.type('אאכ ');
+  await app.type('אאכ ראשון אאכ שני ');
   await app.sleep(1200);
-  // 'אא"כ ' הוא 5 תווים: חמישה תווים בתחילה מזיזים את הראשונה אל ההיסט של השנייה
+  for (const nth of [0, 1]) {
+    const r = await marked('אא\"כ', nth);
+    r === 'ok' ? report.pass(`המופע ${nth + 1} מזוהה לפני עריכה`) : report.fail(`המופע ${nth + 1} מזוהה לפני עריכה`, r);
+  }
+  // אחרי המילה הראשונה יש שכן שמזהה אותה. 11 תווים מזיזים אותה להיסט הישן של השנייה.
   await app.press('Home', 'Home', 36);
   await app.sleep(400);
-  await app.type('abcde');
+  await app.type('abcdefghijk');
   await app.sleep(1200);
   const text = await app.js("document.querySelector('[data-source-node-id][data-pm-start]').textContent");
-  text.startsWith('abcde') ? report.pass('ההקלדה נכנסה לתחילת הפסקה', text) : report.fail('ההקלדה נכנסה לתחילת הפסקה', text);
+  text.startsWith('abcdefghijk') ? report.pass('ההקלדה נכנסה לתחילת הפסקה', text) : report.fail('ההקלדה נכנסה לתחילת הפסקה', text);
   for (const nth of [0, 1]) {
     const r = await marked('אא"כ', nth);
-    r === 'ok' ? report.pass(`מילה זהה מס' ${nth + 1} מסומנת במקומה`) : report.fail(`מילה זהה מס' ${nth + 1} מסומנת במקומה`, r);
+    r === 'אין סימון' ? report.pass(`עריכה פוסלת את המחוון של מופע ${nth + 1}`) : report.fail(`עריכה פוסלת את המחוון של מופע ${nth + 1}`, r);
   }
 } finally {
   report.print();

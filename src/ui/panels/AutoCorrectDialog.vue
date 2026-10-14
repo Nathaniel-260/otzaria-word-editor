@@ -358,7 +358,8 @@ function onResetTable(): void {
 }
 
 function onLoadHebrew(): void {
-  draft.replacements = mergeEntries(WORD_REPLACEMENTS, draft.replacements);
+  const existing = new Set(draft.replacements.map((entry) => entry.from));
+  draft.replacements = mergeEntries(draft.replacements, WORD_REPLACEMENTS.filter((entry) => !existing.has(entry.from)));
   message.value = '';
 }
 

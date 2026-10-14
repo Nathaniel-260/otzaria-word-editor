@@ -669,13 +669,10 @@ function rectsOf(node: Node, offset: number, length: number): { first: Box; rect
  * `rtl-line-end.ts` קורא). ההמרה להיסט בבלוק היא חיסור אחד: `offset = pm −
  * fragmentPmStart`.
  *
- * ## שני שלבים, והשני נוקשה
- *
- * 1. **ההיסט שנרשם.** הטקסט שבו נבדק מול מה שהוחלף. התאמה = זה הוא.
- * 2. **חיפוש בפסקה**, כשההיסט נשבר — מי שהקליד או מחק **לפני** המילה הזיז אותה.
- *    מחפשים את הטקסט בכל הפסקה, ומקבלים רק מופע ש**גם** מה שלפניו ומה שאחריו
- *    (`context`) זהה למה שנרשם; בין כמה כאלה — הקרוב להיסט הרשום. בלי הקשר, או
- *    כשאין מופע שמתאים, **אין סימון** — לא סימון על מילה זהה אחרת.
+ * בלי הקשר נבדק הטקסט בהיסט הרשום. עם הקשר מחפשים בכל הפסקה, ומקבלים רק
+ * מופע יחיד שמה שלפניו ומה שאחריו תואם ל-`context`. יותר ממופע מתאים אחד
+ * אינו מאפשר לזהות את המילה, גם בהיסט הרשום, ולכן מוחזר `null`.
+ * התאמה זו מתארת את הטקסט הנוכחי; היא אינה עוגן זהות בין עריכות במסמך.
  */
 export function locateText(
   blockId: string,
@@ -692,7 +689,7 @@ export function createTextLocator(
   blockId: string,
   root: ParentNode = document,
 ): (start: number, expected: string, context?: TextContext) => LocatedWord | null {
-  const readers: Array<(start: number, expected: string, context?: TextContext) => LocatedWord | null> = [];
+  const readers: Array<(start: number, expected: string, context?: TextContext) => LocatedWord | null | 'ambiguous'> = [];
   const fragments = root.querySelectorAll<HTMLElement>('[data-source-node-id][data-pm-start]');
   for (const fragment of Array.from(fragments)) {
     if (fragment.getAttribute('data-source-node-id') !== blockId) continue;
@@ -730,6 +727,9 @@ export function createTextLocator(
         paragraph += run.text;
       }
     }
+    // מחרוזת והקשר זהים נבדקים פעם אחת בפריים, גם כשמאות תיקונים זהים נשמרו.
+    // -1 = אין מופע; null = יותר ממופע אחד, ולכן אין זיהוי בטוח.
+    const contextMatches = new Map<string, number | null>();
 
     readers.push((start, expected, context) => {
       if (expected.length === 0) return null;
@@ -760,37 +760,31 @@ export function createTextLocator(
         }
         return firstBox ? { first: firstBox, rects, start: blockOffset } : null;
       };
-      // סיומת וקידומת: מה שנרשם היה קצר כשנרשם (סוף הטקסט שנקרא), ומאז נוסף אחריו.
-      const contextOk = (from: number): boolean =>
-        !context ||
-        !reliable ||
-        (paragraph.slice(0, from).endsWith(context.before) &&
-          paragraph.slice(from + expected.length).startsWith(context.after));
-
-      // שלב 1 כולל גם את ההקשר: מילה זהה אחרת שנחתה על ההיסט הרשום אינה "היא".
-      const exact = contextOk(start - (first - base)) ? at(start) : null;
-      if (exact) return exact;
-      if (!context || !reliable) return null;
-
-      // שלב 2: חיפוש בכל הפסקה.
-      let best = -1;
-      for (let from = paragraph.indexOf(expected); from >= 0; from = paragraph.indexOf(expected, from + 1)) {
-        if (!contextOk(from)) continue;
-        const blockOffset = first - base + from;
-        if (best < 0 || Math.abs(blockOffset - start) < Math.abs(best - start)) best = blockOffset;
+      if (!context) return at(start);
+      if (!reliable) return null;
+      const key = JSON.stringify([expected, context.before, context.after]);
+      let match = contextMatches.get(key);
+      if (match === undefined) {
+        match = -1;
+        for (let from = paragraph.indexOf(expected); from >= 0; from = paragraph.indexOf(expected, from + 1)) {
+          if (!paragraph.slice(0, from).endsWith(context.before) ||
+            !paragraph.slice(from + expected.length).startsWith(context.after)) continue;
+          if (match >= 0) { match = null; break; }
+          match = from;
+        }
+        contextMatches.set(key, match);
       }
-      if (best >= 0) {
-        const moved = at(best);
-        if (moved) return moved;
-      }
-      return null;
+      if (match === null) return 'ambiguous';
+      return match < 0 ? null : at(first - base + match);
     });
   }
   return (start, expected, context) => {
+    let located: LocatedWord | null = null;
     for (const read of readers) {
       const found = read(start, expected, context);
-      if (found) return found;
+      if (found === 'ambiguous' || (found && located)) return null;
+      if (found) located = found;
     }
-    return null;
+    return located;
   };
 }

@@ -44,7 +44,7 @@
  */
 import type { CompletionDoc, CompletionTarget } from './book-completion-overlay';
 import { planAutoCorrect, type AutoCorrectFix, type AutoCorrectOptions } from './autocorrect';
-import { applyFixesToText, createAutoCorrectIndicator, type IndicatorEntry } from './autocorrect-indicator';
+import { applyFixesToText, createAutoCorrectIndicator, locateWord, type IndicatorEntry } from './autocorrect-indicator';
 import type { DocReceipt } from './document-api';
 import type { ResolvedRangeLike, SelectionPointLike, SelectionTargetLike } from './word-selection';
 
@@ -222,6 +222,7 @@ export function installAutoCorrect(options: AutoCorrectInstallOptions): AutoCorr
     changeBack: (entry) => changeBack(entry),
     stop: options.onStopCorrecting ? (entry) => options.onStopCorrecting?.(entry) : undefined,
     openOptions: options.onOpenOptions,
+    invalidate: (resetTyping) => resetTyping ? resetTyped() : cancelPending(),
   });
 
   let disposed = false;
@@ -268,21 +269,36 @@ export function installAutoCorrect(options: AutoCorrectInstallOptions): AutoCorr
   async function changeBack(entry: IndicatorEntry): Promise<void> {
     const doc = getDoc();
     if (!doc || typeof doc.insert !== 'function' || typeof doc.ranges?.resolve !== 'function') return;
+    if (disposed || options.isSuppressed?.()) return;
+    const found = locateWord(entry, container);
+    if (!found) return;
+    resetTyped();
+    const token = evalToken;
+    const start = found.start;
     const story = entry.story;
-    const request: Record<string, unknown> = {
-      start: { kind: 'point', point: pointAt(entry.blockId, entry.start, story) },
-      end: { kind: 'point', point: pointAt(entry.blockId, entry.start + entry.replacement.length, story) },
-    };
-    if (story) request.in = story;
-    const resolved = await doc.ranges.resolve(request);
-    if (resolved?.preview?.text !== entry.replacement) {
-      log('חזרה: הטקסט שבהיסט אינו מה שהוחלף', resolved?.preview ?? null);
+    // replacement יכול להגיע ל-255 תווים; preview יחיד מוגבל ל-200.
+    let current = '';
+    for (let offset = 0; offset < entry.replacement.length; offset += AUTOCORRECT_WINDOW_MAX) {
+      const end = Math.min(entry.replacement.length, offset + AUTOCORRECT_WINDOW_MAX);
+      const request: Record<string, unknown> = {
+        start: { kind: 'point', point: pointAt(entry.blockId, start + offset, story) },
+        end: { kind: 'point', point: pointAt(entry.blockId, start + end, story) },
+      };
+      if (story) request.in = story;
+      const resolved = await doc.ranges.resolve(request);
+      if (disposed || token !== evalToken || resolved?.preview?.truncated) return;
+      const text = resolved?.preview?.text;
+      if (typeof text !== 'string' || text.length !== end - offset) return;
+      current += text;
+    }
+    if (current !== entry.replacement) {
+      log('חזרה: הטקסט שבהיסט אינו מה שהוחלף', current);
       return;
     }
     const target: SelectionTargetLike = {
       kind: 'selection',
-      start: pointAt(entry.blockId, entry.start, story),
-      end: pointAt(entry.blockId, entry.start + entry.replacement.length, story),
+      start: pointAt(entry.blockId, start, story),
+      end: pointAt(entry.blockId, start + entry.replacement.length, story),
       ...(story ? { story } : {}),
     };
     const receipt = await doc.insert({ value: entry.original, type: 'text', target });
@@ -291,7 +307,7 @@ export function installAutoCorrect(options: AutoCorrectInstallOptions): AutoCorr
       return;
     }
     // המקור נרשם כבר ב-`remember`, ולכן ההקשה הבאה לא תתקן אותו שוב.
-    remember(entry.blockId, entry.start, entry.original);
+    remember(entry.blockId, start, entry.original);
     log('חזרה למקור', { from: entry.replacement, to: entry.original });
   }
 
@@ -408,7 +424,7 @@ export function installAutoCorrect(options: AutoCorrectInstallOptions): AutoCorr
     }
 
     // רק אם כל התיקונים הוחלו: הסימון מחשב היסטים מהטקסט הסופי, וחלקי אינו מתיישב.
-    if (completed === fixes.length && !disposed) registerIndicators(result.window, fixes);
+    if (completed === fixes.length && !disposed && token === evalToken) registerIndicators(result.window, fixes);
   }
 
   function scheduleEvaluate(): void {
@@ -438,6 +454,7 @@ export function installAutoCorrect(options: AutoCorrectInstallOptions): AutoCorr
     }
 
     if (event.key.length === 1) {
+      cancelPending();
       typed = Math.min(AUTOCORRECT_TYPED_CAP, typed + 1);
       log('הקשה', { key: event.key, typed });
       return;

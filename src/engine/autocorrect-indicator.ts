@@ -21,9 +21,10 @@
  *
  * ## מתי הסימון נעלם
  *
- * לא כשממשיכים להקליד. מילה שעדיין במקומה נשארת מסומנת (כמו ב-Word) עד שהיא
- * משתנה או שאי אפשר לאתר אותה בהקשר שנשמר, או שהמסמך הוחלף. עריכה לפניה
- * שמזיזה את ההיסט נבדקת מול ההקשר שלה. ‏„חזור” בודק שוב לפני שהוא מחליף.
+ * המחוונים מההערכה האחרונה נשארים עד לעריכה חדשה, פעולה בממשק או החלפת המסמך.
+ * הקשר ייחודי בטקסט
+ * הנוכחי אינו מוכיח זהות אחרי מחיקה, ולכן אין שימוש חוזר במחוון אחרי עריכה.
+ * ‏„חזור” בודק שוב לפני שהוא מחליף.
  */
 import type { AutoCorrectFix, AutoCorrectOptions, AutoCorrectRule } from './autocorrect';
 import { ICONS } from '../ui/icons/icons';
@@ -174,6 +175,8 @@ export interface IndicatorCallbacks {
   stop?: (entry: IndicatorEntry) => Promise<void> | void;
   /** „שליטה באפשרויות”. חסר = הפריט אינו מוצג. */
   openOptions?: () => void;
+  /** עריכה פוסלת קריאות באוויר; שינוי הקשר מאפס גם את רצף ההקלדה. */
+  invalidate?: (resetTyping: boolean) => void;
 }
 
 export interface IndicatorHandle {
@@ -188,9 +191,9 @@ const STYLE_ID = 'otzaria-acorr-indicator-style';
 const CHIP_CLASS = 'otzaria-acorr-chip';
 const MENU_CLASS = 'otzaria-acorr-menu';
 /**
- * אין תפוגה: מילה שעדיין במקומה נשארת מסומנת כל עוד המסמך פתוח (כמו ב-Word), ולא
- * רק התיקון האחרון ולא רק כמה דקות. התקרה היא רק לזיכרון — הישנים נושרים ראשונים.
- * מסמך שהוחלף מנקה הכול (`reset`).
+ * אין תפוגה בזמן: המחוונים של אותה הערכה נשארים עד לאינטראקציה הבאה.
+ * עריכה חדשה פוסלת אותם, כי אין כאן עוגני זהות שעוקבים אחרי שינויי המסמך.
+ * התקרה מגבילה את הזיכרון גם לקוראים שמוסיפים מחוונים רבים.
  */
 const MAX_ENTRIES = 1000;
 /** כמה פיקסלים מתחת לשורה עדיין נחשבים „מעל המילה” לצורך הריחוף. */
@@ -419,15 +422,29 @@ export function createAutoCorrectIndicator(
   const onDocPointerDown = (event: PointerEvent): void => {
     const target = event.target as Node | null;
     if (target && (chip.contains(target) || menu.contains(target))) return;
-    if (menuOpen) closeMenu();
+    callbacks.invalidate?.(true);
+    clear();
+  };
+  const onEdit = (): void => {
+    callbacks.invalidate?.(false);
+    clear();
   };
   const onKeyDown = (event: KeyboardEvent): void => {
-    if (event.key === 'Escape' && menuOpen) closeMenu();
+    const target = event.target as Node | null;
+    if (target && container.contains(target) &&
+      (event.key.length === 1 || ['Backspace', 'Delete', 'Enter', 'Tab'].includes(event.key))) onEdit();
+    else { closeMenu(); hideChip(); }
+  };
+  const onBlur = (): void => {
+    callbacks.invalidate?.(true);
+    clear();
   };
 
   document.addEventListener('pointermove', onPointerMove, { passive: true });
   document.addEventListener('pointerdown', onDocPointerDown, true);
   document.addEventListener('keydown', onKeyDown, true);
+  for (const name of ['input', 'compositionstart', 'paste', 'cut', 'drop']) container.addEventListener(name, onEdit, true);
+  window.addEventListener('blur', onBlur);
 
   return {
     show(next) {
@@ -447,6 +464,8 @@ export function createAutoCorrectIndicator(
       document.removeEventListener('pointermove', onPointerMove);
       document.removeEventListener('pointerdown', onDocPointerDown, true);
       document.removeEventListener('keydown', onKeyDown, true);
+      for (const name of ['input', 'compositionstart', 'paste', 'cut', 'drop']) container.removeEventListener(name, onEdit, true);
+      window.removeEventListener('blur', onBlur);
       if (frame) cancelAnimationFrame(frame);
       chip.remove();
       menu.remove();

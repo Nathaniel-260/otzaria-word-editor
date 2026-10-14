@@ -1,8 +1,4 @@
-/**
- * הסימון נשאר על **כל** מילה שתוקנה, לא רק על האחרונה: אחרי המשך הקלדה, אחרי
- * Enter ופסקה חדשה, אחרי המתנה, ואחרי עריכה **לפני** המילה שמזיזה אותה.
- *   node scripts/qa/autocorrect-indicator-persist-qa.mjs
- */
+/** המחוונים נשמרים ללא תפוגה, אך עריכה חדשה פוסלת את זהותם הישנה. */
 import { openApp, createReport } from './harness.mjs';
 import { loadHebrewPreset } from './autocorrect-helpers.mjs';
 const report = createReport('סימון נשאר על כל מילה', { strict: true });
@@ -46,32 +42,28 @@ async function marked(needle, nth) {
 try {
   await loadHebrewPreset(app);
   await app.caret(0);
-  await app.type('אאכ ');
-  await app.sleep(700);
-  await app.type('שלום (c) ');
-  await app.sleep(700);
-  await app.type('ועוד אאכ ');
+  await app.type('(tm) שלום (c) ועוד אאכ ');
   await app.sleep(1200);
 
-  for (const [w, n, label] of [['אא"כ', 0, 'המילה הראשונה'], ['©', 0, 'המילה האמצעית'], ['אא"כ', 1, 'המילה האחרונה']]) {
+  for (const [w, n, label] of [['™', 0, 'המילה הראשונה'], ['©', 0, 'המילה האמצעית'], ['אא"כ', 0, 'המילה האחרונה']]) {
     const r = await marked(w, n);
-    r === 'ok' ? report.pass(`${label} מסומנת אחרי המשך הקלדה`) : report.fail(`${label} מסומנת אחרי המשך הקלדה`, r);
+    r === 'ok' ? report.pass(`${label} מסומנת אחרי התיקון`) : report.fail(`${label} מסומנת אחרי התיקון`, r);
   }
 
   await app.sleep(20_000);
-  const late = await marked('אא"כ', 0);
+  const late = await marked('™', 0);
   late === 'ok' ? report.pass('הסימון נשאר אחרי 20 שניות') : report.fail('הסימון נשאר אחרי 20 שניות', late);
 
-  // עריכה לפני המילים: הן זזות, והסימון עוקב אחריהן
+  // עריכה חדשה פוסלת את המחוונים הישנים: אין ניחוש של זהות אחרי שינוי טקסט.
   await app.press('Home', 'Home', 36);
   await app.sleep(400);
   await app.type('הקדמה ארוכה ');
   await app.sleep(1200);
   const text = await app.js("document.querySelector('[data-source-node-id][data-pm-start]').textContent");
   text.startsWith('הקדמה') ? report.pass('ההקלדה נכנסה לתחילת הפסקה', text) : report.fail('ההקלדה נכנסה לתחילת הפסקה', text);
-  for (const [w, n, label] of [['אא"כ', 0, 'הראשונה'], ['©', 0, 'האמצעית'], ['אא"כ', 1, 'האחרונה']]) {
+  for (const [w, n, label] of [['™', 0, 'הראשונה'], ['©', 0, 'האמצעית'], ['אא"כ', 0, 'האחרונה']]) {
     const r = await marked(w, n);
-    r === 'ok' ? report.pass(`${label} מסומנת אחרי הקלדה לפניה`) : report.fail(`${label} מסומנת אחרי הקלדה לפניה`, r);
+    r === 'אין סימון' ? report.pass(`עריכה חדשה פוסלת את המחוון של ${label}`) : report.fail(`עריכה חדשה פוסלת את המחוון של ${label}`, r);
   }
 } finally {
   report.print();

@@ -64,8 +64,6 @@ try {
   // שתי החלפות זהות ועוד שתיים, ואז המשך הקלדה
   await app.type('אאכ אאכ (c) אאכ ');
   await app.sleep(1500);
-  await app.type('ועוד טקסט שהוקלד אחרי ');
-  await app.sleep(800);
 
   console.log('לוגים:', await app.js("JSON.stringify(window.__logs.filter(function(l){return /סימון|הוחלף/.test(l)}))"));
   console.log('DOM:', await app.js("(function(){var f=document.querySelector('[data-source-node-id][data-pm-start]');return f.getAttribute('data-source-node-id')+' '+f.getAttribute('data-pm-start')+'-'+f.getAttribute('data-pm-end')+' | '+Array.from(f.querySelectorAll('[data-pm-start]')).map(function(r){return r.getAttribute('data-pm-start')+':'+JSON.stringify(r.textContent)}).join(' ')})()"));
@@ -74,10 +72,12 @@ try {
   console.log('מופעים: אא"כ =', hebrew.length, ' © =', copyright.length);
   hebrew.length === 3 ? report.pass('שלוש החלפות של אא"כ בדף') : report.fail('שלוש החלפות של אא"כ בדף', String(hebrew.length));
 
-  // אחרי הקלדה נוספת: כל ההחלפות עדיין מסומנות (לא רק האחרונה)
-  for (const [i, word] of hebrew.entries()) check(`אא"כ מס' ${i + 1} (אחרי המשך הקלדה)`, word, await hover(word));
+  // כל ההחלפות באותה הערכה מסומנות לפני העריכה הבאה.
+  for (const [i, word] of hebrew.entries()) check(`אא"כ מס' ${i + 1}`, word, await hover(word));
   for (const [i, word] of copyright.entries()) check(`© מס' ${i + 1}`, word, await hover(word));
 
+  await app.type('ועוד טקסט שהוקלד אחרי ');
+  await app.sleep(800);
   // טקסט רגיל שלא הוחלף: אין סימון
   const plain = await probeAll('ועוד');
   if (plain[0]) {

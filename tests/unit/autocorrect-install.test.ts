@@ -186,6 +186,59 @@ describe('installAutoCorrect', () => {
     expect(engine.model.text).toBe('©x');
   });
 
+  it('keydown חדש פוסל קריאה באוויר גם לפני שהגיעו input או keyup', async () => {
+    const engine = fakeEngine();
+    install(engine);
+    const resolve = engine.doc.ranges.resolve;
+    let finish = () => {};
+    engine.doc.ranges.resolve = async (request) => {
+      const snapshot = await resolve(request);
+      await new Promise<void>((done) => { finish = done; });
+      return snapshot;
+    };
+    type(engine, '(c)');
+    await settle();
+    key('x');
+    finish();
+    await settle();
+    expect(engine.inserts).toHaveLength(0);
+  });
+
+  it('מחוון מחזיר גם החלפה ארוכה מה-preview של 200 תווים', async () => {
+    const engine = fakeEngine();
+    const replacement = 'a'.repeat(255);
+    install(engine, { replacements: [{ from: 'xx', to: replacement }] });
+    const resolve = engine.doc.ranges.resolve;
+    const reads: number[] = [];
+    engine.doc.ranges.resolve = async (request) => {
+      const result = await resolve(request);
+      reads.push(request.end.point.offset - request.start.point.offset);
+      return result.preview.text.length > 200
+        ? { ...result, preview: { text: result.preview.text.slice(0, 200), truncated: true } }
+        : result;
+    };
+    type(engine, 'xx ');
+    await settle();
+    expect(engine.model.text).toBe(replacement + ' ');
+    container.innerHTML = `<p data-source-node-id="b1" data-pm-start="1" data-pm-end="257"><span data-pm-start="1" data-pm-end="257">${replacement} </span></p>`;
+    const original = Object.getOwnPropertyDescriptor(Range.prototype, 'getClientRects');
+    Object.defineProperty(Range.prototype, 'getClientRects', { configurable: true, value: () => [{ left: 0, right: 10, top: 0, bottom: 10, width: 10, height: 10 }] });
+    try {
+      container.firstElementChild!.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: 5, clientY: 5 }));
+      await vi.advanceTimersByTimeAsync(30);
+      (document.querySelector('.otzaria-acorr-chip') as HTMLButtonElement).click();
+      const undo = document.querySelector<HTMLButtonElement>('.otzaria-acorr-menu button');
+      expect(undo).not.toBeNull();
+      undo!.click();
+      await settle();
+      expect(engine.model.text).toBe('xx ');
+      expect(Math.max(...reads)).toBeLessThanOrEqual(200);
+    } finally {
+      if (original) Object.defineProperty(Range.prototype, 'getClientRects', original);
+      else Reflect.deleteProperty(Range.prototype, 'getClientRects');
+    }
+  });
+
   it('Ctrl+Z שהחזיר את המקור אינו מתוקן שוב בהקלדה הבאה', async () => {
     const engine = fakeEngine('');
     install(engine);

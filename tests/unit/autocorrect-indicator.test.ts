@@ -1,8 +1,35 @@
-import { describe, it, expect } from 'vitest';
-import { applyFixesToText, buildMenu, stopCorrecting } from '../../src/engine/autocorrect-indicator';
+import { describe, it, expect, vi } from 'vitest';
+import { applyFixesToText, buildMenu, createAutoCorrectIndicator, stopCorrecting } from '../../src/engine/autocorrect-indicator';
 import { DEFAULT_AUTOCORRECT, planAutoCorrect } from '../../src/engine/autocorrect';
 
 describe('סימון התיקון האוטומטי', () => {
+  it('עריכה או פעולה בממשק פוסלות זהות ישנה, וגם את הקריאות שבאוויר', () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const invalidate = vi.fn();
+    const handle = createAutoCorrectIndicator(container, { changeBack: () => {}, invalidate });
+    const entry = { rule: 'table' as const, original: 'AA', replacement: 'X', blockId: 'b', story: null, start: 0 };
+    try {
+      handle.show([entry]);
+      container.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true }));
+      expect(handle.active).toBe(false);
+      expect(invalidate).toHaveBeenLastCalledWith(false);
+      handle.show([entry]);
+      container.dispatchEvent(new Event('input', { bubbles: true }));
+      expect(handle.active).toBe(false);
+      handle.show([entry]);
+      document.body.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+      expect(handle.active).toBe(false);
+      expect(invalidate).toHaveBeenLastCalledWith(true);
+      handle.dispose();
+      invalidate.mockClear();
+      container.dispatchEvent(new Event('input', { bubbles: true }));
+      expect(invalidate).not.toHaveBeenCalled();
+    } finally {
+      handle.dispose();
+      container.remove();
+    }
+  });
   it('התפריט כמו ב-Word: חזור, הפסק, אפשרויות', () => {
     const items = buildMenu({ rule: 'table', original: 'teh', replacement: 'the' }, { stop: true, options: true });
     expect(items.map((i) => i.id)).toEqual(['undo', 'stop', 'options']);

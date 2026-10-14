@@ -56,4 +56,16 @@ describe('autocorrect text location', () => {
     splitWord('בד ');
     expect(createTextLocator('b', root)(0, 'אבג')).toBeNull();
   });
+
+  it('does not identify another identical word at the recorded offset', () => {
+    root.innerHTML = '<div data-source-node-id="b" data-pm-start="1" data-pm-end="11"><span data-pm-start="1" data-pm-end="11">zzX X X X </span></div>';
+    // Before inserting zz, the last X was at6 and had this context.
+    // Current offset6 is the third X, and offset8 is the real last X.
+    expect(locateText('b', 6, 'X', root, { before: ' X ', after: ' ' })).toBeNull();
+  });
+
+  it('follows a moved word only when its context identifies one occurrence', () => {
+    root.innerHTML = '<div data-source-node-id="b" data-pm-start="1" data-pm-end="11"><span data-pm-start="1" data-pm-end="11">zzA X B Y </span></div>';
+    expect(locateText('b', 2, 'X', root, { before: 'A ', after: ' B ' })?.start).toBe(4);
+  });
 });
