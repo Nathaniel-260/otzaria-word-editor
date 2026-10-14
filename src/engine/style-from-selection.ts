@@ -10,7 +10,7 @@
  * עדיף סגנון שיורש גודל מבסיסו על סגנון שנועל גודל שאיננו יודעים.
  */
 import type { CommandAdapter } from './command-adapter';
-import type { ParagraphFormatSnapshot } from './paragraph-format';
+import type { ParagraphDeclarations, ParagraphFormatSnapshot } from './paragraph-format';
 import type { StyleAlignment, StyleFormat } from './docx-style-edit';
 import { parseColor, parseFontFamily, parseFontSizePt } from './payloads';
 
@@ -22,9 +22,13 @@ const ALIGNMENTS: readonly StyleAlignment[] = ['right', 'center', 'left', 'justi
 
 const cm = (twips: number): number => Math.round((twips / TWIPS_PER_CM) * 100) / 100;
 
+/**
+ * ערכי הפסקה נלקחים **רק כשהפסקה מצהירה עליהם** (`declared`): מה שאינו
+ * מוצהר מגיע מהסגנון, וה-snapshot מחזיר עליו 0 — לא את מה שעל המסך.
+ */
 export function selectionStyleFormat(
   adapter: SelectionStateSource | null,
-  paragraph: ParagraphFormatSnapshot | null,
+  paragraph: { snapshot: ParagraphFormatSnapshot; declared: ParagraphDeclarations } | null,
 ): StyleFormat {
   const format: StyleFormat = {};
 
@@ -48,16 +52,19 @@ export function selectionStyleFormat(
   }
 
   if (paragraph) {
-    format.spaceBeforePt = paragraph.spacing.beforeTwips / TWIPS_PER_PT;
-    format.spaceAfterPt = paragraph.spacing.afterTwips / TWIPS_PER_PT;
-    if (paragraph.spacing.rule === 'auto' && paragraph.spacing.lineTwips > 0) {
-      format.lineSpacing = Math.round((paragraph.spacing.lineTwips / 240) * 100) / 100;
+    const { snapshot, declared } = paragraph;
+    if (declared.spaceBefore) format.spaceBeforePt = snapshot.spacing.beforeTwips / TWIPS_PER_PT;
+    if (declared.spaceAfter) format.spaceAfterPt = snapshot.spacing.afterTwips / TWIPS_PER_PT;
+    if (declared.line && snapshot.spacing.rule === 'auto' && snapshot.spacing.lineTwips > 0) {
+      format.lineSpacing = Math.round((snapshot.spacing.lineTwips / 240) * 100) / 100;
     }
-    format.indentStartCm = cm(paragraph.indentation.leftTwips);
-    format.indentEndCm = cm(paragraph.indentation.rightTwips);
-    format.firstLineCm = paragraph.indentation.hangingTwips > 0
-      ? -cm(paragraph.indentation.hangingTwips)
-      : cm(paragraph.indentation.firstLineTwips);
+    if (declared.indentStart) format.indentStartCm = cm(snapshot.indentation.leftTwips);
+    if (declared.indentEnd) format.indentEndCm = cm(snapshot.indentation.rightTwips);
+    if (declared.firstLine) {
+      format.firstLineCm = snapshot.indentation.hangingTwips > 0
+        ? -cm(snapshot.indentation.hangingTwips)
+        : cm(snapshot.indentation.firstLineTwips);
+    }
   }
 
   return format;
@@ -70,8 +77,16 @@ function same(a: unknown, b: unknown): boolean {
   return a === b;
 }
 
-/** ערך שאינו מוצהר בשום רמה נקרא כברירת המחדל של Word לאותו שדה. */
+/**
+ * ערך שאינו מוצהר בשום רמה נקרא כברירת המחדל של Word לאותו שדה.
+ *
+ * צבע ויישור כאן מפני שהמנוע **מדווח** אותם גם כשאינם מוצהרים: ריצה בצבע
+ * „אוטומטי” מדווחת `#000000`, ופסקה עברית בלי `w:jc` מדווחת „ימין”. בלעדיהם
+ * „צור סגנון” כתב שחור קבוע ויישור מפורש לסגנון שלא ביקש אותם (נמדד ב-QA).
+ */
 const IMPLICIT: StyleFormat = {
+  color: '000000',
+  alignment: 'right',
   bold: false,
   italic: false,
   underline: false,
@@ -86,6 +101,19 @@ const IMPLICIT: StyleFormat = {
 /**
  * רק מה שבאמת שונה מ-`baseline` — הטלאי שנכתב לסגנון. שדה ששווה לירושה אינו
  * נכתב, וכך סגנון שנוצר מהבחירה ממשיך לרשת מבסיסו כל מה שלא שונה בו.
+ */
+export function withoutThemedFont(wanted: StyleFormat, baseline: StyleFormat): StyleFormat {
+  // גופן ערכת נושא (`fontFamily: ''` ב-`resolveFormat`): המנוע מדווח את השם
+  // שהוא פתר, ושם קבוע במקומו היה מנתק את הסגנון מערכת הנושא. בלי קריאת
+  // `theme1.xml` אין דרך לדעת אם השם שדווח הוא ערכת הנושא או גופן ישיר, ולכן
+  // „מהבחירה” אינו נוגע בגופן כזה. מהדיאלוג — כן: שם נבחר במפורש.
+  if (baseline.fontFamily !== '' || wanted.fontFamily === undefined) return wanted;
+  const { fontFamily: _themed, ...rest } = wanted;
+  return rest;
+}
+
+/**
+ * הטלאי עצמו. ראו `withoutThemedFont` למה שהבחירה אינה כותבת.
  */
 export function formatPatch(wanted: StyleFormat, baseline: StyleFormat): StyleFormat {
   const patch: StyleFormat = {};

@@ -23,7 +23,7 @@ import {
   type StyleFormat,
   type StyleInfo,
 } from '../engine/docx-style-edit';
-import { formatPatch, selectionStyleFormat } from '../engine/style-from-selection';
+import { formatPatch, selectionStyleFormat, withoutThemedFont } from '../engine/style-from-selection';
 import { readParagraphFormat } from '../engine/paragraph-format';
 import { styleDisplayLabel } from '../engine/style-gallery';
 import type { StyleAction } from '../ui/ribbon/common/StyleGallery.vue';
@@ -81,7 +81,7 @@ export function useStyleManager(activeStyleId: () => string | null) {
 
   async function readSelection(): Promise<StyleFormat> {
     const paragraph = await readParagraphFormat(superdoc.value);
-    return selectionStyleFormat(adapter.value, paragraph.ok ? paragraph.snapshot : null);
+    return selectionStyleFormat(adapter.value, paragraph.ok ? paragraph : null);
   }
 
   async function run<T>(action: () => Promise<T>): Promise<T | undefined> {
@@ -140,7 +140,7 @@ export function useStyleManager(activeStyleId: () => string | null) {
           styles: choicesOf(styles),
           basedOn: base?.id ?? null,
           next: null,
-          format: { ...baseline, ...(await readSelection()) },
+          format: { ...baseline, ...withoutThemedFont(await readSelection(), baseline) },
           baseline,
           xml,
         };
@@ -154,7 +154,7 @@ export function useStyleManager(activeStyleId: () => string | null) {
       const resolved = resolveFormat(xml, info.id);
 
       if (action === 'update') {
-        const patch = formatPatch(await readSelection(), resolved);
+        const patch = formatPatch(withoutThemedFont(await readSelection(), resolved), resolved);
         if (Object.keys(patch).length === 0) {
           notify(`„${labelOf(info)}” כבר תואם לבחירה`);
           return;

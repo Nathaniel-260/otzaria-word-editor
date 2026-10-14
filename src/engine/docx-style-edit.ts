@@ -39,6 +39,7 @@ export type StyleAlignment = 'right' | 'center' | 'left' | 'justify';
  * ליחידות OOXML כאן. ראו את הכלל התלת-מצבי בהערת הראש.
  */
 export interface StyleFormat {
+  /** ‏`''` בקריאה = גופן ערכת נושא (ראו `formatOfLevel`). */
   fontFamily?: string | null;
   fontSizePt?: number | null;
   bold?: boolean | null;
@@ -395,8 +396,12 @@ function formatOfLevel(rPr: Element | null, pPr: Element | null): StyleFormat {
     const fonts = childText(rPr, 'rFonts');
     if (fonts) {
       const attrs = parseElement(fonts)?.attrs ?? '';
+      // ערכת נושא גוברת על שם באותה רמה — כך Word פותר `rFonts`. השם שלה אינו
+      // ב-styles.xml, ולכן `''`: „גופן ערכת הנושא”, ולא השם של רמה נמוכה יותר.
+      const themed = ['cstheme', 'asciiTheme', 'hAnsiTheme'].some((name) => attribute(attrs, name) !== null);
       const name = attribute(attrs, 'cs') ?? attribute(attrs, 'ascii') ?? attribute(attrs, 'hAnsi');
-      if (name) format.fontFamily = unescapeXml(name);
+      if (themed) format.fontFamily = '';
+      else if (name) format.fontFamily = unescapeXml(name);
     }
     const size = childValue(rPr, 'szCs') ?? childValue(rPr, 'sz');
     if (size !== null && Number.isFinite(Number(size))) format.fontSizePt = Number(size) / 2;

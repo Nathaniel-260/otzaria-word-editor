@@ -116,6 +116,7 @@
                   :options="familyOptions"
                   width="160px"
                   title="גופן"
+                  placeholder="גופן ערכת הנושא"
                   focus-return="stay"
                 />
                 <input
