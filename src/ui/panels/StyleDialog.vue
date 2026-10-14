@@ -299,13 +299,14 @@
               <span class="sd-label">קיצור מקשים:</span>
               <!-- לוכד ולא שדה טקסט, כמו ב„ניהול קיצורים”: נשמר המקש הפיזי. -->
               <button
+                ref="recorderRef"
                 type="button"
                 class="sd-input sd-recorder"
                 :class="{ 'sd-recorder--armed': recording }"
                 data-testid="style-shortcut-recorder"
                 :aria-label="recording ? 'ממתין לצירוף מקשים' : 'קיצור מקשים לסגנון'"
                 @pointerdown.prevent
-                @click="recording = true"
+                @click="arm"
                 @keydown="onRecorderKey"
                 @blur="recording = false"
               >
@@ -498,6 +499,18 @@ const firstLine = ref<string | number>('0');
 const outlineLevel = ref<number>(BODY_TEXT_LEVEL);
 const combo = ref<KeyCombo | null>(null);
 const recording = ref(false);
+const recorderRef = ref<HTMLButtonElement | null>(null);
+
+/**
+ * מדליקה את הלכידה **ומעבירה מיקוד ללוכד**. `@pointerdown.prevent` (שלא
+ * ייגנב המיקוד מהמסמך) מונע גם מהכפתור עצמו לקבל אותו, וההקשה הלכה לשורש
+ * הדיאלוג — כלומר לחיצה בעכבר לא הקליטה דבר (נמצא ב-QA). כמו `arm` ב„ניהול
+ * קיצורים”.
+ */
+function arm(): void {
+  recording.value = true;
+  recorderRef.value?.focus();
+}
 
 function onRecorderKey(event: KeyboardEvent): void {
   if (!recording.value || event.key === 'Tab') return;

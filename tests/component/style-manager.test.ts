@@ -198,7 +198,12 @@ describe('תפריט הסגנון בגלריה', () => {
     const recorder = dialog()!.querySelector<HTMLButtonElement>('[data-testid="style-shortcut-recorder"]')!;
     recorder.click();
     await settle();
-    recorder.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init }));
+    // ההקשה הולכת לאלמנט **שבמיקוד**, כמו במקלדת אמיתית — לא ישירות ללוכד.
+    // שליחה ישירה הסתירה את הבאג שבו לחיצה בעכבר לא העבירה אליו מיקוד.
+    expect(document.activeElement).toBe(recorder);
+    (document.activeElement as HTMLElement).dispatchEvent(
+      new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init }),
+    );
     await settle();
   }
 
