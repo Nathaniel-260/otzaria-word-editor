@@ -34,6 +34,7 @@
  * מתחילת המילה החלקית ועד הסמן, ו-`insert` מחליף אותו בטקסט המקור המלא —
  * ראו ההסבר המקביל ב-book-completion.ts.
  */
+import { PASTE_STARTED, PASTE_FINISHED } from './paste-events';
 import type { SuperDoc } from 'superdoc';
 import {
   WORD_INNER,
@@ -271,6 +272,7 @@ export function installBookCompletion(
    * שלא מנקה את ה-ghost.
    */
   let evalToken = 0;
+  const pendingPastes = new Set<object>();
 
   function hideGhost(): void {
     ghostEl?.remove();
@@ -577,6 +579,7 @@ export function installBookCompletion(
   }
 
   function scheduleEvaluate(): void {
+    if (pendingPastes.size > 0) return;
     if (debounceTimer !== undefined) clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => void evaluate(), INPUT_DEBOUNCE_MS);
   }
@@ -646,6 +649,18 @@ export function installBookCompletion(
     }
   }
 
+  const onPasteStarted = (event: Event): void => {
+    if (!(event instanceof CustomEvent) || typeof event.detail?.operation !== 'object') return;
+    pendingPastes.add(event.detail.operation);
+    evalToken += 1;
+    if (debounceTimer !== undefined) clearTimeout(debounceTimer);
+    clearSuggestion();
+  };
+  const onPasteFinished = (event: Event): void => {
+    if (!(event instanceof CustomEvent) || !pendingPastes.delete(event.detail?.operation)) return;
+    if (!disposed && pendingPastes.size === 0 && event.detail?.evaluate !== false) scheduleEvaluate();
+  };
+
   const onInput = (): void => scheduleEvaluate();
   /*
    * כל הקשה אחרת פוסלת את ההצעה **מיד**, ולא אחרי ההשהיה. ה-ghost מצויר
@@ -679,6 +694,8 @@ export function installBookCompletion(
     hideGhost();
   };
 
+  container.addEventListener(PASTE_STARTED, onPasteStarted);
+  container.addEventListener(PASTE_FINISHED, onPasteFinished);
   container.addEventListener('input', onInput);
   container.addEventListener('keyup', onInput);
   container.addEventListener('keydown', onKeyDown, true);
@@ -705,6 +722,8 @@ export function installBookCompletion(
       disposed = true;
       if (debounceTimer !== undefined) clearTimeout(debounceTimer);
       clearSuggestion();
+      container.removeEventListener(PASTE_STARTED, onPasteStarted);
+      container.removeEventListener(PASTE_FINISHED, onPasteFinished);
       container.removeEventListener('input', onInput);
       container.removeEventListener('keyup', onInput);
       container.removeEventListener('keydown', onKeyDown, true);

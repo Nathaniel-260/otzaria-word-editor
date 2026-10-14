@@ -4,6 +4,7 @@
  * המקלדת. המראה והמיקום נבדקים בשער ה-QA מול Chrome אמיתי.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { PASTE_STARTED, PASTE_FINISHED } from '../../src/engine/paste-events';
 import { installAtMention } from '../../src/engine/at-mention-overlay';
 import type { ResolvedRefHit } from '../../src/types/otzaria_plugin';
 
@@ -775,6 +776,38 @@ describe('חימוש — מי בכלל שואל את המנוע', () => {
     expect(asked()).toBe(2);
     expect(popup()).not.toBeNull();
     handle.dispose();
+  });
+
+  it('application paste waits for completion before arming an initially idle mention', async () => {
+    const { host, asked } = countingDoc('ראה @פסחים לד');
+    const handle = installAtMention(container, host as never);
+    const operation = {};
+    container.dispatchEvent(new CustomEvent(PASTE_STARTED, { detail: { operation } }));
+    container.dispatchEvent(keyed('v'));
+    await settle();
+    expect(asked()).toBe(0);
+    container.dispatchEvent(new CustomEvent(PASTE_FINISHED, { detail: { operation } }));
+    await settle();
+    expect(asked()).toBe(1);
+    expect(popup()).not.toBeNull();
+    handle.dispose();
+  });
+
+  it('application paste cancels stale suggestions and its listeners are disposed', async () => {
+    const { host, asked } = countingDoc('ראה @פסחים לד');
+    const handle = installAtMention(container, host as never);
+    container.dispatchEvent(keyed('@'));
+    await settle();
+    expect(popup()).not.toBeNull();
+    const operation = {};
+    container.dispatchEvent(new CustomEvent(PASTE_STARTED, { detail: { operation } }));
+    expect(popup()).toBeNull();
+    await settle();
+    expect(asked()).toBe(1);
+    handle.dispose();
+    container.dispatchEvent(new CustomEvent(PASTE_FINISHED, { detail: { operation } }));
+    await settle();
+    expect(asked()).toBe(1);
   });
 
   it('הדבקה מחמשת גם בלי `input` — אין לה מקש', async () => {

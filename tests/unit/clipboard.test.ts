@@ -1204,6 +1204,245 @@ describe('pasteFromClipboard', () => {
   });
 });
 
+const destinationDependencies = [{ target: '/word/styles.xml', dataBase64: btoa('<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:cs="Arial"/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr></w:rPrDefault></w:docDefaults></w:styles>') }];
+
+describe('pasteFromClipboard — אפשרויות ההדבקה', () => {
+  /** תכנית עשירה, כמו שה-`parse` בונה מ-HTML מעוצב. */
+  function richPlan(): ClipboardPlan {
+    return {
+      fragment: {
+        blocks: [
+          {
+            kind: 'heading',
+            level: 1,
+            styleRef: 'Heading1',
+            runs: [
+              { text: 'מודגש', marks: { bold: true, fontFamily: 'Arial', color: '#FF0000' } },
+              { text: ' רגיל', marks: { fontFamily: 'Arial', color: '#FF0000' } },
+            ],
+          },
+        ],
+      },
+      diagnostics: [],
+    };
+  }
+
+  /** הכפיל, עם `parse` שמחזיר תכנית עשירה, פקודות שמדווחות David 18, ו-`docDefaults` של Arial 12. */
+  function richDoc(caret: Record<string, { value?: unknown; active?: boolean }> = {}) {
+    const fake = fakeDoc();
+    fake.doc.clipboard!.parse = (payload) => {
+      assertPayload(payload, 'clipboard.parse');
+      fake.calls.push({ op: 'clipboard.parse', input: payload });
+      return { success: true, plan: richPlan() };
+    };
+    const states: Record<string, { value?: unknown; active?: boolean }> = {
+      'font-family': { value: 'David' },
+      'font-size': { value: '18' },
+      'text-color': { value: '#000000' },
+      ...caret,
+    };
+    (fake.doc as Record<string, unknown>).styles = {
+      apply: (_input: unknown, options?: { dryRun?: boolean }) => {
+        // dryRun בלבד: „מזג עיצוב” קורא את ברירות המחדל, ולעולם אינו כותב אותן.
+        if (options?.dryRun !== true) throw new Error('docDefaults must not be written by paste');
+        return {
+          success: true,
+          before: { fontFamily: { ascii: 'Arial', hAnsi: 'Arial', cs: 'Arial' }, fontSize: 24, fontSizeCs: 24 },
+        };
+      },
+    };
+    fake.doc.info = () => ({ revision: '1' });
+    fake.doc.selection = { extractOoxml: () => ({
+      dependencies: destinationDependencies, fragment: { xml: '<w:r><w:rPr><w:rFonts w:ascii="David" w:hAnsi="David" w:cs="David"/><w:sz w:val="36"/><w:szCs w:val="36"/></w:rPr><w:t>x</w:t></w:r>' },
+    }) };
+    fake.host.ui = {
+      ...fake.host.ui,
+      selection: selectionSurface({ status: 'ready', empty: true, selectionTarget: CARET as never }),
+      commands: {
+        has: (id: string) => id in states,
+        get: (id: string) => ({ getState: () => states[id] }),
+      },
+    };
+    return fake;
+  }
+
+  const insertedPlan = (calls: FakeCall[]) =>
+    (calls.find((call) => call.op === 'clipboard.insert')!.input as { plan: ClipboardPlan }).plan;
+
+  it('„שמירה על עיצוב המקור” מעבירה את התכנית כמו שהיא', async () => {
+    const { host, calls } = richDoc();
+    setSystemClipboard(readableClipboard({ 'text/html': '<h1>x</h1>', 'text/plain': 'x' }));
+
+    expect((await pasteFromClipboard(host, { mode: 'keep-source' })).ok).toBe(true);
+    expect(insertedPlan(calls)).toEqual(richPlan());
+  });
+
+  it('„מזג עיצוב”: עיצוב היעד (David 18), ההדגשה של המקור — ולא הכותרת, הגופן או הצבע שלו', async () => {
+    const { host, calls } = richDoc();
+    setSystemClipboard(readableClipboard({ 'text/html': '<h1>x</h1>', 'text/plain': 'x' }));
+
+    expect((await pasteFromClipboard(host, { mode: 'merge' })).ok).toBe(true);
+    const target = { fontFamily: 'David', fontSizePt: 18, fontSizeCsPt: 18, color: '#000000', bold: false, boldCs: false, italic: false, italicCs: false, underline: false, strike: false };
+    expect(insertedPlan(calls).fragment.blocks).toEqual([
+      {
+        kind: 'paragraph',
+        runs: [
+          { text: 'מודגש', marks: { ...target, bold: true } },
+          { text: ' רגיל', marks: target },
+        ],
+      },
+    ]);
+  });
+
+  it('„מזג עיצוב” בטקסט שלא עוצב: ברירות המחדל אינן נכתבות כעיצוב ישיר', async () => {
+    const { host, calls } = richDoc({ 'font-family': { value: 'Arial' }, 'font-size': { value: '12' } });
+    setSystemClipboard(readableClipboard({ 'text/html': '<h1>x</h1>', 'text/plain': 'x' }));
+
+    await pasteFromClipboard(host, { mode: 'merge' });
+    const blocks = insertedPlan(calls).fragment.blocks as Array<{ runs: Array<{ marks?: unknown }> }>;
+    const destination = { fontFamily: 'Arial', fontSizePt: 12, fontSizeCsPt: 12, color: '#000000', bold: false, boldCs: false, italic: false, italicCs: false, underline: false, strike: false };
+    expect(blocks[0]!.runs.map((run) => run.marks)).toEqual([{ ...destination, bold: true }, destination]);
+  });
+
+  it('„שמירת טקסט בלבד” שולחת למנוע `text/plain` בלבד', async () => {
+    const { host, calls } = richDoc();
+    setSystemClipboard(readableClipboard({ 'text/html': '<h1>x</h1>', 'text/plain': 'x', 'image/png': new Uint8Array([1]) }));
+
+    expect((await pasteFromClipboard(host, { mode: 'text-only' })).ok).toBe(true);
+    expect(calls[0]!.input).toEqual({ source: 'browser', items: [{ type: 'text/plain', kind: 'string', data: 'x' }] });
+    const blocks = insertedPlan(calls).fragment.blocks as Array<{ runs: Array<{ marks?: unknown }> }>;
+    // גם ההדגשה של המקור נזרקת; נשאר רק עיצוב היעד.
+    for (const run of blocks[0]!.runs) expect(run.marks).toEqual({ fontFamily: 'David', fontSizePt: 18, fontSizeCsPt: 18, color: '#000000', bold: false, boldCs: false, italic: false, italicCs: false, underline: false, strike: false });
+  });
+
+  it('„שמירת טקסט בלבד” על לוח בלי טקסט — נכשלת בלי לגעת במסמך', async () => {
+    const { host, calls } = richDoc();
+    setSystemClipboard(readableClipboard({ 'image/png': new Uint8Array([1, 2]) }));
+
+    const outcome = await pasteFromClipboard(host, { mode: 'text-only' });
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) expect(outcome.message).toBe('ההדבקה נכשלה: אין בלוח טקסט להדבקה');
+    expect(calls).toEqual([]);
+  });
+
+  it('payload שנמסר (מאירוע Ctrl+V) מודבק בלי לקרוא את לוח המערכת', async () => {
+    const { host, calls } = richDoc();
+    const clipboard = readableClipboard({ 'text/plain': 'אחר' });
+    setSystemClipboard(clipboard);
+    const payload: ClipboardPayload = { source: 'browser', items: [{ type: 'text/plain', kind: 'string', data: 'מהאירוע' }] };
+
+    expect((await pasteFromClipboard(host, { mode: 'merge', payload })).ok).toBe(true);
+    expect(clipboard.read).not.toHaveBeenCalled();
+    expect(calls[0]!.input).toEqual(payload);
+  });
+});
+
+describe('paste destination safety', () => {
+  function transientHost({ changeTarget = false, changeRevision = false } = {}) {
+    const { host, doc, calls } = fakeDoc();
+    let reads = 0;
+    let revision = '1';
+    host.ui = { selection: { getSnapshot: () => {
+      reads += 1;
+      if (changeRevision && reads > 2) revision = '2';
+      return { status: reads <= 2 ? 'stale' : 'ready', empty: true, selectionTarget: (changeTarget && reads > 2 ? { ...CARET, start: { ...CARET.start, offset: 4 }, end: { ...CARET.end, offset: 4 } } : CARET) as never };
+    } } };
+    doc.info = () => ({ revision });
+    doc.selection = { extractOoxml: () => ({ dependencies: destinationDependencies, fragment: { xml: '<w:r><w:t>x</w:t></w:r>' } }) };
+    return { host, calls };
+  }
+  it('waits for transient stale state at the same caret, then inserts once', async () => {
+    const { host, calls } = transientHost();
+    expect((await pasteFromClipboard(host, { mode: 'merge', payload: enginePayload('x') })).ok).toBe(true);
+    expect(calls.filter((call) => call.op === 'clipboard.insert')).toHaveLength(1);
+  });
+  it('refuses before insertion if settling reveals a different caret or revision', async () => {
+    for (const options of [{ changeTarget: true }, { changeRevision: true }]) {
+      const { host, calls } = transientHost(options);
+      expect((await pasteFromClipboard(host, { mode: 'merge', payload: enginePayload('x') })).ok).toBe(false);
+      expect(calls.some((call) => call.op === 'clipboard.insert')).toBe(false);
+    }
+  });
+  it('refuses a caret change while the final revision read is pending', async () => {
+    const { host, doc, calls } = fakeDoc();
+    let target: SelectionSnapshot['selectionTarget'] = CARET as never;
+    host.ui = { selection: { getSnapshot: () => ({ status: 'ready', empty: true, selectionTarget: target }) } };
+    let reads = 0;
+    let resolveFinal!: (info: { revision: string }) => void;
+    let requested!: () => void;
+    const finalRequested = new Promise<void>((resolve) => { requested = resolve; });
+    doc.info = () => {
+      reads += 1;
+      if (reads !== 2) return { revision: '1' };
+      const pending = new Promise<{ revision: string }>((resolve) => { resolveFinal = resolve; });
+      requested();
+      return pending;
+    };
+    doc.selection = { extractOoxml: () => ({ dependencies: destinationDependencies, fragment: { xml: '<w:r><w:t>x</w:t></w:r>' } }) };
+    const pending = pasteFromClipboard(host, { mode: 'merge', payload: enginePayload('x') });
+    await finalRequested;
+    target = { ...CARET, start: { ...CARET.start, offset: 4 }, end: { ...CARET.end, offset: 4 } } as never;
+    resolveFinal({ revision: '1' });
+    expect((await pending).ok).toBe(false);
+    expect(calls.some((call) => call.op === 'clipboard.insert')).toBe(false);
+  });
+
+  it('refuses a caret change while the initial settled revision read is pending', async () => {
+    const { host, doc, calls } = fakeDoc();
+    let target: SelectionSnapshot['selectionTarget'] = CARET as never;
+    let snapshots = 0;
+    host.ui = { selection: { getSnapshot: () => ({ status: ++snapshots === 1 ? 'stale' : 'ready', empty: true, selectionTarget: target }) } };
+    let reads = 0;
+    let resolveAfter!: (info: { revision: string }) => void;
+    let requested!: () => void;
+    const afterRequested = new Promise<void>((resolve) => { requested = resolve; });
+    doc.info = () => {
+      if (++reads !== 2) return { revision: '1' };
+      const pending = new Promise<{ revision: string }>((resolve) => { resolveAfter = resolve; });
+      requested();
+      return pending;
+    };
+    doc.selection = { extractOoxml: vi.fn() };
+    const pending = pasteFromClipboard(host, { mode: 'merge', payload: enginePayload('x') });
+    await afterRequested;
+    target = { ...CARET, start: { ...CARET.start, offset: 4 }, end: { ...CARET.end, offset: 4 } } as never;
+    resolveAfter({ revision: '1' });
+    expect((await pending).ok).toBe(false);
+    expect(doc.selection.extractOoxml).not.toHaveBeenCalled();
+    expect(calls.some((call) => call.op === 'clipboard.insert')).toBe(false);
+  });
+
+  it('refuses mixed or selected ranges without even reading the clipboard', async () => {
+    const { host, calls } = fakeDoc();
+    const clipboard = readableClipboard({ 'text/plain': 'x' });
+    setSystemClipboard(clipboard);
+    const outcome = await pasteFromClipboard(host, { mode: 'merge' });
+    expect(outcome.ok).toBe(false);
+    expect(clipboard.read).not.toHaveBeenCalled();
+    expect(calls).toEqual([]);
+  });
+  it('refuses unsupported script fonts before inserting', async () => {
+    const { host, doc, calls } = fakeDoc();
+    host.ui = { selection: selectionSurface({ status: 'ready', empty: true, selectionTarget: CARET as never }) };
+    doc.info = () => ({ revision: '1' });
+    doc.selection = { extractOoxml: () => ({ dependencies: destinationDependencies, fragment: { xml: '<w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:cs="David"/></w:rPr><w:t>x</w:t></w:r>' } }) };
+    const outcome = await pasteFromClipboard(host, { mode: 'merge', payload: enginePayload('x') });
+    expect(outcome.ok).toBe(false);
+    expect(calls.some((call) => call.op === 'clipboard.insert')).toBe(false);
+  });
+  it('refuses an async paste if the document changes while parsing with the same selection', async () => {
+    const { host, doc, calls } = fakeDoc();
+    host.ui = { selection: selectionSurface({ status: 'ready', empty: true, selectionTarget: CARET as never }) };
+    let revision = '1';
+    doc.info = () => ({ revision });
+    doc.selection = { extractOoxml: () => ({ dependencies: destinationDependencies, fragment: { xml: '<w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:cs="Arial"/></w:rPr><w:t>x</w:t></w:r>' } }) };
+    doc.clipboard!.parse = async () => { revision = '2'; return { success: true, plan: enginePlan() }; };
+    const outcome = await pasteFromClipboard(host, { mode: 'merge', payload: enginePayload('x') });
+    expect(outcome.ok).toBe(false);
+    expect(calls.some((call) => call.op === 'clipboard.insert')).toBe(false);
+  });
+});
+
 describe('selectWholeDocument', () => {
   /** `ranges.resolve` שמאמת את העוגנים ומחזיר טווח שמכסה את הגוף. */
   function rangesHost(overrides: Partial<ClipboardDocumentApi> = {}) {
@@ -1385,12 +1624,19 @@ describe('קבוצת „לוח” ב-HomeTab', () => {
   });
 
   it('לכל אחד מארבעת הפקדים יש מטפל וגם חיווט של disabled', () => {
-    for (const label of ['הדבק', 'גזור', 'העתק', 'בחר הכל']) {
+    for (const label of ['גזור', 'העתק', 'בחר הכל']) {
       const control = source.match(new RegExp(`<RibbonButton\\b[^>]*?label="${label}"[\\s\\S]*?/>`));
       expect(control, label).not.toBeNull();
       expect(control![0], label).toMatch(/@click=/);
       expect(control![0], label).toMatch(/:disabled=/);
     }
+    // „הדבק” מפוצל, כמו ב-Word: הגוף מדביק (`@action`) והחץ פותח את
+    // אפשרויות ההדבקה (`@select`).
+    const paste = source.match(/<RibbonMenuButton\b[^>]*?label="הדבק"[\s\S]*?\/>/);
+    expect(paste).not.toBeNull();
+    expect(paste![0]).toMatch(/@action=/);
+    expect(paste![0]).toMatch(/@select=/);
+    expect(paste![0]).toMatch(/:disabled=/);
   });
 
   it('הפקד עצמו מונע מהלחיצה לגזול את המיקוד מהעורך', () => {

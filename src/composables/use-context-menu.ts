@@ -34,6 +34,7 @@ import {
   type DocCapabilityReport,
 } from '../engine/doc-capabilities';
 import { copySelection, cutSelection, pasteFromClipboard } from '../engine/clipboard';
+import { pasteDefaultMode } from './paste-default';
 import { focusDocument } from '../engine/focus';
 import { markSyntheticPointer } from '../engine/word-selection';
 import { isTextEntryTarget } from '../ui/shortcuts/dispatch';
@@ -342,6 +343,7 @@ export function useContextMenu(deps: ContextMenuDeps): ContextMenuController {
       // נקרא כאן ולא לפני ההמתנות: הזזת הסמן אינה משנה טקסט ואינה מזיזה
       // סימון, וקריאה מאוחרת מקבלת את המדידה העדכנית ביותר.
       misspelledWord: deps.misspelledWordAt?.(at) ?? null,
+      pasteDefault: pasteDefaultMode.value,
       can: (question: DocCapabilityQuestion) => capabilities.can(question),
     });
     // מקטעים ריקים (למשל המסמך עדיין נטען) הם „אין מה להציג”, לא „תפריט פתוח
@@ -443,7 +445,9 @@ export function useContextMenu(deps: ContextMenuDeps): ContextMenuController {
       void (async () => {
         if (op === 'copy') deps.report(await copySelection(host), 'clipboard-copy');
         else if (op === 'cut') deps.report(await cutSelection(host), 'clipboard-cut');
-        else deps.report(await pasteFromClipboard(host), 'clipboard-paste');
+        else if (op === 'paste-merge') deps.report(await pasteFromClipboard(host, { mode: 'merge' }), 'clipboard-paste-merge');
+        else if (op === 'paste-text') deps.report(await pasteFromClipboard(host, { mode: 'text-only' }), 'clipboard-paste-text');
+        else deps.report(await pasteFromClipboard(host, { mode: 'keep-source' }), 'clipboard-paste');
       })();
     }
   }

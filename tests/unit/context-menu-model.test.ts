@@ -96,10 +96,12 @@ describe('contextMenuModel', () => {
   it('סדר המיקוד כולל את הבוררים, במקומם בכרטיס', () => {
     const order = contextMenuFocusOrder(contextMenuModel(snapshot()));
 
-    expect(order.slice(0, 6)).toEqual([
+    expect(order.slice(0, 8)).toEqual([
       'cut',
       'copy',
       'paste',
+      'paste-merge',
+      'paste-text',
       'format-painter',
       'font-family',
       'font-size',

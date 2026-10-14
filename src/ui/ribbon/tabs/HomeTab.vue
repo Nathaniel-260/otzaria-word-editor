@@ -5,14 +5,24 @@
       title="לוח"
       icon="paste"
     >
-      <RibbonButton
+      <!--
+        מפוצל, כמו ב-Word: הגוף מדביק לפי ברירת המחדל של Ctrl+V, והחץ פותח את
+        „אפשרויות הדבקה” ואת בחירת ברירת המחדל עצמה.
+      -->
+      <RibbonMenuButton
+        split
         icon="paste"
         label="הדבק"
         variant="large"
         :tooltip="pasteTooltip"
+        :description="pasteDescription"
         shortcut-id="paste"
+        menu-tooltip="אפשרויות הדבקה"
+        menu-description="שמירה על עיצוב המקור, מיזוג עיצוב או טקסט בלבד — ובחירת ההתנהגות של Ctrl+V"
         :disabled="!canPaste"
-        @click="doPaste"
+        :items="pasteMenuItems"
+        @action="doPaste(pasteDefaultMode)"
+        @select="onPasteMenuSelect"
       />
       <RibbonStack>
         <RibbonButton
@@ -569,6 +579,12 @@ import {
   pasteFromClipboard,
   selectWholeDocument,
 } from '../../../engine/clipboard';
+import {
+  PASTE_MODES,
+  isPasteMode,
+  type PasteMode,
+} from '../../../engine/paste-formatting';
+import { pasteDefaultMode, setPasteDefault } from '../../../composables/paste-default';
 import {
   readVertAlignSupport,
   toggleVertAlign,
@@ -1222,8 +1238,63 @@ async function doCut(): Promise<void> {
   report(await cutSelection(superdoc.value), 'clipboard-cut');
 }
 
-async function doPaste(): Promise<void> {
-  report(await pasteFromClipboard(superdoc.value), 'clipboard-paste');
+async function doPaste(mode: PasteMode): Promise<void> {
+  report(await pasteFromClipboard(superdoc.value, { mode }), 'clipboard-paste');
+}
+
+/**
+ * המחרוזות של כל אפשרות, מילוליות ולא מורכבות: כל מחרוזת שהרצועה מציגה
+ * עוברת ב-`menuString`, והמילון (ui/ribbon/i18n.ts) מחפש אותה כמות שהיא.
+ */
+const PASTE_OPTIONS: Record<PasteMode, { label: string; hint: string; asDefault: string; onClick: string }> = {
+  'keep-source': {
+    label: 'שמירה על עיצוב המקור',
+    hint: 'הגופן, הגודל, הצבע והעיצוב כמו במקום שממנו הועתק',
+    asDefault: 'Ctrl+V: שמירה על עיצוב המקור',
+    onClick: 'לחיצה: שמירה על עיצוב המקור',
+  },
+  merge: {
+    label: 'מיזוג עיצוב',
+    hint: 'העיצוב של המקום שאליו מדביקים, עם המודגש, הנטוי והקו התחתון של המקור',
+    asDefault: 'Ctrl+V: מיזוג עיצוב',
+    onClick: 'לחיצה: מיזוג עיצוב',
+  },
+  'text-only': {
+    label: 'שמירת טקסט בלבד',
+    hint: 'הטקסט בלבד, בעיצוב של המקום שאליו מדביקים',
+    asDefault: 'Ctrl+V: שמירת טקסט בלבד',
+    onClick: 'לחיצה: שמירת טקסט בלבד',
+  },
+};
+
+const pasteDescription = computed(() =>
+  canPaste.value ? PASTE_OPTIONS[pasteDefaultMode.value].onClick : undefined,
+);
+
+/**
+ * שתי קבוצות: „אפשרויות הדבקה” — הדבקה חד-פעמית באופן שנבחר — ו„הדבקה
+ * רגילה” — מה ש-Ctrl+V וגוף הכפתור עושים מעכשיו (composables/paste-default.ts).
+ * המזהה נושא את הקבוצה, כדי שלחיצה על אותה אפשרות בשתיהן לא תתבלבל.
+ */
+const pasteMenuItems = computed(() => [
+  ...PASTE_MODES.map((mode) => ({
+    id: `paste:${mode}`,
+    label: PASTE_OPTIONS[mode].label,
+    hint: PASTE_OPTIONS[mode].hint,
+  })),
+  ...PASTE_MODES.map((mode, index) => ({
+    id: `default:${mode}`,
+    label: PASTE_OPTIONS[mode].asDefault,
+    checked: pasteDefaultMode.value === mode,
+    ...(index === 0 ? { separatorBefore: true, hint: 'ההדבקה הרגילה — נשמרת להפעלות הבאות' } : {}),
+  })),
+]);
+
+function onPasteMenuSelect(id: string): void {
+  const [group, mode] = id.split(':');
+  if (!isPasteMode(mode)) return;
+  if (group === 'paste') void doPaste(mode);
+  else if (group === 'default') setPasteDefault(mode);
 }
 
 async function doSelectAll(): Promise<void> {

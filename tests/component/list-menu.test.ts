@@ -49,9 +49,13 @@ const NUMBER = 1;
  * הסינון ל-`.word-split` הוא מה שמשאיר כאן את **הכפתורים המפוצלים** בלבד:
  * בקבוצה יושב גם תפריט „מרווח שורות וריווח”, שאינו מפוצל (אין לו פעולה על
  * הגוף), וספירה שכוללת אותו הייתה אומרת „שלושה כפתורי רשימה”.
+ *
+ * „הדבק” מפוצל גם הוא, אבל גדול — ושני כפתורי הרשימה קטנים. זה מה שמוציא אותו.
  */
 function splits(wrapper: VueWrapper) {
-  return wrapper.findAll('.ribbon-menu').filter((node) => node.find('.word-split').exists());
+  return wrapper
+    .findAll('.ribbon-menu')
+    .filter((node) => node.find('.word-split').exists() && !node.classes('ribbon-menu--large'));
 }
 
 /** פותחת את התפריט של אחד הכפתורים ומחזירה את תוויות הפריטים שבו. */

@@ -45,6 +45,7 @@
  * אינו נקרא, כי המנוע אינו מצייר את הריצה כקישור כלל. הלחיצה מטופלת
  * ב-otzaria-link-click.ts, שם גם המדידה המלאה. ראו docs/engine-gaps.md.
  */
+import { PASTE_STARTED, PASTE_FINISHED } from './paste-events';
 import type { SuperDoc } from 'superdoc';
 import {
   WORD_WINDOW_RADIUS,
@@ -289,6 +290,7 @@ export function installAtMention(
    * אחרי מאוחרת ממנה הייתה מחזירה הצעות של מחרוזת שכבר לא מוקלדת.
    */
   let evalToken = 0;
+  const pendingPastes = new Set<object>();
 
   function report(message: string, isError: boolean): void {
     if (lastReported === message) return;
@@ -473,6 +475,7 @@ export function installAtMention(
   }
 
   function scheduleEvaluate(): void {
+    if (pendingPastes.size > 0) return;
     if (debounceTimer !== undefined) clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => void evaluate(), INPUT_DEBOUNCE_MS);
   }
@@ -743,6 +746,18 @@ export function installAtMention(
     scheduleEvaluate();
   };
 
+  const onPasteStarted = (event: Event): void => {
+    if (!(event instanceof CustomEvent) || typeof event.detail?.operation !== 'object') return;
+    pendingPastes.add(event.detail.operation);
+    evalToken += 1;
+    if (debounceTimer !== undefined) clearTimeout(debounceTimer);
+    closeSession();
+  };
+  const onPasteFinished = (event: Event): void => {
+    if (!(event instanceof CustomEvent) || !pendingPastes.delete(event.detail?.operation)) return;
+    if (!disposed && pendingPastes.size === 0 && event.detail?.evaluate !== false) onArm();
+  };
+
   const onKeyDown = (event: KeyboardEvent): void => {
     if (writing) {
       event.preventDefault();
@@ -790,6 +805,8 @@ export function installAtMention(
     closeSession();
   };
 
+  container.addEventListener(PASTE_STARTED, onPasteStarted);
+  container.addEventListener(PASTE_FINISHED, onPasteFinished);
   container.addEventListener('input', onInput);
   container.addEventListener('keyup', onKeyUp);
   container.addEventListener('mouseup', onArm);
@@ -805,6 +822,8 @@ export function installAtMention(
       if (debounceTimer !== undefined) clearTimeout(debounceTimer);
       clearTimeout(blankCleanupTimer);
       closeSession();
+      container.removeEventListener(PASTE_STARTED, onPasteStarted);
+      container.removeEventListener(PASTE_FINISHED, onPasteFinished);
       container.removeEventListener('input', onInput);
       container.removeEventListener('keyup', onKeyUp);
       container.removeEventListener('mouseup', onArm);
