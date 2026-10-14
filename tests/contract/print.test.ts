@@ -81,7 +81,11 @@ describe('מה שהמנוע כבר עושה בהדפסה — ומה שהוא מ�
     // שמחפשים — חיפוש על „@media print” אינו נמצא בו בכלל.
     const MEDIA_PRINT = '@media\\x20print';
     expect(engineHas(MEDIA_PRINT)).toBe(true);
-    expect(engineHasNear(MEDIA_PRINT, 'page-break-after', 400)).toBe(true);
+    // מ-2.23 הפתיח `@media print {` עובר לטבלת המחרוזות של ה-bundle, רחוק
+    // מגוף הכלל, ולכן מעגנים על הגוף עצמו: הצל מבוטל ומעבר עמוד אחרי כל
+    // תיבה. השילוב הזה קיים רק בכלל ההדפסה של העמוד.
+    const ESC = '\\x0a\\x20\\x20\\x20\\x20';
+    expect(engineHas(`box-shadow:\\x20none;${ESC}page-break-after:\\x20always`)).toBe(true);
   });
 
   it('הצל של העמוד הוא סגנון inline — ולכן דורש `!important`', () => {
