@@ -133,6 +133,35 @@ try {
     }
   });
 
+  /*
+   * המילים שעלו זו על זו: ה-ghost נשאר בעמדת הסמן של ההערכה הקודמת בזמן
+   * שההקלדה כבר מציירת אותיות חדשות בדיוק שם. לפני התיקון 11 מתוך 18 דגימות
+   * באמצע הקלדה היו כאלה. הטענה: בכל רגע, ghost שמוצג יושב בסמן.
+   */
+  await step('ghost אינו נשאר מעל טקסט שמוקלד', async () => {
+    const sample = () =>
+      app.js(`(function(){
+        var g = document.querySelector('.otzaria-book-completion-ghost');
+        var sd = window.__otzariaEditor && window.__otzariaEditor.superdoc;
+        var c = sd && sd.ui && sd.ui.selection && sd.ui.selection.getAnchorRect({placement:'end'});
+        if (!g || !c) return null;
+        var r = g.getBoundingClientRect();
+        return JSON.stringify({ dx: Math.round(r.right - c.left), dy: Math.round(r.top - c.top) });
+      })()`).then((raw) => (raw ? JSON.parse(raw) : null));
+
+    const stale = [];
+    for (const ch of 'הארץ') {
+      await app.type(ch, 0);
+      for (let i = 0; i < 3; i += 1) {
+        await app.sleep(40);
+        const s = await sample();
+        if (s && (s.dx > 2 || Math.abs(s.dy) > 2)) stale.push(`${ch}:${s.dx},${s.dy}`);
+      }
+    }
+    if (stale.length === 0) report.pass('ghost אינו נשאר מעל טקסט שמוקלד');
+    else report.fail('ghost אינו נשאר מעל טקסט שמוקלד', `ghost מחוץ לסמן: ${stale.join(' ')}`);
+  });
+
   await step('כיבוי מסיר את ה-ghost', async () => {
     await app.click('השלמה מהספר', { after: 700 });
     const ghost = await ghostText();

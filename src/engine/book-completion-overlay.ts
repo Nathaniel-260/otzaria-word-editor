@@ -647,11 +647,29 @@ export function installBookCompletion(
   }
 
   const onInput = (): void => scheduleEvaluate();
+  /*
+   * כל הקשה אחרת פוסלת את ההצעה **מיד**, ולא אחרי ההשהיה. ה-ghost מצויר
+   * בעמדת הסמן של ההערכה האחרונה, והאותיות החדשות מצוירות בדיוק שם — מתחתיו.
+   * ההערכה הבאה מחכה ל-debounce, וקריאות המנוע בתוכה מחכות לשקט בהקלדה, ולכן
+   * בהקלדה רציפה ה-ghost נשאר קפוא מעל הטקסט לאורך כל הרצף. נמדד: 11 מתוך 18
+   * דגימות באמצע הקלדה הראו ghost שאינו בעמדת הסמן. הטוקן פוסל גם הערכה
+   * שכבר באוויר עם הקשר שקדם להקשה.
+   */
+  const invalidate = (): void => {
+    if (suggestion.kind === 'idle' && !ghostEl) return;
+    evalToken += 1;
+    clearSuggestion();
+  };
   const onKeyDown = (event: KeyboardEvent): void => {
-    if (event.key !== 'Tab' || suggestion.kind !== 'suggesting') return;
-    event.preventDefault();
-    event.stopPropagation();
-    void accept();
+    if (event.key === 'Tab' && suggestion.kind === 'suggesting') {
+      event.preventDefault();
+      event.stopPropagation();
+      void accept();
+      return;
+    }
+    // מקש שינוי לבדו אינו משנה טקסט ואינו מזיז את הסמן.
+    if (event.key === 'Shift' || event.key === 'Control' || event.key === 'Alt' || event.key === 'Meta') return;
+    invalidate();
   };
   // גלילה שהסמן גרר אחריו אינה „המשתמש גלל משם” — ראו `isCaretFollowScroll`.
   // האירוע עצמו עובר, ולא המיכל: ההבחנה נשענת על ה-`target` שלו, ולכן גלילה
@@ -664,6 +682,8 @@ export function installBookCompletion(
   container.addEventListener('input', onInput);
   container.addEventListener('keyup', onInput);
   container.addEventListener('keydown', onKeyDown, true);
+  // הדבקה מהתפריט והכתבה אינן עוברות ב-keydown.
+  container.addEventListener('beforeinput', invalidate, true);
   container.addEventListener('scroll', onScroll, true);
 
   const offRefChanged = on('reader.current_ref_changed', (detail) => {
@@ -688,6 +708,7 @@ export function installBookCompletion(
       container.removeEventListener('input', onInput);
       container.removeEventListener('keyup', onInput);
       container.removeEventListener('keydown', onKeyDown, true);
+      container.removeEventListener('beforeinput', invalidate, true);
       container.removeEventListener('scroll', onScroll, true);
       offRefChanged();
       offBookChanged();
