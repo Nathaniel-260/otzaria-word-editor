@@ -9,6 +9,7 @@ import type { InjectionKey, Ref } from 'vue';
 import type { CommandAdapter, CommandOutcome } from '../engine/command-adapter';
 import type { FontOptions } from '../engine/font-options';
 import type { StyleGalleryState } from '../engine/style-gallery';
+import type { StyleEdit } from '../engine/docx-style-edit';
 import type { ReadoutSelection } from '../engine/readout-hold';
 import type { PageEdgeWords } from '../engine/page-ruler';
 import type { FontMemory } from './use-font-controls';
@@ -52,6 +53,25 @@ export const FONT_OPTIONS: InjectionKey<Ref<FontOptions>> = Symbol('fontOptions'
  * מתי להירשם ומתי לשחרר. הקומפוננטה רואה מצב קריא בלבד.
  */
 export const STYLE_GALLERY: InjectionKey<Ref<StyleGalleryState>> = Symbol('styleGallery');
+
+/**
+ * גיליון הסגנונות של המסמך הפעיל — קריאה וכתיבה של סגנון בעל שם.
+ *
+ * למנוע אין API לכך (ראו engine/docx-style-edit.ts), ולכן הכתיבה היא ייצוא,
+ * עריכת `styles.xml`, ופתיחה מחדש של המסמך באותו טאב עם הסמן והזום. רק
+ * המעטפת יודעת לפתוח מסמך לתוך הטאב, ולכן זה מפתח ולא מודול שהרצועה קוראת.
+ */
+export interface StyleDocumentHandle {
+  /** ‏`styles.xml` של המסמך כפי שהוא עכשיו, או `null` כשאין מסמך או שהייצוא נכשל. */
+  readStyles(): Promise<string | null>;
+  /**
+   * מחילה עריכה וטוענת את המסמך מחדש. `applyToSelection` — אחרי הטעינה, להחיל
+   * את הסגנון על הפסקה שבסמן (סגנון חדש מהבחירה).
+   */
+  applyEdit(edit: StyleEdit, options?: { applyToSelection?: boolean }): Promise<CommandOutcome>;
+}
+
+export const STYLE_DOCUMENT: InjectionKey<StyleDocumentHandle> = Symbol('styleDocument');
 
 /**
  * הזיכרון של בוררי הגופן — „האחרון שהמנוע דיווח” ו„מה שנבחר וטרם נענה”.

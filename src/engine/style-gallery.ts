@@ -66,6 +66,8 @@ export interface StyleGalleryItem {
   previewText: string;
   /** טוקני CSS בטוחים לנושא. `style` בתגית מקבל אותם כמו שהם. */
   previewStyle: Readonly<Record<string, string>>;
+  /** סגנון שהמשתמש יצר — רק אותו אפשר למחוק ולשנות את שמו, כמו ב-Word. */
+  custom?: boolean;
 }
 
 /** מצב הגלריה כולה. */
@@ -298,6 +300,7 @@ export function toGalleryItems(
       // Word מציג את השם עצמו בכרטיס של כותרת, ו„AaBbCc” בכרטיס של סגנון גוף.
       previewText: role === 'body' ? BODY_PREVIEW_TEXT : label,
       previewStyle: previewStyleFor(item),
+      custom: item.custom === true,
     });
   }
 

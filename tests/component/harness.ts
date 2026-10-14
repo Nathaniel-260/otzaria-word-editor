@@ -54,10 +54,13 @@ import {
   HEAVY_ACTION_GUARD,
   READOUT_SELECTION,
   SPELLCHECK,
+  STYLE_DOCUMENT,
   STYLE_GALLERY,
   type HeavyActionGuard,
   type SpellcheckHandle,
+  type StyleDocumentHandle,
 } from '../../src/composables/keys';
+import type { StyleEdit } from '../../src/engine/docx-style-edit';
 import { createFontMemory, type FontMemory } from '../../src/composables/use-font-controls';
 import { ACTIVE_SUPERDOC } from '../../src/engine/document-api';
 import { ACTIVE_MACROS, type MacrosHandle } from '../../src/engine/macros';
@@ -1273,6 +1276,8 @@ export interface HarnessOptions {
    */
   fontMemory?: FontMemory;
   styleGallery?: StyleGalleryState;
+  /** ‏`styles.xml` שכפיל גיליון הסגנונות מחזיר. ברירת המחדל: `STYLE_SHEET_DOUBLE`. */
+  stylesXml?: string;
   /**
    * מצב הבחירה שהחזקת החיווי נשענת עליו. ברירת המחדל היא סמן שהתיישב —
    * המצב שרצועה במסמך פתוח נמצאת בו רוב הזמן. ראו engine/readout-hold.ts.
@@ -1292,6 +1297,8 @@ export const SETTLED_CARET: ReadoutSelection = { empty: true, settled: true };
 
 export interface Harness {
   wrapper: VueWrapper;
+  /** העריכות שנשלחו לגיליון הסגנונות, בסדר שבו נשלחו. */
+  styleEdits: { edit: StyleEdit; options?: { applyToSelection?: boolean } }[];
   adapter: CommandDouble;
   superdoc: SuperdocDouble;
   /** מה שהמדווח קיבל — המסלול שמגיע למשתמש כהודעה בעברית. */
@@ -1305,6 +1312,16 @@ export interface Harness {
   /** מזיזה את הבחירה: סמן/טווח, התיישבה או לא. */
   setReadoutSelection(next: ReadoutSelection): Promise<void>;
 }
+
+/** גיליון סגנונות מינימלי: „רגיל”, „כותרת 1”, וסגנון של המשתמש. */
+export const STYLE_SHEET_DOUBLE =
+  '<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
+  '<w:docDefaults><w:rPrDefault><w:rPr><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr></w:rPrDefault></w:docDefaults>' +
+  '<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/></w:style>' +
+  '<w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/><w:basedOn w:val="Normal"/>' +
+  '<w:next w:val="Normal"/><w:qFormat/><w:rPr><w:b/><w:bCs/><w:sz w:val="32"/><w:szCs w:val="32"/></w:rPr></w:style>' +
+  '<w:style w:type="paragraph" w:customStyle="1" w:styleId="Mine"><w:name w:val="שלי"/><w:basedOn w:val="Normal"/></w:style>' +
+  '</w:styles>';
 
 /**
  * מרכיבה קומפוננטה עם בדיוק מה שהמעטפת מזריקה, ולא פחות: פקד שנשען על מפתח
@@ -1374,6 +1391,20 @@ export function mountUi(component: Component, options: HarnessOptions = {}): Har
     },
   } satisfies SpellcheckHandle;
 
+  /**
+   * גיליון הסגנונות. כפיל שרושם ולא מחיל: הכתיבה עצמה (ייצוא, `styles.xml`,
+   * פתיחה מחדש) היא של המעטפת ונבדקת ב-tests/unit/docx-style-*.test.ts.
+   * בלי מסמך — `null`, כמו במעטפת.
+   */
+  const styleEdits: Harness['styleEdits'] = [];
+  provide[STYLE_DOCUMENT as unknown as symbol] = {
+    readStyles: async () => (superdocRef.value ? options.stylesXml ?? STYLE_SHEET_DOUBLE : null),
+    applyEdit: async (edit, editOptions) => {
+      styleEdits.push({ edit, options: editOptions });
+      return { ok: true };
+    },
+  } satisfies StyleDocumentHandle;
+
   const wrapper = mount(component, {
     props: options.props,
     attachTo: document.body,
@@ -1382,6 +1413,7 @@ export function mountUi(component: Component, options: HarnessOptions = {}): Har
 
   return {
     wrapper,
+    styleEdits,
     // הכפילים מוחזרים גם כשלא הוזרקו, כדי שבדיקה תוכל לאשר שלא נגעו בהם.
     adapter: adapter ?? createCommandDouble(),
     superdoc: superdoc ?? createSuperdocDouble(),

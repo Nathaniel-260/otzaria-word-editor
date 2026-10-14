@@ -138,7 +138,7 @@ describe('StyleGallery', () => {
     await settle();
 
     // גלריה שנכנסת כולה: אין כפתורים בכלל.
-    expect(harness.wrapper.findAll('.nav-btn')).toHaveLength(0);
+    expect(harness.wrapper.findAll('.nav-btn:not(.gallery-more-btn)')).toHaveLength(0);
 
     const scroller = harness.wrapper.find('.style-cards-scroll');
     fakeMetrics(scroller.element as HTMLElement, {
@@ -150,7 +150,7 @@ describe('StyleGallery', () => {
     await settle();
 
     // בקצה ההתחלה יש רק „הבאים”.
-    expect(harness.wrapper.findAll('.nav-btn').map((button) => button.attributes('aria-label'))).toEqual([
+    expect(harness.wrapper.findAll('.nav-btn:not(.gallery-more-btn)').map((button) => button.attributes('aria-label'))).toEqual([
       'הסגנונות הבאים',
     ]);
 
@@ -162,7 +162,7 @@ describe('StyleGallery', () => {
     await scroller.trigger('scroll');
     await settle();
 
-    expect(harness.wrapper.findAll('.nav-btn').map((button) => button.attributes('aria-label'))).toEqual([
+    expect(harness.wrapper.findAll('.nav-btn:not(.gallery-more-btn)').map((button) => button.attributes('aria-label'))).toEqual([
       'הסגנונות הקודמים',
       'הסגנונות הבאים',
     ]);

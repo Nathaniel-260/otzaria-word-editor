@@ -19,6 +19,7 @@
         :disabled="disabled"
         @pointerdown.prevent
         @click="$emit('select-style', item.id)"
+        @contextmenu.prevent="openMenu($event, item)"
       >
         <span
           class="style-card-preview"
@@ -30,12 +31,10 @@
       </button>
     </div>
 
-    <!-- הכפתורים מוצגים רק כשיש לאן לגלול, כמו ב-Word. הם אינם מושבתים עם
-         הגלריה: עיון ברשימה אינו מצריך בחירה במסמך. -->
-    <div
-      v-if="canScrollStart || canScrollEnd"
-      class="gallery-nav-btns"
-    >
+    <!-- כפתורי הגלילה מוצגים רק כשיש לאן לגלול, כמו ב-Word. הם אינם מושבתים
+         עם הגלריה: עיון ברשימה אינו מצריך בחירה במסמך. „עוד” נמצא תמיד — הוא
+         החץ התחתון של הגלריה ב-Word, ושם יושב „צור סגנון”. -->
+    <div class="gallery-nav-btns">
       <button
         v-if="canScrollStart"
         type="button"
@@ -64,7 +63,50 @@
           :size="10"
         />
       </button>
+      <button
+        ref="moreRef"
+        type="button"
+        class="nav-btn gallery-more-btn"
+        data-testid="style-gallery-more"
+        :data-tip-title="menuString('סגנונות')"
+        :aria-label="menuString('אפשרויות סגנונות')"
+        aria-haspopup="menu"
+        :disabled="manageDisabled"
+        @pointerdown.prevent
+        @click="openMoreMenu"
+      >
+        <SvgIcon
+          name="chevronDown"
+          :size="10"
+        />
+      </button>
     </div>
+
+    <Teleport to="body">
+      <div
+        v-if="menu"
+        ref="menuRef"
+        class="style-menu"
+        role="menu"
+        data-testid="style-menu"
+        :style="{ top: `${menu.y}px`, left: `${menu.x}px` }"
+        @pointerdown.prevent.stop
+        @keydown.escape.stop="closeMenu"
+      >
+        <button
+          v-for="entry in menu.entries"
+          :key="entry.action"
+          type="button"
+          class="style-menu__item"
+          role="menuitem"
+          :data-action="entry.action"
+          :disabled="entry.disabled"
+          @click="pick(entry.action)"
+        >
+          {{ entry.label }}
+        </button>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -77,11 +119,15 @@ import { handleWheelScroll } from '../../../composables/wheel-scroll';
 import {
   fallbackStyleGallery,
   galleryScrollAvailability,
+  type StyleGalleryItem,
   galleryScrollDelta,
   galleryScrollIcon,
   type GalleryScrollAvailability,
   type ScrollToward,
 } from '../../../engine/style-gallery';
+
+/** מה שהתפריט מבקש מהלשונית. „החל” מטופל כאן — הוא `select-style`. */
+export type StyleAction = 'apply' | 'update' | 'modify' | 'rename' | 'delete' | 'create';
 
 const props = withDefaults(
   defineProps<{
@@ -92,15 +138,20 @@ const props = withDefaults(
      */
     currentStyle?: string;
     disabled?: boolean;
+    /** ניהול סגנונות (שינוי, יצירה, מחיקה) — דורש מסמך פתוח לעריכה. */
+    manageDisabled?: boolean;
   }>(),
   {
     currentStyle: 'Normal',
     disabled: false,
+    manageDisabled: false,
   },
 );
 
-defineEmits<{
+const emit = defineEmits<{
   (e: 'select-style', styleId: string): void;
+  /** פעולה על הסגנון מהתפריט. `styleId: null` = „צור סגנון” מכפתור „עוד”. */
+  (e: 'style-action', action: StyleAction, styleId: string | null): void;
 }>();
 
 /**
@@ -121,6 +172,93 @@ const items = computed(() => gallery.value.items);
 const activeId = computed(() =>
   gallery.value.fromDocument ? gallery.value.activeId : props.currentStyle,
 );
+
+/* ------------------------------------------------------------------ */
+/* תפריט הסגנון                                                        */
+/* ------------------------------------------------------------------ */
+
+interface MenuEntry {
+  action: StyleAction;
+  label: string;
+  disabled?: boolean;
+}
+
+/** רוחב התפריט לחישוב ההצמדה לחלון, לפני שהוא נמדד. */
+const MENU_WIDTH_PX = 230;
+const MENU_MARGIN_PX = 8;
+/** גובה פריט — לחישוב ההצמדה לתחתית החלון. */
+const MENU_ITEM_PX = 26;
+
+const menu = shallowRef<{ x: number; y: number; styleId: string | null; entries: MenuEntry[] } | null>(null);
+const menuRef = ref<HTMLElement | null>(null);
+const moreRef = ref<HTMLElement | null>(null);
+
+/**
+ * התוויות קבועות ואינן נושאות את שם הסגנון: התפריט נפתח על הכרטיס שנלחץ,
+ * ומחרוזת קבועה היא מה ש-`menuString` יודע לתרגם.
+ */
+function cardEntries(item: StyleGalleryItem): MenuEntry[] {
+  return [
+    { action: 'apply', label: menuString('החל סגנון'), disabled: props.disabled },
+    { action: 'update', label: menuString('עדכן כך שיתאים לבחירה'), disabled: props.disabled || props.manageDisabled },
+    { action: 'modify', label: menuString('שנה סגנון…'), disabled: props.manageDisabled },
+    // רק סגנון שהמשתמש יצר — Word אינו מוחק סגנון מובנה ואינו משנה את שמו.
+    { action: 'rename', label: menuString('שנה שם…'), disabled: props.manageDisabled || !item.custom },
+    { action: 'delete', label: menuString('מחק סגנון'), disabled: props.manageDisabled || !item.custom },
+  ];
+}
+
+/** הצמדה לחלון: התפריט נפתח משמאל לנקודה (RTL), ואינו יוצא מהמסך. */
+function placeMenu(x: number, y: number, count: number): { x: number; y: number } {
+  const height = count * MENU_ITEM_PX + 8;
+  const width = globalThis.innerWidth || 1024;
+  const viewportHeight = globalThis.innerHeight || 768;
+  return {
+    x: Math.max(MENU_MARGIN_PX, Math.min(x - MENU_WIDTH_PX, width - MENU_WIDTH_PX - MENU_MARGIN_PX)),
+    y: Math.max(MENU_MARGIN_PX, Math.min(y, viewportHeight - height - MENU_MARGIN_PX)),
+  };
+}
+
+function focusFirstEntry(): void {
+  void nextTick(() => menuRef.value?.querySelector<HTMLElement>('button:not(:disabled)')?.focus());
+}
+
+function openMenu(event: MouseEvent, item: StyleGalleryItem): void {
+  const entries = cardEntries(item);
+  menu.value = { ...placeMenu(event.clientX, event.clientY, entries.length), styleId: item.id, entries };
+  focusFirstEntry();
+}
+
+function openMoreMenu(): void {
+  const rect = moreRef.value?.getBoundingClientRect();
+  const entries: MenuEntry[] = [
+    { action: 'create', label: menuString('צור סגנון…') },
+    { action: 'modify', label: menuString('שנה את הסגנון הנוכחי…'), disabled: !activeId.value },
+  ];
+  menu.value = { ...placeMenu(rect?.right ?? 0, rect?.bottom ?? 0, entries.length), styleId: activeId.value, entries };
+  focusFirstEntry();
+}
+
+function closeMenu(): void {
+  menu.value = null;
+}
+
+function pick(action: StyleAction): void {
+  const styleId = menu.value?.styleId ?? null;
+  closeMenu();
+  if (action === 'apply') {
+    if (styleId) emit('select-style', styleId);
+    return;
+  }
+  emit('style-action', action, action === 'create' ? null : styleId);
+}
+
+/** לחיצה בחוץ סוגרת, כמו כל תפריט. */
+function onDocumentPointerDown(event: PointerEvent): void {
+  if (!menu.value) return;
+  if (menuRef.value && event.target instanceof Node && menuRef.value.contains(event.target)) return;
+  closeMenu();
+}
 
 const scrollContainerRef = ref<HTMLElement | null>(null);
 
@@ -157,6 +295,7 @@ function scrollToward(toward: ScrollToward): void {
 let observer: ResizeObserver | null = null;
 
 onMounted(() => {
+  document.addEventListener('pointerdown', onDocumentPointerDown, true);
   const element = scrollContainerRef.value;
   if (!element) return;
 
@@ -175,6 +314,7 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  document.removeEventListener('pointerdown', onDocumentPointerDown, true);
   observer?.disconnect();
   observer = null;
 });
@@ -317,8 +457,51 @@ watch(items, () => void nextTick(measure));
   justify-content: center;
 }
 
-.nav-btn:hover {
+.nav-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.nav-btn:hover:not(:disabled) {
   background: var(--word-btn-hover);
   color: var(--word-blue);
+}
+
+.style-menu {
+  position: fixed;
+  z-index: 3000;
+  width: max-content;
+  padding: 4px 0;
+  background: var(--color-surface);
+  border: 1px solid var(--color-outline);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
+  display: flex;
+  flex-direction: column;
+  direction: rtl;
+}
+
+.style-menu__item {
+  text-align: start;
+  height: 26px;
+  padding: 0 14px;
+  font-family: var(--font-main);
+  font-size: 12px;
+  color: var(--color-on-surface);
+  background: none;
+  border: none;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.style-menu__item:hover:not(:disabled),
+.style-menu__item:focus-visible {
+  background: var(--word-btn-hover);
+  outline: none;
+}
+
+.style-menu__item:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 </style>

@@ -397,8 +397,11 @@ import {
   PAGE_MARKING,
   READOUT_SELECTION,
   SPELLCHECK,
+  STYLE_DOCUMENT,
   STYLE_GALLERY,
 } from './composables/keys';
+import { editDocxStyles, readDocxStyles } from './engine/docx-style-package';
+import type { StyleEdit } from './engine/docx-style-edit';
 import { ACTIVE_SUPERDOC } from './engine/document-api';
 import { readDocSelection } from './engine/doc-selection';
 import { layOutTocRows } from './engine/toc';
@@ -448,7 +451,7 @@ import {
   observeReadoutSelection,
   type ReadoutSelection,
 } from './engine/readout-hold';
-import { zoomPayload } from './engine/payloads';
+import { stylePayload, zoomPayload } from './engine/payloads';
 import {
   createSearchAdapter,
   idleSearchState,
@@ -1936,6 +1939,76 @@ async function guardHeavyAction<T>(action: () => Promise<T>): Promise<T> {
 }
 
 provide(HEAVY_ACTION_GUARD, guardHeavyAction);
+
+/**
+ * „שנה סגנון” ברמת המסמך. ראו `STYLE_DOCUMENT` ב-composables/keys.ts.
+ *
+ * הבייטים יוצאים בלי postflight — הם חוזרים לעורך ולא ל-Word, בדיוק כמו
+ * טיוטת השחזור — ונפתחים במסלול של טיוטה: אותו קובץ, אותו יעד שמירה,
+ * מסומן „לא נשמר”. זה המסלול של טאב שנרדם והתעורר (`sleepTab`), והמחיר שלו
+ * זהה: היסטוריית הביטול מתאפסת. את הסמן והזום מחזיר `restoreDocumentView`.
+ */
+async function applyStyleEdit(
+  edit: StyleEdit,
+  options: { applyToSelection?: boolean } = {},
+): Promise<CommandOutcome> {
+  const session = activeSession.value;
+  const current = swap?.current;
+  if (!session || !current) return { ok: false, message: 'אין מסמך פתוח', reason: 'not-ready' };
+  if (isOpenBusy()) return { ok: false, message: 'המסמך עדיין נפתח', reason: 'not-ready' };
+
+  return guardHeavyAction(async () => {
+    let edited;
+    let caret: CaretAnchor | null = null;
+    try {
+      caret = await readCaretAnchor(current.ui, current.superdoc, null);
+      const exported = await exportDocx(current.superdoc, { postflight: false });
+      edited = await editDocxStyles(exported, edit);
+    } catch (error) {
+      console.warn('[otzaria-word] עריכת הסגנון נכשלה', error);
+      return { ok: false, message: 'עריכת הסגנון נכשלה', reason: 'threw' };
+    }
+    if (!edited.ok) return { ok: false, message: edited.message, reason: 'style-edit-refused' };
+
+    // הטאב עשוי היה להתחלף בזמן הייצוא — ואז פתיחה כאן הייתה דורסת מסמך אחר.
+    if (activeSession.value !== session || swap?.current !== current) {
+      return { ok: false, message: 'המסמך הוחלף באמצע הפעולה', reason: 'superseded' };
+    }
+
+    const remembered = activeEntry(session.keeper.state)?.document ?? null;
+    const file = remembered ? await resolveRememberedFile(remembered) : null;
+    const opened = await openDocument(file ?? undefined, {
+      draft: edited.docx,
+      name: title.value,
+      restore: { zoom: zoom.value.value, caret },
+    });
+    if (!opened) return { ok: false, message: 'טעינת המסמך אחרי שינוי הסגנון נכשלה', reason: 'reopen-failed' };
+
+    // `markRestored` של מסלול הטיוטה מקפיא את השמירה האוטומטית עד העריכה
+    // הבאה. כאן זו **כן** עריכה של המשתמש, ולכן היא מסומנת ככזו.
+    activeSession.value?.save.markDirty();
+
+    if (options.applyToSelection && commandAdapter.value) {
+      const outcome = await commandAdapter.value.run('linked-style', stylePayload(edited.id));
+      if (!outcome.ok) return outcome;
+    }
+    return { ok: true };
+  });
+}
+
+provide(STYLE_DOCUMENT, {
+  async readStyles() {
+    const current = swap?.current;
+    if (!current) return null;
+    try {
+      return await readDocxStyles(await exportDocx(current.superdoc, { postflight: false }));
+    } catch (error) {
+      console.warn('[otzaria-word] קריאת גיליון הסגנונות נכשלה', error);
+      return null;
+    }
+  },
+  applyEdit: applyStyleEdit,
+});
 
 /**
  * הרשומה הנשמרת בין הפעלות היא של **כל** הטאבים הפתוחים, לא רק של מי שכתב —
