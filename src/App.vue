@@ -397,8 +397,13 @@ import {
   PAGE_MARKING,
   READOUT_SELECTION,
   SPELLCHECK,
+  STYLE_DOCUMENT,
   STYLE_GALLERY,
+  STYLE_SHORTCUTS,
 } from './composables/keys';
+import { readDocxStyles } from './engine/docx-style-package';
+import type { StyleEdit } from './engine/docx-style-edit';
+import { applyLiveStyleEdit, styleRevision } from './engine/live-style-edit';
 import { ACTIVE_SUPERDOC } from './engine/document-api';
 import { readDocSelection } from './engine/doc-selection';
 import { layOutTocRows } from './engine/toc';
@@ -448,7 +453,7 @@ import {
   observeReadoutSelection,
   type ReadoutSelection,
 } from './engine/readout-hold';
-import { zoomPayload } from './engine/payloads';
+import { stylePayload, zoomPayload } from './engine/payloads';
 import {
   createSearchAdapter,
   idleSearchState,
@@ -662,15 +667,19 @@ import { startParagraphOnNewPage, pageBreakTracker } from './engine/page-break';
 import { createFontMemory } from './composables/use-font-controls';
 import { createLinkDialog } from './composables/use-link-dialog';
 import { createShellActionRunner } from './ui/shortcuts/actions';
-import { comboLabel, reservationText, shortcutTextOwners } from './ui/shortcuts/combo';
+import { comboLabel, isBindableCombo, reservationText, shortcutTextOwners } from './ui/shortcuts/combo';
 import {
+  comboConflict,
+  conflictMessage,
   customMatchers,
   dropMessage,
   normalizeCustomShortcuts,
   removeShortcut,
+  styleShortcutFor,
   upsertShortcut,
   type CustomShortcut,
   type CustomShortcutDraft,
+  type PresetShortcut,
 } from './ui/shortcuts/custom-shortcuts';
 import { createPresetToggles } from './ui/shortcuts/preset-toggle';
 import { readFormat } from './engine/format-reading';
@@ -1063,6 +1072,11 @@ function runCustomShortcut(id: string): boolean {
    * הקלדה רציפה אינה חוזרת עד שהמנוע נרגע, ואין שום סיבה לשלם אותה כשהסמן
    * ממילא במסמך.
    */
+  if (entry.kind === 'apply-style') {
+    void applyStyleShortcut(entry, adapter);
+    return true;
+  }
+
   if (isDocumentSurface(document.activeElement)) {
     applyCustomPreset(entry, adapter);
     return true;
@@ -1071,6 +1085,68 @@ function runCustomShortcut(id: string): boolean {
   void applyCustomPresetOutsideDocument(entry, adapter);
   return true;
 }
+
+/**
+ * קיצור „החל סגנון”: אותה פקודה של כרטיס בגלריה (`linked-style`), ואותו
+ * דיווח. סגנון שאינו במסמך הפתוח — הקיצורים אינם של מסמך אחד — נכשל בהודעה
+ * של המנוע ולא בשקט.
+ */
+async function applyStyleShortcut(
+  entry: Extract<CustomShortcut, { kind: 'apply-style' }>,
+  adapter: CommandAdapter,
+): Promise<void> {
+  const payload = stylePayload(entry.style.id);
+  if (payload === null) return;
+  const outcome = await adapter.run('linked-style', payload);
+  reportCommand(outcome, 'linked-style');
+  if (outcome.ok) setStatus(`הוחל הסגנון „${entry.style.name}”`);
+}
+
+/** קיצורי הסגנונות — ראו `STYLE_SHORTCUTS` ב-composables/keys.ts. */
+provide(STYLE_SHORTCUTS, {
+  comboFor(styleId) {
+    return styleShortcutFor(customShortcuts.value, styleId)?.combo ?? null;
+  },
+  problem(styleId, combo) {
+    const existing = styleShortcutFor(customShortcuts.value, styleId);
+    const conflict = comboConflict(combo, customShortcuts.value, existing?.id, currentMacroHeldCombos());
+    if (conflict) return conflictMessage(conflict);
+    if (!isBindableCombo(combo)) return 'צירוף חייב לכלול Ctrl או Alt, או להיות מקש פונקציה';
+    return null;
+  },
+  assign(style, combo) {
+    const existing = styleShortcutFor(customShortcuts.value, style.id);
+    if (combo === null) {
+      if (!existing) return null;
+      customShortcuts.value = removeShortcut(customShortcuts.value, existing.id);
+      persistCustomShortcuts();
+      return null;
+    }
+    const result = upsertShortcut(
+      customShortcuts.value,
+      { ...(existing ? { id: existing.id } : {}), name: style.name, combo, preset: {}, style },
+      currentMacroHeldCombos(),
+    );
+    if (!result.ok) return result.message;
+    customShortcuts.value = result.list;
+    persistCustomShortcuts();
+    return null;
+  },
+  renamed(styleId, name) {
+    const existing = styleShortcutFor(customShortcuts.value, styleId);
+    if (!existing || existing.kind !== 'apply-style') return;
+    customShortcuts.value = customShortcuts.value.map((entry) =>
+      entry.id === existing.id ? { ...existing, name, style: { id: styleId, name } } : entry,
+    );
+    persistCustomShortcuts();
+  },
+  removed(styleId) {
+    const existing = styleShortcutFor(customShortcuts.value, styleId);
+    if (!existing) return;
+    customShortcuts.value = removeShortcut(customShortcuts.value, existing.id);
+    persistCustomShortcuts();
+  },
+});
 
 /**
  * החלה כשהמיקוד **מחוץ** למסמך — ורק אחרי שנמדד שיש בחירה להחיל עליה.
@@ -1088,7 +1164,7 @@ function runCustomShortcut(id: string): boolean {
  * ש-engine/doc-selection.ts נכתב בשבילו.
  */
 async function applyCustomPresetOutsideDocument(
-  entry: CustomShortcut,
+  entry: PresetShortcut,
   adapter: CommandAdapter,
 ): Promise<void> {
   const selection = await readDocSelection(activeSuperdoc.value);
@@ -1100,7 +1176,7 @@ async function applyCustomPresetOutsideDocument(
 }
 
 /** ההכרעה וההרצה עצמן. משותפות לשני המסלולים כדי שלא ייפרדו בשקט. */
-function applyCustomPreset(entry: CustomShortcut, adapter: CommandAdapter): void {
+function applyCustomPreset(entry: PresetShortcut, adapter: CommandAdapter): void {
   const decision = presetToggles.decide({
     id: entry.id,
     name: entry.name,
@@ -1937,6 +2013,66 @@ async function guardHeavyAction<T>(action: () => Promise<T>): Promise<T> {
 
 provide(HEAVY_ACTION_GUARD, guardHeavyAction);
 
+/** Named style edits are template transactions on the originating instance, never a reopen. */
+const styleEditsInFlight = new Set<DocumentSession>();
+async function applyStyleEdit(
+  edit: StyleEdit,
+  options: { applyToSelection?: boolean } = {},
+): Promise<CommandOutcome & { styleId?: string }> {
+  const session = activeSession.value;
+  const current = swap?.current;
+  if (!session || !current) return { ok: false, message: 'אין מסמך פתוח', reason: 'not-ready' };
+  if (isOpenBusy() || styleEditsInFlight.has(session)) return { ok: false, message: 'המסמך עסוק', reason: 'not-ready' };
+  const selectionAtStart = options.applyToSelection ? JSON.stringify(current.ui.selection.getSnapshot().selectionTarget) : null;
+  styleEditsInFlight.add(session);
+  const release = session.save.hold({ maxMs: HEAVY_ACTION_HOLD_MAX_MS });
+  try {
+    // A revision protects every definition read during export, including a concurrent defaults/style edit.
+    const revision = await styleRevision(current.superdoc);
+    if (revision === null) return { ok: false, message: 'גרסת המסמך אינה זמינה', reason: 'not-ready' };
+    const xml = await readDocxStyles(await exportDocx(current.superdoc, { postflight: false }));
+    if (xml === null) return { ok: false, message: 'גיליון הסגנונות אינו קריא', reason: 'style-edit-refused' };
+    if (activeSession.value !== session || swap?.current !== current) {
+      return { ok: false, message: 'המסמך הוחלף באמצע הפעולה', reason: 'superseded' };
+    }
+    if (options.applyToSelection && JSON.stringify(current.ui.selection.getSnapshot().selectionTarget) !== selectionAtStart) {
+      return { ok: false, message: 'הבחירה השתנתה באמצע הפעולה', reason: 'superseded' };
+    }
+    const edited = await applyLiveStyleEdit(current.superdoc, xml, edit, revision);
+    if (!edited.outcome.ok) return edited.outcome;
+    // Even if a tab changed while the worker processed the transaction, it belongs to this session.
+    session.save.markDirty();
+    if (options.applyToSelection && edited.id && activeSession.value === session && swap?.current === current && commandAdapter.value) {
+      if (JSON.stringify(current.ui.selection.getSnapshot().selectionTarget) !== selectionAtStart) {
+        return { ok: false, message: 'הסגנון נוצר, אך לא הוחל משום שהבחירה השתנתה', reason: 'selection-changed' };
+      }
+      const outcome = await commandAdapter.value.run('linked-style', stylePayload(edited.id));
+      if (!outcome.ok) return outcome;
+    }
+    return { ok: true, styleId: edited.id };
+  } catch (error) {
+    console.warn('[otzaria-word] עריכת הסגנון נכשלה', error);
+    return { ok: false, message: 'עריכת הסגנון נכשלה', reason: 'threw' };
+  } finally {
+    styleEditsInFlight.delete(session);
+    release();
+  }
+}
+
+provide(STYLE_DOCUMENT, {
+  async readStyles() {
+    const current = swap?.current;
+    if (!current) return null;
+    try {
+      return await readDocxStyles(await exportDocx(current.superdoc, { postflight: false }));
+    } catch (error) {
+      console.warn('[otzaria-word] קריאת גיליון הסגנונות נכשלה', error);
+      return null;
+    }
+  },
+  applyEdit: applyStyleEdit,
+});
+
 /**
  * הרשומה הנשמרת בין הפעלות היא של **כל** הטאבים הפתוחים, לא רק של מי שכתב —
  * כל `SessionKeeper` מחזיק את הרשומה שלו בלבד (`sessionForEntry`, ראו
@@ -2285,7 +2421,7 @@ function sleepCandidate(session: DocumentSession, hasUnwrittenWork: boolean): Sl
     isActive: session === activeSession.value,
     isPending: session.pendingRestore,
     hasEngine: session.swap.current !== null,
-    isOpening: session.swap.isOpening,
+    isOpening: session.swap.isOpening || styleEditsInFlight.has(session),
     isSaving: session.save.snapshot.isSaving === true,
     hasFile: activeEntry(session.keeper.state)?.document != null,
     hasUnwrittenWork,
@@ -2458,7 +2594,7 @@ interface OpenOptions {
  * באותה שורה של 24 פיקסלים, ואין טעם שיאמרו את אותו דבר פעמיים.
  */
 async function openDocument(file?: UserFile, options: OpenOptions = {}): Promise<boolean> {
-  if (!swap) return false;
+  if (!swap || (activeSession.value && styleEditsInFlight.has(activeSession.value))) return false;
   const attempt = documentLoad.begin(
     file?.name ?? options.name ?? 'מסמך חדש',
     file || options.draft ? 'קורא את הקובץ…' : 'מכין מסמך ריק…',
@@ -3799,7 +3935,7 @@ async function onExit(): Promise<void> {
   // בזמן פתיחה אין לסגור: `openDocumentInto` כותב לטאב הפעיל לכל אורך ריצתו
   // (ראו `isOpenBusy`), וסגירתו באמצע הייתה משאירה אותה כותבת לתוך מסמך
   // מפורק. הפקד עצמו מנוטרל אז; זה הגיבוי למסלול שיגיע שלא דרכו.
-  if (isExiting.value || isOpenBusy()) return;
+  if (isExiting.value || isOpenBusy() || styleEditsInFlight.size > 0) return;
   isExiting.value = true;
   try {
 
@@ -4219,7 +4355,7 @@ async function resolveUnsavedBeforeClose(
 async function onDocumentTabClose(id: DocumentSessionId): Promise<void> {
   if (isOpenBusy()) return;
   const session = sessions.get(id);
-  if (!session) return;
+  if (!session || styleEditsInFlight.has(session)) return;
   tabClosePending = true;
   try {
     const resolution = await resolveUnsavedBeforeClose(session, 'close-tab');

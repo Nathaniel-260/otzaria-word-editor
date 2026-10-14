@@ -18,23 +18,56 @@
  * ברצועה. ההכרעה מתי לחיצה שנייה „מחזירה” ומתי היא „מחילה מחדש” אינה כאן
  * אלא ב-preset-toggle.ts, כי היא מצב ריצה ולא נתון שמור.
  *
- * `kind` נשמר על כל רשומה למרות שיש לו ערך אחד: אחסון שאין בו הבחנה מחייב
- * מיגרציה ביום שבו תתווסף פעולה שנייה, ורשומה בלי סוג אינה ניתנת לזיהוי
- * בדיעבד.
+ * `kind` נשמר על כל רשומה בדיוק בשביל היום שבו תתווסף פעולה שנייה, והיא
+ * נוספה: `apply-style` — „החל סגנון”, כמו קיצור המקשים שב-Word מוגדר בדיאלוג
+ * „שנה סגנון”. הוא **אינו** מתג: החלת סגנון על פסקה שכבר בו אינה משנה דבר,
+ * ו„חזרה למה שהיה” של סגנון היא החלת הסגנון הקודם — קיצור אחר.
+ *
+ * הסגנון נשמר לפי `styleId` ולא לפי שם: הקיצורים אינם של מסמך אחד, ו-`Heading1`
+ * הוא אותו מזהה בכל מסמך Word. סגנון מותאם שאינו במסמך הפתוח נכשל בהודעה.
  */
 import { comboAsShortcut, comboSignature, isBindableCombo, registryOwners, type KeyCombo } from './combo';
 import { isEmptyPreset, normalizePreset, presetSummary, type FormatPreset } from './format-preset';
 import type { Shortcut } from './registry';
 
-/** קיצור אישי אחד. */
-export interface CustomShortcut {
+/** הסגנון שקיצור מחיל: המזהה להחלה, והשם לתצוגה. */
+export interface StyleRef {
+  id: string;
+  name: string;
+}
+
+interface ShortcutBase {
   /** מזהה יציב, נוצר בהוספה ואינו מוצג. */
   id: string;
   /** השם שהמשתמש נתן — זה מה שמופיע ברשימת הקיצורים ובשורת המצב. */
   name: string;
-  kind: 'format-preset';
   combo: KeyCombo;
-  preset: FormatPreset;
+}
+
+/** קיצור אישי אחד. */
+export type CustomShortcut =
+  | (ShortcutBase & { kind: 'format-preset'; preset: FormatPreset })
+  | (ShortcutBase & { kind: 'apply-style'; style: StyleRef });
+
+export type PresetShortcut = Extract<CustomShortcut, { kind: 'format-preset' }>;
+
+/** מה שהקיצור עושה, במילים — לרשימות ולשורת המצב. */
+export function shortcutSummary(entry: CustomShortcut): string {
+  return entry.kind === 'apply-style' ? `החלת הסגנון „${entry.style.name}”` : presetSummary(entry.preset);
+}
+
+/** הקיצור שמחיל את הסגנון הזה, אם יש. */
+export function styleShortcutFor(list: readonly CustomShortcut[], styleId: string): CustomShortcut | undefined {
+  return list.find((entry) => entry.kind === 'apply-style' && entry.style.id === styleId);
+}
+
+function normalizeStyleRef(raw: unknown): StyleRef | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const source = raw as Record<string, unknown>;
+  const id = typeof source.id === 'string' ? source.id.trim() : '';
+  if (id === '') return null;
+  const name = typeof source.name === 'string' && source.name.trim() !== '' ? source.name.trim() : id;
+  return { id, name: name.slice(0, MAX_NAME_LENGTH) };
 }
 
 /**
@@ -77,10 +110,17 @@ function normalizeEntry(raw: unknown): CustomShortcut | null {
   if (!raw || typeof raw !== 'object') return null;
   const source = raw as Record<string, unknown>;
 
-  if (source.kind !== 'format-preset') return null;
+  if (source.kind !== 'format-preset' && source.kind !== 'apply-style') return null;
 
   const combo = normalizeCombo(source.combo);
   if (!combo) return null;
+
+  if (source.kind === 'apply-style') {
+    const style = normalizeStyleRef(source.style);
+    const styleEntryId = typeof source.id === 'string' && source.id !== '' ? source.id : null;
+    if (!style || styleEntryId === null) return null;
+    return { id: styleEntryId, name: normalizeName(source.name) || style.name, kind: 'apply-style', combo, style };
+  }
 
   const preset = normalizePreset(source.preset);
   // ערכה שאין בה שדה אחד תקין אינה מחילה כלום, וקיצור כזה נראה שבור. עדיף
@@ -267,6 +307,8 @@ export interface CustomShortcutDraft {
   name: string;
   combo: KeyCombo | null;
   preset: FormatPreset;
+  /** קיצור „החל סגנון”. כשהוא קיים `preset` אינו נקרא. */
+  style?: StyleRef;
 }
 
 /**
@@ -310,7 +352,7 @@ export function draftIssue(
       message: 'צירוף חייב לכלול Ctrl או Alt, או להיות מקש פונקציה',
     };
   }
-  if (isEmptyPreset(draft.preset)) {
+  if (!draft.style && isEmptyPreset(draft.preset)) {
     return { kind: 'incomplete', message: 'יש לבחור לפחות תכונת עיצוב אחת' };
   }
 
@@ -363,13 +405,10 @@ export function upsertShortcut(
   if (problem !== null) return { ok: false, message: problem };
 
   const id = draft.id ?? newShortcutId(list);
-  const entry: CustomShortcut = {
-    id,
-    name: draft.name.trim().slice(0, MAX_NAME_LENGTH),
-    kind: 'format-preset',
-    combo: draft.combo!,
-    preset: draft.preset,
-  };
+  const base = { id, name: draft.name.trim().slice(0, MAX_NAME_LENGTH), combo: draft.combo! };
+  const entry: CustomShortcut = draft.style
+    ? { ...base, kind: 'apply-style', style: draft.style }
+    : { ...base, kind: 'format-preset', preset: draft.preset };
 
   const index = list.findIndex((item) => item.id === id);
   const next = [...list];

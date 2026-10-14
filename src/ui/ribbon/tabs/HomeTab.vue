@@ -454,7 +454,9 @@
       <StyleGallery
         :current-style="String(styleCmd.value.value || 'Normal')"
         :disabled="!styleCmd.enabled.value"
+        :manage-disabled="!styleManager.available.value || styleManager.busy.value"
         @select-style="onApplyStyle"
+        @style-action="styleManager.onAction"
       />
     </RibbonGroup>
 
@@ -513,6 +515,24 @@
       @tabs-clear="onParagraphTabsClear"
     />
 
+    <StyleDialog
+      :is-open="styleManager.dialog.value !== null"
+      :busy="styleManager.busy.value"
+      :mode="styleManager.dialog.value?.mode ?? 'modify'"
+      :style-id="styleManager.dialog.value?.styleId ?? null"
+      :style-name="styleManager.dialog.value?.styleName ?? ''"
+      :style-type="styleManager.dialog.value?.styleType ?? 'paragraph'"
+      :styles="styleManager.dialog.value?.styles ?? []"
+      :based-on="styleManager.dialog.value?.basedOn ?? null"
+      :next="styleManager.dialog.value?.next ?? null"
+      :format="styleManager.dialog.value?.format ?? {}"
+      :error="styleManager.error.value"
+      :shortcut="styleManager.dialog.value?.shortcut ?? null"
+      :combo-problem="(combo) => styleManager.comboProblem(styleManager.dialog.value?.styleId ?? null, combo)"
+      @close="styleManager.close"
+      @submit="styleManager.onSubmit"
+    />
+
     <FontAdvancedDialog
       :is-open="fontAdvOpen"
       :busy="fontAdvInFlight"
@@ -534,6 +554,8 @@ import type { SelectOption } from '../common/RibbonSelect.vue';
 import RibbonCombo from '../common/RibbonCombo.vue';
 import ColorPickerPopover from '../common/ColorPickerPopover.vue';
 import StyleGallery from '../common/StyleGallery.vue';
+import StyleDialog from '../../panels/StyleDialog.vue';
+import { useStyleManager } from '../../../composables/use-style-manager';
 import { useCommand } from '../../../composables/useCommand';
 import { useFontControls } from '../../../composables/use-font-controls';
 import { applyOptimistically, withCurrent } from '../../../composables/picker-value';
@@ -648,6 +670,16 @@ const marksCmd = useCommand('formatting-marks');
 const alignCmd = useCommand('text-align');
 const lineSpacingCmd = useCommand('line-height');
 const styleCmd = useCommand('linked-style');
+
+/**
+ * „שנה סגנון”, „צור סגנון” ושאר התפריט של הגלריה — composables/use-style-manager.ts.
+ * הסגנון הנוכחי הוא זה שהגלריה מסמנת: בבחירה מעורבת אין כזה, ו„צור” נשען
+ * אז על „רגיל”.
+ */
+const styleManager = useStyleManager(() => {
+  const value = styleCmd.value.value;
+  return typeof value === 'string' && value.trim() !== '' ? value : null;
+});
 
 /**
  * בורר הגופן ובורר הגודל. המצב שלהם אינו כאן אלא ב-use-font-controls.ts, ומאותו

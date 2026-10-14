@@ -9,6 +9,9 @@ import type { InjectionKey, Ref } from 'vue';
 import type { CommandAdapter, CommandOutcome } from '../engine/command-adapter';
 import type { FontOptions } from '../engine/font-options';
 import type { StyleGalleryState } from '../engine/style-gallery';
+import type { StyleEdit } from '../engine/docx-style-edit';
+import type { KeyCombo } from '../ui/shortcuts/combo';
+import type { StyleRef } from '../ui/shortcuts/custom-shortcuts';
 import type { ReadoutSelection } from '../engine/readout-hold';
 import type { PageEdgeWords } from '../engine/page-ruler';
 import type { FontMemory } from './use-font-controls';
@@ -52,6 +55,45 @@ export const FONT_OPTIONS: InjectionKey<Ref<FontOptions>> = Symbol('fontOptions'
  * מתי להירשם ומתי לשחרר. הקומפוננטה רואה מצב קריא בלבד.
  */
 export const STYLE_GALLERY: InjectionKey<Ref<StyleGalleryState>> = Symbol('styleGallery');
+
+/**
+ * גיליון הסגנונות של המסמך הפעיל — קריאה וכתיבה של סגנון בעל שם.
+ *
+ * המעטפת קוראת את הגיליון הטרי ומחילה רק הגדרות שהשתנו דרך templates.apply,
+ * כטרנזקציה על המופע המקורי, עם הגנת revision. תוכן והיסטוריה נשמרים.
+ */
+export interface StyleDocumentHandle {
+  /** ‏`styles.xml` של המסמך כפי שהוא עכשיו, או `null` כשאין מסמך או שהייצוא נכשל. */
+  readStyles(): Promise<string | null>;
+  /**
+   * מחילה עריכה בלי להחליף תוכן או היסטוריה. `applyToSelection` — להחיל
+   * את הסגנון על הפסקה שבסמן (סגנון חדש מהבחירה).
+   */
+  applyEdit(edit: StyleEdit, options?: { applyToSelection?: boolean }): Promise<CommandOutcome & { styleId?: string }>;
+}
+
+export const STYLE_DOCUMENT: InjectionKey<StyleDocumentHandle> = Symbol('styleDocument');
+
+/**
+ * קיצורי המקשים של סגנונות — „קיצור מקשים” בדיאלוג הסגנון, כמו ב-Word.
+ *
+ * הם רשומות `apply-style` באותו אוסף של הקיצורים האישיים
+ * (ui/shortcuts/custom-shortcuts.ts), ולכן אותו אימות התנגשויות, אותו אחסון,
+ * ואותה רשימה ב„ניהול קיצורים”. הקיצור אינו של המסמך אלא של המשתמש.
+ */
+export interface StyleShortcutsHandle {
+  /** הצירוף שמחיל את הסגנון הזה, או `null`. */
+  comboFor(styleId: string): KeyCombo | null;
+  /** למה אי אפשר להצמיד את הצירוף לסגנון, או `null` כשאפשר. */
+  problem(styleId: string, combo: KeyCombo): string | null;
+  /** מצמידה (או מסירה, ב-`null`) את הצירוף. מחזירה הודעת כשל, או `null`. */
+  assign(style: StyleRef, combo: KeyCombo | null): string | null;
+  /** הסגנון שונה שמו או נמחק — הקיצור שלו עוקב. */
+  renamed(styleId: string, name: string): void;
+  removed(styleId: string): void;
+}
+
+export const STYLE_SHORTCUTS: InjectionKey<StyleShortcutsHandle> = Symbol('styleShortcuts');
 
 /**
  * הזיכרון של בוררי הגופן — „האחרון שהמנוע דיווח” ו„מה שנבחר וטרם נענה”.

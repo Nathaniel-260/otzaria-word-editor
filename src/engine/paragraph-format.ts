@@ -422,6 +422,21 @@ function declaredBidi(props: RawParagraphProps | undefined): boolean | null {
   return props.bidi === true;
 }
 
+/**
+ * אילו מהערכים ב-`snapshot` הפסקה **מצהירה בעצמה** (עיצוב ישיר). ה-snapshot
+ * מחזיר 0 לערך שאינו מוצהר — וזה נכון לדיאלוג „פסקה”, שכותב מצב מלא — אבל
+ * „סגנון מהבחירה” חייב להבחין: 0 שאינו מוצהר הוא „מה שהסגנון נותן”, ולא
+ * „אפס”. בלי ההבחנה „עדכן כך שיתאים” מחק את הריווח של כותרת 1 (נמדד ב-QA).
+ */
+export interface ParagraphDeclarations {
+  spaceBefore: boolean;
+  spaceAfter: boolean;
+  line: boolean;
+  indentStart: boolean;
+  indentEnd: boolean;
+  firstLine: boolean;
+}
+
 const LINE_RULES: readonly LineSpacingRule[] = ['auto', 'exact', 'atLeast'];
 const TAB_ALIGNMENTS: readonly TabAlignment[] = ['left', 'center', 'right', 'decimal', 'bar'];
 const TAB_LEADERS: readonly TabLeader[] = ['none', 'dot', 'hyphen', 'underscore', 'heavy', 'middleDot'];
@@ -440,7 +455,10 @@ const TAB_LEADERS: readonly TabLeader[] = ['none', 'dot', 'hyphen', 'underscore'
  */
 export async function readParagraphFormat(
   host: ParagraphFormatTarget,
-): Promise<{ ok: true; target: ParagraphTarget; snapshot: ParagraphFormatSnapshot } | { ok: false; outcome: CommandOutcome }> {
+): Promise<
+  | { ok: true; target: ParagraphTarget; snapshot: ParagraphFormatSnapshot; declared: ParagraphDeclarations }
+  | { ok: false; outcome: CommandOutcome }
+> {
   const doc = docOf(host);
   if (!doc) return { ok: false, outcome: unavailable('פתיחת תפריט הפסקה נכשלה', LOADING_TEXT, 'document-api-unavailable') };
 
@@ -485,6 +503,14 @@ export async function readParagraphFormat(
   return {
     ok: true,
     target: resolved.target,
+    declared: {
+      spaceBefore: typeof sp.before === 'number',
+      spaceAfter: typeof sp.after === 'number',
+      line: typeof sp.line === 'number',
+      indentStart: typeof (ind.start ?? ind.left) === 'number',
+      indentEnd: typeof (ind.end ?? ind.right) === 'number',
+      firstLine: typeof ind.firstLine === 'number' || typeof ind.hanging === 'number',
+    },
     snapshot: {
       indentation: {
         // `start`/`end` לפני `left`/`right` — ראו ההערה על `indentsFromProps`.

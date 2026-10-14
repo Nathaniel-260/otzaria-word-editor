@@ -20,6 +20,8 @@ import {
   newShortcutId,
   normalizeCustomShortcuts,
   removeShortcut,
+  shortcutSummary,
+  styleShortcutFor,
   upsertShortcut,
   type CustomShortcut,
 } from '../../src/ui/shortcuts/custom-shortcuts';
@@ -417,5 +419,51 @@ describe('סיווג מה שמונע שמירה', () => {
   it('`draftProblem` נשאר הנוסח של אותו סיווג — שער אחד לשמירה', () => {
     const draft = { name: '', combo: null, preset: {} };
     expect(draftProblem(draft, [])).toBe(draftIssue(draft, [])?.message);
+  });
+});
+
+describe('קיצור „החל סגנון”', () => {
+  const styleRecord = (over: Record<string, unknown> = {}) => ({
+    id: 'cs-2',
+    name: '',
+    kind: 'apply-style',
+    combo: freeCombos(1)[0],
+    style: { id: 'Heading1', name: 'כותרת 1' },
+    ...over,
+  });
+
+  it('נקרא מהאחסון, ושם ריק נופל לשם הסגנון', () => {
+    const { list, dropped } = normalizeCustomShortcuts([styleRecord()]);
+    expect(dropped.total).toBe(0);
+    expect(list[0]).toMatchObject({ kind: 'apply-style', name: 'כותרת 1', style: { id: 'Heading1', name: 'כותרת 1' } });
+    expect(shortcutSummary(list[0]!)).toBe('החלת הסגנון „כותרת 1”');
+  });
+
+  it('רשומה בלי מזהה סגנון נושרת', () => {
+    expect(normalizeCustomShortcuts([styleRecord({ style: { id: '  ' } })]).list).toEqual([]);
+  });
+
+  it('נשמר בלי ערכת עיצוב, ונמצא לפי הסגנון', () => {
+    const combo = freeCombos(2)[1]!;
+    const result = upsertShortcut([ENTRY], {
+      name: 'כותרת 1',
+      combo,
+      preset: {},
+      style: { id: 'Heading1', name: 'כותרת 1' },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(styleShortcutFor(result.list, 'Heading1')).toMatchObject({ kind: 'apply-style', combo });
+    expect(styleShortcutFor(result.list, 'Heading2')).toBeUndefined();
+  });
+
+  it('צירוף תפוס בידי קיצור אחר נדחה', () => {
+    const result = upsertShortcut([ENTRY], {
+      name: 'כותרת 1',
+      combo: COMBO,
+      preset: {},
+      style: { id: 'Heading1', name: 'כותרת 1' },
+    });
+    expect(result).toMatchObject({ ok: false });
   });
 });
