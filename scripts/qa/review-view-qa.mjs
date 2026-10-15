@@ -85,6 +85,25 @@ async function caretLine(app, index) {
   return r;
 }
 
+/**
+ * ממתינה עד שפקודת קבלה/דחייה נדלקת, עד 12s. אחרי הקלדה תחת מעקב המנוע פותר
+ * את `activeChangeIds` באסינכרון: ב-superdoc 2.20 נמדד ~2.5s, ב-2.23 ~6.5s
+ * (הפקודה נדלקת מיד כשהסמן זז). הזמן נרשם ללוג, כדי שהשהיה שגדלה תיראה.
+ */
+async function untilEnabled(app, id, limitMs = 12_000) {
+  const start = Date.now();
+  let state = await app.cmd(id);
+  while (!state.enabled && Date.now() - start < limitMs) {
+    await app.sleep(500);
+    state = await app.cmd(id);
+  }
+  return { state, ms: Date.now() - start };
+}
+
+/** מעבר לזה הפקד נראה למשתמש מנוטרל אחרי ההקלדה — „חלקי”, ולא „עובד”. */
+const SLOW_ENABLE_MS = 3_000;
+const slowNote = (ms) => (ms > SLOW_ENABLE_MS ? `; אבל הפקד נדלק רק ${ms}ms אחרי ההקלדה` : '');
+
 /** בונה מסמך של שלוש פסקאות. */
 async function seed(app, words = ['aleph', 'bet', 'gimel']) {
   await app.caret(0);
@@ -295,15 +314,17 @@ async function sectionTrackChanges() {
       const before = await snap(app);
       const beforeIns = (before.doc.match(/<w:ins\b/g) ?? []).length;
       let cmdSt = await app.cmd('acceptChange');
+      let waitedMs = 0;
       log('מצב הפקודה מיד אחרי ההקלדה:', JSON.stringify(cmdSt));
       // המנוע פותר את activeChangeIds באסינכרון ב-worker אחרי שהבחירה מתייצבת
       // (נמדד: reason=selection-required מיד, enabled=true אחרי ~1.5-2.5s
       // בלי אף אינטראקציה נוספת) — לא בעיית מוקד/headless (docs/engine-gaps.md
       // מדבר על activeEditor.view, לא רלוונטי כאן).
       if (cmdSt.reason === 'selection-required') {
-        await app.sleep(2500);
-        cmdSt = await app.cmd('acceptChange');
-        log('מצב הפקודה אחרי המתנה של 2.5s:', JSON.stringify(cmdSt));
+        const waited = await untilEnabled(app, 'acceptChange');
+        cmdSt = waited.state;
+        waitedMs = waited.ms;
+        log(`מצב הפקודה אחרי ${waited.ms}ms:`, JSON.stringify(cmdSt));
       }
       const st = await app.state('קבל שינוי');
       if (!cmdSt.enabled || st.disabled) {
@@ -320,7 +341,11 @@ async function sectionTrackChanges() {
       log('נלחץ:', clicked, '| w:ins לפני/אחרי:', beforeIns, afterIns, '| trkOne עדיין מסומן:', stillMarked, '| trkOne בטקסט:', stillThere);
       log('רעש:', bad || '(אין)');
       if (afterIns < beforeIns && stillThere && !stillMarked && !bad)
-        report.pass('קבל שינוי', `<w:ins> ${beforeIns}→${afterIns}; trkOne נשאר כטקסט רגיל (התקבל)`);
+        (waitedMs > SLOW_ENABLE_MS ? report.partial : report.pass).call(
+          report,
+          'קבל שינוי',
+          `<w:ins> ${beforeIns}→${afterIns}; trkOne נשאר כטקסט רגיל (התקבל)${slowNote(waitedMs)}`,
+        );
       else if (afterIns < beforeIns && stillThere)
         report.partial('קבל שינוי', `התקבל אך יש רעש: ${bad}`);
       else report.fail('קבל שינוי', `לא התקבל: w:ins ${beforeIns}→${afterIns}, trkOne בטקסט=${stillThere}; רעש: ${bad || 'אין'}`);
@@ -346,13 +371,15 @@ async function sectionTrackChanges() {
         return;
       }
       let cmdSt = await app.cmd('rejectChange');
+      let waitedMs = 0;
       log('מצב הפקודה מיד אחרי ההקלדה:', JSON.stringify(cmdSt));
       // אותה השהיה אסינכרונית שנמדדה ב„קבל שינוי" — הרשימה הפנימית
       // (activeChangeIds) נפתרת ב-worker כ-1.5-2.5s אחרי שהבחירה מתייצבת.
       if (cmdSt.reason === 'selection-required') {
-        await app.sleep(2500);
-        cmdSt = await app.cmd('rejectChange');
-        log('מצב הפקודה אחרי המתנה של 2.5s:', JSON.stringify(cmdSt));
+        const waited = await untilEnabled(app, 'rejectChange');
+        cmdSt = waited.state;
+        waitedMs = waited.ms;
+        log(`מצב הפקודה אחרי ${waited.ms}ms:`, JSON.stringify(cmdSt));
       }
       const st = await app.state('דחה שינוי');
       if (!cmdSt.enabled || st.disabled) {
@@ -365,7 +392,12 @@ async function sectionTrackChanges() {
       const after = await snap(app);
       const gone = !/trkTwo/.test(after.doc);
       log('נלחץ:', clicked, '| trkTwo נעלם:', gone, '| רעש:', bad || '(אין)');
-      if (gone && !bad) report.pass('דחה שינוי', 'trkTwo נעלם מה-docx לחלוטין — השינוי נדחה');
+      if (gone && !bad)
+        (waitedMs > SLOW_ENABLE_MS ? report.partial : report.pass).call(
+          report,
+          'דחה שינוי',
+          `trkTwo נעלם מה-docx לחלוטין — השינוי נדחה${slowNote(waitedMs)}`,
+        );
       else if (gone) report.partial('דחה שינוי', `נדחה אך יש רעש: ${bad}`);
       else report.fail('דחה שינוי', `trkTwo נשאר במסמך. רעש: ${bad || 'אין'}`);
     });
