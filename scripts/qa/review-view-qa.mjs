@@ -11,7 +11,7 @@
 import { openApp, createReport } from './harness.mjs';
 
 const PORT = Number(process.env.QA_PORT ?? 9366);
-const report = createReport('סקירה + תצוגה + שורת המצב');
+const report = createReport('סקירה + תצוגה + שורת המצב', { strict: true });
 
 const log = (...a) => console.log(...a);
 
@@ -86,11 +86,11 @@ async function caretLine(app, index) {
 }
 
 /**
- * ממתינה עד שפקודת קבלה/דחייה נדלקת, עד 12s. אחרי הקלדה תחת מעקב המנוע פותר
- * את `activeChangeIds` באסינכרון: ב-superdoc 2.20 נמדד ~2.5s, ב-2.23 ~6.5s
- * (הפקודה נדלקת מיד כשהסמן זז). הזמן נרשם ללוג, כדי שהשהיה שגדלה תיראה.
+ * ממתינה עד 3s לפתרון activeChangeIds בלי להזיז את הסמן. ב-2.23 המקורי
+ * הבחירה חיכתה לשער הקריאות הכבדות (6.5s); תיקון הבנייה מפריד ביניהם.
+ * זה זמן המתנה נוסף אחרי צילום ה-DOCX, ולא זמן מקצה לקצה מההקלדה.
  */
-async function untilEnabled(app, id, limitMs = 12_000) {
+async function untilEnabled(app, id, limitMs = 3_000) {
   const start = Date.now();
   let state = await app.cmd(id);
   while (!state.enabled && Date.now() - start < limitMs) {
@@ -805,5 +805,4 @@ for (const [key, fn] of Object.entries(sections)) {
   await fn();
 }
 
-report.print();
-process.exit(0);
+process.exit(report.print() > 0 ? 1 : 0);

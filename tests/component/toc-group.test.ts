@@ -101,26 +101,20 @@ describe('„עדכן טבלה”', () => {
 });
 
 describe('„הסר”', () => {
-  it('מוחק את הטבלה **ואת השורות שהמנוע משאיר**', async () => {
+  it('מסיר את כל השדה דרך המנוע, בלי מחיקת טווח נוסף', async () => {
     const superdoc = withToc();
     const harness = mountUi(ReferencesTab, { superdoc });
     await settle();
 
     superdoc.reset();
     await button(harness, 'הסר').trigger('click');
-    // 12 ולא 6: ההסרה סופרת בלוקים לפני ואחרי (`blockTotal`, engine/toc.ts),
-    // ושתי הקריאות האלה מאריכות את השרשרת מעבר לשישה סבבים.
-    await settle(12);
+    await settle();
 
     expect(superdoc.inputs('toc.remove')).toEqual([
       { target: { kind: 'block', nodeType: 'tableOfContents', nodeId: 'toc-1' } },
     ]);
-    expect(superdoc.inputs('blocks.deleteRange')).toEqual([
-      {
-        start: { kind: 'block', nodeType: 'paragraph', nodeId: 'toc-1-row-0' },
-        end: { kind: 'block', nodeType: 'paragraph', nodeId: 'toc-1-row-1' },
-      },
-    ]);
+    expect(superdoc.inputs('blocks.deleteRange')).toEqual([]);
+    expect(superdoc.remainingBlocks()).toEqual(['block-1']);
     expect(harness.failures()).toEqual([]);
   });
 
