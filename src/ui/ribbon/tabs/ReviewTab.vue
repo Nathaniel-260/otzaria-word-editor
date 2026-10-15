@@ -15,7 +15,24 @@
         @pointerdown.prevent
         @click="spellcheck.toggle()"
       />
+      <RibbonButton
+        icon="replace"
+        label="תיקון אוטומטי"
+        variant="large"
+        :tooltip="autoCorrectTooltip"
+        :active="autoCorrect.options.value.enabled"
+        :disabled="autoCorrectOpen"
+        @pointerdown.prevent
+        @click="autoCorrectOpen = true"
+      />
     </RibbonGroup>
+
+    <AutoCorrectDialog
+      :is-open="autoCorrectOpen"
+      :options="autoCorrect.options.value"
+      @close="autoCorrectOpen = false"
+      @apply="onAutoCorrectApply"
+    />
 
     <!-- תגובות -->
     <RibbonGroup
@@ -158,6 +175,8 @@ import { computed, inject, ref, shallowRef, watch } from 'vue';
 import RibbonGroup from '../common/RibbonGroup.vue';
 import RibbonStack from '../common/RibbonStack.vue';
 import RibbonButton from '../common/RibbonButton.vue';
+import AutoCorrectDialog from '../../panels/AutoCorrectDialog.vue';
+import { DEFAULT_AUTOCORRECT, type AutoCorrectOptions } from '../../../engine/autocorrect';
 import { useCommand } from '../../../composables/useCommand';
 import {
   disableProtection,
@@ -169,6 +188,8 @@ import {
   COMMAND_ADAPTER,
   COMMAND_REPORTER,
   SPELLCHECK,
+  AUTOCORRECT,
+  type AutoCorrectControl,
   type CommandReporter,
   type SpellcheckHandle,
 } from '../../../composables/keys';
@@ -192,6 +213,33 @@ const spellcheckFallback: SpellcheckHandle = {
   toggle: () => {},
 };
 const spellcheck = inject(SPELLCHECK, spellcheckFallback);
+
+/* ------------------------------------------------------------------ */
+/* תיקון אוטומטי                                                       */
+/* ------------------------------------------------------------------ */
+
+/**
+ * ההגדרות והמתקין חיים במעטפת; הלשונית מציגה ומבקשת לשנות, כמו `SPELLCHECK`.
+ * הדיאלוג **כאן** ולא ב-App.vue, כמו שאר הדיאלוגים של הלשוניות (פסקה, גופן):
+ * מצב הפתיחה שלו מקומי, ומעטפת שאינה צריכה לדעת אם הוא פתוח אינה מחזיקה אותו.
+ */
+const autoCorrectFallback: AutoCorrectControl = {
+  options: ref<AutoCorrectOptions>(DEFAULT_AUTOCORRECT),
+  apply: () => {},
+};
+const autoCorrect = inject(AUTOCORRECT, autoCorrectFallback);
+const autoCorrectOpen = ref(false);
+
+const autoCorrectTooltip = computed(() =>
+  autoCorrect.options.value.enabled
+    ? 'אפשרויות התיקון האוטומטי — דלוק כרגע'
+    : 'אפשרויות התיקון האוטומטי — כבוי כרגע',
+);
+
+function onAutoCorrectApply(options: AutoCorrectOptions): void {
+  autoCorrect.apply(options);
+  autoCorrectOpen.value = false;
+}
 
 const spellcheckTooltip = computed(() => {
   if (spellcheck.busy.value) return 'טוען את המילון התורני…';

@@ -231,6 +231,26 @@ export async function saveSpellcheckWords(words: readonly string[]): Promise<voi
   await tryCall('storage.set', { key: SPELLCHECK_WORDS_KEY, value: [...words] });
 }
 
+const AUTOCORRECT_KEY = 'autocorrect-options';
+
+/**
+ * הגדרות התיקון האוטומטי, גולמיות. הפירוש — שדה פגום נופל לברירת המחדל שלו,
+ * ורשומה פגומה בטבלה נזרקת לבדה — ב-`normalizeAutoCorrect`
+ * (engine/autocorrect.ts), כמו ההפרדה בין `loadCustomShortcuts` ל-
+ * `normalizeCustomShortcuts`: ההחלטות נבדקות בלי לזייף את הגשר.
+ *
+ * ב-`storage` של אוצריא ולא ב-localStorage: זו העדפה של המשתמש, כמו מילון האיות
+ * והקיצורים, והיא אמורה לשרוד ניקוי של אחסון הדפדפן שהתוסף יושב בו. ערך חסר הוא
+ * `null`, ואז ברירות המחדל — ראשון בעלייה, או מחוץ לאוצריא.
+ */
+export async function loadAutoCorrect(): Promise<unknown> {
+  return tryCall<unknown>('storage.get', { key: AUTOCORRECT_KEY });
+}
+
+export async function saveAutoCorrect(value: unknown): Promise<void> {
+  await tryCall('storage.set', { key: AUTOCORRECT_KEY, value });
+}
+
 const CUSTOM_SHORTCUTS_KEY = 'custom-shortcuts';
 
 /**

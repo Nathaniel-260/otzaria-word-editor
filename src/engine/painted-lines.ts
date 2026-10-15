@@ -614,3 +614,177 @@ export function paintedFirstBlockId(host: ParentNode | null | undefined): string
   }
   return firstId;
 }
+
+/* ------------------------------------------------------------------ */
+/* מיקום טקסט שהוחלף — לסימון התיקון האוטומטי                           */
+/* ------------------------------------------------------------------ */
+
+/**
+ * הבלוק המצויר שהצומת נמצא בו (הפסקה הקרובה ביותר, גם בתוך תא טבלה), או `null`.
+ * מי שרוצה לבדוק רק מה שנוגע לבלוק שמתחת לעכבר, בלי לסרוק את המסמך כולו.
+ */
+export function blockIdAt(node: Node | null): string | null {
+  const el = node instanceof Element ? node : (node?.parentElement ?? null);
+  const fragment = el?.closest('[data-source-node-id]') ?? null;
+  return fragment ? fragment.getAttribute('data-source-node-id') : null;
+}
+
+export interface Box {
+  readonly left: number;
+  readonly right: number;
+  readonly top: number;
+  readonly bottom: number;
+}
+
+export interface LocatedWord {
+  /** האות הראשונה של הטקסט — מתחתיה יושב הפס. */
+  readonly first: Box;
+  /** כל מלבני המילה (יותר מאחד כשהיא נשברת בין שורות). */
+  readonly rects: readonly Box[];
+  /** ההיסט בבלוק שבו הטקסט נמצא עכשיו. שונה מהמבוקש כשעריכה לפניו הזיזה אותו. */
+  readonly start: number;
+}
+
+/** מה שהיה סביב הטקסט ברגע ההחלפה, כדי למצוא אותו שוב אחרי עריכה לפניו. */
+export interface TextContext {
+  readonly before: string;
+  readonly after: string;
+}
+
+function rectsOf(node: Node, offset: number, length: number): { first: Box; rects: Box[] } | null {
+  const range = document.createRange();
+  range.setStart(node, offset);
+  range.setEnd(node, offset + length);
+  const rects = Array.from(range.getClientRects()).filter((r) => r.width > 0 && r.height > 0);
+  range.setEnd(node, offset + 1);
+  const first = Array.from(range.getClientRects()).find((r) => r.width > 0 && r.height > 0);
+  return first && rects.length > 0 ? { first, rects } : null;
+}
+
+/**
+ * היכן טקסט מסוים מצויר עכשיו, או `null`: הבלוק, ההיסט בו, והטקסט שאמור להיות שם.
+ *
+ * המנוע מצייר כל פסקה כ-fragment עם `data-source-node-id` ו-`data-pm-start`, וכל
+ * רצף טקסט בה כאלמנט עם `data-pm-start`/`data-pm-end` (נמדד; אותו מבנה ש-
+ * `rtl-line-end.ts` קורא). ההמרה להיסט בבלוק היא חיסור אחד: `offset = pm −
+ * fragmentPmStart`.
+ *
+ * בלי הקשר נבדק הטקסט בהיסט הרשום. עם הקשר מחפשים בכל הפסקה, ומקבלים רק
+ * מופע יחיד שמה שלפניו ומה שאחריו תואם ל-`context`. יותר ממופע מתאים אחד
+ * אינו מאפשר לזהות את המילה, גם בהיסט הרשום, ולכן מוחזר `null`.
+ * התאמה זו מתארת את הטקסט הנוכחי; היא אינה עוגן זהות בין עריכות במסמך.
+ */
+export function locateText(
+  blockId: string,
+  start: number,
+  expected: string,
+  root: ParentNode = document,
+  context?: TextContext,
+): LocatedWord | null {
+  return createTextLocator(blockId, root)(start, expected, context);
+}
+
+/** נתוני בלוק נאספים פעם אחת לסריקת ריחוף; אין לשמור את הקורא בין פריימים. */
+export function createTextLocator(
+  blockId: string,
+  root: ParentNode = document,
+): (start: number, expected: string, context?: TextContext) => LocatedWord | null {
+  const readers: Array<(start: number, expected: string, context?: TextContext) => LocatedWord | null | 'ambiguous'> = [];
+  const fragments = root.querySelectorAll<HTMLElement>('[data-source-node-id][data-pm-start]');
+  for (const fragment of Array.from(fragments)) {
+    if (fragment.getAttribute('data-source-node-id') !== blockId) continue;
+    const base = attr(fragment, 'data-pm-start');
+    const end = attr(fragment, 'data-pm-end');
+    if (!Number.isFinite(base)) continue;
+
+    // הרצפים של הפסקה לפי הסדר, ומהם הטקסט שלה. רצף שאורכו אינו טווח ה-pm שלו
+    // (תו שהמנוע מייצג אחרת) מפסיק את הניחוש: אין מיפוי מהימן.
+    const runs: { node: Node; pmStart: number; text: string }[] = [];
+    let reliable = true;
+    for (const run of Array.from(fragment.querySelectorAll<HTMLElement>('[data-pm-start]'))) {
+      if (run.children.length > 0) continue;
+      const runStart = attr(run, 'data-pm-start');
+      const runEnd = attr(run, 'data-pm-end');
+      const node = run.firstChild;
+      if (!node || node.nodeType !== Node.TEXT_NODE || !Number.isFinite(runStart)) continue;
+      const text = node.nodeValue ?? '';
+      if (runEnd - runStart !== text.length) reliable = false;
+      runs.push({ node, pmStart: runStart, text });
+    }
+    if (runs.length === 0) continue;
+
+    // הטקסט של הפסקה כולה, מה-pm הראשון שלה — לבדיקת ההקשר ולחיפוש.
+    const first = runs[0]!.pmStart;
+    let paragraph = '';
+    if (reliable) {
+      for (const run of runs) {
+        const gap = run.pmStart - first - paragraph.length;
+        if (gap < 0) {
+          reliable = false;
+          break;
+        }
+        if (gap > 0) paragraph += '\u0000'.repeat(gap);
+        paragraph += run.text;
+      }
+    }
+    // מחרוזת והקשר זהים נבדקים פעם אחת בפריים, גם כשמאות תיקונים זהים נשמרו.
+    // -1 = אין מופע; null = יותר ממופע אחד, ולכן אין זיהוי בטוח.
+    const contextMatches = new Map<string, number | null>();
+
+    readers.push((start, expected, context) => {
+      if (expected.length === 0) return null;
+      const at = (blockOffset: number): LocatedWord | null => {
+        let pm = base + blockOffset;
+        if (Number.isFinite(end) && (pm < base || pm >= end)) return null;
+        const segments: { node: Node; offset: number; length: number }[] = [];
+        let matched = 0;
+        for (const run of runs) {
+          if (matched === expected.length) break;
+          const offset = pm - run.pmStart;
+          if (offset < 0) return null; // רווח PM או סוף fragment אינם המשך טקסט.
+          if (offset >= run.text.length) continue;
+          const length = Math.min(expected.length - matched, run.text.length - offset);
+          if (run.text.slice(offset, offset + length) !== expected.slice(matched, matched + length)) return null;
+          segments.push({ node: run.node, offset, length });
+          matched += length;
+          pm += length;
+        }
+        if (matched !== expected.length) return null;
+        let firstBox: Box | null = null;
+        const rects: Box[] = [];
+        for (const segment of segments) {
+          const found = rectsOf(segment.node, segment.offset, segment.length);
+          if (!found) return null;
+          firstBox ??= found.first;
+          rects.push(...found.rects);
+        }
+        return firstBox ? { first: firstBox, rects, start: blockOffset } : null;
+      };
+      if (!context) return at(start);
+      if (!reliable) return null;
+      const key = JSON.stringify([expected, context.before, context.after]);
+      let match = contextMatches.get(key);
+      if (match === undefined) {
+        match = -1;
+        for (let from = paragraph.indexOf(expected); from >= 0; from = paragraph.indexOf(expected, from + 1)) {
+          if (!paragraph.slice(0, from).endsWith(context.before) ||
+            !paragraph.slice(from + expected.length).startsWith(context.after)) continue;
+          if (match >= 0) { match = null; break; }
+          match = from;
+        }
+        contextMatches.set(key, match);
+      }
+      if (match === null) return 'ambiguous';
+      return match < 0 ? null : at(first - base + match);
+    });
+  }
+  return (start, expected, context) => {
+    let located: LocatedWord | null = null;
+    for (const read of readers) {
+      const found = read(start, expected, context);
+      if (found === 'ambiguous' || (found && located)) return null;
+      if (found) located = found;
+    }
+    return located;
+  };
+}

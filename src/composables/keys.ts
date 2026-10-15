@@ -15,6 +15,7 @@ import type { StyleRef } from '../ui/shortcuts/custom-shortcuts';
 import type { ReadoutSelection } from '../engine/readout-hold';
 import type { PageEdgeWords } from '../engine/page-ruler';
 import type { FontMemory } from './use-font-controls';
+import type { AutoCorrectOptions } from '../engine/autocorrect';
 
 /** האדפטר של ה-session הפעיל. `null` עד שיש מסמך פתוח. */
 export const COMMAND_ADAPTER: InjectionKey<Ref<CommandAdapter | null>> = Symbol('commandAdapter');
@@ -147,6 +148,20 @@ export interface SpellcheckHandle {
 }
 
 export const SPELLCHECK: InjectionKey<SpellcheckHandle> = Symbol('spellcheck');
+
+/**
+ * התיקון האוטומטי, ל-`ui/ribbon/tabs/ReviewTab.vue`.
+ *
+ * ההגדרות והמתקין חיים במעטפת (הוא מותקן על ה-container של המסמך הפעיל), והלשונית
+ * רק מציגה אותן ומבקשת לשנות — אותה חלוקה כמו `SPELLCHECK`. `apply` שומר
+ * ומחיל מיד: ההקלדה הבאה כבר לפי ההגדרות החדשות, בלי התקנה מחדש.
+ */
+export interface AutoCorrectControl {
+  readonly options: Ref<AutoCorrectOptions>;
+  apply: (options: AutoCorrectOptions) => void;
+}
+
+export const AUTOCORRECT: InjectionKey<AutoCorrectControl> = Symbol('autocorrect');
 
 /**
  * „סימון עמודים” של שולחן העורך, ל-`ui/ribbon/tabs/ShulchanTab.vue`.

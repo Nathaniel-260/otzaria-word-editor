@@ -1090,6 +1090,15 @@ export const TELL_ME_ACTIONS: readonly TellMeAction[] = [
     ribbonTab: 'review',
   },
   {
+    id: 'review-autocorrect',
+    title: 'תיקון אוטומטי',
+    category: 'סקירה > הגהה',
+    description: inTab('review', 'תיקון אוטומטי'),
+    keywords: ['תיקון אוטומטי', 'תיקון בהקלדה', 'החלפה אוטומטית', 'autocorrect', 'auto correct'],
+    icon: 'replace',
+    ribbonTab: 'review',
+  },
+  {
     id: 'review-comment-new',
     title: 'תגובה חדשה',
     category: 'סקירה > תגובות',

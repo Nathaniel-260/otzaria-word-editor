@@ -500,6 +500,9 @@ const EN: Readonly<Record<string, string>> = {
   'המסמך עדיין נטען': 'The document is still loading',
   // ── לשונית „סקירה” ─────────────────────────────────────────────────
   'הגהה': 'Proofing',
+  'תיקון אוטומטי': 'AutoCorrect',
+  'אפשרויות התיקון האוטומטי — דלוק כרגע': 'AutoCorrect options — currently on',
+  'אפשרויות התיקון האוטומטי — כבוי כרגע': 'AutoCorrect options — currently off',
   'בדיקת איות': 'Spelling Check',
   'טוען את המילון התורני…': 'Loading the Torah dictionary…',
   'כיבוי בדיקת האיות התורנית': 'Turn off Torah spelling check',
