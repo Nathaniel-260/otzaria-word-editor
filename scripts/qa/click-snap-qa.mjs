@@ -189,17 +189,22 @@ try {
   const from = { x: line1.right - 30, y: mid(line1) };
   await mouse('mousePressed', from.x, from.y);
   await sleep(100);
+  // רק דגימה שהמצביע שלה **מתחת** לטקסט נדרשת להגיע לסוף המסמך. הצעד
+  // הראשון (15px מתחת לאמצע השורה הראשונה) עובר מעל השורה הריקה, ושם הראש
+  // נכון שיהיה בה — כמו ב-Word. כך מ-superdoc 2.23; 2.20 קפץ לסוף כבר שם.
   const trail = [];
   for (let step = 1; step <= 10; step++) {
-    await mouse('mouseMoved', from.x - step * 20, from.y + step * 15, { buttons: 1 });
+    const y = from.y + step * 15;
+    await mouse('mouseMoved', from.x - step * 20, y, { buttons: 1 });
     await sleep(60);
-    trail.push(await selection());
+    trail.push({ below: y > line3.bottom, sample: await selection() });
   }
   await mouse('mouseReleased', from.x - 200, from.y + 150);
   await sleep(500);
   const dragged = await selection();
-  const ranged = [...trail, dragged].filter((sample) => !collapsed(sample));
-  const reset = ranged.find((sample) => sample.endBlock === ids.line1 && sample.end === 0);
+  const all = [...trail.map((t) => t.sample), dragged].filter((sample) => !collapsed(sample));
+  const ranged = [...trail.filter((t) => t.below).map((t) => t.sample), dragged].filter((sample) => !collapsed(sample));
+  const reset = all.find((sample) => sample.endBlock === ids.line1 && sample.end === 0);
   const dragName = 'גרירה אל מתחת לטקסט — הראש נמשך עד סוף המסמך';
   if (reset) {
     report.fail(dragName, `הראש התאפס לתחילת הבלוק: ${describe(reset)}`);

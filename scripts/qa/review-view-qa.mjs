@@ -11,7 +11,7 @@
 import { openApp, createReport } from './harness.mjs';
 
 const PORT = Number(process.env.QA_PORT ?? 9366);
-const report = createReport('סקירה + תצוגה + שורת המצב');
+const report = createReport('סקירה + תצוגה + שורת המצב', { strict: true });
 
 const log = (...a) => console.log(...a);
 
@@ -84,6 +84,25 @@ async function caretLine(app, index) {
   await app.sleep(400);
   return r;
 }
+
+/**
+ * ממתינה עד 3s לפתרון activeChangeIds בלי להזיז את הסמן. ב-2.23 המקורי
+ * הבחירה חיכתה לשער הקריאות הכבדות (6.5s); תיקון הבנייה מפריד ביניהם.
+ * זה זמן המתנה נוסף אחרי צילום ה-DOCX, ולא זמן מקצה לקצה מההקלדה.
+ */
+async function untilEnabled(app, id, limitMs = 3_000) {
+  const start = Date.now();
+  let state = await app.cmd(id);
+  while (!state.enabled && Date.now() - start < limitMs) {
+    await app.sleep(500);
+    state = await app.cmd(id);
+  }
+  return { state, ms: Date.now() - start };
+}
+
+/** מעבר לזה הפקד נראה למשתמש מנוטרל אחרי ההקלדה — „חלקי”, ולא „עובד”. */
+const SLOW_ENABLE_MS = 3_000;
+const slowNote = (ms) => (ms > SLOW_ENABLE_MS ? `; אבל הפקד נדלק רק ${ms}ms אחרי ההקלדה` : '');
 
 /** בונה מסמך של שלוש פסקאות. */
 async function seed(app, words = ['aleph', 'bet', 'gimel']) {
@@ -295,15 +314,17 @@ async function sectionTrackChanges() {
       const before = await snap(app);
       const beforeIns = (before.doc.match(/<w:ins\b/g) ?? []).length;
       let cmdSt = await app.cmd('acceptChange');
+      let waitedMs = 0;
       log('מצב הפקודה מיד אחרי ההקלדה:', JSON.stringify(cmdSt));
       // המנוע פותר את activeChangeIds באסינכרון ב-worker אחרי שהבחירה מתייצבת
       // (נמדד: reason=selection-required מיד, enabled=true אחרי ~1.5-2.5s
       // בלי אף אינטראקציה נוספת) — לא בעיית מוקד/headless (docs/engine-gaps.md
       // מדבר על activeEditor.view, לא רלוונטי כאן).
       if (cmdSt.reason === 'selection-required') {
-        await app.sleep(2500);
-        cmdSt = await app.cmd('acceptChange');
-        log('מצב הפקודה אחרי המתנה של 2.5s:', JSON.stringify(cmdSt));
+        const waited = await untilEnabled(app, 'acceptChange');
+        cmdSt = waited.state;
+        waitedMs = waited.ms;
+        log(`מצב הפקודה אחרי ${waited.ms}ms:`, JSON.stringify(cmdSt));
       }
       const st = await app.state('קבל שינוי');
       if (!cmdSt.enabled || st.disabled) {
@@ -320,7 +341,11 @@ async function sectionTrackChanges() {
       log('נלחץ:', clicked, '| w:ins לפני/אחרי:', beforeIns, afterIns, '| trkOne עדיין מסומן:', stillMarked, '| trkOne בטקסט:', stillThere);
       log('רעש:', bad || '(אין)');
       if (afterIns < beforeIns && stillThere && !stillMarked && !bad)
-        report.pass('קבל שינוי', `<w:ins> ${beforeIns}→${afterIns}; trkOne נשאר כטקסט רגיל (התקבל)`);
+        (waitedMs > SLOW_ENABLE_MS ? report.partial : report.pass).call(
+          report,
+          'קבל שינוי',
+          `<w:ins> ${beforeIns}→${afterIns}; trkOne נשאר כטקסט רגיל (התקבל)${slowNote(waitedMs)}`,
+        );
       else if (afterIns < beforeIns && stillThere)
         report.partial('קבל שינוי', `התקבל אך יש רעש: ${bad}`);
       else report.fail('קבל שינוי', `לא התקבל: w:ins ${beforeIns}→${afterIns}, trkOne בטקסט=${stillThere}; רעש: ${bad || 'אין'}`);
@@ -346,13 +371,15 @@ async function sectionTrackChanges() {
         return;
       }
       let cmdSt = await app.cmd('rejectChange');
+      let waitedMs = 0;
       log('מצב הפקודה מיד אחרי ההקלדה:', JSON.stringify(cmdSt));
       // אותה השהיה אסינכרונית שנמדדה ב„קבל שינוי" — הרשימה הפנימית
       // (activeChangeIds) נפתרת ב-worker כ-1.5-2.5s אחרי שהבחירה מתייצבת.
       if (cmdSt.reason === 'selection-required') {
-        await app.sleep(2500);
-        cmdSt = await app.cmd('rejectChange');
-        log('מצב הפקודה אחרי המתנה של 2.5s:', JSON.stringify(cmdSt));
+        const waited = await untilEnabled(app, 'rejectChange');
+        cmdSt = waited.state;
+        waitedMs = waited.ms;
+        log(`מצב הפקודה אחרי ${waited.ms}ms:`, JSON.stringify(cmdSt));
       }
       const st = await app.state('דחה שינוי');
       if (!cmdSt.enabled || st.disabled) {
@@ -365,7 +392,12 @@ async function sectionTrackChanges() {
       const after = await snap(app);
       const gone = !/trkTwo/.test(after.doc);
       log('נלחץ:', clicked, '| trkTwo נעלם:', gone, '| רעש:', bad || '(אין)');
-      if (gone && !bad) report.pass('דחה שינוי', 'trkTwo נעלם מה-docx לחלוטין — השינוי נדחה');
+      if (gone && !bad)
+        (waitedMs > SLOW_ENABLE_MS ? report.partial : report.pass).call(
+          report,
+          'דחה שינוי',
+          `trkTwo נעלם מה-docx לחלוטין — השינוי נדחה${slowNote(waitedMs)}`,
+        );
       else if (gone) report.partial('דחה שינוי', `נדחה אך יש רעש: ${bad}`);
       else report.fail('דחה שינוי', `trkTwo נשאר במסמך. רעש: ${bad || 'אין'}`);
     });
@@ -773,5 +805,4 @@ for (const [key, fn] of Object.entries(sections)) {
   await fn();
 }
 
-report.print();
-process.exit(0);
+process.exit(report.print() > 0 ? 1 : 0);

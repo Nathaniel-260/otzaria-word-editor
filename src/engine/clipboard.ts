@@ -143,6 +143,7 @@ export interface ClipboardDocumentApi {
     insert?: (input: {
       payload?: ClipboardPayload;
       plan?: ClipboardPlan;
+      fragment?: ClipboardPlan['fragment'];
       target?: SelectionTarget;
     }) => MaybePromise<ClipboardInsertReceipt | undefined>;
   };
@@ -1010,7 +1011,12 @@ async function performPaste(
 
   const destination = destinationRead && await destinationRead;
   if (destination && !destination.ok) return destination.outcome;
-  let input: { payload?: ClipboardPayload; plan?: ClipboardPlan; target: SelectionTarget };
+  let input: {
+    payload?: ClipboardPayload;
+    plan?: ClipboardPlan;
+    fragment?: ClipboardPlan['fragment'];
+    target: SelectionTarget;
+  };
   const parse = clipboard?.parse;
   if (typeof parse === 'function') {
     let parsed: ClipboardParseResult | undefined;
@@ -1024,7 +1030,14 @@ async function performPaste(
       return { ok: false, message: pasteFailureText(failure), reason: failure?.code ?? 'parse-failed' };
     }
     const plan = destination?.ok ? reformatPlan(parsed.plan, mode, destination.marks) : parsed.plan;
-    input = { plan, target: at.target };
+    // מ-superdoc 2.23, `insert` של תכנית `plain-text` מתעלם מה-marks שבריצות
+    // ומעתיק את עיצוב הריצה שבסמן. בסמן בלי ריצה (מסמך ריק, גופן שנבחר ועוד
+    // לא הוקלד) הטקסט נוחת בלי עיצוב בכלל. נמדד: אותו fragment עם David 18
+    // נכתב ב-2.20 ולא ב-2.23. כ-`fragment` ישיר ה-marks נכתבים בשתי הגרסאות.
+    input =
+      destination?.ok && parsed.plan.summary?.sourceKind === 'plain-text'
+        ? { fragment: plan.fragment, target: at.target }
+        : { plan, target: at.target };
   } else if (mode !== 'keep-source') {
     // בלי `parse` אין fragment לשכתב, ו-`insert` על payload גולמי היה מדביק
     // את עיצוב המקור — כלומר בדיוק את מה שהמשתמש ביקש שלא.

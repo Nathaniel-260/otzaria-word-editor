@@ -365,7 +365,7 @@ export interface SuperdocDoubleOptions {
   toc?: {
     /** מזהי הטבלאות. יותר מאחד = המצב הדו-משמעי שההסרה מסרבת לו. */
     ids?: readonly string[];
-    /** כמה שורות `TOC1` נשארות אחרי `toc.remove` בכל טבלה. */
+    /** כמה שורות תוצאה נוספות יש בכל טבלה, מעבר לבלוק הראשון. */
     rowsPerToc?: number;
     /** ערכי `TC` שסומנו במסמך. */
     entries?: readonly { nodeId: string; text: string; level: number }[];
@@ -450,6 +450,7 @@ export interface SuperdocDoubleOptions {
 }
 
 export interface SuperdocDouble {
+  remainingBlocks: () => string[];
   /** מה שמוזרק ל-`ACTIVE_SUPERDOC`. אינו SuperDoc אמיתי, ומטופס כך בכוונה. */
   readonly host: SuperDoc;
   readonly calls: DocCall[];
@@ -583,8 +584,8 @@ export function createSuperdocDouble(options: SuperdocDoubleOptions = {}): Super
   /**
    * הבלוקים שבמסמך, במבנה שהמנוע האמיתי מחזיק: **בלוק אחד** מסוג
    * `tableOfContents` לכל טבלה, ואחריו שורותיה כפסקאות `TOC1`. זה מה שהופך
-   * את „הסר” לבדיקה אמיתית — `toc.remove` מפיל רק את הבלוק הראשון, וכל
-   * השאר תלוי ב-`blocks.deleteRange`. ההנמקה ב-engine/toc.ts.
+   * את „הסר” לבדיקה אמיתית — ב-2.23 `toc.remove` מסיר את כל שורות השדה,
+   * בלי שהאדפטר יצטרך למחוק פסקאות נוספות.
    */
   let blocks = tocIds
     .flatMap((nodeId) => [
@@ -867,8 +868,13 @@ export function createSuperdocDouble(options: SuperdocDoubleOptions = {}): Super
       update: route('toc.update', () => receipt('toc.update')),
       remove: route('toc.remove', (input) => {
         const { target } = input as { target: { nodeId: string } };
-        blocks = blocks.filter((block) => block.nodeId !== target.nodeId);
-        return receipt('toc.remove');
+        const result = receipt('toc.remove');
+        if (result.success) {
+          blocks = blocks.filter((block) =>
+            block.nodeId !== target.nodeId && !block.nodeId.startsWith(`${target.nodeId}-row-`),
+          );
+        }
+        return result;
       }),
       configure: route('toc.configure', () => receipt('toc.configure')),
       markEntry: route('toc.markEntry', () => receipt('toc.markEntry')),
@@ -924,11 +930,7 @@ export function createSuperdocDouble(options: SuperdocDoubleOptions = {}): Super
         remove: route('index.entries.remove', () => receipt('index.entries.remove')),
       },
     },
-    /**
-     * `blocks` נדרש להסרת תוכן העניינים בלבד: `toc.remove` מוחק את הבלוק
-     * הראשון של הטבלה ומשאיר את שאר השורות, ו-`blocks.deleteRange` הוא מה
-     * שמנקה אותן. ההנמקה המלאה ב-engine/toc.ts.
-     */
+    /** רשימת הבלוקים מאפשרת לאמת תוצאות פקודות מול מצב המסמך. */
     blocks: {
       list: route('blocks.list', (input) => {
         const query = (input ?? {}) as { limit?: number; offset?: number };
@@ -1235,6 +1237,7 @@ export function createSuperdocDouble(options: SuperdocDoubleOptions = {}): Super
 
   return {
     host: host as unknown as SuperDoc,
+    remainingBlocks: () => blocks.map((block) => block.nodeId),
     calls,
     inputs: (op) => calls.filter((call) => call.op === op).map((call) => call.input),
     ops: () => calls.map((call) => call.op),

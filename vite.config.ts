@@ -9,6 +9,7 @@ import { STATIC_COMPLETION_FILE } from './src/engine/static-completion-constants
 import { buildStaticCompletionAsset } from './scripts/static-completion-asset';
 import { patchBlankDocumentXml, patchBlankStylesXml } from './src/engine/blank-document';
 import { deriveHebrewBlankDocx } from './scripts/blank-docx';
+import { superdocSelectionIdle } from './scripts/superdoc-selection-idle';
 
 /**
  * ל-WebView2 של Windows אין תמיכה ב-<script type="module"> מ-file:// ,
@@ -377,6 +378,7 @@ function hebrewBlankDocx(): Plugin {
 export default defineConfig({
   base: './',
   plugins: [
+    superdocSelectionIdle(),
     vue(),
     hebrewBlankDocx(),
     torahDictionaryAsset(),
@@ -396,7 +398,8 @@ export default defineConfig({
   // שלו. אם ה-dep optimizer של Vite אורז את המנוע מחדש ל-node_modules/.vite/deps,
   // ה-URL היחסי מצביע לשם — ושם אין קובץ worker, כלומר המסמך לא נפתח בפיתוח.
   // החרגה מה-optimizer משאירה את המנוע במקומו, ואת ה-URL נפתר.
-  optimizeDeps: { exclude: ['@superdoc/docx-engine'] },
+  // Keep superdoc/ui in the transform pipeline for the selection-idle fix.
+  optimizeDeps: { exclude: ['superdoc', '@superdoc/docx-engine'] },
 
   // PORT מכובד כשהוא מוגדר: כלי תצוגה (וכל סביבת עבודה עם כמה שרתי פיתוח
   // במקביל) מקצים פורט דרך משתנה הסביבה, ו-Vite מעצמו קורא רק --port.

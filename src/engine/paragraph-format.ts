@@ -63,6 +63,9 @@ const UNAVAILABLE_TEXT = 'אינו זמין בגרסה זו';
 
 const LOADING_TEXT = 'המסמך עדיין נטען';
 
+/** הקלט של `doc.get` לכל המסמך. ריק, אבל חובה — ההנמקה ב-`get` שבטיפוס. */
+const GET_ALL = Object.freeze({});
+
 /** 1440 twips לאינץ', ואינץ' הוא 2.54 ס\"מ בדיוק. */
 export const TWIPS_PER_CM = 1440 / 2.54;
 
@@ -164,7 +167,12 @@ export interface ParagraphFormatDocumentApi extends SelectionDocumentApi {
       clearAllTabStops?: (input: { target: unknown }) => MaybePromise<DocReceipt>;
     };
   };
-  get?: () => MaybePromise<unknown>;
+  /**
+   * הקלט חובה, גם כשהוא ריק: מ-superdoc 2.23 `doc.get()` בלי ארגומנט זורק
+   * „Cannot read properties of undefined (reading 'options')”, ו-`doc.get({})`
+   * מחזיר את המסמך (נמדד; ב-2.20 שתיהן עבדו). מכאן `GET_ALL`.
+   */
+  get?: (input: typeof GET_ALL) => MaybePromise<unknown>;
   blocks?: {
     list?: () => MaybePromise<
       { blocks?: readonly { nodeId?: string; nodeType?: string }[] } | undefined
@@ -472,7 +480,7 @@ export async function readParagraphFormat(
 
   let document: unknown;
   try {
-    document = await get();
+    document = await get(GET_ALL);
   } catch (error) {
     return { ok: false, outcome: { ok: false, message: thrownText('פתיחת תפריט הפסקה נכשלה', error), reason: 'threw' } };
   }
@@ -564,7 +572,7 @@ export async function readParagraphIndents(
 
   let document: unknown;
   try {
-    document = await doc.get();
+    document = await doc.get(GET_ALL);
   } catch {
     return null;
   }
@@ -747,7 +755,7 @@ export async function readSelectionSpacing(
 
   let document: unknown;
   try {
-    document = await doc.get();
+    document = await doc.get(GET_ALL);
   } catch {
     return null;
   }

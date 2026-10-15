@@ -54,25 +54,12 @@
  * בדיוק שני דברים שנמדדו כהפיכים לחלוטין — טווח רמות הכותרות (`\o`) והאם
  * הערכים הם קישורים (`\h`).
  *
- * ## ההסרה, והשיירים שהיא משאירה
+ * ## הסרה ב-SuperDoc 2.23
  *
- * זו התגלית הלא-נעימה של הגל. במודל של המנוע תוכן עניינים אינו בלוק אחד:
- * השורה הראשונה היא בלוק `tableOfContents`, וכל שאר השורות הן פסקאות
- * אחיות בסגנונות `TOC1`…`TOC9`. `toc.remove` מוחק את **הבלוק הראשון בלבד**
- * ומחזיר `success: true`; `toc.list` מדווח מעכשיו 0, אבל כל שאר שורות
- * הטבלה נשארות במסמך כפסקאות רגילות. נמדד: טבלה בת שש שורות הפכה אחרי
- * `remove` לחמש פסקאות `TOC1` יתומות.
- *
- * פקד „הסר תוכן עניינים” שמשאיר את גוף הטבלה על המסך הוא בדיוק הכפתור
- * שמדווח „בוצע” ואינו עושה את מה שנאמר. לכן ההסרה כאן היא שני צעדים:
- * `toc.remove`, ואחריו `blocks.deleteRange` על רצף הפסקאות שנשאר במקומו.
- *
- * `deleteRange` ולא `blocks.delete` בלולאה — והנימוק הראשון עומד בפני עצמו:
- * זו קריאה **אחת** במקום N על מסמך שהאורדינלים שלו זזים אחרי כל מחיקה, כלומר
- * אין מרוץ בין הרשימה שנקראה לבין המצב שנמחק לתוכו. בנוסף נמדד (וגם בבדיקה
- * חוזרת היום) ש-`blocks.delete` על פסקת `TOC*` יתומה **זורק**
- * `paragraph-tracked-wrapper-unsupported` ואינו מוחק דבר; סוכן QA לא שחזר
- * את הזריקה הזאת אצלו, ולכן היא נימוק תומך בלבד ולא זה שההחלטה נשענת עליו.
+ * `toc.remove` מוחק את השדה כולו, כולל תוצאתו השמורה. אין לנקות אחריו
+ * פסקאות לפי סגנון: גם פסקה רגילה יכולה לשאת TOC1, ו-`entryCount` נספר
+ * מהכותרות החיות ולא מהשורות שנשמרו בעדכון האחרון. טבלה מיושנת עלולה
+ * להכיל פחות שורות מכפי שהספירה מציעה, ומעקף כזה מוחק תוכן של המשתמש.
  *
  * ## למה „טבלה אחת” — כולל בעדכון
  *
@@ -211,13 +198,6 @@ export interface TocDocumentApi extends SelectionDocumentApi {
       limit?: number;
       offset?: number;
     }) => MaybePromise<{ blocks?: readonly BlockEntry[]; total?: number } | undefined>;
-    // `nodeType` הוא `'paragraph' | 'listItem'` ולא ליטרל יחיד: שורת תוכן
-    // עניינים ממוספר מסווגת `listItem` (ראו `ROW_NODE_TYPES`), וכתובת עם
-    // הסוג הלא נכון היא כתובת פסולה שהמחיקה עליה נכשלת.
-    deleteRange?: (input: {
-      start: { kind: 'block'; nodeType: 'paragraph' | 'listItem'; nodeId: string };
-      end: { kind: 'block'; nodeType: 'paragraph' | 'listItem'; nodeId: string };
-    }) => MaybePromise<DocReceipt>;
   };
 }
 
@@ -255,7 +235,7 @@ const NO_ANCHOR_DETAIL = 'יש ללחוץ בגוף המסמך, על הפסקה �
 /**
  * מה שמוחזר כשהעדכון רץ אך לא על כל הטבלאות. „לא הושלם” ולא „נכשל”: משהו
  * כן עודכן, והודעה שאומרת „נכשל” הייתה שולחת את המשתמש לבדוק טבלה שדווקא
- * נבנתה מחדש. אותה הבחנה בדיוק כמו ב-`rowsRemain`.
+ * נבנתה מחדש.
  */
 function partialUpdate(unreachable: number): CommandOutcome {
   const left = unreachable === 1 ? 'אחת מהן לא עודכנה' : `${unreachable} מהן לא עודכנו`;
@@ -263,19 +243,6 @@ function partialUpdate(unreachable: number): CommandOutcome {
     ok: false,
     message: `עדכון תוכן העניינים לא הושלם: יש במסמך כמה טבלאות תוכן עניינים שאינן ניתנות להבחנה זו מזו, ולכן ${left}`,
     reason: 'ambiguous-toc',
-  };
-}
-
-/**
- * מה שמוחזר כשההסרה עצמה הצליחה אך שורות הטבלה לא זוהו. שני המסלולים
- * שמגיעים לכאן — מקום שלא נמצא, וזיהוי שלא תפס שורות שהיו צפויות — מחזירים
- * את **אותה** הודעה: למשתמש שרואה שורות על המסך אין שום הבדל ביניהם.
- */
-function rowsRemain(): CommandOutcome {
-  return {
-    ok: false,
-    message: 'הסרת תוכן העניינים לא הושלמה: הטבלה הוסרה, אך שורות ממנה עשויות להישאר במסמך',
-    reason: 'rows-remain',
   };
 }
 
@@ -573,26 +540,16 @@ const TOC_STYLE = /^TOC[1-9]$/;
  */
 const ROW_NODE_TYPES = new Set(['paragraph', 'listItem']);
 
-/**
- * מה שדרוש כדי לזהות את שורות הטבלה אחרי שהבלוק הראשון שלה כבר נמחק.
- *
- * `expectedRows` אינו תקרה למחיקה אלא **ציפייה**: `entryCount` נספר מהמקורות,
- * והשורה הראשונה היא הבלוק שהוסר זה עתה, ולכן מה שאמור להישאר הוא
- * `entryCount - 1` (נמדד: `entryCount: 3` → בלוק ועוד שתי פסקאות; `4` → בלוק
- * ועוד שלוש). מספר קטן מזה אינו מכשיל את המחיקה — הוא רק אוסר לומר „בוצע”.
- */
+/** סגנונות נוספים לזיהוי קצה טבלה, רק למעקף פסקת הסיום. */
 interface TocRowSignature {
   styleNames: readonly string[];
-  expectedRows: number;
 }
 
 function rowSignatureOf(entry: TocEntry | undefined): TocRowSignature {
   const styleNames = (entry?.preserved?.customStyles ?? [])
     .map((style) => style?.styleName)
     .filter((name): name is string => typeof name === 'string' && name !== '');
-  const count = entry?.entryCount;
-  const expectedRows = typeof count === 'number' && count > 1 ? count - 1 : 0;
-  return { styleNames, expectedRows };
+  return { styleNames };
 }
 
 /**
@@ -603,121 +560,6 @@ function isTocRow(block: BlockEntry | undefined, styleNames: readonly string[]):
   if (!ROW_NODE_TYPES.has(block?.nodeType ?? '')) return false;
   const styleId = block?.styleId ?? '';
   return TOC_STYLE.test(styleId) || styleNames.includes(styleId);
-}
-
-/**
- * מוצאת את מקומו של הבלוק ברשימת הבלוקים. `null` כשלא נמצא — מסמך שגדל
- * מעבר לבלם, או מנוע שאינו מדווח `nodeId`.
- */
-async function ordinalOf(
-  host: TocTarget,
-  nodeId: string,
-): Promise<number | null> {
-  const list = docOf(host)?.blocks?.list;
-  if (typeof list !== 'function') return null;
-
-  let offset = 0;
-  let guard = 0;
-  for (;;) {
-    const listed = await attempt(REMOVE_FAILED, () => list({ limit: PAGE_SIZE, offset }));
-    if (!listed.ok) return null;
-
-    const blocks = listed.value?.blocks ?? [];
-    for (const block of blocks) {
-      if (block.nodeId === nodeId) {
-        return typeof block.ordinal === 'number' ? block.ordinal : offset + blocks.indexOf(block);
-      }
-    }
-    if (blocks.length === 0) return null;
-
-    offset += blocks.length;
-    const total = listed.value?.total;
-    if (!Number.isFinite(total) || offset >= (total as number)) return null;
-    if (++guard > PAGE_GUARD) return null;
-  }
-}
-
-/**
- * מוחקת את שורות הטבלה שנשארו יתומות אחרי `toc.remove`.
- *
- * הרצף נקרא **אחרי** ההסרה ומתחיל בדיוק במקום שהבלוק שהוסר תפס, ונעצר
- * בבלוק הראשון שאינו שורת תוכן עניינים. פסקה בסגנון `TOC*` שיושבת שם היא
- * חלק מהטבלה בהגדרה — היא נוצרה על ידה — ולכן אין כאן ניחוש על תוכן שהמשתמש
- * כתב.
- *
- * הרצף נשאב בעמודים ואינו נקרא בקריאה אחת: `PAGE_SIZE` הוא 200, ותוכן עניינים
- * של ספר — התרחיש הרגיל של אוצריא — ארוך ממנו בקלות. קריאה יחידה הייתה מוחקת
- * את 200 השורות הראשונות, משאירה את השאר על המסך, ומחזירה „בוצע”.
- *
- * על `deleteRange` מול `blocks.delete` — ראו הערת הפתיחה.
- */
-async function sweepTocRows(
-  host: TocTarget,
-  from: number,
-  signature: TocRowSignature,
-): Promise<CommandOutcome> {
-  const doc = docOf(host);
-  const list = doc?.blocks?.list;
-  const deleteRange = doc?.blocks?.deleteRange;
-  if (typeof list !== 'function' || typeof deleteRange !== 'function') {
-    return unsupported(REMOVE_FAILED);
-  }
-
-  // כל שורה נושאת גם את ה-`nodeType` שלה: תוכן עניינים ממוספר עשוי לסווג
-  // שורה כ-`listItem` (ROW_NODE_TYPES), ו-`deleteRange` דורש את הסוג האמיתי
-  // של כל קצה — `isTocRow` כבר מוודאת שהוא אחד מהשניים.
-  const rows: { nodeId: string; nodeType: 'paragraph' | 'listItem' }[] = [];
-  let offset = from;
-  let guard = 0;
-  let truncated = false;
-
-  // ממשיכים לעמוד הבא רק כשכל העמוד היה שורות טבלה: העמוד שנקטע באמצע הוא
-  // סוף הרצף בהגדרה, ומה שאחריו כבר שייך למשתמש.
-  for (;;) {
-    const listed = await attempt(REMOVE_FAILED, () => list({ limit: PAGE_SIZE, offset }));
-    if (!listed.ok) return listed.outcome;
-
-    const page = listed.value?.blocks ?? [];
-    let stopped = page.length === 0;
-    for (const block of page) {
-      if (!isTocRow(block, signature.styleNames) || typeof block.nodeId !== 'string') {
-        stopped = true;
-        break;
-      }
-      rows.push({ nodeId: block.nodeId, nodeType: block.nodeType as 'paragraph' | 'listItem' });
-    }
-    if (stopped) break;
-
-    offset += page.length;
-    const total = listed.value?.total;
-    if (!Number.isFinite(total) || offset >= (total as number)) break;
-    if (++guard > PAGE_GUARD) {
-      truncated = true;
-      break;
-    }
-  }
-
-  // זיהוי שלא תפס שורות שהיו צפויות אינו הצלחה שקטה: הטבלה הוסרה, השורות
-  // על המסך, והמשתמש היה בטוח שמה שנשאר הוא טקסט שלו. אותה הודעה בדיוק כמו
-  // במסלול שבו מקום הבלוק לא נמצא מלכתחילה.
-  if (rows.length === 0) {
-    return signature.expectedRows > 0 ? rowsRemain() : { ok: true };
-  }
-
-  const first = rows[0];
-  const last = rows[rows.length - 1];
-  const swept = await attempt(REMOVE_FAILED, () =>
-    deleteRange({
-      start: { kind: 'block', nodeType: first.nodeType, nodeId: first.nodeId },
-      end: { kind: 'block', nodeType: last.nodeType, nodeId: last.nodeId },
-    }),
-  );
-  if (!swept.ok) return swept.outcome;
-
-  const failure = failureOf(REMOVE_FAILED, swept.value);
-  if (failure) return failure;
-
-  return truncated || rows.length < signature.expectedRows ? rowsRemain() : { ok: true };
 }
 
 /**
@@ -743,12 +585,7 @@ async function appendParagraphAfterTocEnd(host: TocTarget, signature: TocRowSign
   return created.ok && created.value?.success !== false;
 }
 
-/**
- * „הסר תוכן עניינים” — מוחקת את הטבלה כולה, כולל השורות שהמנוע משאיר.
- *
- * מקומו של הבלוק נקרא **לפני** ההסרה: אחריה הוא כבר אינו ברשימה, ואין דרך
- * לדעת היכן הרצף מתחיל.
- */
+/** „הסר תוכן עניינים” — המנוע מוחק את השדה לפי גבולותיו ב-DOCX. */
 export async function removeTableOfContents(host: TocTarget): Promise<CommandOutcome> {
   const doc = docOf(host);
   if (!doc) return unavailable(REMOVE_FAILED, 'המסמך עדיין נטען', 'document-api-unavailable');
@@ -758,8 +595,6 @@ export async function removeTableOfContents(host: TocTarget): Promise<CommandOut
 
   const sole = await soleToc(host, REMOVE_FAILED);
   if (!sole.ok) return sole.outcome;
-
-  const at = await ordinalOf(host, sole.address.nodeId);
 
   let removed = await attempt(REMOVE_FAILED, () => remove({ target: sole.address }));
   if (
@@ -773,11 +608,7 @@ export async function removeTableOfContents(host: TocTarget): Promise<CommandOut
   const failure = failureOf(REMOVE_FAILED, removed.value);
   if (failure) return failure;
 
-  // מקום שלא נמצא אינו מכשיל את ההסרה עצמה — היא כבר קרתה. הכשל אומר מה
-  // נשאר, כדי שהמשתמש לא יחשוב שהשורות שעל המסך הן טבלה חיה.
-  if (at === null) return rowsRemain();
-
-  return sweepTocRows(host, at, sole.rows);
+  return { ok: true };
 }
 
 /* ------------------------------------------------------------------ */
@@ -872,7 +703,7 @@ function tocLayoutKey(row: { nodeId: string; nodeType: 'paragraph' | 'listItem' 
 /**
  * האם הבלוק הוא שורה של תוכן עניינים **קיים**.
  *
- * בשונה מ-`isTocRow`, שרץ אחרי `toc.remove` על מה שנשאר, כאן הבלוק הראשון
+ * בשונה מ-`isTocRow`, שמזהה רק פסקאות, כאן הבלוק הראשון
  * של הטבלה עדיין במקומו — והוא השורה הראשונה שעל המסך. הוצאתו הייתה משאירה
  * את הכותרת הראשונה בלי מוביל, וזה בדיוק הפער הגלוי ביותר.
  */

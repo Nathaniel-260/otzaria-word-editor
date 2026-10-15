@@ -4,10 +4,8 @@
  * ארבע הטענות שנמדדות כאן, וכולן מקבעות ממצא שנמדד בדפדפן ולא הנחה
  * (ההנמקה המלאה ב-engine/toc.ts):
  *
- * 1. **ההסרה מנקה גם את השורות שהמנוע משאיר.** `toc.remove` מוחק את הבלוק
- *    הראשון של הטבלה בלבד; מימוש שנעצר שם היה מחזיר „בוצע” ומשאיר את גוף
- *    הטבלה על המסך. הבדיקה דורשת `blocks.deleteRange` על הרצף כולו — ולא
- *    צעד אחד יותר.
+ * 1. **ההסרה נשענת על גבולות השדה של המנוע ב-2.23.** פסקאות רגילות
+ *    בסגנון TOC1 חייבות לשרוד גם כשתוכן העניינים מיושן וספירת המקורות שונה.
  * 2. **הוולידציה יושבת אצלנו, כי המנוע מקבל הכול.** `level: 12` ו-
  *    `{from:9,to:1}` חוזרים ממנו עם `success: true` — הראשון כותב מתג פסול
  *    ל-Word, השני מרוקן את הטבלה. שניהם נדחים כאן לפני שנוגעים במסמך.
@@ -55,7 +53,7 @@ interface FakeOptions {
   displayConfig?: unknown;
   /** מתגים ששרדו round-trip, כפי ש-`toc.list` מחזיר אותם. `\t` הוא מה שנצרך כאן. */
   preserved?: unknown;
-  /** מספר הערכים שהטבלה מצהירה עליו — הציפייה למספר השורות. */
+  /** מספר המקורות החיים — עשוי להיות שונה ממספר השורות שנשמרו. */
   entryCount?: number;
   total?: number;
   /** ערכי `TC` שסומנו במסמך. */
@@ -73,6 +71,8 @@ interface FakeOptions {
   missing?: readonly string[];
   /** כמו superdoc 2.17: `toc.remove` מסרב כשהמסמך נגמר בשורת טבלה. */
   refuseTocAtEnd?: boolean;
+  /** כמו superdoc 2.23: `toc.remove` מוחק גם את השורות שאחרי הבלוק. */
+  removeTakesRows?: number;
 }
 
 function fakeEngine(options: FakeOptions = {}) {
@@ -120,12 +120,14 @@ function fakeEngine(options: FakeOptions = {}) {
       ),
       update: route('toc.update', () => receipt('toc.update')),
       remove: route('toc.remove', (input) => {
+        if (failures['toc.remove']) return receipt('toc.remove');
         const target = (input as { target: { nodeId: string } }).target;
         const last = blocks[blocks.length - 1];
         if (options.refuseTocAtEnd && /^TOC/.test(last?.styleId ?? '')) {
           return { success: false, failure: { code: 'CAPABILITY_UNAVAILABLE' } };
         }
-        blocks = blocks.filter((block) => block.nodeId !== target.nodeId);
+        const at = blocks.findIndex((block) => block.nodeId === target.nodeId);
+        if (at !== -1) blocks.splice(at, 1 + (options.removeTakesRows ?? 0));
         return receipt('toc.remove');
       }),
       configure: route('toc.configure', () => receipt('toc.configure')),
@@ -359,33 +361,72 @@ describe('עדכון תוכן העניינים', () => {
 });
 
 describe('הסרת תוכן העניינים', () => {
-  it('מוחקת את הטבלה **ואת השורות שהמנוע משאיר אחריה**', async () => {
-    const engine = fakeEngine({ tocs: ['toc-1'], total: 1, blocks: documentWithToc() });
-
+  it('המנוע מסיר את כל השדה; האדפטר אינו מוחק טווח נוסף', async () => {
+    const engine = fakeEngine({
+      tocs: ['toc-1'], total: 1, blocks: documentWithToc(), removeTakesRows: 2,
+    });
     expect(await removeTableOfContents(engine.host)).toEqual({ ok: true });
-
     expect(engine.inputs('toc.remove')).toEqual([{ target: tocAddress('toc-1') }]);
-    expect(engine.inputs('blocks.deleteRange')).toEqual([
-      {
-        start: { kind: 'block', nodeType: 'paragraph', nodeId: 'row-1' },
-        end: { kind: 'block', nodeType: 'paragraph', nodeId: 'row-2' },
-      },
-    ]);
     expect(engine.remaining()).toEqual(['body-1', 'body-2']);
+    expect(engine.ops()).not.toContain('blocks.deleteRange');
+    expect(engine.ops()).not.toContain('blocks.list');
     expect(engine.ops()).not.toContain('create.paragraph');
   });
 
-  it('טבלה בסוף המסמך שהמנוע מסרב להסיר — פסקה נוספת אחריה, וניסיון חוזר', async () => {
-    // superdoc 2.17 מסרב להסיר טבלה שאין אחריה פסקה (נמדד ב-references-qa).
+  it.each([undefined, 0, 1, 2, 4, 9])(
+    'פסקת TOC1 של המשתמש שורדת טבלה מיושנת עם entryCount=%s', async (entryCount) => {
+      const engine = fakeEngine({
+        tocs: ['toc-1'], total: 1, entryCount, removeTakesRows: 1,
+        blocks: [
+          { ordinal: 0, nodeId: 'toc-1', nodeType: 'tableOfContents', styleId: 'TOC1' },
+          { ordinal: 1, nodeId: 'row-1', nodeType: 'paragraph', styleId: 'TOC2' },
+          { ordinal: 2, nodeId: 'mine', nodeType: 'paragraph', styleId: 'TOC1' },
+          { ordinal: 3, nodeId: 'body-1', nodeType: 'paragraph', styleId: 'Normal' },
+        ],
+      });
+      expect(await removeTableOfContents(engine.host)).toEqual({ ok: true });
+      expect(engine.remaining()).toEqual(['mine', 'body-1']);
+      expect(engine.ops()).not.toContain('blocks.deleteRange');
+    },
+  );
+
+  it('פסקה בסגנון מותאם אישית אחרי השדה נשמרת גם כשאין מקורות חיים', async () => {
     const engine = fakeEngine({
-      tocs: ['toc-1'],
-      total: 1,
-      blocks: documentWithToc().slice(0, 3),
-      refuseTocAtEnd: true,
+      tocs: ['toc-1'], total: 1, entryCount: 0, removeTakesRows: 0,
+      preserved: { customStyles: [{ styleName: 'MyToc1', level: 1 }] },
+      blocks: [
+        { ordinal: 0, nodeId: 'toc-1', nodeType: 'tableOfContents', styleId: 'MyToc1' },
+        { ordinal: 1, nodeId: 'mine', nodeType: 'paragraph', styleId: 'MyToc1' },
+      ],
     });
-
     expect(await removeTableOfContents(engine.host)).toEqual({ ok: true });
+    expect(engine.remaining()).toEqual(['mine']);
+  });
 
+  it('תוכן עניינים בן 250 שורות מוסר בקריאה אחת למנוע', async () => {
+    const rows = Array.from({ length: 249 }, (_, index) => ({
+      ordinal: index + 1, nodeId: `row-${index}`, nodeType: 'paragraph', styleId: 'TOC1',
+    }));
+    const engine = fakeEngine({
+      tocs: ['toc-1'], total: 1, entryCount: 250, removeTakesRows: rows.length,
+      blocks: [
+        { ordinal: 0, nodeId: 'toc-1', nodeType: 'tableOfContents', styleId: 'TOC1' },
+        ...rows,
+        { ordinal: 250, nodeId: 'body-1', nodeType: 'paragraph', styleId: 'Normal' },
+      ],
+    });
+    expect(await removeTableOfContents(engine.host)).toEqual({ ok: true });
+    expect(engine.inputs('toc.remove')).toHaveLength(1);
+    expect(engine.remaining()).toEqual(['body-1']);
+    expect(engine.ops()).not.toContain('blocks.deleteRange');
+  });
+
+  it('טבלה בסוף המסמך שהמנוע מסרב להסיר — פסקה נוספת וניסיון חוזר', async () => {
+    const engine = fakeEngine({
+      tocs: ['toc-1'], total: 1, blocks: documentWithToc().slice(0, 3),
+      refuseTocAtEnd: true, removeTakesRows: 2,
+    });
+    expect(await removeTableOfContents(engine.host)).toEqual({ ok: true });
     expect(engine.inputs('create.paragraph')).toEqual([
       { at: { kind: 'after', target: { kind: 'block', nodeType: 'paragraph', nodeId: 'row-2' } } },
     ]);
@@ -393,222 +434,28 @@ describe('הסרת תוכן העניינים', () => {
     expect(engine.remaining()).toEqual(['trail']);
   });
 
-  it('סירוב שאינו בגלל סוף המסמך — בלי פסקה נוספת, והכשל מוחזר', async () => {
+  it('סירוב שאינו בגלל סוף המסמך מוחזר בלי הוספת פסקה', async () => {
     const engine = fakeEngine({
-      tocs: ['toc-1'],
-      total: 1,
-      blocks: documentWithToc(),
+      tocs: ['toc-1'], total: 1, blocks: documentWithToc(),
       failures: { 'toc.remove': { code: 'CAPABILITY_UNAVAILABLE' } },
     });
-
     expect((await removeTableOfContents(engine.host)).ok).toBe(false);
     expect(engine.ops()).not.toContain('create.paragraph');
     expect(engine.inputs('toc.remove')).toHaveLength(1);
   });
 
-  it('שואבת עמודים: תוכן עניינים ארוך מ-200 שורות נמחק כולו', async () => {
-    // התרחיש הרגיל של אוצריא — ספר עם מאות ערכים. קריאה יחידה של
-    // `blocks.list` הייתה מוחקת 200 שורות, משאירה ~49 יתומות על המסך,
-    // ומחזירה `{ok:true}`.
-    const rows = Array.from({ length: 249 }, (_, index) => ({
-      ordinal: index + 1,
-      nodeId: `row-${index}`,
-      nodeType: 'paragraph',
-      styleId: 'TOC1',
-    }));
+  it('הסרה אינה דורשת blocks.list או blocks.deleteRange', async () => {
     const engine = fakeEngine({
-      tocs: ['toc-1'],
-      total: 1,
-      entryCount: 250,
-      blocks: [
-        { ordinal: 0, nodeId: 'toc-1', nodeType: 'tableOfContents', styleId: 'TOC1' },
-        ...rows,
-        { ordinal: 250, nodeId: 'body-1', nodeType: 'paragraph', styleId: 'Normal' },
-      ],
+      tocs: ['toc-1'], total: 1, blocks: documentWithToc(), removeTakesRows: 2,
+      missing: ['blocks.list', 'blocks.deleteRange'],
     });
-
     expect(await removeTableOfContents(engine.host)).toEqual({ ok: true });
-
-    expect(engine.inputs('blocks.deleteRange')).toEqual([
-      {
-        start: { kind: 'block', nodeType: 'paragraph', nodeId: 'row-0' },
-        end: { kind: 'block', nodeType: 'paragraph', nodeId: 'row-248' },
-      },
-    ]);
-    expect(engine.remaining()).toEqual(['body-1']);
-  });
-
-  it('מזהה שורות גם לפי סגנון ה-`\\t` שהטבלה מצהירה עליו', async () => {
-    // `preserved.customStyles` הוא חוזה ציבורי, ונמדד שהוא שורד round-trip:
-    // טבלה שנוצרה עם `\t "MyToc1,1"` חזרה מ-`toc.list` עם השם הזה. במסמך
-    // שהגיע מ-Word השורות נושאות אותו ולא `TOC1`, וזיהוי לפי `TOC1` בלבד
-    // היה מותיר את כולן.
-    const engine = fakeEngine({
-      tocs: ['toc-1'],
-      total: 1,
-      entryCount: 3,
-      preserved: { customStyles: [{ styleName: 'MyToc1', level: 1 }] },
-      blocks: [
-        { ordinal: 0, nodeId: 'toc-1', nodeType: 'tableOfContents', styleId: 'MyToc1' },
-        { ordinal: 1, nodeId: 'row-1', nodeType: 'paragraph', styleId: 'MyToc1' },
-        { ordinal: 2, nodeId: 'row-2', nodeType: 'paragraph', styleId: 'TOC2' },
-        { ordinal: 3, nodeId: 'body-1', nodeType: 'paragraph', styleId: 'Normal' },
-      ],
-    });
-
-    expect(await removeTableOfContents(engine.host)).toEqual({ ok: true });
-    expect(engine.remaining()).toEqual(['body-1']);
-  });
-
-  it('שורה שהמנוע סיווג כ-`listItem` אינה קוטעת את הרצף', async () => {
-    const engine = fakeEngine({
-      tocs: ['toc-1'],
-      total: 1,
-      entryCount: 3,
-      blocks: [
-        { ordinal: 0, nodeId: 'toc-1', nodeType: 'tableOfContents', styleId: 'TOC1' },
-        { ordinal: 1, nodeId: 'row-1', nodeType: 'listItem', styleId: 'TOC1' },
-        { ordinal: 2, nodeId: 'row-2', nodeType: 'paragraph', styleId: 'TOC2' },
-        { ordinal: 3, nodeId: 'body-1', nodeType: 'paragraph', styleId: 'Normal' },
-      ],
-    });
-
-    expect(await removeTableOfContents(engine.host)).toEqual({ ok: true });
-    expect(engine.remaining()).toEqual(['body-1']);
-  });
-
-  it('שורת קצה שהיא `listItem` נשלחת ל-`deleteRange` עם nodeType:listItem שלה, ולא paragraph מקובע', async () => {
-    // באג 3: תוכן עניינים ממוספר עשוי לסווג שורה כ-`listItem`. כתובת עם
-    // `nodeType:'paragraph'` מקובע על שורה כזאת פסולה, וה-`deleteRange` היה
-    // עלול להיכשל ולהשאיר שורות יתומות על המסך.
-    const engine = fakeEngine({
-      tocs: ['toc-1'],
-      total: 1,
-      entryCount: 3,
-      blocks: [
-        { ordinal: 0, nodeId: 'toc-1', nodeType: 'tableOfContents', styleId: 'TOC1' },
-        { ordinal: 1, nodeId: 'row-1', nodeType: 'listItem', styleId: 'TOC1' },
-        { ordinal: 2, nodeId: 'row-2', nodeType: 'listItem', styleId: 'TOC2' },
-        { ordinal: 3, nodeId: 'body-1', nodeType: 'paragraph', styleId: 'Normal' },
-      ],
-    });
-
-    expect(await removeTableOfContents(engine.host)).toEqual({ ok: true });
-
-    expect(engine.inputs('blocks.deleteRange')).toEqual([
-      {
-        start: { kind: 'block', nodeType: 'listItem', nodeId: 'row-1' },
-        end: { kind: 'block', nodeType: 'listItem', nodeId: 'row-2' },
-      },
-    ]);
-  });
-
-  it('כותרת שאחרי הטבלה אינה נבלעת גם כשהיא בסגנון `TOC1`', async () => {
-    const engine = fakeEngine({
-      tocs: ['toc-1'],
-      total: 1,
-      entryCount: 2,
-      blocks: [
-        { ordinal: 0, nodeId: 'toc-1', nodeType: 'tableOfContents', styleId: 'TOC1' },
-        { ordinal: 1, nodeId: 'row-1', nodeType: 'paragraph', styleId: 'TOC1' },
-        { ordinal: 2, nodeId: 'head-1', nodeType: 'heading', styleId: 'TOC1' },
-      ],
-    });
-
-    expect(await removeTableOfContents(engine.host)).toEqual({ ok: true });
-    expect(engine.remaining()).toEqual(['head-1']);
-  });
-
-  it('זיהוי שלא תפס שורות שהיו צפויות — אותה הודעה, ולא הצלחה שקטה', async () => {
-    const engine = fakeEngine({
-      tocs: ['toc-1'],
-      total: 1,
-      entryCount: 4,
-      blocks: [
-        { ordinal: 0, nodeId: 'toc-1', nodeType: 'tableOfContents', styleId: 'TOC1' },
-        { ordinal: 1, nodeId: 'row-1', nodeType: 'paragraph', styleId: 'TocUnknown' },
-        { ordinal: 2, nodeId: 'row-2', nodeType: 'paragraph', styleId: 'TocUnknown' },
-      ],
-    });
-
-    expect(await removeTableOfContents(engine.host)).toEqual({
-      ok: false,
-      message: 'הסרת תוכן העניינים לא הושלמה: הטבלה הוסרה, אך שורות ממנה עשויות להישאר במסמך',
-      reason: 'rows-remain',
-    });
-    expect(engine.ops()).not.toContain('blocks.deleteRange');
-  });
-
-  it('פחות שורות מכפי שהוצהר — נמחק מה שנמצא, ונאמר שייתכן שנשארו', async () => {
-    const engine = fakeEngine({
-      tocs: ['toc-1'],
-      total: 1,
-      entryCount: 9,
-      blocks: documentWithToc(),
-    });
-
-    const outcome = await removeTableOfContents(engine.host);
-
-    expect(outcome.ok === false && outcome.reason).toBe('rows-remain');
     expect(engine.remaining()).toEqual(['body-1', 'body-2']);
   });
 
-  it('בלי `blocks.list` — ההסרה עצמה קרתה, וההודעה אומרת מה נשאר', async () => {
-    // הענף היחיד שבו ההודעה היא כל מה שהמשתמש מקבל: הטבלה כבר הוסרה, ואין
-    // דרך לדעת היכן הרצף מתחיל. הודעה ריקה כאן היא כפתור שקרן.
-    const engine = fakeEngine({
-      tocs: ['toc-1'],
-      total: 1,
-      blocks: documentWithToc(),
-      missing: ['blocks.list'],
-    });
-
-    expect(await removeTableOfContents(engine.host)).toEqual({
-      ok: false,
-      message: 'הסרת תוכן העניינים לא הושלמה: הטבלה הוסרה, אך שורות ממנה עשויות להישאר במסמך',
-      reason: 'rows-remain',
-    });
-    expect(engine.ops()).toContain('toc.remove');
-  });
-
-  it('נעצרת בבלוק הראשון שאינו שורת טבלה', async () => {
-    // פסקה בסגנון `TOC*` שיושבת אחרי הטבלה נוצרה על ידה; מה שאחריה שייך
-    // למשתמש, ומחיקה שלו הייתה מוחקת תוכן שאיש לא ביקש למחוק.
-    const engine = fakeEngine({
-      tocs: ['toc-1'],
-      total: 1,
-      blocks: [
-        { ordinal: 0, nodeId: 'toc-1', nodeType: 'tableOfContents', styleId: 'TOC1' },
-        { ordinal: 1, nodeId: 'row-1', nodeType: 'paragraph', styleId: 'TOC1' },
-        { ordinal: 2, nodeId: 'body-1', nodeType: 'paragraph', styleId: 'Normal' },
-        { ordinal: 3, nodeId: 'stray', nodeType: 'paragraph', styleId: 'TOC1' },
-      ],
-    });
-
-    expect(await removeTableOfContents(engine.host)).toEqual({ ok: true });
-    expect(engine.remaining()).toEqual(['body-1', 'stray']);
-  });
-
-  it('טבלה בת שורה אחת — בלי קריאת מחיקה מיותרת', async () => {
-    const engine = fakeEngine({
-      tocs: ['toc-1'],
-      total: 1,
-      blocks: [
-        { ordinal: 0, nodeId: 'toc-1', nodeType: 'tableOfContents', styleId: 'TOC1' },
-        { ordinal: 1, nodeId: 'body-1', nodeType: 'paragraph', styleId: 'Normal' },
-      ],
-    });
-
-    expect(await removeTableOfContents(engine.host)).toEqual({ ok: true });
-    expect(engine.ops()).not.toContain('blocks.deleteRange');
-  });
-
-  it('שתי טבלאות — מסרבת ומסבירה, ואינה מנחשת', async () => {
+  it('שתי טבלאות — מסרבת ואינה מנחשת', async () => {
     const engine = fakeEngine({ tocs: ['toc-1', 'toc-2'], total: 2, blocks: documentWithToc() });
-
     const outcome = await removeTableOfContents(engine.host);
-
-    expect(outcome.ok).toBe(false);
     expect(outcome.ok === false && outcome.reason).toBe('ambiguous-toc');
     expect(engine.ops()).not.toContain('toc.remove');
   });
@@ -621,56 +468,19 @@ describe('הסרת תוכן העניינים', () => {
     });
   });
 
-  it('כשל של `toc.remove` עוצר לפני מחיקת השורות', async () => {
+  it('כשל של toc.remove משאיר את הבלוקים ומוחזר למשתמש', async () => {
     const engine = fakeEngine({
-      tocs: ['toc-1'],
-      total: 1,
-      blocks: documentWithToc(),
+      tocs: ['toc-1'], total: 1, blocks: documentWithToc(),
       failures: { 'toc.remove': { code: 'TARGET_NOT_FOUND' } },
     });
-
     const outcome = await removeTableOfContents(engine.host);
-
     expect(outcome.ok === false && outcome.reason).toBe('TARGET_NOT_FOUND');
+    expect(engine.remaining()).toEqual(documentWithToc().map((block) => block.nodeId));
     expect(engine.ops()).not.toContain('blocks.deleteRange');
   });
 
-  it('כשל של ניקוי השורות מדווח — ולא נבלע כהצלחה', async () => {
-    const engine = fakeEngine({
-      tocs: ['toc-1'],
-      total: 1,
-      blocks: documentWithToc(),
-      failures: { 'blocks.deleteRange': { code: 'PRECONDITION_FAILED' } },
-    });
-
-    const outcome = await removeTableOfContents(engine.host);
-
-    expect(outcome.ok === false && outcome.reason).toBe('PRECONDITION_FAILED');
-  });
-
-  it('גרסה בלי `blocks.deleteRange` — כשל מוסבר אחרי ההסרה', async () => {
-    const engine = fakeEngine({
-      tocs: ['toc-1'],
-      total: 1,
-      blocks: documentWithToc(),
-      missing: ['blocks.deleteRange'],
-    });
-
-    expect(await removeTableOfContents(engine.host)).toEqual({
-      ok: false,
-      message: 'הסרת תוכן העניינים נכשלה: אינו זמין בגרסה זו',
-      reason: 'command-unsupported',
-    });
-  });
-
   it('חריגה אינה יוצאת החוצה', async () => {
-    const engine = fakeEngine({
-      tocs: ['toc-1'],
-      total: 1,
-      blocks: documentWithToc(),
-      throws: ['toc.remove'],
-    });
-
+    const engine = fakeEngine({ tocs: ['toc-1'], total: 1, throws: ['toc.remove'] });
     expect((await removeTableOfContents(engine.host)).ok).toBe(false);
   });
 });
