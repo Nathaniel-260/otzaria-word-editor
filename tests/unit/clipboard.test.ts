@@ -183,7 +183,7 @@ function fakeDoc(overrides: Partial<ClipboardDocumentApi> = {}) {
       insert: (input) => {
         // „exactly one of payload, plan, or fragment” — זה החוזה, והוא זורק
         // INVALID_INPUT על שניים או על אפס.
-        const provided = [input?.payload, input?.plan].filter((value) => value !== undefined);
+        const provided = [input?.payload, input?.plan, input?.fragment].filter((value) => value !== undefined);
         if (provided.length !== 1) {
           throw new Error('clipboard.insert requires exactly one of payload, plan, or fragment');
         }
@@ -1313,6 +1313,33 @@ describe('pasteFromClipboard — אפשרויות ההדבקה', () => {
     const blocks = insertedPlan(calls).fragment.blocks as Array<{ runs: Array<{ marks?: unknown }> }>;
     // גם ההדגשה של המקור נזרקת; נשאר רק עיצוב היעד.
     for (const run of blocks[0]!.runs) expect(run.marks).toEqual({ fontFamily: 'David', fontSizePt: 18, fontSizeCsPt: 18, color: '#000000', bold: false, boldCs: false, italic: false, italicCs: false, underline: false, strike: false });
+  });
+
+  it('תכנית `plain-text` משוכתבת נשלחת כ-`fragment` ולא כ-`plan`', async () => {
+    // superdoc 2.23: `insert({plan})` של תכנית plain-text מתעלם מה-marks
+    // ומעתיק את הריצה שבסמן. נמדד: David 18 נכתב ב-2.20 ולא ב-2.23, ו-
+    // `insert({fragment})` כותב אותו בשתיהן.
+    const { host, calls } = richDoc();
+    host.activeEditor!.doc!.clipboard!.parse = (payload) => {
+      calls.push({ op: 'clipboard.parse', input: payload });
+      return {
+        success: true,
+        plan: {
+          fragment: { blocks: [{ kind: 'paragraph', runs: [{ text: 'x' }] }] },
+          diagnostics: [],
+          summary: { sourceKind: 'plain-text', plainFallback: false },
+        },
+      };
+    };
+    setSystemClipboard(readableClipboard({ 'text/plain': 'x' }));
+
+    expect((await pasteFromClipboard(host, { mode: 'text-only' })).ok).toBe(true);
+    const sent = calls.find((call) => call.op === 'clipboard.insert')!.input as {
+      plan?: unknown;
+      fragment?: { blocks: Array<{ runs: Array<{ marks?: unknown }> }> };
+    };
+    expect(sent.plan).toBeUndefined();
+    expect(sent.fragment!.blocks[0]!.runs[0]!.marks).toMatchObject({ fontFamily: 'David', fontSizePt: 18, fontSizeCsPt: 18 });
   });
 
   it('„שמירת טקסט בלבד” על לוח בלי טקסט — נכשלת בלי לגעת במסמך', async () => {
