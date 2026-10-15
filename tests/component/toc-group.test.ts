@@ -108,7 +108,9 @@ describe('„הסר”', () => {
 
     superdoc.reset();
     await button(harness, 'הסר').trigger('click');
-    await settle();
+    // 12 ולא 6: ההסרה סופרת בלוקים לפני ואחרי (`blockTotal`, engine/toc.ts),
+    // ושתי הקריאות האלה מאריכות את השרשרת מעבר לשישה סבבים.
+    await settle(12);
 
     expect(superdoc.inputs('toc.remove')).toEqual([
       { target: { kind: 'block', nodeType: 'tableOfContents', nodeId: 'toc-1' } },

@@ -655,7 +655,15 @@ async function sweepTocRows(
   host: TocTarget,
   from: number,
   signature: TocRowSignature,
+  removedByEngine: number,
 ): Promise<CommandOutcome> {
+  // מ-superdoc 2.23 `toc.remove` מוחק את השורות בעצמו (נמדד ב-references-qa:
+  // TOC בסוף המסמך עם שורה אחת — 2.20 השאיר אותה, 2.23 לא). רצף שנשאב אחרי
+  // זה היה מתחיל בבלוק שאינו שייך לטבלה: בלי שורות הוא מדווח „עשויות להישאר”
+  // על מסמך נקי, ופסקה של המשתמש בסגנון TOC* שבמקרה עומדת שם הייתה נמחקת.
+  const expected = Math.max(0, signature.expectedRows - removedByEngine);
+  if (signature.expectedRows > 0 && expected === 0) return { ok: true };
+
   const doc = docOf(host);
   const list = doc?.blocks?.list;
   const deleteRange = doc?.blocks?.deleteRange;
@@ -701,7 +709,7 @@ async function sweepTocRows(
   // על המסך, והמשתמש היה בטוח שמה שנשאר הוא טקסט שלו. אותה הודעה בדיוק כמו
   // במסלול שבו מקום הבלוק לא נמצא מלכתחילה.
   if (rows.length === 0) {
-    return signature.expectedRows > 0 ? rowsRemain() : { ok: true };
+    return expected > 0 ? rowsRemain() : { ok: true };
   }
 
   const first = rows[0];
@@ -717,7 +725,16 @@ async function sweepTocRows(
   const failure = failureOf(REMOVE_FAILED, swept.value);
   if (failure) return failure;
 
-  return truncated || rows.length < signature.expectedRows ? rowsRemain() : { ok: true };
+  return truncated || rows.length < expected ? rowsRemain() : { ok: true };
+}
+
+/** מספר הבלוקים במסמך, כפי ש-`blocks.list` מדווח. `null` = לא ידוע. */
+async function blockTotal(host: TocTarget): Promise<number | null> {
+  const list = docOf(host)?.blocks?.list;
+  if (typeof list !== 'function') return null;
+  const head = await attempt(REMOVE_FAILED, () => list({ limit: 1 }));
+  const total = head.ok ? head.value?.total : undefined;
+  return typeof total === 'number' && Number.isFinite(total) ? total : null;
 }
 
 /**
@@ -761,12 +778,16 @@ export async function removeTableOfContents(host: TocTarget): Promise<CommandOut
 
   const at = await ordinalOf(host, sole.address.nodeId);
 
+  // הספירה נלקחת לפני כל ניסיון: הפסקה ש-`appendParagraphAfterTocEnd` מוסיפה
+  // אינה חלק ממה שההסרה מחקה.
+  let totalBefore = await blockTotal(host);
   let removed = await attempt(REMOVE_FAILED, () => remove({ target: sole.address }));
   if (
     removed.ok &&
     removed.value?.failure?.code === 'CAPABILITY_UNAVAILABLE' &&
     (await appendParagraphAfterTocEnd(host, sole.rows))
   ) {
+    totalBefore = await blockTotal(host);
     removed = await attempt(REMOVE_FAILED, () => remove({ target: sole.address }));
   }
   if (!removed.ok) return removed.outcome;
@@ -777,7 +798,12 @@ export async function removeTableOfContents(host: TocTarget): Promise<CommandOut
   // נשאר, כדי שהמשתמש לא יחשוב שהשורות שעל המסך הן טבלה חיה.
   if (at === null) return rowsRemain();
 
-  return sweepTocRows(host, at, sole.rows);
+  // מה שהמנוע מחק מעבר לבלוק הטבלה עצמו הוא שורות. ספירה לא ידועה = אפס,
+  // כלומר ההתנהגות של 2.20: הרצף נשאב כולו.
+  const totalAfter = totalBefore === null ? null : await blockTotal(host);
+  const removedRows = totalBefore === null || totalAfter === null ? 0 : Math.max(0, totalBefore - totalAfter - 1);
+
+  return sweepTocRows(host, at, sole.rows, removedRows);
 }
 
 /* ------------------------------------------------------------------ */

@@ -73,6 +73,8 @@ interface FakeOptions {
   missing?: readonly string[];
   /** כמו superdoc 2.17: `toc.remove` מסרב כשהמסמך נגמר בשורת טבלה. */
   refuseTocAtEnd?: boolean;
+  /** כמו superdoc 2.23: `toc.remove` מוחק גם את השורות שאחרי הבלוק. */
+  removeTakesRows?: number;
 }
 
 function fakeEngine(options: FakeOptions = {}) {
@@ -125,7 +127,8 @@ function fakeEngine(options: FakeOptions = {}) {
         if (options.refuseTocAtEnd && /^TOC/.test(last?.styleId ?? '')) {
           return { success: false, failure: { code: 'CAPABILITY_UNAVAILABLE' } };
         }
-        blocks = blocks.filter((block) => block.nodeId !== target.nodeId);
+        const at = blocks.findIndex((block) => block.nodeId === target.nodeId);
+        if (at !== -1) blocks.splice(at, 1 + (options.removeTakesRows ?? 0));
         return receipt('toc.remove');
       }),
       configure: route('toc.configure', () => receipt('toc.configure')),
@@ -517,6 +520,66 @@ describe('הסרת תוכן העניינים', () => {
 
     expect(await removeTableOfContents(engine.host)).toEqual({ ok: true });
     expect(engine.remaining()).toEqual(['head-1']);
+  });
+
+  it('המנוע מחק את השורות בעצמו (2.23) — הצלחה, בלי deleteRange', async () => {
+    // נמדד ב-references-qa: TOC בסוף המסמך עם שורה אחת. 2.20 השאיר את השורה
+    // ו-2.23 לא, והרצף שאחרי ההסרה התחיל בפסקה שנוספה — „עשויות להישאר”
+    // על מסמך נקי.
+    const engine = fakeEngine({
+      tocs: ['toc-1'],
+      total: 1,
+      entryCount: 2,
+      removeTakesRows: 1,
+      refuseTocAtEnd: true,
+      blocks: [
+        { ordinal: 0, nodeId: 'head-1', nodeType: 'heading', styleId: 'Heading1' },
+        { ordinal: 1, nodeId: 'toc-1', nodeType: 'tableOfContents', styleId: 'TOC1' },
+        { ordinal: 2, nodeId: 'row-1', nodeType: 'paragraph', styleId: 'TOC1' },
+      ],
+    });
+
+    expect(await removeTableOfContents(engine.host)).toEqual({ ok: true });
+    expect(engine.ops()).not.toContain('blocks.deleteRange');
+    expect(engine.remaining()).toEqual(['head-1', 'trail']);
+  });
+
+  it('המנוע מחק את השורות בעצמו — פסקה של המשתמש בסגנון TOC1 שאחריהן אינה נמחקת', async () => {
+    const engine = fakeEngine({
+      tocs: ['toc-1'],
+      total: 1,
+      entryCount: 3,
+      removeTakesRows: 2,
+      blocks: [
+        { ordinal: 0, nodeId: 'toc-1', nodeType: 'tableOfContents', styleId: 'TOC1' },
+        { ordinal: 1, nodeId: 'row-1', nodeType: 'paragraph', styleId: 'TOC1' },
+        { ordinal: 2, nodeId: 'row-2', nodeType: 'paragraph', styleId: 'TOC2' },
+        { ordinal: 3, nodeId: 'mine', nodeType: 'paragraph', styleId: 'TOC1' },
+        { ordinal: 4, nodeId: 'body-1', nodeType: 'paragraph', styleId: 'Normal' },
+      ],
+    });
+
+    expect(await removeTableOfContents(engine.host)).toEqual({ ok: true });
+    expect(engine.remaining()).toEqual(['mine', 'body-1']);
+  });
+
+  it('המנוע מחק רק חלק מהשורות — השאר נשאבות, ו„בוצע”', async () => {
+    const engine = fakeEngine({
+      tocs: ['toc-1'],
+      total: 1,
+      entryCount: 4,
+      removeTakesRows: 1,
+      blocks: [
+        { ordinal: 0, nodeId: 'toc-1', nodeType: 'tableOfContents', styleId: 'TOC1' },
+        { ordinal: 1, nodeId: 'row-1', nodeType: 'paragraph', styleId: 'TOC1' },
+        { ordinal: 2, nodeId: 'row-2', nodeType: 'paragraph', styleId: 'TOC1' },
+        { ordinal: 3, nodeId: 'row-3', nodeType: 'paragraph', styleId: 'TOC1' },
+        { ordinal: 4, nodeId: 'body-1', nodeType: 'paragraph', styleId: 'Normal' },
+      ],
+    });
+
+    expect(await removeTableOfContents(engine.host)).toEqual({ ok: true });
+    expect(engine.remaining()).toEqual(['body-1']);
   });
 
   it('זיהוי שלא תפס שורות שהיו צפויות — אותה הודעה, ולא הצלחה שקטה', async () => {
