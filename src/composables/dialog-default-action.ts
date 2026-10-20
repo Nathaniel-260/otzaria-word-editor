@@ -24,9 +24,11 @@
  * מה ש-Enter עליו הוא של האלמנט עצמו, ולא של הדיאלוג.
  *
  * כפתור וקישור מופעלים כבר על ידי הדפדפן, ופריט בתפריט/ברשימה בוחר את עצמו.
- * לחטוף מהם את Enter פירושו כפתור „ביטול” שמאשר.
+ * לחטוף מהם את Enter פירושו כפתור „ביטול” שמאשר. וכך גם `<summary>`: Enter
+ * עליו פותח את ה-`<details>` — ב„דיווח על באג” זה „מה יישלח”, ולחטוף ממנו את
+ * Enter פירושו לשלוח את הדיווח במקום להציג אותו.
  */
-const SELF_ACTIVATING = 'button, a[href], [role="button"], [role="menuitem"], [role="option"], [role="tab"]';
+const SELF_ACTIVATING = 'button, a[href], summary, [role="button"], [role="menuitem"], [role="option"], [role="tab"]';
 
 export interface DialogDefaultAction {
   /** נקשר ב-`@keydown.enter` על שורש הדיאלוג. */

@@ -70,6 +70,7 @@
         @export-pdf="onExportPdf"
         @export-otzaria="onExportOtzaria"
         @about="isAboutOpen = true"
+        @report-bug="isBugReportOpen = true"
         @shortcuts-help="isShortcutsHelpOpen = true"
         @shortcuts-manage="isShortcutsManagerOpen = true"
         @exit-app="onExit"
@@ -241,6 +242,11 @@
       @close="isAboutOpen = false"
     />
 
+    <BugReportDialog
+      :is-open="isBugReportOpen"
+      @close="isBugReportOpen = false"
+    />
+
     <ShortcutsDialog
       :is-open="isShortcutsHelpOpen"
       :custom="customShortcuts"
@@ -373,6 +379,7 @@ import SpellingOverlay from './ui/shell/SpellingOverlay.vue';
 import PageMarkingOverlay from './ui/shell/PageMarkingOverlay.vue';
 import FindReplaceDialog from './ui/panels/FindReplaceDialog.vue';
 import AboutDialog from './ui/panels/AboutDialog.vue';
+import BugReportDialog from './ui/panels/BugReportDialog.vue';
 import LinkDialog from './ui/panels/LinkDialog.vue';
 import ShortcutsDialog from './ui/panels/ShortcutsDialog.vue';
 import ShortcutManagerDialog from './ui/panels/ShortcutManagerDialog.vue';
@@ -973,6 +980,7 @@ const findMode = ref<'find' | 'replace'>('find');
 const findInitialQuery = ref('');
 const titleBarRef = ref<InstanceType<typeof TitleBar> | null>(null);
 const isAboutOpen = ref(false);
+const isBugReportOpen = ref(false);
 const isShortcutsHelpOpen = ref(false);
 /**
  * ## הקיצורים שהמשתמש הגדיר בעצמו
@@ -4873,6 +4881,9 @@ function onCustomActionFromTellMe(action: TellMeCustomAction): void {
     case 'about':
       isAboutOpen.value = true;
       break;
+    case 'report-bug':
+      isBugReportOpen.value = true;
+      break;
     case 'shortcuts-manage':
       isShortcutsManagerOpen.value = true;
       break;
@@ -5218,6 +5229,10 @@ function closeTopmostLayer(): boolean {
   }
   if (isAboutOpen.value) {
     isAboutOpen.value = false;
+    return true;
+  }
+  if (isBugReportOpen.value) {
+    isBugReportOpen.value = false;
     return true;
   }
   if (linkDialog.isOpen.value) {

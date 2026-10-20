@@ -22,7 +22,8 @@
     "clipboard.read",
     "library.refresh",
     "library.books.read",
-    "library.content.read"
+    "library.content.read",
+    "app.open_url"
   ],
   "contributes": {
     "startup": {

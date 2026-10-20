@@ -227,6 +227,13 @@ async function handle(method: string, payload: Record<string, unknown> = {}): Pr
     // את app.info.read כהרשאת בסיס, ולכן זה עובד גם שם בלי הצהרה במניפסט.
     case 'app.getInfo':
       return BOOT.app;
+    // „דיווח על באג”. כמו במאחז: http/https בלבד, ו-`true` בהצלחה.
+    case 'app.openUrl': {
+      const url = String(payload.url ?? '');
+      if (!/^https?:\/\//i.test(url)) throw new Error('error.forbidden: only http/https URLs are allowed');
+      window.open(url, '_blank', 'noopener');
+      return true;
+    }
     case 'app.getTheme':
       return BOOT.theme;
     /*

@@ -116,6 +116,8 @@ const EN: Readonly<Record<string, string>> = {
   'קיצורים': 'Shortcuts',
   'רשימת קיצורי המקלדת': 'List of keyboard shortcuts',
   'ניהול קיצורים': 'Manage shortcuts',
+  'דיווח על באג': 'Report a bug',
+  'פתיחת דיווח על תקלה במאגר התוסף ב-GitHub': 'Open a bug report in the plugin repository on GitHub',
   'הצמדת צירוף מקשים לערכת עיצוב': 'Bind a key combination to a formatting preset',
 
   // ── לשונית „בית” ───────────────────────────────────────────────────

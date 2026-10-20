@@ -75,6 +75,7 @@
         @print-doc="$emit('print-doc')"
         @export-pdf="$emit('export-pdf')"
         @about="$emit('about')"
+        @report-bug="$emit('report-bug')"
         @shortcuts-help="$emit('shortcuts-help')"
         @shortcuts-manage="$emit('shortcuts-manage')"
         @exit-app="$emit('exit-app')"
@@ -220,6 +221,7 @@ defineEmits<{
   (e: 'export-pdf'): void;
   (e: 'export-otzaria'): void;
   (e: 'about'): void;
+  (e: 'report-bug'): void;
   (e: 'shortcuts-help'): void;
   (e: 'shortcuts-manage'): void;
   (e: 'exit-app'): void;

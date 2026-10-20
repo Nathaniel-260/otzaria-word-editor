@@ -144,6 +144,15 @@
           tooltip="הצמדת צירוף מקשים לערכת עיצוב"
           @click="$emit('shortcuts-manage')"
         />
+        <!-- פותח issue ב-GitHub דרך הדפדפן (host/bug-report.ts). כמו „אודות”
+             אינו נוגע במסמך, ולכן אין לו `:disabled`. -->
+        <RibbonButton
+          icon="bug"
+          label="דיווח על באג"
+          variant="small"
+          tooltip="פתיחת דיווח על תקלה במאגר התוסף ב-GitHub"
+          @click="$emit('report-bug')"
+        />
       </RibbonStack>
       <!-- הפקד היחיד בלשונית בלי `:disabled`, ובכוונה: הדיאלוג הוא של התוסף,
            הוא אינו נוגע במסמך ואינו נוגע במנוע, ואין מצב שבו הוא אינו זמין.
@@ -248,6 +257,7 @@ defineEmits<{
   (e: 'print-doc'): void;
   (e: 'export-pdf'): void;
   (e: 'about'): void;
+  (e: 'report-bug'): void;
   (e: 'shortcuts-help'): void;
   (e: 'shortcuts-manage'): void;
   (e: 'exit-app'): void;
