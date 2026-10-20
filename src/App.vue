@@ -1792,6 +1792,8 @@ let openingAttempt: LoadAttempt | null = null;
 let tabClosePending = false;
 /** קובץ שהתקבל נשאר בפתיחה עד שהבייטים שלו נכתבו לשחזור. */
 let receivedFileOpening = false;
+/** פתירת ספר מהקורא מחזיקה את אותו שער כמו פתיחת המסמך עצמו. */
+let editBookResolving = false;
 
 /**
  * האם אסור להתחיל פתיחה או להחליף טאב כרגע.
@@ -1802,7 +1804,7 @@ let receivedFileOpening = false;
  */
 function isOpenBusy(): boolean {
   return isOpening.value || pendingTabLoad || (openingAttempt !== null && !openingAttempt.cancelled) ||
-    tabClosePending || isExiting.value || receivedFileOpening;
+    tabClosePending || isExiting.value || receivedFileOpening || editBookResolving;
 }
 let contextMenuListener: (() => void) | null = null;
 /** מבטל את ההאזנה לקובץ שתוסף אחר שולח. ראו `registerReceivedFiles`. */
@@ -2610,6 +2612,8 @@ async function applyNewDocumentPaperSize(superdoc: SuperDoc): Promise<void> {
 
 /** מה שאינו נגזר מהקובץ עצמו — המסלולים של „חזרה למה שהיה”. */
 interface OpenOptions {
+  /** הנחיית פתיחה, בעדיפות נמוכה מהתראות מאקרו ותיקוני המסמך. */
+  openedNotice?: string;
   /**
    * בייטים לפתוח **במקום** ה-URL של הקובץ: טיוטת השחזור. המסמך שנפתח כך
    * מסומן מיד כלא-שמור, כי זה בדיוק מה שהוא — עבודה שאינה בדיסק.
@@ -3218,12 +3222,13 @@ async function openDocumentInto(
      לא בביטול, ולא בקובץ. ראו COMPLEX_SCRIPT_BOLD_NOTICE. */
   const readOnlyNotice =
     file && file.access !== 'readwrite'
-      ? `${title.value} — פתוח לקריאה; „שמור” יבקש מקום חדש`
+      ? options.openedNotice ?? `${title.value} — פתוח לקריאה; „שמור” יבקש מקום חדש`
       : null;
   if (vba.autoRun.length > 0 && vba.status) setStatus(vba.status);
   else if (preflightNotice) setStatus(preflightNotice);
   else if (readOnlyNotice) setStatus(readOnlyNotice);
   else if (vba.status) setStatus(vba.status);
+  else if (options.openedNotice) setStatus(options.openedNotice);
 
   save?.reset(file && file.access === 'readwrite' ? { token: file.token, name: file.name } : null);
 
@@ -5715,20 +5720,18 @@ function registerReceivedFiles(): void {
 }
 
 /**
- * ספרים שנפתחו מ„ערוך בוורד לאוצריא” לכתיבה: מפתח הספר → הטאב וה-token שלו.
- *
- * לחיצה שנייה על אותו ספר עוברת לטאב הקיים ואינה פותחת עותק שני: שני טאבים
- * שכותבים לאותו קובץ הם שמירה אחת שדורסת את השנייה בשקט. ספר שנפתח לקריאה
- * אינו נרשם כאן — אין לו יעד כתיבה, ועותק נוסף שלו אינו דורס דבר.
+ * יעד הכתיבה הוא זהות הקובץ גם אחרי פתיחה ידנית או שחזור הפעלה. ה-host
+ * מחזיר אותו token לאותו קובץ; מפתח הספר לבדו אינו מזהה טאבים ממסלולים אחרים.
+ * טאב רדום/שטרם נטען מחזיק את היעד בזוכר, עד שקואורדינטור השמירה ייטען.
  */
-const editedBooks = new Map<string, { sessionId: DocumentSessionId; token: string }>();
-
-function findEditedBookTab(key: string): DocumentSessionId | null {
-  const entry = editedBooks.get(key);
-  if (!entry) return null;
-  // הטאב קיים ועדיין כותב לאותו קובץ — אחרת הרשומה ישנה.
-  if (sessions.get(entry.sessionId)?.save.snapshot.targetToken === entry.token) return entry.sessionId;
-  editedBooks.delete(key);
+function findWritableFileTab(token: string): DocumentSessionId | null {
+  for (const session of sessions.values()) {
+    if (session.save.snapshot.targetToken === token) return session.id;
+    if (session.pendingRestore) {
+      const file = activeEntry(session.keeper.state)?.document;
+      if (file?.writable && file.token === token) return session.id;
+    }
+  }
   return null;
 }
 
@@ -5749,33 +5752,35 @@ async function openEditBook(event: EditBookEvent): Promise<void> {
   const { book } = request;
   await untilOpenIdle();
 
-  const existing = findEditedBookTab(book.key);
-  if (existing) {
-    onDocumentTabSelect(existing);
-    setStatus(`„${book.title}” כבר פתוח לעריכה`);
-    return;
+  // לפני ה-await, כדי שפתיחה/סגירה/מעבר טאב ידניים לא יתחילו בתוך סבב ה-IPC.
+  editBookResolving = true;
+  let result: SourceResult<UserFile>;
+  try {
+    result = await openLibraryBook(book);
+  } finally {
+    editBookResolving = false;
   }
-
-  const result = await openLibraryBook(book);
   if (!result.ok) {
     setStatus(result.message, true);
     return;
   }
-  ensureOpenTargetTab();
-  const opened = await openDocument(result.value);
-  if (!opened) {
-    setStatus(`„${book.title}” לא נפתח`, true);
+
+  // רק אחרי שה-host פתר את זהות הקובץ: גם טאב שנפתח מ„אחרונים”, מבורר
+  // הקבצים או בהפעלה קודמת יכול כבר להחזיק את העבודה העדכנית על אותו קובץ.
+  const existing = findWritableFileTab(result.value.token);
+  if (existing) {
+    onDocumentTabSelect(existing);
     return;
   }
 
+  ensureOpenTargetTab();
   const writable = result.value.access === 'readwrite';
-  const session = activeSession.value;
-  if (writable && session) editedBooks.set(book.key, { sessionId: session.id, token: result.value.token });
-  setStatus(
-    writable
+  const opened = await openDocument(result.value, {
+    openedNotice: writable
       ? `„${book.title}” נפתח לעריכה — „שמור” כותב לקובץ עצמו`
       : `„${book.title}” הוא ספר של הספרייה — „שמור” ישמור עותק במקום אחר`,
-  );
+  });
+  if (!opened) setStatus(`„${book.title}” לא נפתח`, true);
 }
 
 function queueEditBook(event: EditBookEvent): void {

@@ -270,15 +270,12 @@ vi.mock('../../src/sessions/save-coordinator', async (importOriginal) => ({
   createSaveCoordinator: (deps: SaveCoordinatorDeps) => {
     stub.saveDeps = deps;
     stub.saveDepsList.push(deps);
+    const snapshot: SaveSnapshot = {
+      state: 'idle', isDirty: false, isSaving: false,
+      targetToken: null, name: null, lastError: null,
+    };
     return {
-      snapshot: {
-        state: 'idle',
-        isDirty: false,
-        isSaving: false,
-        targetToken: null,
-        name: null,
-        lastError: null,
-      },
+      get snapshot() { return snapshot; },
       markDirty: () => {
         stub.markDirtyCalls += 1;
       },
@@ -296,8 +293,11 @@ vi.mock('../../src/sessions/save-coordinator', async (importOriginal) => ({
         stub.autosaveCalls.push(enabled);
       },
       adoptTarget: () => {},
-      reset: () => {
+      reset: (target?: { token: string; name: string } | null) => {
         stub.resetCalls += 1;
+        snapshot.targetToken = target?.token ?? null;
+        snapshot.name = target?.name ?? null;
+        deps.onStateChange?.({ ...snapshot });
       },
       saveNow: async (options?: { forceSaveAs?: boolean; suggestedName?: string }) => {
         stub.saveNowCalls.push(options);
@@ -2631,5 +2631,167 @@ describe('הגרסה שלפני השמירה האחרונה', () => {
 
     expect(stub.openSources, 'לא נפתח דבר').toHaveLength(0);
     expect(wrapper.find('.word-statusbar').text()).toContain('לא נמצאה');
+  });
+});
+
+describe('פתיחת ספר Word מסרגל הקורא', () => {
+  function host(bookReply: () => Promise<unknown>) {
+    const listeners = new Map<string, (event: unknown) => void>();
+    window.Otzaria = {
+      call: (method: string) => method === 'library.openBookFile'
+        ? bookReply()
+        : Promise.resolve({ success: true, data: {} }),
+      on: (name: string, listener: (event: unknown) => void) => listeners.set(name, listener),
+      off: (name: string) => listeners.delete(name),
+    } as never;
+    return () => listeners.get('reader.toolbar_item_clicked')!({
+      itemId: 'otzaria-word-edit-book', context: 'reader-text',
+      currentBook: 'ראשון', currentBookId: 'ראשון', bookUid: 'user:42',
+      currentId: 42, currentType: 'docx', currentSource: 'user',
+    });
+  }
+
+  const fileReply = () => Promise.resolve({
+    success: true, data: { ...TAB_FILES['tok-1'] as object, access: 'readwrite' },
+  });
+
+  function storedTabs(activeId = 'doc-1', draft: unknown = null) {
+    stub.storedSession = {
+      version: 2,
+      documents: [
+        { id: 'doc-1', document: FIRST_DOC, caret: null, draft },
+        { id: 'doc-2', document: SECOND_DOC, caret: null, draft: null },
+      ],
+      activeId,
+      view: { zoom: null, focusMode: false, ribbonTab: null, ribbonCollapsed: false },
+    };
+    stub.resolvedFile = (token: string) => TAB_FILES[token] ?? null;
+  }
+
+  it('לחיצה חוזרת עוברת לטאב הכתיב בלי לפתוח מנוע נוסף', async () => {
+    const emit = host(fileReply);
+    const wrapper = await mountShell();
+    try {
+      emit(); await settle(16);
+      expect(wrapper.find('.word-statusbar').text()).toContain('„שמור” כותב לקובץ עצמו');
+      await wrapper.find('.word-doctabs-new').trigger('click');
+      await settle(12);
+      const opened = stub.openSources.length;
+      emit(); await settle(16);
+      expect(wrapper.findAll('.word-doctab')).toHaveLength(2);
+      expect(wrapper.find('.word-doctab.active .word-doctab-title').text()).toBe('ראשון');
+      expect(stub.openSources).toHaveLength(opened);
+    } finally { wrapper.unmount(); window.Otzaria = undefined as never; }
+  });
+
+  it('גם ספר שנפתח מ„אחרונים” מזוהה לפי יעד הכתיבה', async () => {
+    stub.storedRecents = [{ ...FIRST_DOC, size: 100, openedAt: 1, pinned: false }];
+    stub.resolvedFile = TAB_FILES['tok-1'];
+    const emit = host(fileReply);
+    const wrapper = await mountShell();
+    try {
+      pressCtrl('KeyO'); await settle(8);
+      const { default: OpenDialog } = await import('../../src/ui/panels/OpenDocumentDialog.vue');
+      wrapper.findComponent(OpenDialog).vm.$emit('open-recent', 'tok-1');
+      await settle(16);
+      expect(stub.openSources[stub.openSources.length - 1]).toBe('loopback://first');
+      const opened = stub.openSources.length;
+      emit(); await settle(16);
+      expect(wrapper.findAll('.word-doctab')).toHaveLength(1);
+      expect(stub.openSources).toHaveLength(opened);
+    } finally { wrapper.unmount(); window.Otzaria = undefined as never; }
+  });
+
+  it.each(['doc-1', 'doc-2'])('שחזור טאב כתיב, פעיל או ממתין (%s), אינו יוצר עותק נוסף', async (activeId) => {
+    storedTabs(activeId);
+    const emit = host(fileReply);
+    const wrapper = await mountShell();
+    try {
+      emit(); await settle(20);
+      expect(wrapper.findAll('.word-doctab')).toHaveLength(2);
+      expect(wrapper.find('.word-doctab.active .word-doctab-title').text()).toBe('ראשון');
+      expect(stub.openSources.filter(source => source === 'loopback://first')).toHaveLength(1);
+    } finally { wrapper.unmount(); window.Otzaria = undefined as never; }
+  });
+
+  it('טאב ממתין עם שינויים משוחזר מהטיוטה ולא מהעותק שבדיסק', async () => {
+    const draft = { path: 'session-draft-doc-1.docx', savedAt: 1, documentToken: 'tok-1', sourceSize: 100 };
+    storedTabs('doc-2', draft);
+    stub.draftsByPath[draft.path] = new Uint8Array([80, 75, 3, 4]);
+    const emit = host(fileReply);
+    const wrapper = await mountShell();
+    try {
+      emit(); await settle(20);
+      expect(wrapper.findAll('.word-doctab')).toHaveLength(2);
+      expect(stub.openSources[stub.openSources.length - 1]).toBeInstanceOf(Blob);
+      expect(stub.openSources).not.toContain('loopback://first');
+      expect(stub.markRestoredCalls).toBe(1);
+    } finally { wrapper.unmount(); window.Otzaria = undefined as never; }
+  });
+
+  it.each(['preflight', 'autoRun'])('התראת %s קודמת להנחיית השמירה', async (warning) => {
+    const emit = host(fileReply);
+    const wrapper = await mountShell();
+    try {
+      if (warning === 'preflight') stub.preflight.notice = COMPLEX_SCRIPT_BOLD_NOTICE;
+      else stub.preflight.vba = {
+        ...NO_VBA, hasMacroPart: true, autoRun: ['AutoOpen'], status: 'התראת מאקרו בפתיחה',
+      };
+      emit(); await settle(16);
+      expect(wrapper.find('.word-statusbar').text()).toContain(
+        warning === 'preflight' ? COMPLEX_SCRIPT_BOLD_NOTICE : 'התראת מאקרו בפתיחה',
+      );
+      expect(wrapper.find('.word-statusbar').text()).not.toContain('„שמור” כותב לקובץ עצמו');
+    } finally { wrapper.unmount(); window.Otzaria = undefined as never; }
+  });
+
+  it('ספר לקריאה בלבד אינו מקבל יעד כתיבה', async () => {
+    const emit = host(async () => ({ success: true, data: { ...TAB_FILES['tok-1'] as object, access: 'read' } }));
+    const wrapper = await mountShell();
+    try {
+      emit(); await settle(16);
+      expect(wrapper.find('.word-statusbar').text()).toContain('„שמור” ישמור עותק במקום אחר');
+      const record = stub.persistedSessions[stub.persistedSessions.length - 1] as {
+        documents: Array<{ document: typeof FIRST_DOC }>;
+      };
+      expect(record.documents[0]?.document.writable).toBe(false);
+    } finally { wrapper.unmount(); window.Otzaria = undefined as never; }
+  });
+
+  it('סבב פתירת הספר חוסם פתיחה, סגירה ומעבר טאב ידניים ומשחרר את השער בסיום', async () => {
+    storedTabs();
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    let started = false;
+    const emit = host(async () => { started = true; await gate; return fileReply(); });
+    const wrapper = await mountShell();
+    try {
+      emit(); await settle(8);
+      expect(started).toBe(true);
+      const opened = stub.openSources.length;
+      await wrapper.find('.word-doctabs-new').trigger('click');
+      pressCtrl('KeyW');
+      await wrapper.findAll('.word-doctab')[1]!.trigger('click');
+      await settle(8);
+      expect(wrapper.findAll('.word-doctab')).toHaveLength(2);
+      expect(wrapper.find('.word-doctab.active .word-doctab-title').text()).toBe('ראשון');
+      expect(stub.openSources).toHaveLength(opened);
+      release(); await settle(16);
+      await wrapper.find('.word-doctabs-new').trigger('click'); await settle(12);
+      expect(wrapper.findAll('.word-doctab')).toHaveLength(3);
+    } finally { release(); await settle(8); wrapper.unmount(); window.Otzaria = undefined as never; }
+  });
+
+  it.each(['rejected', 'throw'])('כשל RPC מסוג %s משחרר את שער הפתיחה', async (failure) => {
+    const emit = host(async () => {
+      if (failure === 'throw') throw new Error('RPC failed');
+      return { success: false, error: { message: 'אין הרשאה' } };
+    });
+    const wrapper = await mountShell();
+    try {
+      emit(); await settle(16);
+      await wrapper.find('.word-doctabs-new').trigger('click'); await settle(12);
+      expect(wrapper.findAll('.word-doctab')).toHaveLength(2);
+    } finally { wrapper.unmount(); window.Otzaria = undefined as never; }
   });
 });
