@@ -154,7 +154,11 @@ export function createDirectionShortcut(deps: DirectionShortcutDeps): { dispose:
   // באוויר עד שהמשתמש חוזר ומשחרר Shift — ואז הכיוון מתהפך בלי שביקש.
   const onBlur = () => detector.reset();
 
-  target?.addEventListener('keydown', onKeyDown);
+  // `keydown` ב-capture: רשומה שרצה לפני המנוע (`runsBeforeEngine`, וכל קיצור
+  // אישי) בולעת את ההקשה ב-`stopPropagation` על `window` בשלב ה-capture, ומאזין
+  // bubble כאן לא היה רואה את ה-E של `Ctrl+Shift+E` — החימוש נשאר, ושחרור
+  // ה-Shift הפך את כיוון הפסקה. על אותו צומת `stopPropagation` אינו חוסם.
+  target?.addEventListener('keydown', onKeyDown, true);
   target?.addEventListener('keyup', onKeyUp);
   target?.addEventListener('blur', onBlur);
 
@@ -163,7 +167,7 @@ export function createDirectionShortcut(deps: DirectionShortcutDeps): { dispose:
     dispose() {
       if (disposed) return;
       disposed = true;
-      target?.removeEventListener('keydown', onKeyDown);
+      target?.removeEventListener('keydown', onKeyDown, true);
       target?.removeEventListener('keyup', onKeyUp);
       target?.removeEventListener('blur', onBlur);
     },

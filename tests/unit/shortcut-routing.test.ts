@@ -265,6 +265,10 @@ describe('הרשימה כולה', () => {
       'tab-goto-last',
       'tell-me',
       'macro-manage',
+      // `Ctrl+Shift` שהמנוע קושר לפעולה אחרת (מירכוז, רשימת תבליטים) — נמדד
+      // ב-scripts/qa/ctrl-shift-survey-probe.mjs.
+      'track-changes',
+      'formatting-marks',
     ];
 
     const inCapture: string[] = [];

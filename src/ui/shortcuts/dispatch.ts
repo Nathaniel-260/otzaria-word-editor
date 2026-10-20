@@ -60,7 +60,44 @@ import { SHORTCUTS, type ShellAction, type Shortcut } from './registry';
  * כקלט-פלט ולא דרך מאזין.
  */
 export function runsBeforeEngine(shortcut: Shortcut): boolean {
-  return shortcut.alt === true && shortcut.ctrl !== true;
+  if (shortcut.alt === true && shortcut.ctrl !== true) return true;
+  return conflictsWithEngineCtrlShift(shortcut);
+}
+
+/**
+ * צירופי `Ctrl+Shift` שהמנוע קושר בעצמו, ומה הם עושים אצלו.
+ *
+ * נמדד בדפדפן (scripts/qa/ctrl-shift-survey-probe.mjs, על כל האותיות, הספרות
+ * ו-`> < + _`): אלה בדיוק הצירופים שהמנוע קורא להם `preventDefault`. רובם
+ * מוסכמות TipTap ולא Word — `Ctrl+Shift+E` מרכז, `L`/`R` מיישרים, `7`/`8`
+ * פותחים רשימה. כש-`defaultPrevented` כבר דלוק ב-bubble המנתב נוטש, ולכן
+ * רשומה שלנו על צירוף כזה לא רצה מעולם: `Ctrl+Shift+E` מירכז את הפסקה במקום
+ * להפעיל מעקב שינויים, ו-`Ctrl+Shift+8` פתח רשימת תבליטים במקום סימני עיצוב.
+ */
+const ENGINE_CTRL_SHIFT: Readonly<Record<string, string>> = {
+  KeyE: 'text-align',
+  KeyL: 'text-align',
+  KeyR: 'text-align',
+  KeyH: 'highlight',
+  KeyX: 'strikethrough',
+  KeyZ: 'redo',
+  Digit7: 'ordered-list',
+  Digit8: 'bullet-list',
+};
+
+/**
+ * רשומה שלנו על צירוף שהמנוע קושר **לפעולה אחרת** — ולכן חייבת לרוץ לפניו.
+ *
+ * כשהפעולה זהה (`Ctrl+Shift+X` קו חוצה, `Ctrl+Shift+Z` ביצוע חוזר) הצירוף
+ * נשאר של המנוע, בדיוק כמו `Ctrl+B`: אין מה להרוויח מלעקוף אותו.
+ */
+function conflictsWithEngineCtrlShift(shortcut: Shortcut): boolean {
+  if (shortcut.ctrl !== true || shortcut.shift !== true || shortcut.alt === true) return false;
+  const codes = typeof shortcut.code === 'string' ? [shortcut.code] : (shortcut.code ?? []);
+  return codes.some((code) => {
+    const engine = ENGINE_CTRL_SHIFT[code];
+    return engine !== undefined && engine !== shortcut.command;
+  });
 }
 
 /**

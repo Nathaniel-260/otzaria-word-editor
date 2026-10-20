@@ -880,6 +880,36 @@ describe('כיווניות פסקה', () => {
 
     expect(adapter.calls.map((call) => call.id)).toEqual(['strikethrough']);
   });
+
+  /*
+   * הדיווח: „Ctrl+Shift+E שובר את הטקסט”. נמדד בדפדפן: המנוע קושר את הצירוף
+   * למירכוז וקורא `preventDefault`, ולכן המנתב שלנו (ב-bubble) נטש ומעקב
+   * השינויים לא הופעל — הפסקה זזה במקומו. התיקון מריץ את הרשומה לפני המנוע,
+   * ב-capture על `window` — ושם הבליעה עוצרת את ה-E לפני ש-bubble על `window`
+   * רואה אותו, כלומר מאזין כיווניות ב-bubble היה נשאר חמוש ושחרור ה-Shift
+   * היה הופך גם את הכיוון. הבדיקה סוגרת את שני הצדדים.
+   */
+  it('Ctrl+Shift+E במסמך מפעיל מעקב שינויים, גם כשהמנוע קושר את הצירוף, ואינו הופך כיווניות', async () => {
+    const wrapper = await mountShell();
+    const surface = composingSurface(wrapper);
+    // הדמה של המנוע: מירכוז על Ctrl+Shift+E, עם `preventDefault`, כמו שנמדד.
+    surface.addEventListener('keydown', (event) => {
+      if (event.ctrlKey && event.shiftKey && event.code === 'KeyE') event.preventDefault();
+    });
+
+    const init = { ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true };
+    surface.dispatchEvent(new KeyboardEvent('keydown', { code: 'ShiftLeft', key: 'Shift', ...init }));
+    surface.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyE', key: 'E', ...init }));
+    // ה-Shift משוחרר **לפני** ה-E, כמו באצבעות שמתגלגלות מהצירוף: שחרור ה-E
+    // קודם מנטרל את החימוש בעצמו, ובסדר הזה הבאג נשאר מוסתר.
+    surface.dispatchEvent(new KeyboardEvent('keyup', { code: 'ShiftLeft', key: 'Shift', ...init }));
+    surface.dispatchEvent(
+      new KeyboardEvent('keyup', { code: 'KeyE', key: 'e', ctrlKey: true, bubbles: true, cancelable: true }),
+    );
+    await settle();
+
+    expect(adapter.calls.map((call) => call.id)).toEqual(['document-mode']);
+  });
 });
 
 describe('אוצריא', () => {
