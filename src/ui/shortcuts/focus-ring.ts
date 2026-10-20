@@ -1,5 +1,5 @@
 /**
- * מעגל המיקוד של `F6` — סרגל הכותרת, הרצועה, המסמך, כפתור היציאה ממצב מיקוד
+ * מעגל המיקוד של `F6` — סרגל הכותרת, הרצועה, חלונית הניווט, המסמך, כפתור היציאה ממצב מיקוד
  * ושורת המצב.
  *
  * ## למה זה נחוץ
@@ -24,7 +24,7 @@
  * אזור: הוא הפקד היחיד שרואים שם, והמנוע בולע `Tab` ולכן אין אליו שום דרך
  * אחרת מהמקלדת. נמדד בדפדפן: `Tab` מגוף המסמך אינו מגיע אליו.
  */
-export type FocusRegionId = 'titlebar' | 'ribbon' | 'document' | 'focus-exit' | 'statusbar';
+export type FocusRegionId = 'titlebar' | 'ribbon' | 'navigation' | 'document' | 'focus-exit' | 'statusbar';
 
 export type FocusDirection = 'next' | 'prev';
 

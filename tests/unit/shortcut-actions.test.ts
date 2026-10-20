@@ -25,6 +25,7 @@ function setup(over: Partial<ShellActionDeps> = {}) {
     insertNote: vi.fn(),
     toggleTrackChanges: vi.fn(),
     toggleFocusMode: vi.fn(),
+    toggleNavigationPane: vi.fn(),
     findAgain: vi.fn(() => true),
     insertCitation: vi.fn(),
     searchOtzaria: vi.fn(),

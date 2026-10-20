@@ -40,6 +40,18 @@
           :disabled="!marksCmd.enabled.value"
           @click="marksCmd.run()"
         />
+        <!--
+          בלי `disabled`, כמו „רקע”: החלונית היא העדפת תצוגה ולא פקודת מנוע,
+          ובלי מסמך היא פשוט אומרת שאין מסמך.
+        -->
+        <RibbonButton
+          icon="navigationPane"
+          label="חלונית ניווט"
+          variant="small"
+          tooltip="הצג את כותרות המסמך בצד, ועבור מכותרת לכותרת בלחיצה"
+          :active="navigationPaneVisible"
+          @click="$emit('toggle-navigation-pane')"
+        />
       </RibbonStack>
     </RibbonGroup>
 
@@ -135,8 +147,13 @@ import {
   setCanvasColor,
 } from '../../../composables/canvas-color';
 
+defineProps<{
+  navigationPaneVisible?: boolean;
+}>();
+
 defineEmits<{
   (e: 'toggle-focus-mode'): void;
+  (e: 'toggle-navigation-pane'): void;
 }>();
 
 /** ברירת המחדל כשאין מדווח — הרכבה חלקית בבדיקות. זהה להתנהגות של `useCommand`. */

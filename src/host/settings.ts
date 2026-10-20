@@ -164,6 +164,17 @@ export async function saveListAutoformatEnabled(enabled: boolean): Promise<void>
   await tryCall('storage.set', { key: LIST_AUTOFORMAT_KEY, value: enabled });
 }
 
+const NAVIGATION_PANE_KEY = 'navigation-pane-visible';
+
+/** „חלונית ניווט” פתוחה. ברירת המחדל סגורה, כמו ב-Word. */
+export async function loadNavigationPaneVisible(): Promise<boolean> {
+  return (await tryCall<unknown>('storage.get', { key: NAVIGATION_PANE_KEY })) === true;
+}
+
+export async function saveNavigationPaneVisible(visible: boolean): Promise<void> {
+  await tryCall('storage.set', { key: NAVIGATION_PANE_KEY, value: visible });
+}
+
 const CANVAS_COLOR_KEY = 'canvas-color';
 
 /**

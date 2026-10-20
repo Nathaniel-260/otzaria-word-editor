@@ -62,6 +62,7 @@
         :is-exiting="isExiting"
         :book-completion-enabled="bookCompletionEnabled"
         :list-autoformat-enabled="listAutoformatEnabled"
+        :navigation-pane-visible="navigationPaneVisible"
         @new-doc="openOpenDialog('new')"
         @open-doc="openOpenDialog('open')"
         @save-doc="onSave(false)"
@@ -86,6 +87,7 @@
         @macro-play="onMacroPlay"
         @toggle-book-completion="onToggleBookCompletion"
         @toggle-list-autoformat="onToggleListAutoformat"
+        @toggle-navigation-pane="onToggleNavigationPane"
       />
 
       <!-- שורת הסרגל האופקי. הפינה שלפניו רחבה כמו הסרגל האנכי, וכך שניהם
@@ -110,6 +112,19 @@
 
     <!-- אזור המסמך: הסרגל האנכי ולצדו ה-stack שהמנוע מצייר בתוכו -->
     <div class="editor-area">
+      <!--
+        ראשונה בשורה, ולכן ב-RTL בקצה הימני — שם Word העברי מציב אותה.
+        `v-if` ולא `v-show`: חלונית סגורה אינה קוראת את המסמך כלל.
+      -->
+      <NavigationPane
+        v-if="navigationPaneVisible && !isFocusMode"
+        :host="activeSuperdoc"
+        :generation="documentGeneration"
+        :doc-revision="navDocRevision"
+        :caret-revision="navCaretRevision"
+        @close="onCloseNavigationPane"
+        @navigated="focusRing.toDocument()"
+      />
       <VerticalRuler
         :visible="isRulerVisible"
         :reading="rulerReading"
@@ -372,6 +387,7 @@ import Ribbon from './ui/ribbon/Ribbon.vue';
 import StatusBar from './ui/shell/StatusBar.vue';
 import DocumentRuler from './ui/shell/DocumentRuler.vue';
 import VerticalRuler from './ui/shell/VerticalRuler.vue';
+import NavigationPane from './ui/shell/NavigationPane.vue';
 import PageBorderOverlay from './ui/shell/PageBorderOverlay.vue';
 import LineNumberOverlay from './ui/shell/LineNumberOverlay.vue';
 import PilcrowOverlay from './ui/shell/PilcrowOverlay.vue';
@@ -633,6 +649,8 @@ import {
   saveSpellcheckEnabled,
   loadListAutoformatEnabled,
   saveListAutoformatEnabled,
+  loadNavigationPaneVisible,
+  saveNavigationPaneVisible,
   loadAutoCorrect,
   saveAutoCorrect,
   loadCanvasColor,
@@ -959,6 +977,15 @@ const revealed = ref<RevealZone>(null);
 const bookCompletionEnabled = ref(false);
 /** זיהוי רשימות בהקלדה. ברירת המחדל דלוקה — ראו host/settings.ts. */
 const listAutoformatEnabled = ref(true);
+/** „חלונית ניווט”. העדפה של המעטפת, לא של מסמך — ראו host/settings.ts. */
+const navigationPaneVisible = ref(false);
+/**
+ * מונים שהחלונית מקשיבה להם: עריכה ותזוזת סמן **בטאב הפעיל**. טאב ברקע אינו
+ * מקדם אותם — החלונית מציגה את המסמך שעל המסך, ומסמך אחר מגיע אליה דרך
+ * `activeSuperdoc`/`documentGeneration`.
+ */
+const navDocRevision = ref(0);
+const navCaretRevision = ref(0);
 
 /**
  * הלשונית ברצועה ומצב הכיווץ. הוחזקו עד עכשיו בתוך `Ribbon.vue` עצמו, ועלו
@@ -1895,6 +1922,15 @@ function reportCommand(outcome: CommandOutcome, commandId: string): void {
    * נשאר ישן עד לעריכת טקסט הבאה — בחירה בתפריט לא הייתה מצטיירת עד אז.
    */
   if (commandId === 'page-line-numbering') lineNumberModel?.refreshNow();
+
+  /**
+   * „חלונית ניווט” — אותה מלכודת, בפקודה אחרת: החלת סגנון מהגלריה
+   * (`linked-style`) אינה מפעילה `onUpdate`. נמדד בשער `check:navigation-pane`:
+   * אחרי „כותרת 3” `blocks.list` כבר החזיר `Heading3`, והחלונית נשארה בלי
+   * הכותרת. לכל פקודה שהצליחה ולא לרשימת מזהים: כל פקודה שמשנה סגנון או
+   * רמת מתאר יכולה להוסיף או להסיר כותרת, והקריאה מושהית בחלונית ממילא.
+   */
+  navDocRevision.value += 1;
 }
 
 provide(COMMAND_REPORTER, reportCommand);
@@ -2211,6 +2247,7 @@ function createOpenEditorForSession(session: DocumentSession): OpenEditor {
         session.pageBorders?.noteDocumentChanged();
         session.lineNumbers?.noteDocumentChanged();
         session.formattingMarks?.noteDocumentChanged();
+        if (session === activeSession.value) navDocRevision.value += 1;
         // המילון משותף לכל הטאבים, ולכן זה מונה אחד ולא שדה של ה-session.
         // המחיר: עריכה בטאב **ברקע** מריצה מדידה על המסמך שעל המסך. היא לא
         // תצייר כלום (`sameTextSegments` מזהה שדבר לא זז), אבל היא כן נמדדת
@@ -3146,6 +3183,7 @@ async function openDocumentInto(
     editor.ui.selection.observe(() => {
       sessionMetrics.noteSelectionChanged();
       sessionRuler.noteSelectionChanged();
+      if (!session || session === activeSession.value) navCaretRevision.value += 1;
       // הזוכר **של הטאב הזה**, בדיוק כמו ב-`observeZoom` שמתחת: הסינגלטון
       // מתאפס למשך מעבר טאב (`stashActiveInto`), ובטאב שברקע הוא כבר של
       // מסמך אחר — כלומר תזוזת הסמן הייתה נרשמת אצל השכן, או נבלעת.
@@ -4700,6 +4738,16 @@ watch([activeEditorContainer, activeSuperdoc, documentGeneration], () => {
   });
 });
 
+function onCloseNavigationPane(): void {
+  focusRing.toDocument();
+  onToggleNavigationPane();
+}
+
+function onToggleNavigationPane(): void {
+  navigationPaneVisible.value = !navigationPaneVisible.value;
+  void saveNavigationPaneVisible(navigationPaneVisible.value);
+}
+
 function onToggleListAutoformat(): void {
   listAutoformatEnabled.value = !listAutoformatEnabled.value;
   void saveListAutoformatEnabled(listAutoformatEnabled.value);
@@ -5303,6 +5351,7 @@ const runShellAction = createShellActionRunner({
   insertNote: (type) => void runInsertNote(type),
   toggleTrackChanges: () => void runToggleTrackChanges(),
   toggleFocusMode,
+  toggleNavigationPane: onToggleNavigationPane,
   findAgain,
   insertCitation: () => void onInsertCitation(),
   searchOtzaria: () => void onSearchOtzaria(),
@@ -5530,7 +5579,7 @@ function focusOpenedDocument(superdoc: SuperDoc): void {
 }
 
 /**
- * מעגל המיקוד של `F6`, בסדר של המסך: סרגל הכותרת, הרצועה, המסמך, שורת המצב.
+ * מעגל המיקוד של `F6`, בסדר של המסך: סרגל הכותרת, הרצועה, חלונית הניווט, המסמך, שורת המצב.
  *
  * אזור המסמך ממוקד דרך המנוע ולא דרך ה-`<main>` שמארח אותו: מיקוד המארח מזיז
  * את הפוקוס אבל אינו מחזיר את הסמן לטקסט, כלומר המשתמש היה מקבל „חזרה למסמך”
@@ -5573,6 +5622,16 @@ const focusRing = createFocusRing({
       id: 'ribbon',
       element: () => shellRegion('.word-ribbon-container'),
       isAvailable: revealedBarAvailable('top'),
+    },
+    {
+      id: 'navigation',
+      element: () => shellRegion('.nav-pane'),
+      focus: () => {
+        const target = shellRegion('.nav-pane [role=treeitem][tabindex="0"]') ?? shellRegion('.nav-pane .nav-close');
+        if (!target) return false;
+        target.focus();
+        return true;
+      },
     },
     {
       id: 'document',
@@ -5968,6 +6027,7 @@ onMounted(async () => {
       storedCanvasColor,
       storedListAutoformat,
       storedAutoCorrect,
+      storedNavigationPane,
       customShortcutsNotice,
     ] =
       await Promise.all([
@@ -5980,6 +6040,7 @@ onMounted(async () => {
         loadCanvasColor(),
         loadListAutoformatEnabled(),
         loadAutoCorrect(),
+        loadNavigationPaneVisible(),
         // לפני פתיחת המסמך הראשון: MacroKit קוראת `reservedShortcuts` פעם
         // אחת בלבד. אם הקיצורים האישיים ייטענו אחר כך, מאקרו קיים יכול
         // להיקשר אליהם לפני שהם מוכרזים כשמורים ולהשתיק אותם.
@@ -5989,6 +6050,7 @@ onMounted(async () => {
       ]);
     autosaveEnabled.value = storedAutosave;
     listAutoformatEnabled.value = storedListAutoformat;
+    navigationPaneVisible.value = storedNavigationPane;
     // ערך חסר או פגום הוא ברירות המחדל, ושדה פגום נופל לברירת המחדל שלו.
     autoCorrectOptions.value = normalizeAutoCorrect(storedAutoCorrect);
     rulerPreference = storedRuler;
