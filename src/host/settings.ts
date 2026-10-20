@@ -360,3 +360,17 @@ export async function loadOpenDialogPlace(): Promise<unknown> {
 export async function saveOpenDialogPlace(place: string): Promise<void> {
   await tryCall('storage.set', { key: OPEN_PLACE_KEY, value: place });
 }
+
+const NEW_DOCUMENT_DEFAULTS_KEY = 'new-document-defaults';
+
+/**
+ * ברירות המחדל של מסמך חדש — גופן, גודל וסגנונות שהמשתמש קבע. גולמי; הפירוש
+ * ב-`normalizeNewDocumentDefaults` (engine/new-document-defaults.ts).
+ */
+export async function loadNewDocumentDefaults(): Promise<unknown> {
+  return tryCall<unknown>('storage.get', { key: NEW_DOCUMENT_DEFAULTS_KEY });
+}
+
+export async function saveNewDocumentDefaults(value: unknown): Promise<void> {
+  await tryCall('storage.set', { key: NEW_DOCUMENT_DEFAULTS_KEY, value });
+}

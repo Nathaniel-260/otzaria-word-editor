@@ -341,6 +341,22 @@
             <p class="sd-note">
               השינוי חל על כל הפסקאות בסגנון ונשמר במסמך. אפשר לבטל אותו באמצעות „בטל”.
             </p>
+            <!--
+              „מסמכים חדשים המבוססים על תבנית זו” של Word: העיצוב נשמר גם לכל
+              מסמך חדש — composables/new-document-defaults.ts. רק לסגנון שקיים
+              בתבנית; לסגנון שנוצר במסמך הזה אין מה לשנות שם.
+            -->
+            <label
+              v-if="newDocumentsOption"
+              class="sd-check"
+            >
+              <input
+                v-model="forNewDocuments"
+                type="checkbox"
+                data-testid="style-new-documents"
+              >
+              גם לכל מסמך חדש
+            </label>
           </template>
 
         <p
@@ -409,6 +425,8 @@ export interface StyleDialogResult {
   format: StyleFormat;
   /** קיצור המקשים שנבחר (`null` = אין). נבדק מול `shortcut` בפתיחה כדי לדעת אם שונה. */
   combo: KeyCombo | null;
+  /** לשמור את העיצוב גם לכל מסמך חדש. */
+  forNewDocuments: boolean;
 }
 
 const { dragStyle, startDialogDrag } = useDialogDrag();
@@ -431,6 +449,8 @@ const props = withDefaults(
     shortcut?: KeyCombo | null;
     /** למה צירוף אינו זמין (תפוס, או בלי Ctrl/Alt), או `null`. */
     comboProblem?: (combo: KeyCombo) => string | null;
+    /** להציע „גם לכל מסמך חדש” — רק בשינוי של סגנון שקיים בתבנית. */
+    newDocumentsOption?: boolean;
   }>(),
   {
     busy: false,
@@ -444,6 +464,7 @@ const props = withDefaults(
     error: null,
     shortcut: null,
     comboProblem: () => null,
+    newDocumentsOption: false,
   },
 );
 
@@ -488,6 +509,7 @@ const indentEnd = ref<string | number>('0');
 const firstLine = ref<string | number>('0');
 const outlineLevel = ref<number>(BODY_TEXT_LEVEL);
 const combo = ref<KeyCombo | null>(null);
+const forNewDocuments = ref(false);
 const recording = ref(false);
 const recorderRef = ref<HTMLButtonElement | null>(null);
 
@@ -580,6 +602,7 @@ watch(
     firstLine.value = text(format.firstLineCm, '0');
     outlineLevel.value = format.outlineLevel ?? BODY_TEXT_LEVEL;
     combo.value = props.shortcut;
+    forNewDocuments.value = false;
     recording.value = false;
     await nextTick();
     if (props.mode === 'create' || props.mode === 'rename') {
@@ -670,6 +693,7 @@ function onSubmit(): void {
     next: next.value || null,
     format,
     combo: short.value ? props.shortcut : combo.value,
+    forNewDocuments: props.newDocumentsOption && !short.value && forNewDocuments.value,
   });
 }
 </script>
@@ -883,6 +907,14 @@ function onSubmit(): void {
   font-size: 10.5px;
   line-height: 1.4;
   color: var(--color-on-surface-variant);
+}
+
+.sd-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--color-on-surface);
 }
 
 .sd-error {

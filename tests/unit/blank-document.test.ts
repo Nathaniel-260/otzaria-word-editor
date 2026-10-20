@@ -22,7 +22,9 @@ const a4 = PAPER_SIZES.find((size) => size.id === 'a4')!;
 const A4 = `<w:pgSz w:w="${a4.widthTwips}" w:h="${a4.heightTwips}" w:code="${a4.code}"/>`;
 
 const DOCUMENT = `<w:document><w:body><w:p w14:paraId="1"/><w:sectPr>${ENGINE_BLANK_PAGE_SIZE}<w:pgMar w:top="1440"/><w:cols w:space="720"/><w:docGrid w:linePitch="360"/></w:sectPr></w:body></w:document>`;
-const STYLES = `<w:styles><w:docDefaults><w:rPrDefault><w:rPr><w:lang w:val="en-US" w:eastAsia="en-US" w:bidi="ar-SA"/></w:rPr></w:rPrDefault><w:pPrDefault/></w:docDefaults></w:styles>`;
+const NORMAL = '<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/></w:style>';
+const W = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"';
+const STYLES = `<w:styles ${W}><w:docDefaults><w:rPrDefault><w:rPr><w:lang w:val="en-US" w:eastAsia="en-US" w:bidi="ar-SA"/></w:rPr></w:rPrDefault><w:pPrDefault/></w:docDefaults>${NORMAL}</w:styles>`;
 
 describe('patchBlankDocumentXml', () => {
   it('A4, bidi במקטע לפני docGrid, ו-bidi בפסקה הראשונה', () => {
@@ -38,10 +40,14 @@ describe('patchBlankDocumentXml', () => {
 });
 
 describe('patchBlankStylesXml', () => {
-  it('bidi בברירת המחדל של הפסקאות, ושפת bidi עברית', () => {
+  it('bidi בברירת המחדל של הפסקאות, שפת bidi עברית, ו„רגיל” מיושר לשני הצדדים', () => {
     expect(patchBlankStylesXml(STYLES)).toBe(
-      `<w:styles><w:docDefaults><w:rPrDefault><w:rPr><w:lang w:val="en-US" w:eastAsia="en-US" w:bidi="he-IL"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:bidi/></w:pPr></w:pPrDefault></w:docDefaults></w:styles>`,
+      `<w:styles ${W}><w:docDefaults><w:rPrDefault><w:rPr><w:lang w:val="en-US" w:eastAsia="en-US" w:bidi="he-IL"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:bidi/></w:pPr></w:pPrDefault></w:docDefaults><w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/><w:pPr><w:jc w:val="both"/></w:pPr></w:style></w:styles>`,
     );
+  });
+
+  it('זורקת כשאין סגנון Normal', () => {
+    expect(() => patchBlankStylesXml(STYLES.replace(NORMAL, ''))).toThrow(/Normal/);
   });
 
   it('זורקת כשאין pPrDefault ריק', () => {
@@ -65,6 +71,14 @@ describe('deriveHebrewBlankDocx — על המסמך הריק של המנוע ה�
 
   it('styles.xml נושא bidi בברירת המחדל של הפסקאות', () => {
     expect(part(derived, STYLES_PART)).toContain('<w:pPrDefault><w:pPr><w:bidi/></w:pPr></w:pPrDefault>');
+  });
+
+  it('styles.xml: „רגיל” מיושר לשני הצדדים, והכותרות יורשות ממנו בלי jc משלהן', () => {
+    const xml = part(derived, STYLES_PART);
+    expect(xml).toMatch(/<w:style [^>]*w:styleId="Normal">(?:(?!<\/w:style>)[\s\S])*<w:jc w:val="both"\/>/);
+    const heading = /<w:style [^>]*w:styleId="Heading1">[\s\S]*?<\/w:style>/.exec(xml)![0];
+    expect(heading).toContain('<w:basedOn w:val="Normal"/>');
+    expect(heading).not.toContain('<w:jc');
   });
 
   it('styles.xml: הגופן העברי של ברירות המחדל הוא הלטיני — Arial, ולא מחרוזת התפריט של Word ל-Mac', () => {

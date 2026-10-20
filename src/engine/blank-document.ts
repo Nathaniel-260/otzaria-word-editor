@@ -3,7 +3,8 @@
  * ב-XML — A4, `w:bidi` במקטע ובברירת המחדל של הפסקאות, ו-`w:bidi` בפסקה
  * הראשונה. אלה בדיוק שלוש השכבות ש-`applyHebrewDocumentDefaults` כותבת למנוע
  * אחרי הפתיחה, אבל כאן הן בקובץ עצמו — ולכן אין שלוש מוטציות, אין בנייה
- * חוזרת של אינדקס הביקורת, ופתיחת מסמך חדש מתקצרת בכ-650ms (נמדד).
+ * חוזרת של אינדקס הביקורת, ופתיחת מסמך חדש מתקצרת בכ-650ms (נמדד). ובנוסף
+ * „רגיל” מיושר לשני הצדדים (`justifyNormalStyle`).
  *
  * הגזירה נעשית בזמן הבנייה (`hebrewBlankDocx` ב-vite.config.ts) מהמסמך הריק
  * שבחבילת המנוע, כדי שהתבנית תעקוב אחרי שדרוגי מנוע; הפונקציות כאן טהורות
@@ -13,6 +14,7 @@
 import { DOCX_MIME } from './export';
 import { PAPER_SIZES } from './page-setup';
 import { alignComplexScriptStyles, hasEngineTemplateSignature } from './docx-cs-align';
+import { editStyles } from './docx-style-edit';
 
 /** `w:pgSz` של המסמך הריק של המנוע — Letter. */
 export const ENGINE_BLANK_PAGE_SIZE = '<w:pgSz w:w="12240" w:h="15840"/>';
@@ -63,7 +65,20 @@ export function patchBlankStylesXml(xml: string): string {
     .replace(lang, '$1he-IL$2');
   const aligned = alignComplexScriptStyles(patched) ?? patched;
   require(!hasEngineTemplateSignature(aligned), 'הצד המורכב של הסגנונות לא יושר');
-  return aligned;
+  return justifyNormalStyle(aligned);
+}
+
+/**
+ * „רגיל” מיושר לשני הצדדים — כך רוב הכותבים בעברית תורנית כותבים, וזו ברירת
+ * המחדל שהתבקשה. בסגנון ולא בפסקה: כל פסקה חדשה, והכותרות שמבוססות על
+ * „רגיל”, יורשות אותו; ב-Word זה `w:jc="both"` בסגנון, ו„יישור לימין” של
+ * פסקה בודדת הוא עיצוב ישיר מעליו. המשתמש משנה אותו כמו כל סגנון, ו„מסמכים
+ * חדשים” בדיאלוג הסגנון שומר את הבחירה (engine/new-document-defaults.ts).
+ */
+export function justifyNormalStyle(xml: string): string {
+  const edited = editStyles(xml, { kind: 'modify', id: 'Normal', format: { alignment: 'justify' } });
+  require(edited.ok, 'לא נמצא הסגנון Normal');
+  return (edited as { xml: string }).xml;
 }
 
 /** ה-Blob לפתיחה, מהמחרוזת שהבנייה הטמיעה. `undefined` כשאין תבנית (בדיקות). */

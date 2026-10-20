@@ -136,8 +136,10 @@
       :is-open="docDefaultsOpen"
       :busy="docDefaultsInFlight"
       :current-size-pt="docDefaultsSizePt"
+      :new-documents-summary="newDocumentsSummary"
       @close="docDefaultsOpen = false"
       @submit="onDocDefaultsSubmit"
+      @reset-new-documents="onResetNewDocuments"
     />
   </div>
 </template>
@@ -187,8 +189,14 @@ import DocDefaultsDialog from '../../panels/DocDefaultsDialog.vue';
 import { ACTIVE_SUPERDOC } from '../../../engine/document-api';
 import {
   COMMAND_REPORTER,
+  STATUS_NOTIFIER,
   type CommandReporter,
 } from '../../../composables/keys';
+import {
+  describeNewDocumentDefaults,
+  rememberRunDefaults,
+  resetNewDocumentDefaults,
+} from '../../../composables/new-document-defaults';
 import type { CommandOutcome } from '../../../engine/command-adapter';
 import {
   readDocCapabilities,
@@ -231,6 +239,7 @@ const fallbackReporter: CommandReporter = (outcome, id) => {
 
 const superdoc = inject(ACTIVE_SUPERDOC, shallowRef<SuperDoc | null>(null));
 const report = inject(COMMAND_REPORTER, fallbackReporter);
+const notify = inject(STATUS_NOTIFIER, () => {});
 
 const capabilities = shallowRef<DocCapabilityReport | null>(null);
 const layoutState = shallowRef<PageLayoutState>(emptyPageLayoutState());
@@ -404,6 +413,7 @@ function onHeaderDistanceSubmit(settings: HeaderDistanceSettings): void {
 const docDefaultsOpen = shallowRef(false);
 const docDefaultsInFlight = shallowRef(false);
 const docDefaultsSizePt = shallowRef<number | null>(null);
+const newDocumentsSummary = shallowRef<string | null>(null);
 
 async function onOpenDocDefaults(): Promise<void> {
   if (docDefaultsInFlight.value) return;
@@ -411,23 +421,37 @@ async function onOpenDocDefaults(): Promise<void> {
   try {
     // dryRun היא קריאת המצב; כשלה אינו חוסם פתיחה — השדה נפתח „ללא שינוי".
     docDefaultsSizePt.value = await readDefaultFontSizePt(superdoc.value);
+    newDocumentsSummary.value = await describeNewDocumentDefaults();
     docDefaultsOpen.value = true;
   } finally {
     docDefaultsInFlight.value = false;
   }
 }
 
-function onDocDefaultsSubmit(patch: { fontFamily?: string; fontSizePt?: number }): void {
+function onDocDefaultsSubmit(patch: { fontFamily?: string; fontSizePt?: number }, forNewDocuments: boolean): void {
   docDefaultsOpen.value = false;
   if (docDefaultsInFlight.value) return;
   docDefaultsInFlight.value = true;
   void (async () => {
     try {
-      report(await applyDocStyleDefaults(superdoc.value, patch), 'doc-style-defaults');
+      const outcome = await applyDocStyleDefaults(superdoc.value, patch);
+      report(outcome, 'doc-style-defaults');
+      // רק אחרי שהמסמך קיבל: ערך שהמנוע דחה (גודל מחוץ לטווח) אינו נשמר.
+      if (outcome.ok && forNewDocuments) {
+        await rememberRunDefaults(patch);
+        notify('ברירת המחדל תחול גם על כל מסמך חדש');
+      }
     } finally {
       docDefaultsInFlight.value = false;
     }
   })();
+}
+
+/** „החזר למקור”: מסמך חדש נפתח שוב מהתבנית המקורית. המסמך הפתוח אינו משתנה. */
+async function onResetNewDocuments(): Promise<void> {
+  resetNewDocumentDefaults();
+  newDocumentsSummary.value = await describeNewDocumentDefaults();
+  notify('מסמך חדש ייפתח שוב בברירות המחדל המקוריות');
 }
 </script>
 

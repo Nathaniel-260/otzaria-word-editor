@@ -32,6 +32,7 @@ import { styleDisplayLabel } from '../engine/style-gallery';
 import type { StyleAction } from '../ui/ribbon/common/StyleGallery.vue';
 import type { StyleChoice, StyleDialogMode, StyleDialogResult } from '../ui/panels/StyleDialog.vue';
 import type { CommandOutcome } from '../engine/command-adapter';
+import { rememberStyleDefault, templateHasStyle } from './new-document-defaults';
 
 export interface StyleDialogState {
   /** The originating instance; a dialog never follows the active tab. */
@@ -50,6 +51,8 @@ export interface StyleDialogState {
   xml: string;
   /** קיצור המקשים של הסגנון בפתיחה. */
   shortcut: KeyCombo | null;
+  /** הסגנון קיים בתבנית של מסמך חדש — ראו „גם לכל מסמך חדש” בדיאלוג. */
+  newDocumentsOption: boolean;
 }
 
 function sameCombo(a: KeyCombo | null, b: KeyCombo | null): boolean {
@@ -171,6 +174,7 @@ export function useStyleManager(activeStyleId: () => string | null) {
           baseline,
           xml,
           shortcut: null,
+          newDocumentsOption: false,
         };
         return;
       }
@@ -193,8 +197,11 @@ export function useStyleManager(activeStyleId: () => string | null) {
         return;
       }
 
+      const newDocumentsOption = action === 'modify' && await templateHasStyle(info.id);
+      if (superdoc.value !== origin) return;
       dialog.value = {
         origin,
+        newDocumentsOption,
         mode: action as StyleDialogMode,
         styleId: info.id,
         styleName: action === 'rename' ? info.name : labelOf(info),
@@ -229,6 +236,13 @@ export function useStyleManager(activeStyleId: () => string | null) {
       if (failure) fail(failure, 'style-shortcut');
     };
 
+    // „גם לכל מסמך חדש”: העיצוב השלם שהדיאלוג החזיר, אחרי שהמסמך עצמו עודכן.
+    const rememberForNewDocuments = async (): Promise<void> => {
+      if (!result.forNewDocuments || !state.styleId) return;
+      await rememberStyleDefault(state.styleId, result.format);
+      notify(`„${state.styleName}” יחול גם על כל מסמך חדש`);
+    };
+
     await run(async () => {
       let done = false;
       switch (state.mode) {
@@ -259,6 +273,7 @@ export function useStyleManager(activeStyleId: () => string | null) {
             // רק הקיצור השתנה — אין מה לכתוב למסמך, ואין טעינה מחדש.
             assignCombo(state.styleId as string, state.styleName);
             if (comboChanged) notify(`קיצור המקשים של „${state.styleName}” נשמר`);
+            await rememberForNewDocuments();
             done = true;
             break;
           }
@@ -272,7 +287,10 @@ export function useStyleManager(activeStyleId: () => string | null) {
             },
             `הסגנון „${state.styleName}” עודכן`,
           );
-          if (done) assignCombo(state.styleId as string, state.styleName);
+          if (done) {
+            assignCombo(state.styleId as string, state.styleName);
+            await rememberForNewDocuments();
+          }
           break;
         }
         case 'rename':

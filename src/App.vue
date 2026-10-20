@@ -583,7 +583,7 @@ import {
   applyHebrewPaperSize,
   verifyHebrewDocumentDefaults,
 } from './engine/document-defaults';
-import { blankDocumentSource } from './engine/blank-document-source';
+import { loadNewDocumentDefaults, newDocumentSource } from './composables/new-document-defaults';
 import type { SuperDoc } from 'superdoc';
 import {
   DOCX_MIME,
@@ -2716,9 +2716,12 @@ async function openDocumentInto(
   if (attempt.cancelled) return false;
   attempt.stage(LOAD_STAGES.engine, 'בונה את המסמך…');
 
-  // מסמך חדש נפתח מהתבנית העברית (A4, RTL) ולא מהמסמך הריק של המנוע — ראו
-  // engine/blank-document.ts. `undefined` בבדיקות, ואז המנוע פותח את שלו.
-  const blank = !file && !options.draft ? blankDocumentSource() : undefined;
+  // מסמך חדש נפתח מהתבנית העברית (A4, RTL, „רגיל” מיושר לשני הצדדים) ולא
+  // מהמסמך הריק של המנוע — ראו engine/blank-document.ts — אחרי ברירות המחדל
+  // שהמשתמש קבע (composables/new-document-defaults.ts). `undefined` בבדיקות,
+  // ואז המנוע פותח את שלו.
+  const blank = !file && !options.draft ? await newDocumentSource() : undefined;
+  if (attempt.cancelled) return false;
   const outcome = await swap.open(source ?? blank);
 
   // ה-swap מדווח `superseded` גם על פתיחה שבוטלה — הביטול מקדם שם את הדור
@@ -5997,6 +6000,9 @@ onMounted(async () => {
     // ברירת המחדל של Ctrl+V. לא חוסמת: עד שהיא נקראת Ctrl+V הוא של המנוע,
     // וזו בדיוק ברירת המחדל.
     void loadPasteDefault();
+    // ברירות המחדל של מסמך חדש. לא חוסמת: מסמך חדש שנפתח לפני שהן נקראו
+    // מחכה להן בעצמו (`newDocumentSource`).
+    void loadNewDocumentDefaults();
     // צבע הבד מוחל כאן ולא בלשונית „תצוגה”: הפקד שמשנה אותו יושב בלשונית
     // שמורכבת רק כשהיא הפעילה (`v-else-if` ב-Ribbon.vue), והבד נראה מהרגע
     // הראשון. `applyCanvasColor` ולא `setCanvasColor` — זו קריאה, ואין טעם

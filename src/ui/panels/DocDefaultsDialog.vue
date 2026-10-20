@@ -74,6 +74,35 @@
 
         <p class="dd-note">חל על המסמך כולו: טקסט שאינו נושא עיצוב ישיר יוצג לפי ברירת המחדל.</p>
 
+        <!--
+          „הגדר כברירת מחדל” של Word: גם כל מסמך חדש ייפתח בגופן ובגודל האלה
+          (composables/new-document-defaults.ts). עיצוב הכותרות ויישור הטקסט
+          נשמרים מאותו מקום בדיאלוג הסגנון.
+        -->
+        <label class="dd-check">
+          <input
+            v-model="forNewDocuments"
+            type="checkbox"
+            data-testid="docdef-new-documents"
+          >
+          גם לכל מסמך חדש
+        </label>
+        <div
+          v-if="newDocumentsSummary"
+          class="dd-saved"
+        >
+          <span class="dd-note">מסמך חדש: {{ newDocumentsSummary }}</span>
+          <button
+            type="button"
+            class="dd-link"
+            data-testid="docdef-reset-new-documents"
+            @pointerdown.prevent
+            @click="$emit('reset-new-documents')"
+          >
+            החזר למקור
+          </button>
+        </div>
+
         <p
           v-if="showError"
           class="dd-error"
@@ -135,16 +164,20 @@ const props = defineProps<{
   busy: boolean;
   /** הגודל הנוכחי בנקודות, כפי שנקרא ב-dryRun. `null` = לא נודע. */
   currentSizePt: number | null;
+  /** מה שנקבע למסמכים חדשים, בשורה אחת. `null` = התבנית המקורית. */
+  newDocumentsSummary?: string | null;
 }>();
 
 const emit = defineEmits<{
   close: [];
-  submit: [patch: { fontFamily?: string; fontSizePt?: number }];
+  submit: [patch: { fontFamily?: string; fontSizePt?: number }, forNewDocuments: boolean];
+  'reset-new-documents': [];
 }>();
 
 const rootRef = ref<HTMLElement | null>(null);
 const fontFamily = ref('');
 const fontSize = ref('');
+const forNewDocuments = ref(false);
 
 const sizePlaceholder = computed(() =>
   props.currentSizePt !== null ? String(props.currentSizePt) : UNCHANGED,
@@ -162,6 +195,7 @@ watch(
     if (!open) return;
     fontFamily.value = '';
     fontSize.value = '';
+    forNewDocuments.value = false;
     await nextTick();
     rootRef.value?.focus();
   },
@@ -214,7 +248,7 @@ function onSubmit(): void {
   const size = parseSize(fontSize.value);
   if (size !== null && size !== undefined) patch.fontSizePt = size;
 
-  emit('submit', patch);
+  emit('submit', patch, forNewDocuments.value);
 }
 </script>
 
@@ -317,6 +351,35 @@ function onSubmit(): void {
   font-size: 10.5px;
   line-height: 1.4;
   color: var(--color-on-surface-variant);
+}
+
+.dd-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--color-on-surface);
+}
+
+.dd-saved {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.dd-link {
+  flex-shrink: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  font-family: var(--font-main);
+  font-size: 11px;
+  color: var(--word-blue);
+  cursor: pointer;
+}
+
+.dd-link:hover {
+  text-decoration: underline;
 }
 
 .dd-error {

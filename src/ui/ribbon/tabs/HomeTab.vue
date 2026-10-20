@@ -538,6 +538,7 @@
       :format="styleManager.dialog.value?.format ?? {}"
       :error="styleManager.error.value"
       :shortcut="styleManager.dialog.value?.shortcut ?? null"
+      :new-documents-option="styleManager.dialog.value?.newDocumentsOption ?? false"
       :combo-problem="(combo) => styleManager.comboProblem(styleManager.dialog.value?.styleId ?? null, combo)"
       @close="styleManager.close"
       @submit="styleManager.onSubmit"
