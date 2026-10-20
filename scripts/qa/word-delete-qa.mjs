@@ -117,6 +117,66 @@ try {
   });
   await scenario('lists.create דרך ה-API, Ctrl+Backspace', { setup: () => app.js(MAKE_LIST), expect: 'אחד שתיים' });
 
+  // Ctrl+Delete משאיר את הסמן באותו היסט אחרי מחיקה תקינה. תצלום כזה
+  // אינו מפגר. לחיצות נפרדות מוחקות כל מילה. במקש מוחזק שומרים על אותה
+  // מדיניות בטיחות כמו במחיקה אחורה: ייתכן דילוג עד commit, אך לעולם לא
+  // מחיקת מילה אחרת; ההקשה הנפרדת הבאה חייבת להמשיך ולא להיתקע לנצח.
+  for (const [label, offset, gap] of [
+    ['תחילת הפסקה, לחיצות נפרדות', 0, 1000],
+    ['אמצע הפסקה, לחיצות נפרדות', 4, 1000],
+    ['תחילת הפסקה, מקש מוחזק', 0, 33],
+    ['אמצע הפסקה, מקש מוחזק', 4, 33],
+  ]) {
+    const name = `„מספור”, Ctrl+Delete חוזר: ${label}`;
+    try {
+      const text = 'אחד שתיים שלוש ארבע חמש שש';
+      await setText(text);
+      await app.js(`(async function(){
+        var e = window.__otzariaEditor.superdoc.activeEditor;
+        var s = e.host.readLiveSelectionSyncSnapshot().selectionTarget;
+        var p = { ...s.start, offset: ${offset} };
+        await e.authoring.setSelectionTarget({ target: { ...s, start: p, end: p }, focus: true });
+      })()`);
+      await app.sleep(400);
+      await ribbon('מספור')();
+      await app.sleep(900);
+      const before = await readPara();
+      if (before.caret !== offset) throw new Error(`הסמן לפני: ${before.caret}`);
+      for (let i = 0; i < 3; i++) {
+        await app.cdp.send('Input.dispatchKeyEvent', {
+          type: 'rawKeyDown', key: 'Delete', code: 'Delete',
+          windowsVirtualKeyCode: 46, nativeVirtualKeyCode: 46, modifiers: CTRL, autoRepeat: gap < 100 && i > 0,
+        });
+        await app.sleep(gap);
+        if (gap >= 100) await app.cdp.send('Input.dispatchKeyEvent', {
+          type: 'keyUp', key: 'Delete', code: 'Delete', windowsVirtualKeyCode: 46, nativeVirtualKeyCode: 46, modifiers: CTRL,
+        });
+      }
+      await app.cdp.send('Input.dispatchKeyEvent', {
+        type: 'keyUp', key: 'Delete', code: 'Delete', windowsVirtualKeyCode: 46, nativeVirtualKeyCode: 46, modifiers: CTRL,
+      });
+      await app.sleep(1000);
+      const after = await readPara();
+      const prefix = text.slice(0, offset);
+      const words = text.slice(offset).split(' ');
+      const remaining = (deleted) => prefix + words.slice(deleted).join(' ');
+      let deleted = -1;
+      for (let n = 1; n <= 3; n++) if (after.text === remaining(n)) deleted = n;
+      if (after.caret !== offset || deleted < 1 || (gap >= 100 && deleted !== 3)) {
+        report.fail(name, JSON.stringify(after), gap >= 100 ? `צפוי ${JSON.stringify(remaining(3))}@${offset}` : 'נמחק רק רצף מילים קדימה והסמן נשאר במקומו');
+      } else if (gap < 100) {
+        await press('^DEL');
+        await app.sleep(1000);
+        const next = await readPara();
+        const detail = `${JSON.stringify(after)} נמחקו ${deleted}/3; הקשה נפרדת נוספת: ${JSON.stringify(next)}`;
+        if (next.text === remaining(deleted + 1) && next.caret === offset) report.pass(name, detail);
+        else report.fail(name, detail, `צפוי ${JSON.stringify(remaining(deleted + 1))}@${offset}`);
+      } else report.pass(name, JSON.stringify(after));
+    } catch (error) {
+      report.fail(name, String(error?.message ?? error));
+    }
+  }
+
   // הקלדה אינה מרפאת את המצב במנוע, ולכן גם המשתמש שהמשיך לכתוב נפגע.
   await scenario('„מספור”, הקלדת מילה, Ctrl+Backspace', {
     setup: async () => {

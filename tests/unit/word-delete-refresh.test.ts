@@ -66,7 +66,7 @@ describe('collapsedCaret', () => {
 
 describe('isLaggingSnapshot', () => {
   const at = (offset: number, blockId = 'p1') => ({ kind: 'text', blockId, offset });
-  const last = { blockId: 'p1', offset: 13, revision: 7 };
+  const last = { blockId: 'p1', offset: 13, revision: 7, direction: 'backward' as const };
 
   it('אין כתיבה קודמת, או נקודה אחרת — אינו מפגר', () => {
     expect(isLaggingSnapshot(null, at(13), 7)).toBe(false);
@@ -82,6 +82,15 @@ describe('isLaggingSnapshot', () => {
   it('אותה נקודה אחרי מחיקה ועוד פעולה (הקלדה חזרה, ביטול) — אמיתי', () => {
     expect(isLaggingSnapshot(last, at(13), 9)).toBe(false);
     expect(isLaggingSnapshot(last, at(13), 14)).toBe(false);
+  });
+
+  it('מחיקה קדימה נשארת באותו היסט — רק מוטציה שנקלטה מתירה כתיבה חוזרת', () => {
+    const forward = { ...last, direction: 'forward' as const };
+    expect(isLaggingSnapshot(forward, at(13), 7)).toBe(true);
+    expect(isLaggingSnapshot(forward, at(13), 8)).toBe(false);
+    expect(isLaggingSnapshot(forward, at(13), undefined)).toBe(true);
+    expect(isLaggingSnapshot({ ...forward, revision: undefined }, at(13), 8)).toBe(true);
+    expect(isLaggingSnapshot(forward, at(13), 6)).toBe(true);
   });
 
   it('בלי מונה מוטציות — אותה נקודה נחשבת מפגרת (עדיף להחמיץ הקשה ממחיקה שגויה)', () => {
@@ -270,6 +279,32 @@ describe('installWordDeleteRefresh', () => {
     offset = 11;
     press();
     expect(written()).toEqual([15, 13, 11]);
+    handle.dispose();
+  });
+
+  it('Ctrl+Delete חוזר באותו היסט אחרי commit; החלפת כיוון אינה עוקפת תצלום אחורה מפגר', () => {
+    const host = document.createElement('div');
+    let revision = 3;
+    const setSelectionTarget = vi.fn(() => Promise.resolve({ ok: true }));
+    const superdoc: WordDeleteHost = {
+      activeEditor: {
+        host: { readLiveSelectionSyncSnapshot: () => ({ selectionTarget: caret }) as never, getLocalMutationRevision: () => revision },
+        authoring: { setSelectionTarget },
+      },
+    };
+    const handle = installWordDeleteRefresh({ host, superdoc });
+    const press = (key: string) => host.dispatchEvent(new KeyboardEvent('keydown', { key, ctrlKey: true, cancelable: true }));
+    press('Delete');
+    press('Delete'); // no commit: still cannot trust the old snapshot
+    expect(setSelectionTarget).toHaveBeenCalledTimes(1);
+    revision += 1;
+    press('Delete');
+    revision += 1;
+    press('Backspace'); // previous forward deletion legitimately kept this offset
+    expect(setSelectionTarget).toHaveBeenCalledTimes(3);
+    revision += 1;
+    press('Delete'); // previous BACKWARD deletion should have moved the caret
+    expect(setSelectionTarget).toHaveBeenCalledTimes(3);
     handle.dispose();
   });
 

@@ -130,6 +130,7 @@ export interface LastWrite {
   blockId: string;
   offset: number;
   revision: number | undefined;
+  direction: 'backward' | 'forward';
 }
 
 /**
@@ -138,12 +139,16 @@ export interface LastWrite {
  *
  * מונה המוטציות מבדיל בין זה לבין חזרה אמיתית לאותה נקודה: בפיגור הוא זז
  * לכל היותר ב-1 (המחיקה עצמה, אם כבר נקלטה); כדי לחזור לאותו היסט אחרי
- * מחיקה צריך לפחות פעולה אחת נוספת (הקלדה, ביטול).
+ * מחיקה אחורה צריך לפחות פעולה אחת נוספת (הקלדה, ביטול).
+ * במחיקה קדימה ההיסט נשאר במקומו: אם המוטציה שלה כבר נקלטה, אותה נקודה
+ * היא סמן תקין. הכיוון הוא של ההקשה הקודמת, גם אם המשתמש החליף כיוון כעת.
  */
 export function isLaggingSnapshot(last: LastWrite | null, caret: TextPoint, revision: number | undefined): boolean {
   if (!last || last.blockId !== caret.blockId || last.offset !== caret.offset) return false;
   if (typeof revision !== 'number' || typeof last.revision !== 'number') return true;
-  return revision - last.revision <= 1;
+  const mutations = revision - last.revision;
+  if (last.direction === 'forward' && mutations === 1) return false;
+  return mutations <= 1;
 }
 
 /** מתקין את העקיפה. המצב היחיד הוא הכתיבה האחרונה, והיא נפרקת עם המסמך. */
@@ -176,7 +181,7 @@ export function installWordDeleteRefresh({ host, superdoc }: WordDeleteRefreshOp
     if (!caret) return;
 
     // הקשה חוזרת (מקש מוחזק) לפני שהתצלום התעדכן: כתיבה
-    // של ההיסט הישן הייתה מזיזה את הסמן קדימה, אל מעבר למה שכבר נמחק —
+    // של ההיסט הישן אחרי מחיקה אחורה הייתה מזיזה את הסמן קדימה, אל מעבר למה שכבר נמחק —
     // ובאמצע פסקה זו מחיקה של המילה הלא נכונה. עדיף להחמיץ הקשה.
     if (isLaggingSnapshot(lastWrite, caret, revision)) return;
 
@@ -197,7 +202,12 @@ export function installWordDeleteRefresh({ host, superdoc }: WordDeleteRefreshOp
         focus: true,
       });
       void Promise.resolve(written).catch(() => {});
-      lastWrite = { blockId: caret.blockId as string, offset: caret.offset as number, revision };
+      lastWrite = {
+        blockId: caret.blockId as string,
+        offset: caret.offset as number,
+        revision,
+        direction: event.key === 'Delete' ? 'forward' : 'backward',
+      };
     } catch {
       /* סמן שלא נכתב מחדש אינו סיבה לעצור את המחיקה — המנוע עדיין מקבל אותה */
     }
