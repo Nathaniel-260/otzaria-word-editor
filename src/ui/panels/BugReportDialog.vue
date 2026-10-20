@@ -2,7 +2,10 @@
   <Teleport to="body">
     <div
       v-if="isOpen"
+      ref="dialogRef"
       class="bug-dialog"
+      tabindex="-1"
+      @keydown.tab="onTab"
       :style="dragStyle"
       role="dialog"
       aria-modal="true"
@@ -66,7 +69,7 @@
               v-model="includeErrors"
               type="checkbox"
             >
-            צרף שגיאות אחרונות מהתוסף ({{ errors.length }})
+            צרף שגיאות אחרונות מהתוסף ({{ errors.length }}) — יש לבדוק את התצוגה המקדימה
           </label>
 
           <details class="br-preview">
@@ -78,7 +81,8 @@
           </details>
 
           <p class="br-note">
-            תוכן המסמך אינו נשלח. הדיווח נפתח כטופס ב-GitHub בדפדפן, ושם אפשר
+            המסמך עצמו אינו נקרא לצורך הדיווח. הודעות שגיאה עשויות להכיל מידע פרטי;
+            בדקו את „מה יישלח” לפני צירופן. הדיווח נפתח כטופס ציבורי ב-GitHub, ושם אפשר
             לערוך אותו לפני השליחה (נדרש חשבון GitHub).
           </p>
         </template>
@@ -110,18 +114,19 @@
               aria-label="כתובת לפתיחת דיווח"
               @focus="($event.target as HTMLInputElement).select()"
             >
-            <textarea
-              v-if="phase === 'failed'"
-              class="br-input br-textarea br-manual"
-              readonly
-              rows="6"
-              dir="auto"
-              aria-label="טקסט הדיווח להעתקה ידנית"
-              :value="preview"
-              @focus="($event.target as HTMLTextAreaElement).select()"
-            />
+
           </template>
         </p>
+        <textarea
+          v-if="phase === 'failed' || (phase === 'opened' && sentTruncated === 'lost')"
+          class="br-input br-textarea br-manual"
+          readonly
+          rows="6"
+          dir="auto"
+          aria-label="טקסט הדיווח להעתקה ידנית"
+          :value="preview"
+          @focus="($event.target as HTMLTextAreaElement).select()"
+        />
       </div>
 
       <div class="br-footer">
@@ -146,7 +151,7 @@
         </template>
         <template v-else>
           <button
-            v-if="phase === 'failed'"
+            v-if="phase === 'failed' || (phase === 'opened' && sentTruncated === 'lost')"
             type="button"
             class="br-btn"
             @click="copyAgain"
@@ -178,7 +183,7 @@
  * השגיאות נלכדות ברגע הפתיחה ולא בזמן השליחה: מה שהמשתמש ראה בתצוגה המקדימה
  * הוא מה שיוצא, גם אם בינתיים נרשמה שגיאה נוספת.
  */
-import { computed, nextTick, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import {
   BUG_REPORT_NEW_ISSUE,
   buildIssueBody,
@@ -208,9 +213,37 @@ type Phase = 'form' | 'sending' | 'opened' | 'copied' | 'failed';
 const phase = ref<Phase>('form');
 const title = ref('');
 const description = ref('');
-const includeErrors = ref(true);
+const includeErrors = ref(false);
 const errors = ref<RecentError[]>([]);
 const environment = ref(collectEnvironment());
+
+const dialogRef = ref<HTMLElement | null>(null);
+let focusOnClose: HTMLElement | null = null;
+let session = 0;
+
+function restoreFocus(): void {
+  const target = focusOnClose;
+  focusOnClose = null;
+  if (target && document.contains(target)) target.focus();
+}
+
+function onTab(event: KeyboardEvent): void {
+  const root = dialogRef.value;
+  if (!root) return;
+  const items = [...root.querySelectorAll<HTMLElement>(
+    'button, [href], input, select, textarea, summary, [tabindex]:not([tabindex="-1"])',
+  )].filter((element) => !element.hasAttribute('disabled') && !element.closest('details:not([open]) > :not(summary)'));
+  const first = items[0];
+  const last = items[items.length - 1];
+  if (!first || !last) { event.preventDefault(); root.focus(); return; }
+  if (event.shiftKey && (document.activeElement === first || document.activeElement === root)) {
+    event.preventDefault(); last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault(); first.focus();
+  }
+}
+
+onBeforeUnmount(() => { session += 1; restoreFocus(); });
 
 const titleRef = ref<HTMLInputElement | null>(null);
 const doneRef = ref<HTMLButtonElement | null>(null);
@@ -239,21 +272,25 @@ ${buildIssueBody(input.value)}`,
 watch(
   () => props.isOpen,
   (open) => {
-    if (!open) return;
+    session += 1;
+    if (!open) { restoreFocus(); return; }
+    focusOnClose = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     phase.value = 'form';
     title.value = '';
     description.value = '';
-    includeErrors.value = true;
+    includeErrors.value = false;
     sentTruncated.value = null;
     errors.value = recentErrors();
     // גרסת אוצריא מגיעה מה-boot, שעשוי להסתיים אחרי הרכבת הקומפוננטה.
     environment.value = collectEnvironment();
-    void nextTick(() => titleRef.value?.focus());
+    void nextTick(() => { if (props.isOpen) titleRef.value?.focus(); });
   },
+  { immediate: true },
 );
 
 async function send(): Promise<void> {
   if (phase.value === 'sending') return;
+  const sendingSession = session;
   phase.value = 'sending';
   const current = buildIssueUrl(input.value);
   // הכתובת קוצרה — הנוסח המלא נשמר בלוח כדי שאפשר יהיה להדביק אותו. **לפני**
@@ -261,18 +298,27 @@ async function send(): Promise<void> {
   // דף שאינו ממוקד נדחה („Document is not focused”) — ההודעה הייתה מבטיחה
   // לוח שלא נכתב.
   const copied = current.truncated ? await copyText(current.fullText) : false;
+  if (sendingSession !== session) return;
   sentTruncated.value = current.truncated ? (copied ? 'copied' : 'lost') : null;
   try {
     await openInBrowser(current.url);
+    if (sendingSession !== session) return;
     phase.value = 'opened';
   } catch {
-    phase.value = copied || (await copyText(current.fullText)) ? 'copied' : 'failed';
+    if (sendingSession !== session) return;
+    const fallbackCopied = copied || (await copyText(current.fullText));
+    if (sendingSession !== session) return;
+    phase.value = fallbackCopied ? 'copied' : 'failed';
   }
   void nextTick(() => doneRef.value?.focus());
 }
 
 async function copyAgain(): Promise<void> {
-  if (await copyText(preview.value)) phase.value = 'copied';
+  const copyingSession = session;
+  if (await copyText(preview.value) && copyingSession === session) {
+    if (phase.value === 'opened') sentTruncated.value = 'copied';
+    else phase.value = 'copied';
+  }
 }
 </script>
 

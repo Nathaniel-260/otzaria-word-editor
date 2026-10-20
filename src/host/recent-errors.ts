@@ -13,7 +13,7 @@
  * הודעה בלבד, מקוצרת, ובלי ערכים שאינם טקסט: אובייקט שנמסר ל-`console.error`
  * נרשם כשם הסוג שלו ולא כתוכנו, כי תוכן כזה עשוי להיות צומת של המסמך. הודעות
  * עוברות `scrubDiagnostic` (נתיבי משתמש, כתובות מייל) כבר ברישום, כך שגם
- * מה שמוצג בתצוגה המקדימה כבר נקי.
+ * דפוסים מוכרים מוסתרים; עדיין נדרשת בדיקת המשתמש לפני צירוף הטקסט.
  *
  * אין כאן שמירה לדיסק ואין שליחה: הרשימה מתה עם הדף.
  */
@@ -35,37 +35,34 @@ export interface RecentError {
 const entries: RecentError[] = [];
 let installed = false;
 
+/** Maximum input inspected per diagnostic, before any pattern processing. */
+export const DIAGNOSTIC_INPUT_LIMIT = 4096;
+
 /**
- * מנקה הודעת אבחון ממה שמזהה את המשתמש.
- *
- * - `C:\Users\<שם>\…` ו-`/home/<שם>/…` — שם המשתמש במערכת.
- * - תיקיית ההתקנה ב-`file:///` — מוחלפת ב-`…/`, ושם הקובץ (`assets/app.js`)
- *   נשאר, כי הוא מה שמאתר את השורה.
- * - כתובות מייל.
- * - שמות מסמכים (`חידושים.docx` → `<מסמך>.docx`): שם קובץ הוא לא פעם תוכן.
+ * Best-effort redaction of recognizable paths, document filenames and email.
+ * Arbitrary log strings can still contain private text: inclusion is opt-in and
+ * the user must review the preview. Never read document content for diagnostics.
  */
 export function scrubDiagnostic(text: string): string {
-  return text
-    .replace(/file:\/\/\/[^\s'"()]+/gi, (url) => {
-      const segments = url.slice('file:///'.length).split('/');
-      const name = segments.pop() ?? '';
-      const parent = segments.pop();
-      return `file:///…/${parent === 'assets' ? 'assets/' : ''}${name}`;
+  const bounded = text.slice(0, DIAGNOSTIC_INPUT_LIMIT);
+  const scrubbed = bounded
+    .replace(/[^\s<>"'()]+/g, (token) => token.includes('@') ? '<מייל>' : token)
+    // Absolute paths can contain spaces, including the home directory itself.
+    // Consume conservatively through a known filename or the next delimiter;
+    // removing extra prose is preferable to exporting a private directory name.
+    .replace(/(?:file:\/\/\/|[A-Za-z]:[\\/]|\\\\|\/)(?:[^\r\n"'<>|?*()„“”«»]*?\.(?:docx|dotx|docm|doc|pdf|txt|[cm]?[jt]s)(?=[:\s"'<>|?*()„“”«»]|$)(?::\d+(?::\d+)?)?|[^\r\n"'<>|?*()„“”«»]*)/gi, (path) => {
+      const document = path.match(/\.(docx|dotx|docm|doc|pdf|txt)(?=[:\s]|$)/i);
+      if (document) return `<מסמך>.${document[1]}`;
+      // Only keep technical script basenames, never user-chosen directories.
+      const script = path.match(/(?:^|[\\/])([^\\/\s]+\.[cm]?[jt]s(?::\d+(?::\d+)?)?)$/i);
+      return script ? `file:///…/${path.includes('/assets/') ? 'assets/' : ''}${script[1]}` : '<נתיב>';
     })
-    // שם משתמש עם רווח („yossi cohen”) — עד המפריד הבא, ולא עד הרווח.
-    .replace(/([A-Za-z]:[\\/]+(?:Users|Documents and Settings)[\\/]+)[^\\/\n'"<>|?*]+/gi, '$1…')
-    .replace(/(\/(?:home|Users)\/)[^/\s'"]+/g, '$1…')
-    .replace(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g, '<מייל>')
-    // שם במירכאות עשוי להכיל רווחים; בלעדיהן — עד הרווח או המפריד הקרוב.
     .replace(/(["'„“«])[^"'„“”«»\n]*?\.(docx|dotx|docm|doc|pdf|txt)(["'”»])/gi, '$1<מסמך>.$2$3')
-    // נתיב מלא (כונן או UNC) עד סיומת של מסמך, גם בלי מירכאות: שמות תיקיות
-    // וקבצים עם רווחים („D:\הספרים שלי\חידושים על התורה.docx”). הגבול הוא
-    // התווים שאסורים בנתיב של Windows, ולא הרווח.
-    .replace(/(?:[A-Za-z]:[\\/]|\\\\)[^\n"'<>|?*:„“”«»]*?\.(docx|dotx|docm|doc|pdf|txt)\b/gi, (_path, ext: string) => `<מסמך>.${ext}`)
-    // התיקיות של נתיב שאינו מסמך (סקריפט, תיקיית התקנה) — שמות שבחר המשתמש.
-    // שם הקובץ האחרון נשאר: הוא מה שמאתר את השורה.
-    .replace(/((?:[A-Za-z]:[\\/]|\\\\))(?:[^\\/\n"'<>|?*:]+[\\/])+/g, '$1…\\')
-    .replace(/[^\\/\s'"«»„“”:<>]+\.(docx|dotx|docm|doc|pdf|txt)\b/gi, (_name, ext: string) => `<מסמך>.${ext}`);
+    // Match each token once, rather than restarting a greedy basename search
+    // at every character of an extension-free diagnostic (quadratic work).
+    .replace(/[^\\/\s'"«»„“”:<>]+/g, (token) =>
+      token.startsWith('.') ? token : token.replace(/^.*\.(docx|dotx|docm|doc|pdf|txt)\b/i, (_name, ext: string) => `<מסמך>.${ext}`));
+  return scrubbed + (text.length > DIAGNOSTIC_INPUT_LIMIT ? '…' : '');
 }
 
 function clip(text: string): string {
@@ -76,7 +73,7 @@ function clip(text: string): string {
 /** ערך אחד מתוך הארגומנטים של `console.error` — טקסט, או שם הסוג בלבד. */
 function describe(value: unknown): string {
   if (typeof value === 'string') return value;
-  if (value instanceof Error) return `${value.name}: ${value.message}`;
+  if (value instanceof Error) return `${value.name.slice(0, 100)}: ${value.message.slice(0, DIAGNOSTIC_INPUT_LIMIT)}`;
   if (typeof value === 'number' || typeof value === 'boolean' || value == null) return String(value);
   const name = (value as { constructor?: { name?: string } }).constructor?.name;
   return `[${name || typeof value}]`;
@@ -91,7 +88,14 @@ function timestamp(): string {
 
 /** רושמת שגיאה. מיוצאת לבדיקות ולמי שתופס שגיאה ורוצה שתופיע בדיווח. */
 export function recordError(...parts: unknown[]): void {
-  const message = clip(scrubDiagnostic(parts.map(describe).join(' ')));
+  // Stop before mapping/joining arbitrary argument lists; descriptions and
+  // aggregate text are bounded even for a multi-megabyte console message.
+  let raw = '';
+  for (let i = 0; i < Math.min(parts.length, 32) && raw.length < DIAGNOSTIC_INPUT_LIMIT; i += 1) {
+    const part = describe(parts[i]).slice(0, DIAGNOSTIC_INPUT_LIMIT - raw.length);
+    raw += (raw ? ' ' : '') + part;
+  }
+  const message = clip(scrubDiagnostic(raw));
   if (!message) return;
 
   const last = entries[entries.length - 1];
@@ -137,8 +141,8 @@ export function installRecentErrors(): void {
   window.addEventListener('error', (event: ErrorEvent) => {
     // שגיאת טעינה של משאב (תמונה, סקריפט) מגיעה בלי message — אין מה לרשום.
     if (!event.message) return;
-    const where = event.filename ? ` (${event.filename}:${event.lineno}:${event.colno})` : '';
-    recordError(`${event.message}${where}`);
+    const where = event.filename ? ` (${event.filename.slice(0, DIAGNOSTIC_INPUT_LIMIT)}:${event.lineno}:${event.colno})` : '';
+    recordError(event.message, where);
   });
 
   window.addEventListener('unhandledrejection', (event: PromiseRejectionEvent) => {

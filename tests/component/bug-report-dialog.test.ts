@@ -74,13 +74,17 @@ describe('BugReportDialog', () => {
     const preview = teleported('.br-preview-text').text();
     expect(preview).toContain('הסמן קופץ');
     expect(preview).toContain('הדבקתי טקסט ולחצתי Enter');
-    expect(preview).toContain('TypeError: boom');
+    expect(preview).not.toContain('TypeError: boom');
+    expect((teleported('.br-check input').element as HTMLInputElement).checked).toBe(false);
+    await teleported('.br-check input').setValue(true);
+    expect(teleported('.br-preview-text').text()).toContain('TypeError: boom');
   });
 
   it('ביטול הסימון מוציא את השגיאות מהדיווח', async () => {
     recordError('TypeError: boom');
     await openAndFill();
 
+    await teleported('.br-check input').setValue(true);
     await teleported('.br-check input').setValue(false);
     await settle();
     expect(teleported('.br-preview-text').text()).not.toContain('TypeError: boom');
@@ -195,6 +199,63 @@ describe('BugReportDialog', () => {
     expect(status).toContain('הטופס נפתח בדפדפן');
     expect(status).not.toContain('הנוסח המלא הועתק ללוח');
     expect(status).toContain('נכשלה');
+    expect((teleported('.br-manual').element as HTMLTextAreaElement).value).toContain('א'.repeat(3000));
+    const writeText = installClipboard();
+    await footerButton('העתק שוב').trigger('click');
+    await settle();
+    expect(String(writeText.mock.calls[0][0])).toContain('א'.repeat(3000));
+    expect(teleported('.br-status').text()).toContain('הטופס נפתח בדפדפן');
+    expect(teleported('.br-status').text()).toContain('הנוסח המלא הועתק ללוח');
+  });
+
+  it('host false is refusal: fallback copies and never claims the browser opened', async () => {
+    installHost({ success: true, data: false, error: null });
+    const writeText = installClipboard();
+    await openAndFill();
+    await footerButton('פתח דיווח').trigger('click');
+    await settle();
+    expect(writeText).toHaveBeenCalledTimes(1);
+    expect(teleported('.br-status').text()).not.toContain('הטופס נפתח בדפדפן');
+    expect(teleported('.br-status').text()).toContain('הועתק ללוח');
+  });
+
+  it('Tab stays inside the dialog and closing restores the opener', async () => {
+    const opener = document.createElement('button');
+    document.body.append(opener);
+    opener.focus();
+    const harness = mountUi(BugReportDialog, { props: { isOpen: false } });
+    await harness.wrapper.setProps({ isOpen: true });
+    await settle();
+    const first = teleported('.br-close-btn');
+    const last = footerButton('ביטול');
+    (first.element as HTMLElement).focus();
+    await first.trigger('keydown', { key: 'Tab', shiftKey: true });
+    expect(document.activeElement).toBe(last.element);
+    await last.trigger('keydown', { key: 'Tab' });
+    expect(document.activeElement).toBe(first.element);
+    await harness.wrapper.setProps({ isOpen: false });
+    await settle();
+    expect(document.activeElement).toBe(opener);
+    opener.remove();
+  });
+
+  it('a pending host response cannot replace a newly reopened report', async () => {
+    let finish!: (reply: Reply) => void;
+    (window as unknown as { Otzaria: unknown }).Otzaria = {
+      call: () => new Promise<Reply>((resolve) => { finish = resolve; }), on() {}, off() {},
+    };
+    const harness = mountUi(BugReportDialog, { props: { isOpen: false } });
+    await harness.wrapper.setProps({ isOpen: true });
+    await settle();
+    await footerButton('פתח דיווח').trigger('click');
+    await harness.wrapper.setProps({ isOpen: false });
+    await harness.wrapper.setProps({ isOpen: true });
+    await settle();
+    await teleported('#br-desc-input').setValue('new report');
+    finish({ success: true, data: true, error: null });
+    await settle();
+    expect((teleported('#br-desc-input').element as HTMLTextAreaElement).value).toBe('new report');
+    expect(document.querySelector('.br-status')).toBeNull();
   });
 
   it('„סגור” ו-Escape סוגרים', async () => {

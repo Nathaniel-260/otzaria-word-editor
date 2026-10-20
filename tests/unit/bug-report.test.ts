@@ -17,6 +17,7 @@ import {
   type BugReportEnvironment,
 } from '../../src/host/bug-report';
 import {
+  DIAGNOSTIC_INPUT_LIMIT,
   RECENT_ERRORS_LIMIT,
   clearRecentErrors,
   recentErrors,
@@ -178,6 +179,30 @@ describe('recent-errors', () => {
     expect(scrubbed[0]).toBe('open <מסמך>.docx');
     // שם הסקריפט ומיקום השורה נשארים — הם מה שמאתר את התקלה.
     expect(scrubbed[1]).toContain('x.js:3:4');
+  });
+
+  it.each([
+    'open /Users/yossi/Documents/חידושים על התורה.docx',
+    'open /home/yossi/private/client projects/book.docx',
+    'open /Users/yossi cohen/Documents/חידושים על התורה.docx',
+    'at file:///Users/yossi cohen/Library/otzaria/assets/app.js:12:3',
+    'open file:///Users/yossi%20cohen/private/חידושים%20על%20התורה.docx',
+    'read /srv/private/client projects/book.bin',
+  ])('conservatively removes complete private paths: %s', (input) => {
+    const output = scrubDiagnostic(input);
+    for (const privatePart of ['yossi', 'cohen', 'חידושים', 'התורה', 'private', 'client', 'projects']) {
+      expect(output).not.toContain(privatePart);
+    }
+  });
+
+  it('bounds input before processing; huge messages and argument lists stay bounded', () => {
+    const inspected = scrubDiagnostic('x'.repeat(DIAGNOSTIC_INPUT_LIMIT * 100));
+    expect(inspected.length).toBe(DIAGNOSTIC_INPUT_LIMIT + 1);
+    const unreadable = { get constructor(): never { throw new Error('must not inspect argument 33'); } };
+    recordError(...Array(32).fill(''), unreadable);
+    expect(recentErrors()).toEqual([]);
+    recordError('x'.repeat(1_000_000));
+    expect(recentErrors()[0].message.length).toBeLessThanOrEqual(301);
   });
 
   it('אובייקט נרשם כשם הסוג בלבד — לא כתוכנו', () => {

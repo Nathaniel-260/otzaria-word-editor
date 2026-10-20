@@ -17,7 +17,7 @@
  *
  * רק מה שהמשתמש כתב, ופרטי סביבה: גרסת התוסף, גרסת SuperDoc, גרסת אוצריא,
  * ה-user agent, ובאישורו — השגיאות האחרונות מהקונסול (מנוקות, ר'
- * `recent-errors.ts`). **תוכן המסמך אינו נאסף כלל**, וגם לא שמו. אין כאן
+ * `recent-errors.ts`). אין קריאה של המסמך; הודעות שגיאה עשויות להכיל מידע פרטי ודורשות בדיקה. אין כאן
  * מייל — אף שאוצריא מציעה `app.getUserEmail` בדיוק לדיווחי שגיאות, issue
  * ב-GitHub הוא ציבורי.
  */
@@ -98,13 +98,13 @@ export function buildIssueBody(input: Omit<BugReportInput, 'title'>, options: { 
     description || '_לא נכתב תיאור._',
   ];
   if (options.truncated) {
-    sections.push('_(הדיווח קוצר כדי להיכנס לכתובת. הנוסח המלא הועתק ללוח של המדווח.)_');
+    sections.push('_(הדיווח קוצר כדי להיכנס לכתובת. הנוסח המלא זמין בחלון הדיווח בעורך להעתקה.)_');
   }
   sections.push('', '### פרטים טכניים', environmentTable(input.environment));
   if (input.errors.length > 0) {
     sections.push('', '### שגיאות אחרונות', errorsBlock(input.errors));
   }
-  sections.push('', '<sub>נשלח מתוך „דיווח על באג” בוורד לאוצריא. תוכן המסמך לא צורף.</sub>');
+  sections.push('', '<sub>נשלח מתוך „דיווח על באג” בוורד לאוצריא. לא בוצעה קריאה של המסמך לצורך הדיווח.</sub>');
   return sections.join('\n');
 }
 
@@ -177,7 +177,9 @@ export function buildIssueUrl(input: BugReportInput): IssueLink {
 
 /** פתיחה בדפדפן דרך אוצריא. זורקת כשהמאחז סירב או אינו קיים. */
 export async function openInBrowser(url: string): Promise<void> {
-  await call<boolean>('app.openUrl', { url });
+  if (await call<boolean>('app.openUrl', { url }) !== true) {
+    throw new Error('Opening the report was declined');
+  }
 }
 
 /**
