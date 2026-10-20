@@ -60,7 +60,44 @@ import { SHORTCUTS, type ShellAction, type Shortcut } from './registry';
  * כקלט-פלט ולא דרך מאזין.
  */
 export function runsBeforeEngine(shortcut: Shortcut): boolean {
-  return shortcut.alt === true && shortcut.ctrl !== true;
+  if (shortcut.alt === true && shortcut.ctrl !== true) return true;
+  return conflictsWithEngineCtrlShift(shortcut);
+}
+
+/**
+ * צירופי `Ctrl+Shift` שהמנוע קושר בעצמו, ומה הם עושים אצלו.
+ *
+ * נמדד בדפדפן עם זהות Windows (scripts/qa/ctrl-shift-survey-probe.mjs, על כל האותיות, הספרות
+ * ו-`> < + _`): אלה בדיוק הצירופים שהמנוע קורא להם `preventDefault`. רובם
+ * מוסכמות TipTap ולא Word — `Ctrl+Shift+E` מרכז, `L`/`R` מיישרים, `7`/`8`
+ * פותחים רשימה. כש-`defaultPrevented` כבר דלוק ב-bubble המנתב נוטש, ולכן
+ * רשומה שלנו על צירוף כזה לא רצה מעולם: `Ctrl+Shift+E` מירכז את הפסקה במקום
+ * להפעיל מעקב שינויים, ו-`Ctrl+Shift+8` פתח רשימת תבליטים במקום סימני עיצוב.
+ */
+const ENGINE_CTRL_SHIFT: Readonly<Record<string, string>> = {
+  KeyE: 'text-align',
+  KeyL: 'text-align',
+  KeyR: 'text-align',
+  KeyH: 'highlight',
+  KeyX: 'strikethrough',
+  KeyZ: 'redo',
+  Digit7: 'ordered-list',
+  Digit8: 'bullet-list',
+};
+
+/**
+ * רשומה שלנו על צירוף שהמנוע קושר **לפעולה אחרת** — ולכן חייבת לרוץ לפניו.
+ *
+ * כשהפעולה זהה (`Ctrl+Shift+X` קו חוצה, `Ctrl+Shift+Z` ביצוע חוזר) הצירוף
+ * נשאר של המנוע, בדיוק כמו `Ctrl+B`: אין מה להרוויח מלעקוף אותו.
+ */
+function conflictsWithEngineCtrlShift(shortcut: Shortcut): boolean {
+  if (shortcut.ctrl !== true || shortcut.shift !== true || shortcut.alt === true) return false;
+  const codes = typeof shortcut.code === 'string' ? [shortcut.code] : (shortcut.code ?? []);
+  return codes.some((code) => {
+    const engine = ENGINE_CTRL_SHIFT[code];
+    return engine !== undefined && engine !== shortcut.command;
+  });
 }
 
 /**
@@ -206,6 +243,14 @@ export function createShortcutDispatcher(deps: ShortcutDispatcherDeps): Shortcut
     if (isModalOpen() && !shortcut.inModal) return false;
     if (!shortcut.inTextEntry && inUiTextEntry(event.target)) return false;
 
+    // Capture owns the entire held chord. Letting repeats reach the engine
+    // would center the paragraph (E) or create bullets (8) after our toggle.
+    // Keep all guards above, but never repeat a non-repeatable action.
+    if (event.repeat && shortcut.repeatable !== true) {
+      swallow(event);
+      return true;
+    }
+
     // פקודת מנוע נחשבת מטופלת תמיד: גם סירוב של ה-controller הוא תשובה,
     // והיא מגיעה למשתמש כהודעה בעברית. פעולת מעטפת מדווחת בעצמה — `Escape`
     // שלא היה לו מה לסגור אינו „מטופל”, ואסור לבלוע אותו.
@@ -237,7 +282,7 @@ export function createShortcutDispatcher(deps: ShortcutDispatcherDeps): Shortcut
     // מאזין capture מוקדם משלנו שכבר טיפל. אותה הכרעה של `handle`.
     if (event.defaultPrevented) return false;
 
-    const shortcut = matchAny(event, shortcuts);
+    const shortcut = matchAny(event, shortcuts, { ignoreRepeat: true });
     if (shortcut) return runsBeforeEngine(shortcut) ? runMatched(shortcut, event) : false;
 
     return handleCustom(event);

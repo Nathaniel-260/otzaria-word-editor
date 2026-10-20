@@ -41,11 +41,16 @@ function isComposing(event: KeyEventLike): boolean {
   return event.isComposing === true || event.keyCode === 229;
 }
 
-export function matchShortcut(event: KeyEventLike, shortcut: Shortcut): boolean {
+/** Capture may reserve a chord on repeat without running its action again. */
+interface MatchOptions {
+  ignoreRepeat?: boolean;
+}
+
+export function matchShortcut(event: KeyEventLike, shortcut: Shortcut, options?: MatchOptions): boolean {
   if (isComposing(event)) return false;
 
   // מקש מוחזק חוזר עשרות פעמים בשנייה. „הגדל גופן” אמור לחזור, „שמור” לא.
-  if (event.repeat === true && shortcut.repeatable !== true) return false;
+  if (!options?.ignoreRepeat && event.repeat === true && shortcut.repeatable !== true) return false;
 
   // Meta שקול ל-Ctrl: מקלדת Mac שולחת Cmd, ואותה רשומה צריכה לתפוס את שניהם.
   if (event.ctrlKey || event.metaKey ? shortcut.ctrl !== true : shortcut.ctrl === true) return false;
@@ -67,6 +72,7 @@ export function matchShortcut(event: KeyEventLike, shortcut: Shortcut): boolean 
 export function matchAny(
   event: KeyEventLike,
   shortcuts: readonly Shortcut[],
+  options?: MatchOptions,
 ): Shortcut | undefined {
-  return shortcuts.find((shortcut) => matchShortcut(event, shortcut));
+  return shortcuts.find((shortcut) => matchShortcut(event, shortcut, options));
 }
