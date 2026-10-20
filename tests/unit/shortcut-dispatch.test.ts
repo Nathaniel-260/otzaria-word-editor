@@ -8,7 +8,7 @@ import {
   isTextEntryTarget,
   type ShortcutDispatcherDeps,
 } from '../../src/ui/shortcuts/dispatch';
-import type { Shortcut } from '../../src/ui/shortcuts/registry';
+import { SHORTCUTS, type Shortcut } from '../../src/ui/shortcuts/registry';
 
 const BOLD: Shortcut = {
   id: 'bold',
@@ -337,6 +337,71 @@ describe('המנתב', () => {
     const { dispatcher } = setup();
     dispatcher.dispose();
     expect(() => dispatcher.dispose()).not.toThrow();
+  });
+});
+
+describe('held capture chords', () => {
+  for (const code of ['KeyE', 'Digit8']) {
+    for (const modifier of ['ctrlKey', 'metaKey']) {
+      it(`${modifier}+Shift+${code}: toggle once and consume repeated keydowns`, () => {
+        const { dispatcher, runAction, runCommand } = setup({ shortcuts: SHORTCUTS });
+        const chord = { code, [modifier]: true, shiftKey: true };
+        expect(dispatcher.handleCapture(event(chord))).toBe(true);
+        for (let i = 0; i < 3; i++) {
+          const repeated = event({ ...chord, repeat: true });
+          expect(dispatcher.handleCapture(repeated)).toBe(true);
+          expect(repeated.preventDefault).toHaveBeenCalledOnce();
+          expect(repeated.stopPropagation).toHaveBeenCalledOnce();
+        }
+        expect(runAction.mock.calls.length + runCommand.mock.calls.length).toBe(1);
+      });
+    }
+  }
+
+  for (const guard of [
+    { isModalOpen: () => true },
+    { target: element('input') },
+    { isComposing: true },
+    { keyCode: 229 },
+    { defaultPrevented: true },
+  ]) {
+    it(`preserves repeat guards: ${Object.keys(guard)[0]}`, () => {
+      const { isModalOpen, ...init } = guard;
+      const { dispatcher, runAction } = setup({ shortcuts: SHORTCUTS, isModalOpen });
+      const repeated = event({ code: 'KeyE', ctrlKey: true, shiftKey: true, repeat: true, ...init });
+      expect(dispatcher.handleCapture(repeated)).toBe(false);
+      expect(repeated.preventDefault).not.toHaveBeenCalled();
+      expect(runAction).not.toHaveBeenCalled();
+    });
+  }
+
+  it('still consumes repeats from the engine composition textarea', () => {
+    const { dispatcher } = setup({ shortcuts: SHORTCUTS, isDocumentSurface: () => true });
+    expect(dispatcher.handleCapture(event({ code: 'KeyE', ctrlKey: true, shiftKey: true, repeat: true, target: element('textarea') }))).toBe(true);
+  });
+
+  it('keeps built-in priority over repeatable custom shortcuts', () => {
+    const runCustom = vi.fn(() => true);
+    const custom: Shortcut = { ...BOLD, id: 'custom', code: 'KeyE', shift: true, repeatable: true };
+    const { dispatcher } = setup({ shortcuts: SHORTCUTS, customShortcuts: () => [custom], runCustom });
+    expect(dispatcher.handleCapture(event({ code: 'KeyE', ctrlKey: true, shiftKey: true, repeat: true }))).toBe(true);
+    expect(runCustom).not.toHaveBeenCalled();
+  });
+
+  it('leaves equivalent engine bindings and native repeat handling alone', () => {
+    const { dispatcher, runCommand } = setup({ shortcuts: SHORTCUTS });
+    for (const code of ['KeyX', 'KeyZ', 'KeyV']) {
+      const repeated = event({ code, ctrlKey: true, shiftKey: true, repeat: true });
+      expect(dispatcher.handleCapture(repeated)).toBe(false);
+      expect(repeated.preventDefault).not.toHaveBeenCalled();
+    }
+    expect(runCommand).not.toHaveBeenCalled();
+  });
+
+  it('continues running repeatable capture commands', () => {
+    const { dispatcher, runAction } = setup({ shortcuts: [{ ...TAB_GOTO, repeatable: true }] });
+    expect(dispatcher.handleCapture(event({ code: 'Digit3', altKey: true, repeat: true }))).toBe(true);
+    expect(runAction).toHaveBeenCalledExactlyOnceWith('tab-goto', 3);
   });
 });
 

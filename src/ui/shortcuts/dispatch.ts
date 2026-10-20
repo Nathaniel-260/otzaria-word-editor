@@ -67,7 +67,7 @@ export function runsBeforeEngine(shortcut: Shortcut): boolean {
 /**
  * צירופי `Ctrl+Shift` שהמנוע קושר בעצמו, ומה הם עושים אצלו.
  *
- * נמדד בדפדפן (scripts/qa/ctrl-shift-survey-probe.mjs, על כל האותיות, הספרות
+ * נמדד בדפדפן עם זהות Windows (scripts/qa/ctrl-shift-survey-probe.mjs, על כל האותיות, הספרות
  * ו-`> < + _`): אלה בדיוק הצירופים שהמנוע קורא להם `preventDefault`. רובם
  * מוסכמות TipTap ולא Word — `Ctrl+Shift+E` מרכז, `L`/`R` מיישרים, `7`/`8`
  * פותחים רשימה. כש-`defaultPrevented` כבר דלוק ב-bubble המנתב נוטש, ולכן
@@ -243,6 +243,14 @@ export function createShortcutDispatcher(deps: ShortcutDispatcherDeps): Shortcut
     if (isModalOpen() && !shortcut.inModal) return false;
     if (!shortcut.inTextEntry && inUiTextEntry(event.target)) return false;
 
+    // Capture owns the entire held chord. Letting repeats reach the engine
+    // would center the paragraph (E) or create bullets (8) after our toggle.
+    // Keep all guards above, but never repeat a non-repeatable action.
+    if (event.repeat && shortcut.repeatable !== true) {
+      swallow(event);
+      return true;
+    }
+
     // פקודת מנוע נחשבת מטופלת תמיד: גם סירוב של ה-controller הוא תשובה,
     // והיא מגיעה למשתמש כהודעה בעברית. פעולת מעטפת מדווחת בעצמה — `Escape`
     // שלא היה לו מה לסגור אינו „מטופל”, ואסור לבלוע אותו.
@@ -274,7 +282,7 @@ export function createShortcutDispatcher(deps: ShortcutDispatcherDeps): Shortcut
     // מאזין capture מוקדם משלנו שכבר טיפל. אותה הכרעה של `handle`.
     if (event.defaultPrevented) return false;
 
-    const shortcut = matchAny(event, shortcuts);
+    const shortcut = matchAny(event, shortcuts, { ignoreRepeat: true });
     if (shortcut) return runsBeforeEngine(shortcut) ? runMatched(shortcut, event) : false;
 
     return handleCustom(event);

@@ -15,6 +15,9 @@
  *
  * מגבלה: האותיות שפותחות דיאלוג או טאב, וההדבקה (`SKIP`), אינן נסקרות, ולכן צירוף
  * מנוע חדש עליהן לא ייתפס כאן.
+ * The table describes Windows Ctrl bindings. Set Windows navigator identity
+ * before app/engine initialization so this survey is deterministic on macOS too.
+ * This exercises the real engine in Chrome, not a native Windows WebView.
  *
  *   npm run build && node scripts/qa/ctrl-shift-engine-qa.mjs   (QA_PORT דורס 9395)
  */
@@ -44,18 +47,30 @@ for (let c = 65; c <= 90; c++) KEYS.push({ key: String.fromCharCode(c), code: `K
 for (let d = 0; d <= 9; d++) KEYS.push({ key: String(d), code: `Digit${d}`, vk: 48 + d });
 KEYS.push({ key: '>', code: 'Period', vk: 190 }, { key: '<', code: 'Comma', vk: 188 }, { key: '+', code: 'Equal', vk: 187 }, { key: '_', code: 'Minus', vk: 189 });
 
-const app = await openApp({ name: 'ctrl-shift-engine', port: Number(process.env.QA_PORT ?? 9395) });
+const app = await openApp({
+  name: 'ctrl-shift-engine',
+  port: Number(process.env.QA_PORT ?? 9395),
+  extra: `<script>
+    Object.defineProperty(navigator, 'platform', { value: 'Win32' });
+    Object.defineProperty(navigator, 'userAgent', {
+      value: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36',
+    });
+  </script>`,
+});
 const { cdp } = app;
 
-async function key(type, k, code, vk, modifiers, location = 0) {
-  await cdp.send('Input.dispatchKeyEvent', { type, key: k, code, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk, modifiers, location });
+async function key(type, k, code, vk, modifiers, location = 0, autoRepeat = false) {
+  await cdp.send('Input.dispatchKeyEvent', { type, key: k, code, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk, modifiers, location, autoRepeat });
   await sleep(60);
 }
 /** `rolled`: ה-Shift משוחרר לפני האות — הסדר שבו היפוך הכיוון הסתתר. */
-async function chord(letter, { rolled = false } = {}) {
+async function chord(letter, { rolled = false, repeat = false } = {}) {
   await key('rawKeyDown', 'Control', 'ControlLeft', 17, CTRL, 1);
   await key('rawKeyDown', 'Shift', 'ShiftLeft', 16, CTRL | SHIFT, 1);
   await key('rawKeyDown', letter.key, letter.code, letter.vk, CTRL | SHIFT);
+  if (repeat) {
+    for (let i = 0; i < 3; i++) await key('rawKeyDown', letter.key, letter.code, letter.vk, CTRL | SHIFT, 0, true);
+  }
   if (rolled) {
     await key('keyUp', 'Shift', 'ShiftLeft', 16, CTRL, 1);
     await key('keyUp', letter.key.toLowerCase(), letter.code, letter.vk, CTRL);
@@ -151,9 +166,10 @@ try {
   await app.caret(0);
   await sleep(300);
   const p0 = await firstPara();
-  for (const rolled of [false, true]) {
-    const name = `Ctrl+Shift+E (${rolled ? 'Shift משוחרר ראשון' : 'האות משוחררת ראשונה'}) — מעקב שינויים, בלי יישור ובלי כיוון`;
-    await chord(E, { rolled });
+  for (const options of [{ rolled: false }, { rolled: true }, { rolled: true, repeat: true }]) {
+    const { rolled, repeat } = options;
+    const name = `Ctrl+Shift+E (${repeat ? 'מקש מוחזק' : rolled ? 'Shift משוחרר ראשון' : 'האות משוחררת ראשונה'}) — מעקב שינויים, בלי יישור ובלי כיוון`;
+    await chord(E, options);
     const m = await mode();
     const p1 = await firstPara();
     const detail = `mode=${m} jc=${p1.jc} bidi=${p1.bidi}`;
@@ -161,10 +177,10 @@ try {
     else report.fail(name, detail, `לפני: jc=${p0.jc} bidi=${p0.bidi}`);
     if (m === 'suggesting') await chord(E);
   }
-  {
-    const name = 'Ctrl+Shift+8 — סימני עיצוב, לא רשימת תבליטים';
+  for (const repeat of [false, true]) {
+    const name = `Ctrl+Shift+8${repeat ? ' (מקש מוחזק)' : ''} — סימני עיצוב, לא רשימת תבליטים`;
     const before = await marks();
-    await chord(EIGHT, { rolled: true });
+    await chord(EIGHT, { rolled: true, repeat });
     const after = await marks();
     const p8 = await firstPara();
     const detail = `marks ${before}→${after} list=${p8.list} bidi=${p8.bidi}`;
