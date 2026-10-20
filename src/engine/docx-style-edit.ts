@@ -568,7 +568,14 @@ function inheritedRuns(xml: string, basedOn: string | null): InheritedRuns {
  * Refuse NEW Word/renderer disagreements before importing any definitions.
  * Resolve both graphs with memoization: work scales with stylesheet size, not body size.
  */
-export function liveStyleTogglesSupported(beforeXml: string, afterXml: string, edit: StyleEdit, editedId: string): boolean {
+export function liveStyleTogglesSupported(
+  beforeXml: string,
+  afterXml: string,
+  edit: StyleEdit,
+  editedId: string,
+  /** Atomic template edits: validate all explicit requests in the same final graph. */
+  additionalRequests?: Readonly<Record<string, StyleFormat>>,
+): boolean {
   const before = readSheet(beforeXml);
   const after = readSheet(afterXml);
   if (!before || !after) return false;
@@ -639,8 +646,9 @@ export function liveStyleTogglesSupported(beforeXml: string, afterXml: string, e
     const previous = old.definitions.has(id) ? old.resolve(id) : null;
     for (const key of keys) {
       if (wanted[key].word === wanted[key].renderer) continue;
-      const requested = id === editedId && (edit.kind === 'create' || edit.kind === 'modify') &&
-        has(edit.format, key.startsWith('b') ? 'bold' : 'italic');
+      const format = id === editedId && (edit.kind === 'create' || edit.kind === 'modify')
+        ? edit.format : additionalRequests?.[id];
+      const requested = format && has(format, key.startsWith('b') ? 'bold' : 'italic');
       if (requested || !previous || previous[key].word !== wanted[key].word || previous[key].renderer !== wanted[key].renderer) return false;
     }
   }
@@ -1023,4 +1031,37 @@ export function stripStyleReferences(partXml: string, ids: readonly string[]): s
   );
   const out = partXml.replace(pattern, '');
   return out === partXml ? null : out;
+}
+
+/** ‏CT_DocDefaults. */
+const DOC_DEFAULTS_ORDER = ['rPrDefault', 'pPrDefault'] as const;
+
+/**
+ * גופן וגודל ברירת המחדל של המסמך כולו — `w:docDefaults/w:rPrDefault/w:rPr`,
+ * המקום שבו Word כותב „הגדר כברירת מחדל” של דיאלוג הגופן. מקבלת רק את שני
+ * השדות האלה; השאר מתעלמים. שני צדי הכתב נכתבים יחד (`sz`+`szCs`,
+ * `ascii`/`hAnsi`/`cs`), כמו בסגנון. מחזירה `null` כשהגיליון אינו נקרא.
+ */
+export function editRunDefaults(stylesXml: string, format: Pick<StyleFormat, 'fontFamily' | 'fontSizePt'>): string | null {
+  const sheet = readSheet(stylesXml);
+  if (!sheet) return null;
+  const p = sheet.prefix;
+  const run: StyleFormat = {};
+  if (has(format, 'fontFamily')) run.fontFamily = format.fontFamily;
+  if (has(format, 'fontSizePt')) run.fontSizePt = format.fontSizePt;
+  if (Object.keys(run).length === 0) return stylesXml;
+
+  const node = childrenOf(sheet.xml, sheet.innerStart, sheet.innerEnd).find((child) => child.name === 'docDefaults');
+  let defaults = node ? parseElement(sheet.xml.slice(node.start, node.end)) : emptyElement(p, 'docDefaults');
+  if (!defaults) return null;
+  const rPrDefaultText = childText(defaults, 'rPrDefault');
+  let rPrDefault = (rPrDefaultText && parseElement(rPrDefaultText)) || emptyElement(p, 'rPrDefault');
+  const rPrText = childText(rPrDefault, 'rPr');
+  const rPr = patchRunProperties((rPrText && parseElement(rPrText)) || emptyElement(p, 'rPr'), run, { latin: {}, complex: {} });
+  rPrDefault = withChild(rPrDefault, 'rPr', rPr.inner ? serialize(rPr) : null, ['rPr']);
+  defaults = withChild(defaults, 'rPrDefault', serialize(rPrDefault), DOC_DEFAULTS_ORDER);
+  // ‏`docDefaults` הוא הילד הראשון של `w:styles` לפי הסכמה.
+  return node
+    ? replaceRange(sheet, node.start, node.end, serialize(defaults))
+    : replaceRange(sheet, sheet.innerStart, sheet.innerStart, serialize(defaults));
 }
