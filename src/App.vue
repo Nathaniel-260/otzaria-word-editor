@@ -667,6 +667,7 @@ import {
 } from './engine/caret-anchor';
 import { createTextCursorWatch } from './engine/text-cursor';
 import { installRtlLineEnd } from './engine/rtl-line-end';
+import { installWordDeleteRefresh } from './engine/word-delete-refresh';
 import { installRtlVisualArrows } from './engine/rtl-caret';
 import { installRtlVerticalArrows } from './engine/rtl-vertical-caret';
 import { installCaretVisibility, type CaretVisibilityUi } from './engine/caret-visibility';
@@ -2926,6 +2927,17 @@ async function openDocumentInto(
     superdoc: editor.superdoc,
   });
   editor.onDispose(() => sessionVisualArrows.dispose());
+
+  /**
+   * ‏`Ctrl+Backspace`/`Ctrl+Delete` שאינם מוחקים אחרי פקודת רצועה — ראו
+   * engine/word-delete-refresh.ts. אינו בולע את ההקשה, ולכן הסדר מול שני
+   * המאזינים שמעליו (שאינם נוגעים ב-Backspace/Delete) אינו משנה.
+   */
+  const sessionWordDelete = installWordDeleteRefresh({
+    host: paintedHost(editor.ui),
+    superdoc: editor.superdoc,
+  });
+  editor.onDispose(() => sessionWordDelete.dispose());
 
   /**
    * חצים אנכיים בשורה עברית — ראו engine/rtl-vertical-caret.ts. מאזין שלישי
