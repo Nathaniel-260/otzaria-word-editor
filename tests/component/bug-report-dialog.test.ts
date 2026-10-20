@@ -135,6 +135,68 @@ describe('BugReportDialog', () => {
     expect((teleported('.br-manual').element as HTMLTextAreaElement).value).toContain('הדבקתי טקסט ולחצתי Enter');
   });
 
+  it('Enter על „מה יישלח” אינו שולח את הדיווח', async () => {
+    const calls = installHost({ success: true, data: true, error: null });
+    await openAndFill();
+
+    await teleported('.br-preview summary').trigger('keydown', { key: 'Enter' });
+    await settle();
+    expect(calls).toHaveLength(0);
+
+    // ובשדה הנושא Enter הוא „פתח דיווח”.
+    await teleported('#br-title-input').trigger('keydown', { key: 'Enter' });
+    await settle();
+    expect(calls.map((call) => call.method)).toEqual(['app.openUrl']);
+  });
+
+  it('דיווח שקוצר מועתק ללוח לפני פתיחת הדפדפן, כשהדף עוד ממוקד', async () => {
+    const order: string[] = [];
+    (window as unknown as { Otzaria: unknown }).Otzaria = {
+      call: async (method: string) => {
+        order.push(method);
+        return { success: true, data: true, error: null };
+      },
+      on: () => {},
+      off: () => {},
+    };
+    const writeText = vi.fn(async () => {
+      order.push('clipboard');
+    });
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    const harness = mountUi(BugReportDialog, { props: { isOpen: false } });
+    await harness.wrapper.setProps({ isOpen: true });
+    await settle();
+    await teleported('#br-desc-input').setValue('א'.repeat(3000));
+    await settle();
+
+    await footerButton('פתח דיווח').trigger('click');
+    await settle();
+
+    expect(order).toEqual(['clipboard', 'app.openUrl']);
+    expect(teleported('.br-status').text()).toContain('הנוסח המלא הועתק ללוח');
+  });
+
+  it('דיווח שקוצר, והלוח נכשל — ההודעה אינה מבטיחה לוח', async () => {
+    installHost({ success: true, data: true, error: null });
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText: vi.fn(async () => { throw new Error('Document is not focused'); }) },
+      configurable: true,
+    });
+    const harness = mountUi(BugReportDialog, { props: { isOpen: false } });
+    await harness.wrapper.setProps({ isOpen: true });
+    await settle();
+    await teleported('#br-desc-input').setValue('א'.repeat(3000));
+    await settle();
+
+    await footerButton('פתח דיווח').trigger('click');
+    await settle();
+
+    const status = teleported('.br-status').text();
+    expect(status).toContain('הטופס נפתח בדפדפן');
+    expect(status).not.toContain('הנוסח המלא הועתק ללוח');
+    expect(status).toContain('נכשלה');
+  });
+
   it('„סגור” ו-Escape סוגרים', async () => {
     const harness = mountUi(BugReportDialog, { props: { isOpen: true } });
     await settle();

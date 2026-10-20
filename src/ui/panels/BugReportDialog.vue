@@ -90,8 +90,12 @@
         >
           <template v-if="phase === 'opened'">
             הטופס נפתח בדפדפן, והשליחה עצמה נעשית שם.
-            <template v-if="sentTruncated">
+            <template v-if="sentTruncated === 'copied'">
               הדיווח היה ארוך מדי לכתובת וקוצר בה; הנוסח המלא הועתק ללוח.
+            </template>
+            <template v-else-if="sentTruncated === 'lost'">
+              הדיווח היה ארוך מדי לכתובת וקוצר בה, וההעתקה ללוח של הנוסח המלא
+              נכשלה.
             </template>
           </template>
           <template v-else>
@@ -211,7 +215,8 @@ const environment = ref(collectEnvironment());
 const titleRef = ref<HTMLInputElement | null>(null);
 const doneRef = ref<HTMLButtonElement | null>(null);
 
-const sentTruncated = ref(false);
+/** הכתובת קוצרה: `copied` — הנוסח המלא בלוח; `lost` — ההעתקה נכשלה. */
+const sentTruncated = ref<'copied' | 'lost' | null>(null);
 
 const input = computed<BugReportInput>(() => ({
   title: title.value,
@@ -239,7 +244,7 @@ watch(
     title.value = '';
     description.value = '';
     includeErrors.value = true;
-    sentTruncated.value = false;
+    sentTruncated.value = null;
     errors.value = recentErrors();
     // גרסת אוצריא מגיעה מה-boot, שעשוי להסתיים אחרי הרכבת הקומפוננטה.
     environment.value = collectEnvironment();
@@ -251,14 +256,17 @@ async function send(): Promise<void> {
   if (phase.value === 'sending') return;
   phase.value = 'sending';
   const current = buildIssueUrl(input.value);
-  sentTruncated.value = current.truncated;
+  // הכתובת קוצרה — הנוסח המלא נשמר בלוח כדי שאפשר יהיה להדביק אותו. **לפני**
+  // הפתיחה: אחריה הדפדפן החיצוני מקבל את המיקוד, ו-`clipboard.writeText` של
+  // דף שאינו ממוקד נדחה („Document is not focused”) — ההודעה הייתה מבטיחה
+  // לוח שלא נכתב.
+  const copied = current.truncated ? await copyText(current.fullText) : false;
+  sentTruncated.value = current.truncated ? (copied ? 'copied' : 'lost') : null;
   try {
     await openInBrowser(current.url);
-    // הכתובת קוצרה — הנוסח המלא נשמר בלוח כדי שאפשר יהיה להדביק אותו.
-    if (current.truncated) await copyText(current.fullText);
     phase.value = 'opened';
   } catch {
-    phase.value = (await copyText(current.fullText)) ? 'copied' : 'failed';
+    phase.value = copied || (await copyText(current.fullText)) ? 'copied' : 'failed';
   }
   void nextTick(() => doneRef.value?.focus());
 }

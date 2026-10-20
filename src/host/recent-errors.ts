@@ -52,11 +52,19 @@ export function scrubDiagnostic(text: string): string {
       const parent = segments.pop();
       return `file:///…/${parent === 'assets' ? 'assets/' : ''}${name}`;
     })
-    .replace(/([A-Za-z]:[\\/]+(?:Users|Documents and Settings)[\\/]+)[^\\/\s'"]+/gi, '$1…')
+    // שם משתמש עם רווח („yossi cohen”) — עד המפריד הבא, ולא עד הרווח.
+    .replace(/([A-Za-z]:[\\/]+(?:Users|Documents and Settings)[\\/]+)[^\\/\n'"<>|?*]+/gi, '$1…')
     .replace(/(\/(?:home|Users)\/)[^/\s'"]+/g, '$1…')
     .replace(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g, '<מייל>')
     // שם במירכאות עשוי להכיל רווחים; בלעדיהן — עד הרווח או המפריד הקרוב.
     .replace(/(["'„“«])[^"'„“”«»\n]*?\.(docx|dotx|docm|doc|pdf|txt)(["'”»])/gi, '$1<מסמך>.$2$3')
+    // נתיב מלא (כונן או UNC) עד סיומת של מסמך, גם בלי מירכאות: שמות תיקיות
+    // וקבצים עם רווחים („D:\הספרים שלי\חידושים על התורה.docx”). הגבול הוא
+    // התווים שאסורים בנתיב של Windows, ולא הרווח.
+    .replace(/(?:[A-Za-z]:[\\/]|\\\\)[^\n"'<>|?*:„“”«»]*?\.(docx|dotx|docm|doc|pdf|txt)\b/gi, (_path, ext: string) => `<מסמך>.${ext}`)
+    // התיקיות של נתיב שאינו מסמך (סקריפט, תיקיית התקנה) — שמות שבחר המשתמש.
+    // שם הקובץ האחרון נשאר: הוא מה שמאתר את השורה.
+    .replace(/((?:[A-Za-z]:[\\/]|\\\\))(?:[^\\/\n"'<>|?*:]+[\\/])+/g, '$1…\\')
     .replace(/[^\\/\s'"«»„“”:<>]+\.(docx|dotx|docm|doc|pdf|txt)\b/gi, (_name, ext: string) => `<מסמך>.${ext}`);
 }
 

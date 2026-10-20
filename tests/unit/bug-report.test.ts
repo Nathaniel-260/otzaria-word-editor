@@ -166,6 +166,20 @@ describe('recent-errors', () => {
     expect(scrubbed).toContain('„<מסמך>.docx”');
   });
 
+  it('נתיב עם רווחים, בלי מירכאות — גם התיקיות וגם השם יורדים', () => {
+    const scrubbed = [
+      'open D:\\הספרים שלי\\חידושים על התורה.docx',
+      'at C:\\Users\\yossi cohen\\Desktop\\x.js:3:4',
+      'open \\\\server\\share\\Rabbi Name\\file.docx',
+    ].map(scrubDiagnostic);
+    for (const leak of ['הספרים', 'חידושים', 'התורה', 'yossi', 'cohen', 'Rabbi', 'server']) {
+      expect(scrubbed.join(' ')).not.toContain(leak);
+    }
+    expect(scrubbed[0]).toBe('open <מסמך>.docx');
+    // שם הסקריפט ומיקום השורה נשארים — הם מה שמאתר את התקלה.
+    expect(scrubbed[1]).toContain('x.js:3:4');
+  });
+
   it('אובייקט נרשם כשם הסוג בלבד — לא כתוכנו', () => {
     recordError('[otzaria-word] שגיאה:', { text: 'תוכן המסמך' }, new TypeError('boom'));
     const [entry] = recentErrors();
