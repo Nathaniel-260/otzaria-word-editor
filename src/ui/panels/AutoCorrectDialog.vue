@@ -111,6 +111,10 @@
           >
             {{ message }}
           </p>
+          <small
+            v-else-if="draftFrom !== ''"
+            class="acorr-timing"
+          >{{ timingHint }}</small>
 
           <div
             class="acorr-list"
@@ -141,6 +145,11 @@
                 class="acorr-cell"
                 dir="auto"
               >{{ entry.to === '' ? '(מחיקה)' : entry.to }}</span>
+              <span
+                v-if="isImmediatePattern(entry.from)"
+                class="acorr-mode"
+                data-tip-title="מוחלף מיד כשהוקלד, גם בתוך מילה"
+              >מיד</span>
             </button>
             <p
               v-if="draft.replacements.length === 0"
@@ -238,6 +247,8 @@ import { computed, reactive, ref, watch } from 'vue';
 import {
   DEFAULT_REPLACEMENTS,
   WORD_REPLACEMENTS,
+  isImmediatePattern,
+  isSelfFeedingEntry,
   mergeEntries,
   normalizeEntries,
   type AutoCorrectEntry,
@@ -314,6 +325,27 @@ watch(
 /** האם הדפוס שבשדה כבר בטבלה — קובע אם הכפתור „יוסיף” או „יעדכן”. */
 const exists = computed(() => draft.replacements.some((entry) => entry.from === draftFrom.value));
 
+/**
+ * מתי הדפוס שבשדה יוחלף. הכלל נגזר מהדפוס (`isImmediatePattern`) ולא נבחר, ולכן
+ * הדיאלוג אומר אותו לפני האישור: מי שמגדיר `/` ← `"` צריך לדעת שזה יפעל גם
+ * בתוך מילה, ומי שמגדיר `תשו` — שזה יחכה לרווח.
+ */
+/** בידוד כיוון (LRI…PDI): רצף סימנים בתוך משפט עברי מתהפך בלי בידוד — `-->` נראה `<--`. */
+const LRI = String.fromCodePoint(0x2066);
+const PDI = String.fromCodePoint(0x2069);
+
+const timingHint = computed(() => {
+  const from = draftFrom.value;
+  if (!isImmediatePattern(from)) return 'יוחלף כשהמילה תסתיים — ברווח או בסימן פיסוק.';
+  // דפוס שהוא תחילתו של דפוס סמל ארוך ממנו ממתין לתו הבא (`mayStillGrow`).
+  const longer = draft.replacements.find(
+    (entry) => entry.from.length > from.length && entry.from.startsWith(from) && isImmediatePattern(entry.from),
+  );
+  return longer
+    ? `יוחלף בתו שאחריו, כי „${LRI}${longer.from}${PDI}” מתחיל בו. Ctrl+Z מיד אחרי ההחלפה מחזיר את מה שהוקלד.`
+    : 'יוחלף מיד כשיוקלד, גם בתוך מילה. Ctrl+Z מיד אחרי ההחלפה מחזיר את מה שהוקלד.';
+});
+
 function onSelect(entry: AutoCorrectEntry): void {
   selectedFrom.value = entry.from;
   draftFrom.value = entry.from;
@@ -329,6 +361,10 @@ function onUpsert(): void {
       draftFrom.value.trim() !== draftFrom.value
         ? 'הדפוס אינו יכול להתחיל או להסתיים ברווח.'
         : 'הדפוס אינו תקין: חובה לכתוב טקסט להחלפה, בשורה אחת.';
+    return;
+  }
+  if (isSelfFeedingEntry(valid)) {
+    message.value = 'ההחלפה מכילה את הטקסט שמוחלף, והייתה חוזרת בכל הקשה.';
     return;
   }
 
@@ -546,6 +582,20 @@ function onOk(): void {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.acorr-mode {
+  flex: 0 0 auto;
+  padding: 0 4px;
+  font-size: 10px;
+  color: var(--color-on-surface-variant);
+  border: 1px solid var(--color-outline-variant);
+  border-radius: var(--radius-xs);
+}
+
+.acorr-timing {
+  font-size: 11px;
+  color: var(--color-on-surface-variant);
 }
 
 .acorr-arrow {

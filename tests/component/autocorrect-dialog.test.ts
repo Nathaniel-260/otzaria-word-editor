@@ -74,6 +74,23 @@ describe('AutoCorrectDialog', () => {
     wrapper.unmount();
   });
 
+  it('שורת ההסבר: מיד, בתו שאחריו כשדפוס ארוך מתחיל בו, או בסוף המילה', async () => {
+    const wrapper = open();
+    const [from] = inputs();
+    const hint = () => dialog().querySelector('.acorr-timing')?.textContent ?? '';
+
+    await typeInto(from, '/');
+    await wrapper.vm.$nextTick();
+    expect(hint()).toContain('מיד');
+    await typeInto(from, '--');
+    await wrapper.vm.$nextTick();
+    expect(hint()).toContain(`„${String.fromCodePoint(0x2066)}-->${String.fromCodePoint(0x2069)}” מתחיל בו`);
+    await typeInto(from, 'teh');
+    await wrapper.vm.$nextTick();
+    expect(hint()).toContain('כשהמילה תסתיים');
+    wrapper.unmount();
+  });
+
   it('מחיקה: בחירת שורה ואז „מחק” מסירה אותה', async () => {
     const wrapper = open();
 

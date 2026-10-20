@@ -19,7 +19,10 @@
  * - **חוק סמל** (דפוס שהתו הראשון **והאחרון** שלו אינם אות או ספרה: `(c)`,
  *   `...`, `-->`) — מיד כשהוא שלם. אין בו „המשך מילה” שעלול לשנות את משמעותו,
  *   וב-Word `(c)` הופך ל-© ברגע שנסגר. האות שבתוך `(c)` אינה הופכת אותו למילה:
- *   הסוגריים סוגרים אותו משני צדיו.
+ *   הסוגריים סוגרים אותו משני צדיו. כך גם רצפים שהמשתמש מגדיר למקש שאינו
+ *   בשימוש (`/` ← `"`, `==` ← `?`): הם מוחלפים מיד, גם בתוך מילה. שני חריגים —
+ *   דפוס שהוא תחילתו של דפוס סמל ארוך ממנו ממתין לתו הבא (`mayStillGrow`),
+ *   וטוקן שהוא כתובת אינו נוגע (`ADDRESS_TOKEN`).
  *
  * ## חוקים שמסתכלים קדימה דורשים תו אחד אחריהם
  *
@@ -90,6 +93,11 @@ export interface AutoCorrectContext {
   readonly atBlockStart?: boolean;
   /** החלון מתחיל באמצע טוקן; אין להתייחס לסיומת שלו כמילה שלמה. */
   readonly startsInsideToken?: boolean;
+  /**
+   * אחרי הטקסט לא יוקלד תו נוסף באותה שורה — Enter או Tab. דפוס סמל שהמתין
+   * כתחילית של דפוס ארוך ממנו (`mayStillGrow`) כבר לא יגדל, ומוחלף.
+   */
+  readonly ended?: boolean;
 }
 
 /**
@@ -294,6 +302,35 @@ function isSymbolPattern(pattern: string): boolean {
   return !HAS_WORD_CHAR.test(chars[0] ?? '') && !HAS_WORD_CHAR.test(chars[chars.length - 1] ?? '');
 }
 
+/**
+ * האם הדפוס מוחלף **מיד** כשהוקלד, גם בתוך מילה (`/` ב-`רש/י`), או רק כשהמילה
+ * הושלמה. זה אותו כלל של חוקי הסמל, והדיאלוג מציג אותו ליד כל שורה.
+ *
+ * ## למה כלל ולא מתג לכל שורה
+ *
+ * שני הכיוונים של מתג כזה שוברים משהו: דפוס מילה „מיידי” היה הופך `teh` באמצע
+ * `tehran`, ודפוס סמל „בסוף מילה” לעולם לא היה מוחלף בתוך מילה — `רש/י` אינו
+ * שווה ל-`/`. הכלל נגזר מהדפוס עצמו, ולכן אין מצב שהמשתמש צריך לנחש.
+ */
+export function isImmediatePattern(pattern: string): boolean {
+  return pattern.length > 0 && isSymbolPattern(pattern);
+}
+
+/**
+ * דפוס סמל שההחלפה שלו מכילה אותו (`/` ← `//`) היה מוחלף שוב בכל הקשה: הסריקה
+ * של חוקי הסמל רצה על כל האזור שהוקלד, וההחלפה נשארת בתוכו.
+ */
+export function isSelfFeedingEntry(entry: AutoCorrectEntry): boolean {
+  return isImmediatePattern(entry.from) && entry.to !== entry.from && entry.to.includes(entry.from);
+}
+
+/**
+ * טוקן שהוא כתובת: `http:/`, `file:/` או `www.` בראשו. דפוס סמל שהמשתמש הגדיר
+ * למקש שאינו בשימוש (`/` ← `"`) היה הורס כל כתובת שמוקלדת. נבדק כבר מ-`http:/`,
+ * כי זה מה שלפני הסמן כשה-`/` הראשון הוקלד.
+ */
+const ADDRESS_TOKEN = /^(?:[A-Za-z][A-Za-z\d+.-]*:\/|www\.)/u;
+
 const LEADING_PUNCT = /^[("'[{“‘«<]+/u;
 const TRAILING_PUNCT = /[.,;:!?)"'\]}”’»…>׃]+$/u;
 
@@ -389,7 +426,9 @@ function compileTable(entries: readonly AutoCorrectEntry[]): CompiledTable {
 
   const words = entries.filter((entry) => !isSymbolPattern(entry.from));
   const compiled: CompiledTable = {
-    symbols: entries.filter((entry) => isSymbolPattern(entry.from)).sort((a, b) => b.from.length - a.from.length),
+    symbols: entries
+      .filter((entry) => isSymbolPattern(entry.from) && !isSelfFeedingEntry(entry))
+      .sort((a, b) => b.from.length - a.from.length),
     exact: new Map(words.map((entry) => [entry.from, entry.to])),
     // דפוס שיש בו אות גדולה מותאם בדיוק בלבד.
     folded: new Map(words.filter((entry) => entry.from === entry.from.toLowerCase()).map((entry) => [entry.from, entry.to])),
@@ -399,14 +438,52 @@ function compileTable(entries: readonly AutoCorrectEntry[]): CompiledTable {
   return compiled;
 }
 
-function tableFixes(text: string, tokens: readonly Token[], entries: readonly AutoCorrectEntry[]): AutoCorrectFix[] {
+/** האם ההיסט בתוך טוקן שהוא כתובת (`ADDRESS_TOKEN`). */
+function insideAddress(text: string, index: number): boolean {
+  const before = text.slice(0, index);
+  const start = Math.max(before.lastIndexOf(' '), before.lastIndexOf('\t'), before.lastIndexOf(' ')) + 1;
+  return ADDRESS_TOKEN.test(text.slice(start));
+}
+
+/**
+ * מופע שנוגע בסמן, ודפוס סמל ארוך ממנו עדיין יכול להיות מושלם בתו הבא: `--`
+ * כשבטבלה גם `-->`. בלי ההמתנה התוצאה הייתה תלויה בקצב — מי שעצר אחרי `--`
+ * היה מקבל את הקצר, ומי שהקליד `-->` ברצף את הארוך. התו הבא (כל תו) מכריע.
+ */
+function mayStillGrow(
+  text: string,
+  index: number,
+  hit: AutoCorrectEntry,
+  symbols: readonly AutoCorrectEntry[],
+): boolean {
+  if (index + hit.from.length !== text.length) return false;
+  const longest = symbols[0]?.from.length ?? 0;
+  for (let from = Math.max(0, text.length - longest + 1); from <= index; from += 1) {
+    const tail = text.slice(from);
+    if (symbols.some((entry) => entry.from.length > tail.length && entry.from.startsWith(tail))) return true;
+  }
+  return false;
+}
+
+function tableFixes(
+  text: string,
+  tokens: readonly Token[],
+  entries: readonly AutoCorrectEntry[],
+  ended = false,
+  waiting: AutoCorrectFix[] = [],
+): AutoCorrectFix[] {
   const fixes: AutoCorrectFix[] = [];
   const { symbols, exact, folded, hasPhrases } = compileTable(entries);
 
   // חוקי סמל: מופע שלם בכל מקום, הארוך ראשון.
   for (let index = 0; index < text.length; ) {
     const hit = symbols.find((entry) => text.startsWith(entry.from, index));
-    if (hit) {
+    if (hit && insideAddress(text, index)) {
+      index += 1;
+    } else if (hit && !ended && mayStillGrow(text, index, hit, symbols)) {
+      waiting.push({ start: index, end: index + hit.from.length, original: hit.from, replacement: hit.to, rule: 'table' });
+      index += 1;
+    } else if (hit) {
       fixes.push({
         start: index,
         end: index + hit.from.length,
@@ -604,12 +681,22 @@ export function planAutoCorrect(
   options: AutoCorrectOptions,
   context: AutoCorrectContext = {},
 ): AutoCorrectFix[] {
-  if (!options.enabled || text.length === 0) return [];
+  return planAutoCorrectWithPending(text, options, context).fixes;
+}
+
+/** The installer also needs the deferred suffix; derive it during the same bounded planning pass. */
+export function planAutoCorrectWithPending(
+  text: string,
+  options: AutoCorrectOptions,
+  context: AutoCorrectContext = {},
+): { fixes: AutoCorrectFix[]; pending: AutoCorrectFix | null } {
+  if (!options.enabled || text.length === 0) return { fixes: [], pending: null };
 
   const tokens = tokenize(text, context.startsInsideToken);
   const candidates: AutoCorrectFix[] = [];
 
-  if (options.replaceAsYouType) candidates.push(...tableFixes(text, tokens, options.replacements));
+  const waiting: AutoCorrectFix[] = [];
+  if (options.replaceAsYouType) candidates.push(...tableFixes(text, tokens, options.replacements, context.ended, waiting));
   if (options.dashes || options.spacedHyphen) {
     candidates.push(...dashFixes(text, options.spacedHyphen).filter((fix) => options.dashes || fix.rule === 'spaced-hyphen'));
   }
@@ -627,5 +714,9 @@ export function planAutoCorrect(
     if (!overlaps) chosen.push(candidate);
   }
 
-  return chosen.sort((a, b) => b.start - a.start);
+  const pending = waiting.find((candidate) =>
+    candidate.original !== candidate.replacement &&
+    !chosen.some((fix) => candidate.start < fix.end && fix.start < candidate.end),
+  ) ?? null;
+  return { fixes: chosen.sort((a, b) => b.start - a.start), pending };
 }

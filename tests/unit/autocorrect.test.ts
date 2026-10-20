@@ -11,6 +11,9 @@ import {
   BUILT_IN_REPLACEMENTS,
   DEFAULT_AUTOCORRECT,
   DEFAULT_REPLACEMENTS,
+  isImmediatePattern,
+  planAutoCorrectWithPending,
+  isSelfFeedingEntry,
   mergeEntries,
   normalizeAutoCorrect,
   normalizeEntries,
@@ -68,6 +71,77 @@ describe('טבלת ההחלפות — חוקי סמל', () => {
 
   it('שלוש נקודות בתוך ארבע: מתוקנות פעם אחת, והנקודה הרביעית נשארת', () => {
     expect(apply('סוף....')).toBe('סוף….');
+  });
+});
+
+describe('טבלת ההחלפות — רצפי סימנים שהמשתמש מגדיר', () => {
+  const KEYS = mergeEntries(BUILT_IN_REPLACEMENTS, [
+    { from: '/', to: '"' },
+    { from: '--', to: ':' },
+    { from: '==', to: '?' },
+  ]);
+  const keys = (text: string): string => apply(text, ONLY({ replaceAsYouType: true, replacements: KEYS }));
+
+  it('/ ← " מיד, גם בתוך מילה ובלי רווח אחריו', () => {
+    expect(keys('רש/')).toBe('רש"');
+    expect(keys('רש/י')).toBe('רש"י');
+  });
+
+  it('-- ממתין לתו הבא כשבטבלה גם -->, ואז מוחלף', () => {
+    expect(keys('א--')).toBe('א--');
+    expect(keys('א--ב')).toBe('א:ב');
+    expect(keys('א-->')).toBe('א→');
+  });
+
+  it('== ממתין בגלל ==>, ומוחלף אחרי רווח', () => {
+    expect(keys('מה==')).toBe('מה==');
+    expect(keys('מה== ')).toBe('מה? ');
+  });
+
+  it('ended: סוף השורה מכריע — -- ו-== מוחלפים בלי תו אחריהם', () => {
+    const ended = (text: string): string =>
+      planAutoCorrect(text, { ...BASE, ...ONLY({ replaceAsYouType: true, replacements: KEYS }) }, { ended: true }).reduce(
+        (result, fix) => result.slice(0, fix.start) + fix.replacement + result.slice(fix.end),
+        text,
+      );
+    expect(ended('א--')).toBe('א:');
+    expect(ended('מה==')).toBe('מה?');
+    expect(ended('http:/')).toBe('http:/');
+  });
+
+  it('אותה סריקה מחזירה רק את סיומת הסמל הממתינה, ושומרת את התיקונים הרגילים', () => {
+    const options = { ...BASE, ...ONLY({ replaceAsYouType: true, replacements: KEYS }) };
+    const result = planAutoCorrectWithPending('רש/י--', options);
+    expect(result.fixes).toEqual(planAutoCorrect('רש/י--', options));
+    expect(result.pending).toEqual({ start: 4, end: 6, original: '--', replacement: ':', rule: 'table' });
+    expect(planAutoCorrectWithPending('http://x/--', options).pending).toBeNull();
+    expect(planAutoCorrectWithPending('plain prose', options).pending).toBeNull();
+    expect(planAutoCorrectWithPending('א--', { ...options, enabled: false }).pending).toBeNull();
+    expect(planAutoCorrectWithPending('א--', options, { ended: true }).pending).toBeNull();
+  });
+
+  it('דפוס בלי המשך אפשרי אינו ממתין', () => {
+    const only = ONLY({ replaceAsYouType: true, replacements: [{ from: '--', to: ':' }] });
+    expect(apply('א--', only)).toBe('א:');
+  });
+
+  it('כתובת אינה נוגעת, גם באמצע ההקלדה', () => {
+    expect(keys('http:/')).toBe('http:/');
+    expect(keys('ראו http://a.b/c ')).toBe('ראו http://a.b/c ');
+    expect(keys('www.a.b/c')).toBe('www.a.b/c');
+    expect(keys('ראו http://a ו-ב/ג')).toBe('ראו http://a ו-ב"ג');
+  });
+
+  it('החלפה שמכילה את הדפוס אינה מוחלת — אחרת הייתה גדלה בכל הקשה', () => {
+    const only = ONLY({ replaceAsYouType: true, replacements: [{ from: '/', to: '//' }] });
+    expect(apply('א/', only)).toBe('א/');
+    expect(isSelfFeedingEntry({ from: '/', to: '//' })).toBe(true);
+    expect(isSelfFeedingEntry({ from: 'teh', to: 'teh the' })).toBe(false);
+  });
+
+  it('isImmediatePattern: סמל בשני הקצוות — מיד; אות או ספרה בקצה — בסוף מילה', () => {
+    expect(['/', '--', '(c)', '...'].map(isImmediatePattern)).toEqual([true, true, true, true]);
+    expect(['teh', '1/2', 'c++', ''].map(isImmediatePattern)).toEqual([false, false, false, false]);
   });
 });
 
