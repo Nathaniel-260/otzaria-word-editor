@@ -93,6 +93,11 @@ export interface AutoCorrectContext {
   readonly atBlockStart?: boolean;
   /** החלון מתחיל באמצע טוקן; אין להתייחס לסיומת שלו כמילה שלמה. */
   readonly startsInsideToken?: boolean;
+  /**
+   * אחרי הטקסט לא יוקלד תו נוסף באותה שורה — Enter או Tab. דפוס סמל שהמתין
+   * כתחילית של דפוס ארוך ממנו (`mayStillGrow`) כבר לא יגדל, ומוחלף.
+   */
+  readonly ended?: boolean;
 }
 
 /**
@@ -460,14 +465,19 @@ function mayStillGrow(
   return false;
 }
 
-function tableFixes(text: string, tokens: readonly Token[], entries: readonly AutoCorrectEntry[]): AutoCorrectFix[] {
+function tableFixes(
+  text: string,
+  tokens: readonly Token[],
+  entries: readonly AutoCorrectEntry[],
+  ended = false,
+): AutoCorrectFix[] {
   const fixes: AutoCorrectFix[] = [];
   const { symbols, exact, folded, hasPhrases } = compileTable(entries);
 
   // חוקי סמל: מופע שלם בכל מקום, הארוך ראשון.
   for (let index = 0; index < text.length; ) {
     const hit = symbols.find((entry) => text.startsWith(entry.from, index));
-    if (hit && (insideAddress(text, index) || mayStillGrow(text, index, hit, symbols))) {
+    if (hit && (insideAddress(text, index) || (!ended && mayStillGrow(text, index, hit, symbols)))) {
       index += 1;
     } else if (hit) {
       fixes.push({
@@ -672,7 +682,7 @@ export function planAutoCorrect(
   const tokens = tokenize(text, context.startsInsideToken);
   const candidates: AutoCorrectFix[] = [];
 
-  if (options.replaceAsYouType) candidates.push(...tableFixes(text, tokens, options.replacements));
+  if (options.replaceAsYouType) candidates.push(...tableFixes(text, tokens, options.replacements, context.ended));
   if (options.dashes || options.spacedHyphen) {
     candidates.push(...dashFixes(text, options.spacedHyphen).filter((fix) => options.dashes || fix.rule === 'spaced-hyphen'));
   }

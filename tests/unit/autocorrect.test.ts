@@ -97,6 +97,17 @@ describe('טבלת ההחלפות — רצפי סימנים שהמשתמש מג�
     expect(keys('מה== ')).toBe('מה? ');
   });
 
+  it('ended: סוף השורה מכריע — -- ו-== מוחלפים בלי תו אחריהם', () => {
+    const ended = (text: string): string =>
+      planAutoCorrect(text, { ...BASE, ...ONLY({ replaceAsYouType: true, replacements: KEYS }) }, { ended: true }).reduce(
+        (result, fix) => result.slice(0, fix.start) + fix.replacement + result.slice(fix.end),
+        text,
+      );
+    expect(ended('א--')).toBe('א:');
+    expect(ended('מה==')).toBe('מה?');
+    expect(ended('http:/')).toBe('http:/');
+  });
+
   it('דפוס בלי המשך אפשרי אינו ממתין', () => {
     const only = ONLY({ replaceAsYouType: true, replacements: [{ from: '--', to: ':' }] });
     expect(apply('א--', only)).toBe('א:');

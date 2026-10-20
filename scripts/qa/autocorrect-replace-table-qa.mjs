@@ -4,8 +4,8 @@
  *
  * מה נמדד: ההחלפה מיידית גם בתוך מילה; קצב אנושי וקצב מהיר נותנים אותה תוצאה;
  * דפוס קצר שהוא תחילתו של דפוס ארוך (`--` מול `-->`) ממתין לתו הבא ואינו תלוי
- * בקצב; Ctrl+Z מחזיר את המקור בצעד אחד; כתובת אינה נפגעת; ההחלפה יורשת את
- * עיצוב הריצה.
+ * בקצב, ו-Enter בסוף השורה מחליף אותו; Ctrl+Z מחזיר את המקור בצעד אחד; כתובת
+ * אינה נפגעת; ההחלפה יורשת את עיצוב הריצה.
  *
  * `QA_SHOTS=<תיקייה>` שומר צילום של הדיאלוג.
  */
@@ -123,7 +123,22 @@ try {
   await app.sleep(800);
   check('/ בכתובת נשאר', await read(), 'http://a.b/c ');
 
-  // 5. עיצוב הריצה עובר להחלפה.
+  // 5. דפוס שממתין בסוף שורה: Enter מכריע שלא יגדל, ומחליף אותו בשורה שהסתיימה.
+  //    הסמן נשאר בשורה החדשה, וההקלדה בה ממשיכה.
+  await newPara();
+  await app.type('ואלו הן--');
+  await app.sleep(800);
+  await newPara();
+  await app.sleep(1200);
+  await app.type('א');
+  await app.sleep(800);
+  const texts = await app.js(
+    "JSON.stringify(Array.from(document.querySelectorAll('.superdoc-fragment[data-source-node-id]')).map(f => f.textContent))",
+  ).then(JSON.parse);
+  check('-- ← : כש-Enter סיים את השורה', texts.includes('ואלו הן:') ? 'ואלו הן:' : JSON.stringify(texts.slice(-3)), 'ואלו הן:');
+  check('אחרי ההחלפה הסמן נשאר בשורה החדשה', await read(), 'א');
+
+  // 6. עיצוב הריצה עובר להחלפה.
   await newPara();
   await app.press('b', 'KeyB', 66, 2);
   await app.type('ש/ב');

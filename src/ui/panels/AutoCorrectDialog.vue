@@ -330,11 +330,21 @@ const exists = computed(() => draft.replacements.some((entry) => entry.from === 
  * הדיאלוג אומר אותו לפני האישור: מי שמגדיר `/` ← `"` צריך לדעת שזה יפעל גם
  * בתוך מילה, ומי שמגדיר `תשו` — שזה יחכה לרווח.
  */
-const timingHint = computed(() =>
-  isImmediatePattern(draftFrom.value)
-    ? 'יוחלף מיד כשיוקלד, גם בתוך מילה. Ctrl+Z מיד אחרי ההחלפה מחזיר את מה שהוקלד.'
-    : 'יוחלף כשהמילה תסתיים — ברווח או בסימן פיסוק.',
-);
+/** בידוד כיוון (LRI…PDI): רצף סימנים בתוך משפט עברי מתהפך בלי בידוד — `-->` נראה `<--`. */
+const LRI = String.fromCodePoint(0x2066);
+const PDI = String.fromCodePoint(0x2069);
+
+const timingHint = computed(() => {
+  const from = draftFrom.value;
+  if (!isImmediatePattern(from)) return 'יוחלף כשהמילה תסתיים — ברווח או בסימן פיסוק.';
+  // דפוס שהוא תחילתו של דפוס סמל ארוך ממנו ממתין לתו הבא (`mayStillGrow`).
+  const longer = draft.replacements.find(
+    (entry) => entry.from.length > from.length && entry.from.startsWith(from) && isImmediatePattern(entry.from),
+  );
+  return longer
+    ? `יוחלף בתו שאחריו, או ב-Enter, כי „${LRI}${longer.from}${PDI}” מתחיל בו. Ctrl+Z מיד אחרי ההחלפה מחזיר את מה שהוקלד.`
+    : 'יוחלף מיד כשיוקלד, גם בתוך מילה. Ctrl+Z מיד אחרי ההחלפה מחזיר את מה שהוקלד.';
+});
 
 function onSelect(entry: AutoCorrectEntry): void {
   selectedFrom.value = entry.from;

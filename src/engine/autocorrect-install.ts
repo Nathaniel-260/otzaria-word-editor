@@ -40,6 +40,9 @@
  *
  * - **Enter אינו מתקן את המילה האחרונה.** אחריו הסמן כבר בבלוק החדש, והמילה
  *   בבלוק הקודם. קריאה ממנו דורשת ללמוד את הבלוק הקודם מהמנוע, וזו הרחבה.
+ *   חריג אחד: דפוס סמל שהמתין לתו הבא כתחילית של דפוס ארוך ממנו (`--` מול
+ *   `-->`). ההערכה שבשקט שלפני ה-Enter כבר ידעה איפה הוא (`pending`), ולכן
+ *   Enter או Tab מחליפים אותו שם — אחרת `--` ← `:` בסוף שורה לא היה מוחלף לעולם.
  * ביטול בלחיצה על המחוון נעשה ב-`changeBack`, אחרי בדיקת הטקסט העדכני.
  */
 import type { CompletionDoc, CompletionTarget } from './book-completion-overlay';
@@ -103,6 +106,18 @@ export interface AutoCorrectHandle {
   /** מנקה את הספירה ואת זיכרון הביטולים — מסמך שהוחלף. */
   reset(): void;
   dispose(): void;
+}
+
+/**
+ * דפוס סמל שממתין לתו הבא (`mayStillGrow` ב-autocorrect.ts), כפי שההערכה
+ * האחרונה ראתה אותו. Enter או Tab מכריעים שלא יגדל, ואז הוא מוחלף כאן.
+ */
+interface PendingFix {
+  readonly blockId: string;
+  readonly story: unknown;
+  readonly start: number;
+  readonly original: string;
+  readonly replacement: string;
 }
 
 /** תיקון שהוחל, כדי שביטול שלו לא יתוקן שוב. */
@@ -231,6 +246,7 @@ export function installAutoCorrect(options: AutoCorrectInstallOptions): AutoCorr
   let evalToken = 0;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let applied: AppliedFix[] = [];
+  let pending: PendingFix | null = null;
 
   function cancelPending(): void {
     evalToken += 1;
@@ -241,6 +257,7 @@ export function installAutoCorrect(options: AutoCorrectInstallOptions): AutoCorr
   /** איפוס הספירה. כל מה שאינו הקלדה של תו. */
   function resetTyped(): void {
     typed = 0;
+    pending = null;
     cancelPending();
   }
 
@@ -376,7 +393,27 @@ export function installAutoCorrect(options: AutoCorrectInstallOptions): AutoCorr
       (fix) => touchesTyped(fix, text.length, typed) && !wasUndone(blockId, base + fix.start, fix.original),
     );
     log('תכנון', { text, planned: planned.length, afterFilter: fixes.length });
-    if (fixes.length === 0) return;
+
+    // דפוס שממתין לתו הבא: מה שהיה מוחלף אילו השורה הסתיימה כאן.
+    const waiting = planAutoCorrect(text, settings, { atBlockStart: base === 0, startsInsideToken, ended: true }).find(
+      (fix) =>
+        fix.rule === 'table' &&
+        fix.end === text.length &&
+        touchesTyped(fix, text.length, typed) &&
+        !planned.some((other) => other.start < fix.end && fix.start < other.end) &&
+        !wasUndone(blockId, base + fix.start, fix.original),
+    );
+    // התיקונים שלפניו מזיזים אותו, כולם לפניו ואינם חופפים.
+    const shift = waiting
+      ? fixes.reduce((sum, fix) => (fix.end <= waiting.start ? sum + fix.replacement.length - (fix.end - fix.start) : sum), 0)
+      : 0;
+    const nextPending: PendingFix | null = waiting
+      ? { blockId, story, start: base + waiting.start + shift, original: waiting.original, replacement: waiting.replacement }
+      : null;
+    if (fixes.length === 0) {
+      pending = nextPending;
+      return;
+    }
 
     // מההיסט הגבוה לנמוך (כך `planAutoCorrect` מחזירה): החלפה לא מזיזה היסט
     // של מה שלפניה. כל הקשה בדרך פוסלת את הנותרים — הם יחושבו מחדש בשקט הבא.
@@ -424,7 +461,44 @@ export function installAutoCorrect(options: AutoCorrectInstallOptions): AutoCorr
     }
 
     // רק אם כל התיקונים הוחלו: הסימון מחשב היסטים מהטקסט הסופי, וחלקי אינו מתיישב.
-    if (completed === fixes.length && !disposed && token === evalToken) registerIndicators(result.window, fixes);
+    if (completed === fixes.length && !disposed && token === evalToken) {
+      registerIndicators(result.window, fixes);
+      pending = nextPending;
+    }
+  }
+
+  /**
+   * Enter או Tab אחרי דפוס שממתין: מחליפה אותו במקום שההערכה ראתה. הטקסט שם
+   * נקרא ונבדק קודם, כמו ב-`changeBack` — אם אינו הדפוס, לא נוגעים בו.
+   */
+  async function settlePending(entry: PendingFix): Promise<void> {
+    const doc = getDoc();
+    if (!doc || typeof doc.insert !== 'function' || typeof doc.ranges?.resolve !== 'function') return;
+    if (disposed || options.isSuppressed?.()) return;
+    const end = entry.start + entry.original.length;
+    const request: Record<string, unknown> = {
+      start: { kind: 'point', point: pointAt(entry.blockId, entry.start, entry.story) },
+      end: { kind: 'point', point: pointAt(entry.blockId, end, entry.story) },
+    };
+    if (entry.story) request.in = entry.story;
+    const resolved = await doc.ranges.resolve(request);
+    if (disposed || resolved?.preview?.text !== entry.original) {
+      log('המתנה: הטקסט שבהיסט אינו הדפוס', resolved?.preview?.text);
+      return;
+    }
+    const target: SelectionTargetLike = {
+      kind: 'selection',
+      start: pointAt(entry.blockId, entry.start, entry.story),
+      end: pointAt(entry.blockId, end, entry.story),
+      ...(entry.story ? { story: entry.story } : {}),
+    };
+    const receipt = await doc.insert({ value: entry.replacement, type: 'text', target });
+    if (receipt?.success === false) {
+      console.warn('[otzaria-word] תיקון אוטומטי: המנוע דחה את ההחלפה', receipt.failure ?? receipt);
+      return;
+    }
+    remember(entry.blockId, entry.start, entry.original);
+    log('הוחלף אחרי סוף השורה', { from: entry.original, to: entry.replacement, start: entry.start });
   }
 
   function scheduleEvaluate(): void {
@@ -446,7 +520,18 @@ export function installAutoCorrect(options: AutoCorrectInstallOptions): AutoCorr
       return;
     }
 
+    if ((event.key === 'Enter' || event.key === 'Tab') && !event.shiftKey && !event.altKey && pending) {
+      const entry = pending;
+      resetTyped();
+      // אחרי שה-Enter/Tab עצמו עבר: קריאות המנוע ממתינות לשקט בכל מקרה.
+      setTimeout(() => void settlePending(entry).catch((error) => {
+        console.warn('[otzaria-word] תיקון אוטומטי: ההחלפה אחרי סוף השורה נכשלה', error);
+      }), AUTOCORRECT_DEBOUNCE_MS);
+      return;
+    }
+
     if (event.key === 'Backspace') {
+      pending = null;
       typed = Math.max(0, typed - 1);
       // בדיקה שכבר מתוזמנת או רצה חושבה על הטקסט שלפני המחיקה.
       cancelPending();
@@ -454,6 +539,7 @@ export function installAutoCorrect(options: AutoCorrectInstallOptions): AutoCorr
     }
 
     if (event.key.length === 1) {
+      pending = null;
       cancelPending();
       typed = Math.min(AUTOCORRECT_TYPED_CAP, typed + 1);
       log('הקשה', { key: event.key, typed });

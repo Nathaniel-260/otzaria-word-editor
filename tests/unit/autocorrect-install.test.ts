@@ -323,6 +323,81 @@ describe('installAutoCorrect', () => {
     expect(engine.model.text).toBe('x the ');
   });
 
+  describe('דפוס שממתין לתו הבא (-- מול -->)', () => {
+    const KEYS = { replacements: [...BUILT_IN_REPLACEMENTS, { from: '--', to: ':' }] };
+    /** Enter מדומה: הסמן עובר לבלוק חדש, והבלוק הקודם נשאר במודל (b1). */
+    function enter(engine: ReturnType<typeof fakeEngine>): void {
+      key('Enter');
+      engine.model.caret = engine.model.text.length + 1;
+      engine.model.text += ' ';
+    }
+
+    it('ממתין בשקט, ו-Enter מחליף אותו במקומו', async () => {
+      const engine = fakeEngine('');
+      install(engine, KEYS);
+      type(engine, 'ואלו הן--');
+      await settle();
+      expect(engine.model.text).toBe('ואלו הן--');
+      enter(engine);
+      await settle();
+      expect(engine.model.text).toBe('ואלו הן: ');
+    });
+
+    it('Tab מחליף כמו Enter', async () => {
+      const engine = fakeEngine('');
+      install(engine, KEYS);
+      type(engine, 'א--');
+      await settle();
+      key('Tab');
+      await settle();
+      expect(engine.model.text).toBe('א:');
+    });
+
+    it('התו הבא מכריע לבדו, ו-Enter אחריו אינו מחליף שוב', async () => {
+      const engine = fakeEngine('');
+      install(engine, KEYS);
+      type(engine, 'א--');
+      await settle();
+      type(engine, '>');
+      await settle();
+      expect(engine.model.text).toBe('א→');
+      enter(engine);
+      await settle();
+      expect(engine.inserts).toHaveLength(1);
+    });
+
+    it('Enter לפני שההערכה רצה אינו מחליף — אין ניחוש בלי קריאה', async () => {
+      const engine = fakeEngine('');
+      install(engine, KEYS);
+      type(engine, 'א--');
+      enter(engine);
+      await settle();
+      expect(engine.inserts).toHaveLength(0);
+    });
+
+    it('חץ או עכבר אחרי ההמתנה אינם מחליפים, כמו ב-Word', async () => {
+      const engine = fakeEngine('');
+      install(engine, KEYS);
+      type(engine, 'א--');
+      await settle();
+      key('ArrowLeft');
+      key('Enter');
+      await settle();
+      expect(engine.inserts).toHaveLength(0);
+    });
+
+    it('טקסט שזז מאז ההערכה אינו מוחלף', async () => {
+      const engine = fakeEngine('');
+      install(engine, KEYS);
+      type(engine, 'א--');
+      await settle();
+      engine.model.text = 'בא--';
+      enter(engine);
+      await settle();
+      expect(engine.inserts).toHaveLength(0);
+    });
+  });
+
   it('Backspace מבטל בדיקה שכבר מתוזמנת', async () => {
     const engine = fakeEngine('');
     install(engine);
