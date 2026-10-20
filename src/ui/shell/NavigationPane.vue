@@ -140,7 +140,7 @@ async function readOutline(): Promise<void> {
   const host = props.host;
   const generation = props.generation;
   const next = await readNavOutline(host, () => !disposed && mine === generationToken && host === props.host && generation === props.generation);
-  if (mine !== generationToken || host !== props.host) return;
+  if (disposed || mine !== generationToken || host !== props.host || generation !== props.generation) return;
   // `null` היא קריאה שנכשלה: משאירים את מה שהיה, ולא „אין כותרות”.
   if (next !== null || !loaded.value) outline.value = next;
   loaded.value = true;
