@@ -287,7 +287,8 @@ async function copyAgain(): Promise<void> {
   border-radius: var(--radius-sm);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
   width: 400px;
-  max-width: calc(100vw - 32px);
+  /* 40 מהקצה שבו הוא נפתח ועוד 16 בצד השני: ברוחב צר (360) הקצה השמאלי נחתך. */
+  max-width: calc(100vw - 56px);
   /* חלון נמוך (אוצריא בחצי מסך): הגוף נגלל, והכותרת והכפתורים נשארים. */
   max-height: calc(100vh - 136px);
   display: flex;
