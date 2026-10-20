@@ -159,6 +159,30 @@ describe('normalizeNewDocumentDefaults', () => {
     ).toEqual({ run: { fontFamily: 'David' }, styles: { Heading1: { fontSizePt: 18, italic: false } } });
   });
 
+  it('„ברירות מחדל” אחרי „שנה סגנון” על „רגיל” שמצהיר גופן — הבחירה האחרונה חלה', () => {
+    // מסמך מהדיסק שבו „רגיל” מצהיר Times New Roman 11; „שנה סגנון” ← מרכז,
+    // עם „גם לכל מסמך חדש” — הטלאי נושא גם את הגופן והגודל של המסמך ההוא.
+    const disk = TEMPLATE.replace(
+      /(<w:style [^>]*w:styleId="Normal">[\s\S]*?)(<\/w:style>)/,
+      '$1<w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman" w:cs="Times New Roman"/><w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr>$2',
+    );
+    const styled = rememberStyle(NO_NEW_DOCUMENT_DEFAULTS, TEMPLATE, 'Normal', {
+      ...resolveFormat(disk, 'Normal'),
+      alignment: 'center',
+    });
+    expect(styled.styles.Normal?.fontFamily).toBe('Times New Roman');
+
+    // ואז „ברירות מחדל” ← David 15, „גם לכל מסמך חדש”.
+    const next = withRunDefaults(styled, { fontFamily: 'David', fontSizePt: 15 });
+    const normal = resolveFormat(applyNewDocumentDefaults(TEMPLATE, next), 'Normal');
+    expect(normal.fontFamily).toBe('David');
+    expect(normal.fontSizePt).toBe(15);
+    // והיישור שנבחר בסגנון נשאר.
+    expect(normal.alignment).toBe('center');
+    // רק השדה שנשלח יורד: גודל לבד משאיר את הגופן של „רגיל”.
+    expect(withRunDefaults(styled, { fontSizePt: 15 }).styles.Normal?.fontFamily).toBe('Times New Roman');
+  });
+
   it('withRunDefaults ממזג, ו-withStyleDefault עם טלאי ריק מוחק', () => {
     const merged = withRunDefaults({ run: { fontFamily: 'David' }, styles: {} }, { fontSizePt: 14 });
     expect(merged.run).toEqual({ fontFamily: 'David', fontSizePt: 14 });

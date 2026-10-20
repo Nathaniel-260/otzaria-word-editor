@@ -105,13 +105,29 @@ export function hasNewDocumentDefaults(defaults: NewDocumentDefaults): boolean {
   return Object.keys(defaults.run).length > 0 || Object.keys(defaults.styles).length > 0;
 }
 
-/** גופן/גודל חדשים מתמזגים עם מה שנשמר: שדה שלא נשלח נשאר. */
+/**
+ * גופן/גודל חדשים מתמזגים עם מה שנשמר: שדה שלא נשלח נשאר.
+ *
+ * ואותו שדה יורד מהטלאי של „רגיל”: סגנון „רגיל” שמצהיר גופן או גודל מסתיר את
+ * `rPrDefault`, ולכן „גם לכל מסמך חדש” של „ברירות מחדל” היה נבלע בשקט אחרי
+ * „שנה סגנון” על „רגיל” — למשל במסמך מהדיסק שבו „רגיל” מצהיר גופן, שנשמר
+ * כולו לטלאי. הבחירה האחרונה של המשתמש היא שקובעת.
+ */
 export function withRunDefaults(defaults: NewDocumentDefaults, run: RunDefaults): NewDocumentDefaults {
   const next: RunDefaults = { ...defaults.run };
   const font = fontName(run.fontFamily);
   if (font !== undefined) next.fontFamily = font;
   if (isNumber(run.fontSizePt, 0.5, 800)) next.fontSizePt = run.fontSizePt;
-  return { run: next, styles: defaults.styles };
+
+  const normal = defaults.styles.Normal;
+  if (!normal) return { run: next, styles: defaults.styles };
+  const patch: StyleFormat = { ...normal };
+  if (font !== undefined) delete patch.fontFamily;
+  if (isNumber(run.fontSizePt, 0.5, 800)) delete patch.fontSizePt;
+  const styles = { ...defaults.styles };
+  if (Object.keys(patch).length === 0) delete styles.Normal;
+  else styles.Normal = patch;
+  return { run: next, styles };
 }
 
 /** מחליפה את הטלאי של סגנון אחד. טלאי ריק מוחק אותו — הסגנון חוזר לתבנית. */

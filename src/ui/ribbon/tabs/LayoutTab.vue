@@ -194,7 +194,9 @@ import {
 } from '../../../composables/keys';
 import {
   describeNewDocumentDefaults,
+  NEW_DOCUMENT_DEFAULTS_RESET_MESSAGE,
   rememberRunDefaults,
+  RUN_DEFAULTS_SAVED_MESSAGE,
   resetNewDocumentDefaults,
 } from '../../../composables/new-document-defaults';
 import type { CommandOutcome } from '../../../engine/command-adapter';
@@ -439,7 +441,7 @@ function onDocDefaultsSubmit(patch: { fontFamily?: string; fontSizePt?: number }
       // רק אחרי שהמסמך קיבל: ערך שהמנוע דחה (גודל מחוץ לטווח) אינו נשמר.
       if (outcome.ok && forNewDocuments) {
         await rememberRunDefaults(patch);
-        notify('ברירת המחדל תחול גם על כל מסמך חדש');
+        notify(RUN_DEFAULTS_SAVED_MESSAGE);
       }
     } finally {
       docDefaultsInFlight.value = false;
@@ -451,7 +453,7 @@ function onDocDefaultsSubmit(patch: { fontFamily?: string; fontSizePt?: number }
 async function onResetNewDocuments(): Promise<void> {
   resetNewDocumentDefaults();
   newDocumentsSummary.value = await describeNewDocumentDefaults();
-  notify('מסמך חדש ייפתח שוב בברירות המחדל המקוריות');
+  notify(NEW_DOCUMENT_DEFAULTS_RESET_MESSAGE);
 }
 </script>
 

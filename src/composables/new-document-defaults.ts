@@ -21,6 +21,15 @@ import {
 } from '../engine/new-document-defaults';
 import { listStyles, type StyleFormat } from '../engine/docx-style-edit';
 
+/**
+ * הודעות שורת המצב של „ברירות מחדל”. כאן ולא ב-LayoutTab.vue: כל מחרוזת עברית
+ * בקוד של הרצועה נחשבת פריט שמוצג דרך `menuString` וחייבת אנגלית
+ * (tests/unit/menu-locale-coverage.test.ts), ושורת המצב אינה מתורגמת — כמו
+ * ההודעות של composables/use-style-manager.ts.
+ */
+export const RUN_DEFAULTS_SAVED_MESSAGE = 'ברירת המחדל תחול גם על כל מסמך חדש';
+export const NEW_DOCUMENT_DEFAULTS_RESET_MESSAGE = 'מסמך חדש ייפתח שוב בברירות המחדל המקוריות';
+
 /** מה שחל עכשיו על כל מסמך חדש. */
 export const newDocumentDefaults = shallowRef<NewDocumentDefaults>(NO_NEW_DOCUMENT_DEFAULTS);
 
