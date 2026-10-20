@@ -20,7 +20,7 @@
  * כמו כל מסמך. קובץ קיים שנפתח אינו עובר כאן לעולם.
  */
 import { readZip, rewriteDocxXmlParts, readEntryText, type Bytes } from './docx-parts';
-import { editRunDefaults, editStyles, resolveFormat, type StyleAlignment, type StyleFormat } from './docx-style-edit';
+import { editRunDefaults, editStyles, listStyles, liveStyleTogglesSupported, resolveFormat, type StyleAlignment, type StyleFormat } from './docx-style-edit';
 import { formatPatch } from './style-from-selection';
 
 export interface RunDefaults {
@@ -150,32 +150,63 @@ export function withoutStyleDefault(defaults: NewDocumentDefaults, id: string): 
 
 /**
  * שומרת את העיצוב השלם שהדיאלוג החזיר כטלאי של הסגנון: רק ההבדל ממה שמסמך
- * חדש היה מקבל בלי הטלאי הקודם של אותו סגנון. בלי תבנית (`null`) — הבדל
- * מהריק, כלומר כל מה שהדיאלוג הצהיר.
+ * חדש היה מקבל בלי הטלאי הקודם של אותו סגנון.
+ * כשאין תבנית או שהגרף הסופי אינו נתמך — null, ואין לשמור את ההעדפה.
  */
 export function rememberStyle(
   defaults: NewDocumentDefaults,
   templateXml: string | null,
   id: string,
   format: StyleFormat,
-): NewDocumentDefaults {
+): NewDocumentDefaults | null {
+  if (!templateXml) return null;
   const without = withoutStyleDefault(defaults, id);
-  const baseline = templateXml ? resolveFormat(applyNewDocumentDefaults(templateXml, without), id) : {};
-  return withStyleDefault(without, id, formatPatch(format, baseline));
+  const baseline = resolveFormat(applyNewDocumentDefaults(templateXml, without), id);
+  const next = withStyleDefault(without, id, formatPatch(format, baseline));
+  return newDocumentDefaultsSupported(templateXml, next) ? next : null;
 }
 
 /**
- * מחילה את ברירות המחדל על `styles.xml`. אינה זורקת: סגנון שאינו בגיליון או
- * עריכה שנדחתה מדולגים, והשאר חל.
+ * Build the whole graph before validating it: a later parent edit can invalidate
+ * an earlier child. Apply ancestors first, independently of storage key order,
+ * because editStyles encodes bold/italic relative to the inherited Word value.
+ * Reject the style group atomically; safe run defaults can still be used.
  */
-export function applyNewDocumentDefaults(stylesXml: string, defaults: NewDocumentDefaults): string {
-  let xml = stylesXml;
-  if (Object.keys(defaults.run).length > 0) xml = editRunDefaults(xml, defaults.run) ?? xml;
-  for (const [id, format] of Object.entries(defaults.styles)) {
-    const edited = editStyles(xml, { kind: 'modify', id, format });
-    if (edited.ok) xml = edited.xml;
+function checkedDefaults(stylesXml: string, defaults: NewDocumentDefaults): { xml: string; supported: boolean } {
+  const base = Object.keys(defaults.run).length > 0 ? editRunDefaults(stylesXml, defaults.run) ?? stylesXml : stylesXml;
+  const known = new Map(listStyles(base).map(style => [style.id, style]));
+  const visited = new Set<string>();
+  const ordered: string[] = [];
+  const visit = (id: string): void => {
+    if (visited.has(id)) return;
+    visited.add(id);
+    const parent = known.get(id)?.basedOn;
+    if (parent && known.has(parent)) visit(parent);
+    if (known.has(id) && Object.prototype.hasOwnProperty.call(defaults.styles, id)) ordered.push(id);
+  };
+  Object.keys(defaults.styles).sort().forEach(visit);
+  let xml = base;
+  for (const id of ordered) {
+    const edited = editStyles(xml, { kind: 'modify', id, format: defaults.styles[id] });
+    if (!edited.ok) return { xml: base, supported: false };
+    xml = edited.xml;
   }
-  return xml;
+  // Compare the final graph with the original template, including descendants
+  // and both script stacks. Requested toggle fields also get the live guard's
+  // stricter check for an explicit request in an already inconsistent style.
+  if (ordered.length > 0 && !liveStyleTogglesSupported(base, xml, { kind: 'modify', id: '', format: {} }, '', defaults.styles)) {
+    return { xml: base, supported: false };
+  }
+  return { xml, supported: true };
+}
+
+export function newDocumentDefaultsSupported(stylesXml: string, defaults: NewDocumentDefaults): boolean {
+  return checkedDefaults(stylesXml, defaults).supported;
+}
+
+/** Unsafe stored style groups fall back to the template; callers can announce this. */
+export function applyNewDocumentDefaults(stylesXml: string, defaults: NewDocumentDefaults): string {
+  return checkedDefaults(stylesXml, defaults).xml;
 }
 
 async function bytesOf(blob: Blob): Promise<Bytes> {

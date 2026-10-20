@@ -13,6 +13,7 @@ import {
   customizeBlankDocx,
   hasNewDocumentDefaults,
   normalizeNewDocumentDefaults,
+  newDocumentDefaultsSupported,
   NO_NEW_DOCUMENT_DEFAULTS,
   readTemplateStyles,
   rememberStyle,
@@ -94,7 +95,7 @@ describe('rememberStyle — רק ההבדל מהתבנית נשמר', () => {
   it('העיצוב השלם של „רגיל” עם יישור לימין נשמר כיישור בלבד', () => {
     const shown = { ...resolveFormat(TEMPLATE, 'Normal'), alignment: 'right' as const };
     const next = rememberStyle(NO_NEW_DOCUMENT_DEFAULTS, TEMPLATE, 'Normal', shown);
-    expect(next.styles).toEqual({ Normal: { alignment: 'right' } });
+    expect(next!.styles).toEqual({ Normal: { alignment: 'right' } });
   });
 
   it('חזרה לערך של התבנית מוחקת את הטלאי, והטלאים האחרים נשארים', () => {
@@ -110,7 +111,7 @@ describe('rememberStyle — רק ההבדל מהתבנית נשמר', () => {
     const before: NewDocumentDefaults = { run: {}, styles: { Normal: { alignment: 'right' } } };
     const current = applyNewDocumentDefaults(TEMPLATE, before);
     const shown = { ...resolveFormat(current, 'Heading1'), fontSizePt: 22 };
-    expect(rememberStyle(before, TEMPLATE, 'Heading1', shown).styles).toEqual({
+    expect(rememberStyle(before, TEMPLATE, 'Heading1', shown)!.styles).toEqual({
       Normal: { alignment: 'right' },
       Heading1: { fontSizePt: 22 },
     });
@@ -170,17 +171,17 @@ describe('normalizeNewDocumentDefaults', () => {
       ...resolveFormat(disk, 'Normal'),
       alignment: 'center',
     });
-    expect(styled.styles.Normal?.fontFamily).toBe('Times New Roman');
+    expect(styled!.styles.Normal?.fontFamily).toBe('Times New Roman');
 
     // ואז „ברירות מחדל” ← David 15, „גם לכל מסמך חדש”.
-    const next = withRunDefaults(styled, { fontFamily: 'David', fontSizePt: 15 });
+    const next = withRunDefaults(styled!, { fontFamily: 'David', fontSizePt: 15 });
     const normal = resolveFormat(applyNewDocumentDefaults(TEMPLATE, next), 'Normal');
     expect(normal.fontFamily).toBe('David');
     expect(normal.fontSizePt).toBe(15);
     // והיישור שנבחר בסגנון נשאר.
     expect(normal.alignment).toBe('center');
     // רק השדה שנשלח יורד: גודל לבד משאיר את הגופן של „רגיל”.
-    expect(withRunDefaults(styled, { fontSizePt: 15 }).styles.Normal?.fontFamily).toBe('Times New Roman');
+    expect(withRunDefaults(styled!, { fontSizePt: 15 }).styles.Normal?.fontFamily).toBe('Times New Roman');
   });
 
   it('withRunDefaults ממזג, ו-withStyleDefault עם טלאי ריק מוחק', () => {
@@ -188,5 +189,61 @@ describe('normalizeNewDocumentDefaults', () => {
     expect(merged.run).toEqual({ fontFamily: 'David', fontSizePt: 14 });
     const withHeading = withStyleDefault(merged, 'Heading1', { bold: true });
     expect(withStyleDefault(withHeading, 'Heading1', {}).styles).toEqual({});
+  });
+});
+
+const TOGGLE_TEMPLATE = '<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/></w:style><w:style w:type="paragraph" w:styleId="Child"><w:name w:val="Child"/><w:basedOn w:val="Normal"/><w:rPr><w:i/><w:iCs/></w:rPr></w:style></w:styles>';
+
+describe('stored style graph safety', () => {
+  it('refuses an imported no-op Normal italic preference against the installed template', () => {
+    const disk = '<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:rPr><w:i/><w:iCs/></w:rPr></w:style></w:styles>';
+    const previous: NewDocumentDefaults = { run: { fontSizePt: 14 }, styles: { Heading1: { color: '123456' } } };
+    const snapshot = JSON.stringify(previous);
+    expect(rememberStyle(previous, TEMPLATE, 'Normal', resolveFormat(disk, 'Normal'))).toBeNull();
+    expect(JSON.stringify(previous)).toBe(snapshot);
+  });
+
+  it('rejects unsafe stored Normal italic, retaining run defaults and the original style graph', () => {
+    const preferences = { run: { fontFamily: 'David', fontSizePt: 14 }, styles: { Normal: { italic: true }, Heading1: { color: '123456' } } };
+    expect(newDocumentDefaultsSupported(TEMPLATE, preferences)).toBe(false);
+    const xml = applyNewDocumentDefaults(TEMPLATE, preferences);
+    expect(xml).toBe(editRunDefaults(TEMPLATE, preferences.run));
+    expect(resolveFormat(xml, 'Heading4').italic).toBe(true);
+  });
+
+  it('validates the complete final graph and resolves ancestors before children for either storage order', () => {
+    const parent = { italic: true };
+    const child = { italic: true, color: '123456' };
+    const first: NewDocumentDefaults = { run: {}, styles: { Child: child, Normal: parent } };
+    const second: NewDocumentDefaults = { run: {}, styles: { Normal: parent, Child: child } };
+    expect(newDocumentDefaultsSupported(TOGGLE_TEMPLATE, { run: {}, styles: { Normal: parent } })).toBe(false);
+    expect(newDocumentDefaultsSupported(TOGGLE_TEMPLATE, first)).toBe(true);
+    expect(newDocumentDefaultsSupported(TOGGLE_TEMPLATE, second)).toBe(true);
+    const xml = applyNewDocumentDefaults(TOGGLE_TEMPLATE, first);
+    expect(xml).toBe(applyNewDocumentDefaults(TOGGLE_TEMPLATE, second));
+    expect(resolveFormat(xml, 'Normal').italic).toBe(true);
+    expect(resolveFormat(xml, 'Child')).toMatchObject({ italic: true, color: '123456' });
+    expect(styleXml(xml, 'Child')).not.toMatch(/<w:i(?:Cs)?\b/);
+  });
+
+  it('checks inherited bold in both script stacks as well as italic', () => {
+    const template = TOGGLE_TEMPLATE.replace(/<w:i\/>/g, '<w:b/>').replace(/<w:iCs\/>/g, '<w:bCs/>');
+    expect(newDocumentDefaultsSupported(template, { run: {}, styles: { Normal: { bold: true } } })).toBe(false);
+    for (const styles of [{ Child: { bold: true }, Normal: { bold: true } }, { Normal: { bold: true }, Child: { bold: true } }]) {
+      const preferences = { run: {}, styles };
+      expect(newDocumentDefaultsSupported(template, preferences)).toBe(true);
+      const xml = applyNewDocumentDefaults(template, preferences);
+      expect(resolveFormat(xml, 'Child').bold).toBe(true);
+      expect(styleXml(xml, 'Child')).not.toMatch(/<w:b(?:Cs)?\b/);
+    }
+  });
+
+  it('rejects an incompatible complete combination in both storage orders', () => {
+    for (const styles of [{ Child: { italic: false }, Normal: { italic: true } }, { Normal: { italic: true }, Child: { italic: false } }]) {
+      const preferences = { run: {}, styles };
+      expect(newDocumentDefaultsSupported(TOGGLE_TEMPLATE, preferences)).toBe(false);
+      expect(applyNewDocumentDefaults(TOGGLE_TEMPLATE, preferences)).toBe(TOGGLE_TEMPLATE);
+    }
+    expect(rememberStyle(NO_NEW_DOCUMENT_DEFAULTS, null, 'Normal', { italic: true })).toBeNull();
   });
 });

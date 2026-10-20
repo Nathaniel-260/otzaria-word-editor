@@ -189,4 +189,24 @@ if (saved) {
   });
 }
 
+/* 3. Old or hand-edited storage cannot introduce Word/renderer disagreement. */
+await stage('unsupported-stored', { [KEY]: { run: { fontSizePt: 15 }, styles: { Normal: { italic: true } } } }, async (app, h) => {
+  const xml = (await app.docx())['word/styles.xml'];
+  assert.ok(!/<w:i(?:Cs)?\b/.test(style(xml, 'Normal')), 'unsafe Normal italic reached the new document');
+  assert.ok(style(xml, 'Heading4').includes('<w:iCs/>'), 'original Heading4 formatting changed');
+  assert.ok(/<w:rPrDefault>[\s\S]*?<w:szCs w:val="30"\/>/.test(xml), 'safe run size was discarded');
+  report.pass('העדפת סגנון לא נתמכת אינה מוחלת; גודל בטוח נשמר');
+  const status = await h.ask(`Promise.resolve(document.querySelector('#status .status-message')?.textContent ?? '')`);
+  assert.ok(status.includes('לא הוחלו'), `missing visible warning: ${status}`);
+  report.pass('אזהרה גלויה על סגנונות שמורים שלא הוחלו');
+  await app.tab('פריסה');
+  assert.equal(await app.click('ברירות מחדל'), true);
+  await h.until(() => app.exists('[data-testid="docdef-reset-new-documents"]'), 'סיכום ההעדפות שנדחו');
+  const summary = await h.ask(`Promise.resolve(document.querySelector('.docdef-dialog')?.textContent ?? '')`);
+  assert.ok(summary.includes('לא הוחלו'), 'dialog claims incompatible styles were applied');
+  assert.equal(await h.click('[data-testid="docdef-reset-new-documents"]'), true);
+  await h.until(async () => (await h.stored()) === null, 'איפוס ההעדפות שנדחו');
+  report.pass('סיכום ההעדפות מסביר את הסירוב ואפשר לאפס אותן');
+});
+
 process.exit(report.print() > 0 ? 1 : 0);

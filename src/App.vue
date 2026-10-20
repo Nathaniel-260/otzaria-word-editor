@@ -2720,7 +2720,10 @@ async function openDocumentInto(
   // מהמסמך הריק של המנוע — ראו engine/blank-document.ts — אחרי ברירות המחדל
   // שהמשתמש קבע (composables/new-document-defaults.ts). `undefined` בבדיקות,
   // ואז המנוע פותח את שלו.
-  const blank = !file && !options.draft ? await newDocumentSource() : undefined;
+  let newDocumentDefaultsNotice: string | null = null;
+  const blank = !file && !options.draft
+    ? await newDocumentSource(message => { newDocumentDefaultsNotice = message; })
+    : undefined;
   if (attempt.cancelled) return false;
   const outcome = await swap.open(source ?? blank);
 
@@ -3252,6 +3255,7 @@ async function openDocumentInto(
   else if (readOnlyNotice) setStatus(readOnlyNotice);
   else if (vba.status) setStatus(vba.status);
   else if (options.openedNotice) setStatus(options.openedNotice);
+  else if (newDocumentDefaultsNotice) setStatus(newDocumentDefaultsNotice, true);
 
   save?.reset(file && file.access === 'readwrite' ? { token: file.token, name: file.name } : null);
 

@@ -12,6 +12,7 @@ import {
   customizeBlankDocx,
   hasNewDocumentDefaults,
   normalizeNewDocumentDefaults,
+  newDocumentDefaultsSupported,
   NO_NEW_DOCUMENT_DEFAULTS,
   readTemplateStyles,
   rememberStyle,
@@ -28,6 +29,10 @@ import { listStyles, type StyleFormat } from '../engine/docx-style-edit';
  * ההודעות של composables/use-style-manager.ts.
  */
 export const RUN_DEFAULTS_SAVED_MESSAGE = 'ברירת המחדל תחול גם על כל מסמך חדש';
+export const UNSUPPORTED_STYLE_DEFAULTS_MESSAGE = 'עיצוב הסגנונות אינו נתמך במסמכים חדשים בלי הבדל בין העורך ל-Word; ההעדפה לא נשמרה';
+export const STORED_STYLE_DEFAULTS_REJECTED_MESSAGE = 'ברירות מחדל שמורות לסגנונות לא הוחלו: העיצוב אינו נתמך בלי הבדל בין העורך ל-Word. ניתן לקבוע אותן מחדש או לבחור „החזר למקור”';
+let storedStylesRejected = false;
+
 export const NEW_DOCUMENT_DEFAULTS_RESET_MESSAGE = 'מסמך חדש ייפתח שוב בברירות המחדל המקוריות';
 
 /** מה שחל עכשיו על כל מסמך חדש. */
@@ -46,13 +51,18 @@ export function loadNewDocumentDefaults(): Promise<void> {
     const version = userChoiceVersion;
     const stored = await loadStored();
     if (version !== userChoiceVersion) return;
-    newDocumentDefaults.value = normalizeNewDocumentDefaults(stored);
+    const next = normalizeNewDocumentDefaults(stored);
+    const xml = Object.keys(next.styles).length > 0 ? await templateStyles() : null;
+    if (version !== userChoiceVersion) return;
+    storedStylesRejected = Object.keys(next.styles).length > 0 && (!xml || !newDocumentDefaultsSupported(xml, next));
+    newDocumentDefaults.value = storedStylesRejected ? { run: next.run, styles: {} } : next;
   })();
   return loading;
 }
 
 function store(next: NewDocumentDefaults): void {
   userChoiceVersion += 1;
+  storedStylesRejected = false;
   newDocumentDefaults.value = next;
   void saveNewDocumentDefaults(hasNewDocumentDefaults(next) ? next : null);
 }
@@ -68,9 +78,13 @@ export async function rememberRunDefaults(run: RunDefaults): Promise<void> {
  * מה שנשמר הוא רק ההבדל ממה שמסמך חדש היה מקבל בלי הטלאי של הסגנון הזה —
  * ולכן גם סימון בלי שינוי, על סגנון שכבר תואם לתבנית, אינו שומר דבר.
  */
-export async function rememberStyleDefault(id: string, format: StyleFormat): Promise<void> {
+export async function rememberStyleDefault(id: string, format: StyleFormat): Promise<boolean> {
   await loadNewDocumentDefaults();
-  store(rememberStyle(newDocumentDefaults.value, await templateStyles(), id, format));
+  const xml = await templateStyles();
+  const next = rememberStyle(newDocumentDefaults.value, xml, id, format);
+  if (!next) return false;
+  store(next);
+  return true;
 }
 
 let templateXml: Promise<string | null> | null = null;
@@ -95,10 +109,11 @@ export function resetNewDocumentDefaults(): void {
 }
 
 /** התבנית שמסמך חדש נפתח ממנה, אחרי ההגדרות. `undefined` כשאין תבנית (בדיקות). */
-export async function newDocumentSource(): Promise<Blob | undefined> {
+export async function newDocumentSource(onWarning?: (message: string) => void): Promise<Blob | undefined> {
   const blank = blankDocumentSource();
   if (!blank) return undefined;
   await loadNewDocumentDefaults();
+  if (storedStylesRejected) onWarning?.(STORED_STYLE_DEFAULTS_REJECTED_MESSAGE);
   return customizeBlankDocx(blank, newDocumentDefaults.value);
 }
 
@@ -106,8 +121,8 @@ export async function newDocumentSource(): Promise<Blob | undefined> {
 export async function describeNewDocumentDefaults(): Promise<string | null> {
   await loadNewDocumentDefaults();
   const { run, styles } = newDocumentDefaults.value;
-  if (!hasNewDocumentDefaults(newDocumentDefaults.value)) return null;
-  const parts: string[] = [];
+  if (!hasNewDocumentDefaults(newDocumentDefaults.value) && !storedStylesRejected) return null;
+  const parts: string[] = storedStylesRejected ? [STORED_STYLE_DEFAULTS_REJECTED_MESSAGE] : [];
   if (run.fontFamily) parts.push(run.fontFamily);
   if (run.fontSizePt) parts.push(`${run.fontSizePt} נק'`);
   const ids = Object.keys(styles);

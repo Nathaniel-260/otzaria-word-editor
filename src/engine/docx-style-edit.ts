@@ -568,7 +568,14 @@ function inheritedRuns(xml: string, basedOn: string | null): InheritedRuns {
  * Refuse NEW Word/renderer disagreements before importing any definitions.
  * Resolve both graphs with memoization: work scales with stylesheet size, not body size.
  */
-export function liveStyleTogglesSupported(beforeXml: string, afterXml: string, edit: StyleEdit, editedId: string): boolean {
+export function liveStyleTogglesSupported(
+  beforeXml: string,
+  afterXml: string,
+  edit: StyleEdit,
+  editedId: string,
+  /** Atomic template edits: validate all explicit requests in the same final graph. */
+  additionalRequests?: Readonly<Record<string, StyleFormat>>,
+): boolean {
   const before = readSheet(beforeXml);
   const after = readSheet(afterXml);
   if (!before || !after) return false;
@@ -639,8 +646,9 @@ export function liveStyleTogglesSupported(beforeXml: string, afterXml: string, e
     const previous = old.definitions.has(id) ? old.resolve(id) : null;
     for (const key of keys) {
       if (wanted[key].word === wanted[key].renderer) continue;
-      const requested = id === editedId && (edit.kind === 'create' || edit.kind === 'modify') &&
-        has(edit.format, key.startsWith('b') ? 'bold' : 'italic');
+      const format = id === editedId && (edit.kind === 'create' || edit.kind === 'modify')
+        ? edit.format : additionalRequests?.[id];
+      const requested = format && has(format, key.startsWith('b') ? 'bold' : 'italic');
       if (requested || !previous || previous[key].word !== wanted[key].word || previous[key].renderer !== wanted[key].renderer) return false;
     }
   }

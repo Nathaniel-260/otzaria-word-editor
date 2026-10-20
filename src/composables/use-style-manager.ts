@@ -32,7 +32,7 @@ import { styleDisplayLabel } from '../engine/style-gallery';
 import type { StyleAction } from '../ui/ribbon/common/StyleGallery.vue';
 import type { StyleChoice, StyleDialogMode, StyleDialogResult } from '../ui/panels/StyleDialog.vue';
 import type { CommandOutcome } from '../engine/command-adapter';
-import { rememberStyleDefault, templateHasStyle } from './new-document-defaults';
+import { rememberStyleDefault, templateHasStyle, UNSUPPORTED_STYLE_DEFAULTS_MESSAGE } from './new-document-defaults';
 
 export interface StyleDialogState {
   /** The originating instance; a dialog never follows the active tab. */
@@ -237,10 +237,15 @@ export function useStyleManager(activeStyleId: () => string | null) {
     };
 
     // „גם לכל מסמך חדש”: העיצוב השלם שהדיאלוג החזיר, אחרי שהמסמך עצמו עודכן.
-    const rememberForNewDocuments = async (): Promise<void> => {
-      if (!result.forNewDocuments || !state.styleId) return;
-      await rememberStyleDefault(state.styleId, result.format);
+    const rememberForNewDocuments = async (): Promise<boolean> => {
+      if (!result.forNewDocuments || !state.styleId) return true;
+      if (!await rememberStyleDefault(state.styleId, result.format)) {
+        error.value = UNSUPPORTED_STYLE_DEFAULTS_MESSAGE;
+        fail(UNSUPPORTED_STYLE_DEFAULTS_MESSAGE, 'style-new-documents');
+        return false;
+      }
       notify(`„${state.styleName}” יחול גם על כל מסמך חדש`);
+      return true;
     };
 
     await run(async () => {
@@ -273,8 +278,7 @@ export function useStyleManager(activeStyleId: () => string | null) {
             // רק הקיצור השתנה — אין מה לכתוב למסמך, ואין טעינה מחדש.
             assignCombo(state.styleId as string, state.styleName);
             if (comboChanged) notify(`קיצור המקשים של „${state.styleName}” נשמר`);
-            await rememberForNewDocuments();
-            done = true;
+            done = await rememberForNewDocuments();
             break;
           }
           done = await apply(
@@ -289,7 +293,7 @@ export function useStyleManager(activeStyleId: () => string | null) {
           );
           if (done) {
             assignCombo(state.styleId as string, state.styleName);
-            await rememberForNewDocuments();
+            done = await rememberForNewDocuments();
           }
           break;
         }
