@@ -91,6 +91,22 @@ describe('readNavOutline', () => {
     expect(outline?.headings.map((h) => h.ordinal)).toEqual([0, 400, 800, 1200]);
   });
 
+  it('marks a bounded outline partial rather than hiding omitted headings', async () => {
+    const blocks = Array.from({ length: 25001 }, (_, i) => ({ nodeId: `b${i}`, text: `p${i}`, styleId: i === 25000 ? 'Heading1' : 'Normal' }));
+    const outline = await readNavOutline(fakeHost(blocks));
+    expect(outline?.partial).toBe(true);
+    expect(outline?.ordinals.size).toBe(25000);
+    expect(outline?.headings).toEqual([]);
+    expect((await readNavOutline(fakeHost(blocks.slice(0, 25000))))?.partial).toBe(false);
+  });
+
+  it('stops paginating as soon as the reader becomes stale', async () => {
+    const list = vi.fn(async () => ({ blocks: Array.from({ length: 500 }, (_, i) => ({ nodeId: String(i) })) }));
+    const host = { activeEditor: { doc: { blocks: { list } } } } as NavigationTarget;
+    expect(await readNavOutline(host, () => false)).toBeNull();
+    expect(list).toHaveBeenCalledTimes(1);
+  });
+
   it('null כשאין API או שהקריאה נזרקה', async () => {
     expect(await readNavOutline(null)).toBeNull();
     expect(await readNavOutline(fakeHost([], { throwOnList: true }))).toBeNull();

@@ -122,7 +122,7 @@
         :generation="documentGeneration"
         :doc-revision="navDocRevision"
         :caret-revision="navCaretRevision"
-        @close="onToggleNavigationPane"
+        @close="onCloseNavigationPane"
         @navigated="focusRing.toDocument()"
       />
       <VerticalRuler
@@ -4738,6 +4738,11 @@ watch([activeEditorContainer, activeSuperdoc, documentGeneration], () => {
   });
 });
 
+function onCloseNavigationPane(): void {
+  focusRing.toDocument();
+  onToggleNavigationPane();
+}
+
 function onToggleNavigationPane(): void {
   navigationPaneVisible.value = !navigationPaneVisible.value;
   void saveNavigationPaneVisible(navigationPaneVisible.value);
@@ -5574,7 +5579,7 @@ function focusOpenedDocument(superdoc: SuperDoc): void {
 }
 
 /**
- * מעגל המיקוד של `F6`, בסדר של המסך: סרגל הכותרת, הרצועה, המסמך, שורת המצב.
+ * מעגל המיקוד של `F6`, בסדר של המסך: סרגל הכותרת, הרצועה, חלונית הניווט, המסמך, שורת המצב.
  *
  * אזור המסמך ממוקד דרך המנוע ולא דרך ה-`<main>` שמארח אותו: מיקוד המארח מזיז
  * את הפוקוס אבל אינו מחזיר את הסמן לטקסט, כלומר המשתמש היה מקבל „חזרה למסמך”
@@ -5617,6 +5622,16 @@ const focusRing = createFocusRing({
       id: 'ribbon',
       element: () => shellRegion('.word-ribbon-container'),
       isAvailable: revealedBarAvailable('top'),
+    },
+    {
+      id: 'navigation',
+      element: () => shellRegion('.nav-pane'),
+      focus: () => {
+        const target = shellRegion('.nav-pane [role=treeitem][tabindex="0"]') ?? shellRegion('.nav-pane .nav-close');
+        if (!target) return false;
+        target.focus();
+        return true;
+      },
     },
     {
       id: 'document',

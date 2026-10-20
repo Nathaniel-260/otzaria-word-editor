@@ -115,6 +115,43 @@ try {
     ? report.pass('החלונית מציגה את הכותרות לפי הסדר והרמה', shape)
     : report.fail('רשימת הכותרות שגויה', shape);
 
+  // F6 enters the tree. RTL arrows change focus and collapse without moving
+  // the document caret; Enter/Space return to editing through the public API.
+  await app.js(`document.querySelector('.word-ribbon-container button').focus(); true`);
+  await app.press('F6', 'F6', 117);
+  const focusedHeading = async () => await app.js(`document.activeElement?.matches('.nav-item') ? document.activeElement.querySelector('.nav-label').textContent.trim() : ''`);
+  const entered = await focusedHeading();
+  await app.press('ArrowRight', 'ArrowRight', 39);
+  const collapsedByKey = (await paneItems(app)).length === 2;
+  await app.press('ArrowDown', 'ArrowDown', 40);
+  const down = await focusedHeading();
+  await app.press('Home', 'Home', 36);
+  await app.press('ArrowLeft', 'ArrowLeft', 37);
+  await app.press('ArrowLeft', 'ArrowLeft', 37);
+  const child = await focusedHeading();
+  await app.press('ArrowRight', 'ArrowRight', 39);
+  const parent = await focusedHeading();
+  await app.press('End', 'End', 35);
+  const end = await focusedHeading();
+  await app.press('ArrowUp', 'ArrowUp', 38);
+  await app.press('Enter', 'Enter', 13);
+  await app.sleep(400);
+  const keyCaret = await app.caretBlock();
+  const keyboard = entered === 'פרק ראשון' && collapsedByKey && down === 'פרק שני' && child === 'סעיף אלף' && parent === 'פרק ראשון' && end === 'פרק שני' && keyCaret?.text?.includes('סעיף אלף');
+  keyboard
+    ? report.pass('F6 ועץ הכותרות נגישים במקלדת, כולל קיפול, הורה/ילד והפעלה', '')
+    : report.fail('ניווט מקלדת', JSON.stringify({ entered, collapsedByKey, down, child, parent, end, keyCaret }));
+  await app.press('F6', 'F6', 117, 8);
+  (await focusedHeading()) === 'סעיף אלף'
+    ? report.pass('Shift+F6 מחזיר מהמסמך לכותרת הממוקדת', '')
+    : report.fail('Shift+F6 לחלונית', await focusedHeading());
+  await app.press(' ', 'Space', 32, 0, ' ');
+  await app.sleep(300);
+  const spaceCaret = await app.caretBlock();
+  spaceCaret?.text?.includes('סעיף אלף')
+    ? report.pass('Space מפעיל כותרת בלי להוסיף רווח למסמך', spaceCaret.text)
+    : report.fail('הפעלת כותרת ב-Space', JSON.stringify(spaceCaret));
+
   const paneRect = JSON.parse(
     await app.js(
       `(function(){var p=document.querySelector('.nav-pane').getBoundingClientRect();` +

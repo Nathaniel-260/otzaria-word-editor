@@ -77,6 +77,8 @@ export interface NavigationHost {
 export interface NavOutline {
   headings: NavHeading[];
   ordinals: ReadonlyMap<string, number>;
+  /** More blocks exist beyond the bounded scan. */
+  partial: boolean;
 }
 
 /** ה-union מאפשר גם את המופע האמיתי וגם כפיל. ההסבר המלא ב-page-setup.ts. */
@@ -122,19 +124,24 @@ function headingText(raw: string): string {
  * כל הכותרות במסמך, לפי הסדר. `null` כשאין Document API או שהקריאה נכשלה —
  * החלונית מראה אז את מה שהיה בה, ולא רשימה ריקה שאומרת „אין כותרות”.
  *
- * מסמך שגדול מתקרת הדפדוף מחזיר את מה שנקרא: בשונה מהייצוא לספר, כאן רשימה
- * חלקית אינה נזק — היא תצוגה, ושום דבר אינו נכתב ממנה.
+ * The scan is bounded; a one-block lookahead marks incomplete outlines explicitly.
+ * The caller can cancel between pages after an edit, document switch or unmount.
  */
-export async function readNavOutline(target: NavigationTarget): Promise<NavOutline | null> {
+export async function readNavOutline(
+  target: NavigationTarget,
+  isCurrent: () => boolean = () => true,
+): Promise<NavOutline | null> {
   const list = hostOf(target)?.activeEditor?.doc?.blocks?.list;
   if (typeof list !== 'function') return null;
 
   const headings: NavHeading[] = [];
   const ordinals = new Map<string, number>();
   let offset = 0;
+  let complete = false;
   try {
     for (let page = 0; page < BLOCKS_MAX_PAGES; page += 1) {
       const result = await list({ includeText: true, offset, limit: BLOCKS_PAGE_SIZE });
+      if (!isCurrent()) return null;
       const entries = result?.blocks ?? [];
       entries.forEach((entry, index) => {
         if (typeof entry?.nodeId !== 'string') return;
@@ -148,13 +155,21 @@ export async function readNavOutline(target: NavigationTarget): Promise<NavOutli
         if (!text) return;
         headings.push({ blockId: entry.nodeId, text, level, ordinal: offset + index });
       });
-      if (entries.length < BLOCKS_PAGE_SIZE) break;
+      if (entries.length < BLOCKS_PAGE_SIZE) {
+        complete = true;
+        break;
+      }
       offset += entries.length;
+    }
+    if (!complete) {
+      const extra = await list({ includeText: false, offset, limit: 1 });
+      if (!isCurrent()) return null;
+      complete = (extra?.blocks?.length ?? 0) === 0;
     }
   } catch {
     return null;
   }
-  return { headings, ordinals };
+  return { headings, ordinals, partial: !complete };
 }
 
 /**
