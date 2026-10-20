@@ -40,6 +40,7 @@ export interface ShellActionDeps {
   /** מחליף בין עריכה למעקב. המצב הנוכחי נקרא מהמנוע. */
   toggleTrackChanges: () => void;
   toggleFocusMode: () => void;
+  toggleNavigationPane: () => void;
   /** מופע הבא/קודם בחיפוש. מחזיר האם היה מה לחפש. */
   findAgain: (direction: 'next' | 'prev') => boolean;
   insertCitation: () => void;
@@ -169,6 +170,9 @@ export function createShellActionRunner(
         return true;
       case 'focus-mode':
         deps.toggleFocusMode();
+        return true;
+      case 'navigation-pane':
+        deps.toggleNavigationPane();
         return true;
       case 'find-next':
         return deps.findAgain('next');

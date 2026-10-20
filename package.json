@@ -38,6 +38,7 @@
     "check:undrawable-fonts": "node scripts/qa/undrawable-fonts-qa.mjs",
     "check:toc-removal": "node scripts/qa/toc-removal-qa.mjs",
     "check:toc": "node scripts/qa/toc-layout-qa.mjs",
+    "check:navigation-pane": "node scripts/qa/navigation-pane-qa.mjs",
     "check:wheel": "node scripts/qa/ribbon-wheel-qa.mjs",
     "check:click-focus": "node scripts/qa/click-focus-qa.mjs",
     "check:caret-focus": "node scripts/qa/caret-focus-qa.mjs",

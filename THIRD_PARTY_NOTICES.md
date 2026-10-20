@@ -209,6 +209,7 @@
 | `zoom` | זום | `zoom_in` |
 | `fitWidth` | התאם לרוחב | `arrow_autofit_width` |
 | `focusMode` | מצב מיקוד | `full_screen_maximize` |
+| `navigationPane` | חלונית ניווט | `text_bullet_list_tree` |
 
 **לשונית „אוצריא” והמעטפת**
 

@@ -1026,6 +1026,15 @@ export const TELL_ME_ACTIONS: readonly TellMeAction[] = [
     shellAction: 'focus-mode',
   },
   {
+    id: 'view-navigation-pane',
+    title: 'חלונית ניווט',
+    category: 'תצוגה',
+    description: 'הצגת כותרות המסמך בצד, ומעבר מכותרת לכותרת בלחיצה',
+    keywords: ['ניווט', 'חלונית ניווט', 'כותרות', 'מבנה', 'ראשי פרקים', 'navigation', 'outline'],
+    icon: 'navigationPane',
+    shellAction: 'navigation-pane',
+  },
+  {
     id: 'view-ruler',
     title: 'סרגל מידות',
     category: 'תצוגה',

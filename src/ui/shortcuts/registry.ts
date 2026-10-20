@@ -79,6 +79,7 @@ export type ShellAction =
   | 'endnote'
   | 'track-changes'
   | 'focus-mode'
+  | 'navigation-pane'
   | 'find-next'
   | 'find-prev'
   | 'insert-citation'

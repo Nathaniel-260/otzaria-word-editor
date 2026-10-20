@@ -46,6 +46,7 @@ import type { SuperDoc } from 'superdoc';
 import type { MaybePromise } from './document-api';
 import { thrownText } from './document-api';
 import { stripWordExtension } from './export';
+import { navHeadingLevel } from './navigation-pane';
 import { NO_DOCUMENT_TEXT } from './shulchan/shulchan-doc';
 
 /** מה שנצרך מ-`blocks.list` — כמו ב-shulchan-doc.ts, בתוספת שדות הכותרת. */
@@ -111,16 +112,9 @@ export function otzariaHeadingLevel(
   styleId: string | null | undefined,
   headingLevel: number | undefined,
 ): number | null {
-  if (typeof headingLevel === 'number' && Number.isInteger(headingLevel) && headingLevel >= 1) {
-    return Math.min(headingLevel, MAX_HEADING);
-  }
-
-  const key =
-    typeof styleId === 'string' ? styleId.trim().toLowerCase().replace(/[\s_-]+/g, '') : '';
-  if (key === 'title') return 1;
-
-  const match = /^(?:heading|כותרת)([1-9])$/.exec(key);
-  return match ? Math.min(Number(match[1]), MAX_HEADING) : null;
+  // אותה הכרעה כמו בחלונית הניווט, עם תקרת אוצריא.
+  const level = navHeadingLevel(styleId, headingLevel);
+  return level === null ? null : Math.min(level, MAX_HEADING);
 }
 
 /** escaping לטקסט חופשי — `<` גולמי היה נקרא באוצריא כתג. הסדר קובע: `&` ראשון. */

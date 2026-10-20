@@ -96,7 +96,9 @@
       <ReviewTab v-else-if="currentTabId === 'review'" />
       <ViewTab
         v-else-if="currentTabId === 'view'"
+        :navigation-pane-visible="navigationPaneVisible"
         @toggle-focus-mode="$emit('toggle-focus-mode')"
+        @toggle-navigation-pane="$emit('toggle-navigation-pane')"
       />
       <DeveloperTab
         v-else-if="currentTabId === 'developer'"
@@ -174,6 +176,7 @@ withDefaults(
     isExiting?: boolean;
     bookCompletionEnabled?: boolean;
     listAutoformatEnabled?: boolean;
+    navigationPaneVisible?: boolean;
   }>(),
   {
     hasDocument: false,
@@ -183,6 +186,7 @@ withDefaults(
     isExiting: false,
     bookCompletionEnabled: false,
     listAutoformatEnabled: true,
+    navigationPaneVisible: false,
   },
 );
 
@@ -237,6 +241,7 @@ defineEmits<{
   (e: 'macro-play'): void;
   (e: 'toggle-book-completion'): void;
   (e: 'toggle-list-autoformat'): void;
+  (e: 'toggle-navigation-pane'): void;
 }>();
 
 /** רק הלשונית הפעילה נמצאת ב-tab order, ולכן החצים צריכים להזיז מיקוד בעצמם. */

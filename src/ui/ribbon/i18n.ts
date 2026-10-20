@@ -548,6 +548,9 @@ const EN: Readonly<Record<string, string>> = {
   'הצג או הסתר את סרגל המידות': 'Show or hide the ruler',
   'סימני עיצוב': 'Formatting Marks',
   'הצג סימני פסקאות ותווים נסתרים': 'Show paragraph marks and hidden characters',
+  'חלונית ניווט': 'Navigation Pane',
+  'הצג את כותרות המסמך בצד, ועבור מכותרת לכותרת בלחיצה':
+    'Show the document headings on the side, and jump between them with a click',
   'גודל אמיתי': 'Actual Size',
   'הצג את המסמך בגודלו האמיתי (100%)': 'View the document at actual size (100%)',
   'שינוי גודל תצוגה': 'Zoom',
