@@ -426,6 +426,7 @@ import {
   openOtzariaLink,
   openSearchTab,
   registerSendToDocumentItem,
+  registerEditBookItem,
   handleSendToDocument,
   takePendingContextMenuClicks,
   type SendToDocumentEvent,
@@ -437,6 +438,12 @@ import {
   type PageOpenedEvent,
   type ReceivedFile,
 } from './host/received-file';
+import {
+  EDIT_BOOK_ITEM_ID,
+  readEditBookClick,
+  takePendingToolbarClicks,
+  type EditBookEvent,
+} from './host/edit-book';
 import {
   fallbackStyleGallery,
   observeStyleGallery,
@@ -1800,6 +1807,8 @@ function isOpenBusy(): boolean {
 let contextMenuListener: (() => void) | null = null;
 /** מבטל את ההאזנה לקובץ שתוסף אחר שולח. ראו `registerReceivedFiles`. */
 let pageOpenedListener: (() => void) | null = null;
+/** מבטל את ההאזנה ל„ערוך בוורד לאוצריא”. ראו `registerEditBook`. */
+let toolbarClickListener: (() => void) | null = null;
 /** מבטל את ההאזנה ליציאה ממסך מלא שלא באה מאיתנו. */
 let fullscreenListener: (() => void) | null = null;
 
@@ -5705,6 +5714,98 @@ function registerReceivedFiles(): void {
   }
 }
 
+/**
+ * ספרים שנפתחו מ„ערוך בוורד לאוצריא” לכתיבה: מפתח הספר → הטאב וה-token שלו.
+ *
+ * לחיצה שנייה על אותו ספר עוברת לטאב הקיים ואינה פותחת עותק שני: שני טאבים
+ * שכותבים לאותו קובץ הם שמירה אחת שדורסת את השנייה בשקט. ספר שנפתח לקריאה
+ * אינו נרשם כאן — אין לו יעד כתיבה, ועותק נוסף שלו אינו דורס דבר.
+ */
+const editedBooks = new Map<string, { sessionId: DocumentSessionId; token: string }>();
+
+function findEditedBookTab(key: string): DocumentSessionId | null {
+  const entry = editedBooks.get(key);
+  if (!entry) return null;
+  // הטאב קיים ועדיין כותב לאותו קובץ — אחרת הרשומה ישנה.
+  if (sessions.get(entry.sessionId)?.save.snapshot.targetToken === entry.token) return entry.sessionId;
+  editedBooks.delete(key);
+  return null;
+}
+
+/**
+ * פותחת את ספר ה-Word שהיה מוצג בקורא. ראו host/edit-book.ts.
+ *
+ * אותו מסלול כמו ענף „הספרייה” של „פתח מסמך” (`openLibraryBook`), ומחוץ
+ * לדיאלוג: ממתינה לסוף שחזור ההפעלה ולשקט, כמו קובץ מתוסף אחר.
+ */
+async function openEditBook(event: EditBookEvent): Promise<void> {
+  const request = readEditBookClick(event);
+  if (request.kind === 'ignore') return;
+  if (request.kind === 'rejected') {
+    setStatus(request.message, true);
+    return;
+  }
+
+  const { book } = request;
+  await untilOpenIdle();
+
+  const existing = findEditedBookTab(book.key);
+  if (existing) {
+    onDocumentTabSelect(existing);
+    setStatus(`„${book.title}” כבר פתוח לעריכה`);
+    return;
+  }
+
+  const result = await openLibraryBook(book);
+  if (!result.ok) {
+    setStatus(result.message, true);
+    return;
+  }
+  ensureOpenTargetTab();
+  const opened = await openDocument(result.value);
+  if (!opened) {
+    setStatus(`„${book.title}” לא נפתח`, true);
+    return;
+  }
+
+  const writable = result.value.access === 'readwrite';
+  const session = activeSession.value;
+  if (writable && session) editedBooks.set(book.key, { sessionId: session.id, token: result.value.token });
+  setStatus(
+    writable
+      ? `„${book.title}” נפתח לעריכה — „שמור” כותב לקובץ עצמו`
+      : `„${book.title}” הוא ספר של הספרייה — „שמור” ישמור עותק במקום אחר`,
+  );
+}
+
+function queueEditBook(event: EditBookEvent): void {
+  if (event?.itemId !== EDIT_BOOK_ITEM_ID) return;
+  receivedFiles = receivedFiles
+    .then(() => openEditBook(event))
+    .catch((error: unknown) => {
+      console.warn('[otzaria-word] „ערוך בוורד לאוצריא” נכשל', error);
+      setStatus('הספר לא נפתח', true);
+    });
+}
+
+/**
+ * „ערוך בוורד לאוצריא” בסרגל הקורא — אותו סדר בדיוק כמו `registerReceivedFiles`.
+ * הפקד מוצהר במניפסט; הרישום מ-JS הוא הגיבוי (ראו `EDIT_BOOK_ITEM`).
+ */
+function registerEditBook(): void {
+  if (!isAvailable()) return;
+
+  try {
+    void registerEditBookItem().then((outcome) => {
+      if (!outcome.ok) console.warn('[otzaria-word]', outcome.message);
+    });
+    toolbarClickListener = on('reader.toolbar_item_clicked', (event) => queueEditBook(event));
+    for (const pending of takePendingToolbarClicks()) queueEditBook(pending);
+  } catch (error) {
+    console.warn('[otzaria-word] ההאזנה ל„ערוך בוורד לאוצריא” נכשלה', error);
+  }
+}
+
 onMounted(async () => {
   /**
    * המנייה של גופני המכונה — ראשונה, ובלי `await`, ובשני שלבים.
@@ -5762,6 +5863,7 @@ onMounted(async () => {
   // נבדק בזמן הלחיצה, לא עכשיו.
   registerSendToDocument();
   registerReceivedFiles();
+  registerEditBook();
 
   shortcuts = createShortcutDispatcher({
     runCommand: (id, payload) => void runShortcutCommand(id, payload),
@@ -5968,6 +6070,8 @@ onUnmounted(() => {
   contextMenuListener = null;
   pageOpenedListener?.();
   pageOpenedListener = null;
+  toolbarClickListener?.();
+  toolbarClickListener = null;
   fullscreenListener?.();
   fullscreenListener = null;
   // מעטפת שנפרקת בזמן מסך מלא הייתה משאירה את החלון מורחב בלי מי שיצא ממנו.

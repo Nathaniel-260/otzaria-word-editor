@@ -75,6 +75,24 @@
       })();
     </script>
 
+    <script>
+      /* ה-latch של „ערוך בוורד לאוצריא” בסרגל הקורא, מאותו טעם בדיוק:
+         `openPlugin: true` מוסר את `reader.toolbar_item_clicked` מיד בסוף
+         ה-boot, לפני שהמאזין ב-App.vue קיים.
+
+         השם __otzariaToolbarClicks משותף עם src/host/edit-book.ts, ו-
+         tests/unit/edit-book.test.ts מקבע את הזהות הזאת. */
+      (function () {
+        var latch = { queue: [], live: false };
+        window.__otzariaToolbarClicks = latch;
+        window.addEventListener('reader.toolbar_item_clicked', function (event) {
+          if (latch.live) return;
+          if (latch.queue.length >= 8) latch.queue.shift();
+          latch.queue.push(event.detail);
+        });
+      })();
+    </script>
+
     <!-- מסך הטעינה. ה-CSS כאן ולא בגיליון חיצוני, ובכוונה: הוא חייב להיות
          מצויר לפני שנטענת ולו שורה אחת מקוד התוסף, וכל בקשה נוספת היא עוד
          סיבוב שבו המסך לבן. מאותה סיבה אין כאן הגופן הארוז — הוא מותקן

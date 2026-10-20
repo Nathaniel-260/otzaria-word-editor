@@ -16,6 +16,7 @@
     "fs.user_files.write",
     "reader.open",
     "reader.context_menu",
+    "reader.toolbar",
     "app.startup_contributions",
     "navigation.write",
     "clipboard.read",
@@ -31,6 +32,15 @@
           "title": "שלח למסמך",
           "icon": "document_text_24_regular",
           "contexts": ["reader-selection", "reader-page-shape-selection"],
+          "openPlugin": true
+        }
+      ],
+      "toolbarItems": [
+        {
+          "id": "otzaria-word-edit-book",
+          "title": "ערוך בוורד לאוצריא",
+          "icon": "document_edit_24_regular",
+          "contexts": ["reader-text"],
           "openPlugin": true
         }
       ]
