@@ -375,6 +375,117 @@ describe('installAutoCorrect', () => {
       expect(engine.inserts).toHaveLength(0);
     });
 
+    it.each(['reset', 'undo', 'pointer', 'typing', 'delete', 'paste', 'composition', 'dispose'])(
+      'מבטל החלפה מתוזמנת אחרי %s', async (action) => {
+        const engine = fakeEngine('');
+        const installed = install(engine, KEYS);
+        type(engine, 'א--');
+        await settle();
+        enter(engine);
+        if (action === 'reset') installed.reset();
+        if (action === 'undo') {
+          key('z', { ctrlKey: true });
+          container.dispatchEvent(new InputEvent('input', { inputType: 'historyUndo', bubbles: true }));
+        }
+        if (action === 'pointer') container.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+        if (action === 'typing') type(engine, 'x');
+        if (action === 'delete') container.dispatchEvent(new InputEvent('input', { inputType: 'deleteContentBackward', bubbles: true }));
+        if (action === 'paste') container.dispatchEvent(new Event('paste', { bubbles: true }));
+        if (action === 'composition') container.dispatchEvent(new Event('compositionstart', { bubbles: true }));
+        if (action === 'dispose') installed.dispose();
+        await settle();
+        expect(engine.inserts).toHaveLength(0);
+      },
+    );
+
+    it('אירוע הקלט של Enter עצמו אינו מבטל את ההחלפה', async () => {
+      const engine = fakeEngine('');
+      install(engine, KEYS);
+      type(engine, 'א--');
+      await settle();
+      enter(engine);
+      container.dispatchEvent(new InputEvent('input', { inputType: 'insertParagraph', bubbles: true }));
+      await settle();
+      expect(engine.model.text).toBe('א:\u0000');
+    });
+
+    it('קריאה ישנה אינה מוחקת טקסט חדש שהוקלד בזמן ההמתנה', async () => {
+      const engine = fakeEngine('');
+      install(engine, KEYS);
+      type(engine, 'א--');
+      await settle();
+      const read = engine.doc.ranges.resolve;
+      let finish!: () => void;
+      engine.doc.ranges.resolve = async (request) => {
+        const snapshot = await read(request);
+        await new Promise<void>((resolve) => { finish = resolve; });
+        return snapshot;
+      };
+      enter(engine);
+      await settle();
+      key('Backspace');
+      key('X');
+      engine.model.text = 'אXY';
+      engine.model.caret = 3;
+      finish();
+      await settle();
+      expect(engine.model.text).toBe('אXY');
+      expect(engine.inserts).toHaveLength(0);
+    });
+
+    it('reset פוסל גם קריאה שכבר התחילה', async () => {
+      const engine = fakeEngine('');
+      const installed = install(engine, KEYS);
+      type(engine, 'א--');
+      await settle();
+      const read = engine.doc.ranges.resolve;
+      let finish!: () => void;
+      engine.doc.ranges.resolve = async (request) => {
+        const snapshot = await read(request);
+        await new Promise<void>((resolve) => { finish = resolve; });
+        return snapshot;
+      };
+      enter(engine);
+      await settle();
+      installed.reset();
+      finish();
+      await settle();
+      expect(engine.inserts).toHaveLength(0);
+    });
+
+    it('שינוי ההגדרות אחרי Enter מבטל את הדפוס הישן', async () => {
+      const engine = fakeEngine('');
+      let settings = { ...BASE, ...KEYS };
+      handle = installAutoCorrect({ container, host: engine.host as never, getOptions: () => settings });
+      type(engine, 'א--');
+      await settle();
+      enter(engine);
+      settings = { ...settings, replacements: [{ from: '--', to: 'different' }] };
+      await settle();
+      expect(engine.inserts).toHaveLength(0);
+    });
+
+    it('דיאלוג שנפתח בזמן קריאת הטווח מונע החלפה', async () => {
+      const engine = fakeEngine('');
+      let suppressed = false;
+      install(engine, KEYS, { isSuppressed: () => suppressed });
+      type(engine, 'א--');
+      await settle();
+      const read = engine.doc.ranges.resolve;
+      let finish!: () => void;
+      engine.doc.ranges.resolve = async (request) => {
+        const snapshot = await read(request);
+        await new Promise<void>((resolve) => { finish = resolve; });
+        return snapshot;
+      };
+      enter(engine);
+      await settle();
+      suppressed = true;
+      finish();
+      await settle();
+      expect(engine.inserts).toHaveLength(0);
+    });
+
     it('חץ או עכבר אחרי ההמתנה אינם מחליפים, כמו ב-Word', async () => {
       const engine = fakeEngine('');
       install(engine, KEYS);

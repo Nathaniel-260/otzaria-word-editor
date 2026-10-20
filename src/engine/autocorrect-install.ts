@@ -42,11 +42,13 @@
  *   בבלוק הקודם. קריאה ממנו דורשת ללמוד את הבלוק הקודם מהמנוע, וזו הרחבה.
  *   חריג אחד: דפוס סמל שהמתין לתו הבא כתחילית של דפוס ארוך ממנו (`--` מול
  *   `-->`). ההערכה שבשקט שלפני ה-Enter כבר ידעה איפה הוא (`pending`), ולכן
- *   Enter או Tab מחליפים אותו שם — אחרת `--` ← `:` בסוף שורה לא היה מוחלף לעולם.
+ *   Enter או Tab מחליפים אותו שם. בלי קריאה שהושלמה לפני Enter אין עוגן בטוח,
+ *   ולכן הקלדה מהירה ומיד Enter משאירה את המקור. כל עריכה נוספת מבטלת גם
+ *   החלפה שכבר ממתינה לקריאת טווח — עדיף להחמיץ תיקון מאשר לדרוס טקסט חדש.
  * ביטול בלחיצה על המחוון נעשה ב-`changeBack`, אחרי בדיקת הטקסט העדכני.
  */
 import type { CompletionDoc, CompletionTarget } from './book-completion-overlay';
-import { planAutoCorrect, type AutoCorrectFix, type AutoCorrectOptions } from './autocorrect';
+import { planAutoCorrectWithPending, type AutoCorrectFix, type AutoCorrectOptions } from './autocorrect';
 import { applyFixesToText, createAutoCorrectIndicator, locateWord, type IndicatorEntry } from './autocorrect-indicator';
 import type { DocReceipt } from './document-api';
 import type { ResolvedRangeLike, SelectionPointLike, SelectionTargetLike } from './word-selection';
@@ -237,7 +239,11 @@ export function installAutoCorrect(options: AutoCorrectInstallOptions): AutoCorr
     changeBack: (entry) => changeBack(entry),
     stop: options.onStopCorrecting ? (entry) => options.onStopCorrecting?.(entry) : undefined,
     openOptions: options.onOpenOptions,
-    invalidate: (resetTyping) => resetTyping ? resetTyped() : cancelPending(),
+    invalidate: (resetTyping, event) => {
+      if (!resetTyping && event?.type === 'input' && isSettlementInput(event)) return;
+      if (resetTyping) resetTyped();
+      else cancelPending();
+    },
   });
 
   let disposed = false;
@@ -247,11 +253,13 @@ export function installAutoCorrect(options: AutoCorrectInstallOptions): AutoCorr
   let timer: ReturnType<typeof setTimeout> | undefined;
   let applied: AppliedFix[] = [];
   let pending: PendingFix | null = null;
+  let settlement: { entry: PendingFix; token: number; doc: CompletionDoc; expectedInput: boolean } | null = null;
 
   function cancelPending(): void {
     evalToken += 1;
     if (timer !== undefined) clearTimeout(timer);
     timer = undefined;
+    settlement = null;
   }
 
   /** איפוס הספירה. כל מה שאינו הקלדה של תו. */
@@ -388,21 +396,17 @@ export function installAutoCorrect(options: AutoCorrectInstallOptions): AutoCorr
     }
 
     const { text, base, blockId, story, startsInsideToken } = result.window;
-    const planned = planAutoCorrect(text, settings, { atBlockStart: base === 0, startsInsideToken });
+    const { fixes: planned, pending: deferred } = planAutoCorrectWithPending(
+      text, settings, { atBlockStart: base === 0, startsInsideToken },
+    );
     const fixes = planned.filter(
       (fix) => touchesTyped(fix, text.length, typed) && !wasUndone(blockId, base + fix.start, fix.original),
     );
     log('תכנון', { text, planned: planned.length, afterFilter: fixes.length });
 
-    // דפוס שממתין לתו הבא: מה שהיה מוחלף אילו השורה הסתיימה כאן.
-    const waiting = planAutoCorrect(text, settings, { atBlockStart: base === 0, startsInsideToken, ended: true }).find(
-      (fix) =>
-        fix.rule === 'table' &&
-        fix.end === text.length &&
-        touchesTyped(fix, text.length, typed) &&
-        !planned.some((other) => other.start < fix.end && fix.start < other.end) &&
-        !wasUndone(blockId, base + fix.start, fix.original),
-    );
+    // The same planning pass records a suffix deferred by a longer symbol pattern.
+    const waiting = deferred && touchesTyped(deferred, text.length, typed) &&
+      !wasUndone(blockId, base + deferred.start, deferred.original) ? deferred : null;
     // התיקונים שלפניו מזיזים אותו, כולם לפניו ואינם חופפים.
     const shift = waiting
       ? fixes.reduce((sum, fix) => (fix.end <= waiting.start ? sum + fix.replacement.length - (fix.end - fix.start) : sum), 0)
@@ -471,10 +475,15 @@ export function installAutoCorrect(options: AutoCorrectInstallOptions): AutoCorr
    * Enter או Tab אחרי דפוס שממתין: מחליפה אותו במקום שההערכה ראתה. הטקסט שם
    * נקרא ונבדק קודם, כמו ב-`changeBack` — אם אינו הדפוס, לא נוגעים בו.
    */
-  async function settlePending(entry: PendingFix): Promise<void> {
-    const doc = getDoc();
-    if (!doc || typeof doc.insert !== 'function' || typeof doc.ranges?.resolve !== 'function') return;
-    if (disposed || options.isSuppressed?.()) return;
+  async function settlePending(job: NonNullable<typeof settlement>): Promise<void> {
+    const { entry, doc, token } = job;
+    const current = (): boolean => {
+      const settings = options.getOptions();
+      return !disposed && token === evalToken && settlement === job && getDoc() === doc &&
+        !composing && !options.isSuppressed?.() && settings.enabled && settings.replaceAsYouType &&
+        settings.replacements.some((item) => item.from === entry.original && item.to === entry.replacement);
+    };
+    if (typeof doc.insert !== 'function' || typeof doc.ranges?.resolve !== 'function' || !current()) return;
     const end = entry.start + entry.original.length;
     const request: Record<string, unknown> = {
       start: { kind: 'point', point: pointAt(entry.blockId, entry.start, entry.story) },
@@ -482,7 +491,8 @@ export function installAutoCorrect(options: AutoCorrectInstallOptions): AutoCorr
     };
     if (entry.story) request.in = entry.story;
     const resolved = await doc.ranges.resolve(request);
-    if (disposed || resolved?.preview?.text !== entry.original) {
+    if (!current() || resolved?.preview?.truncated || resolved?.preview?.text !== entry.original ||
+      resolved?.target?.start?.offset !== entry.start || resolved?.target?.end?.offset !== end) {
       log('המתנה: הטקסט שבהיסט אינו הדפוס', resolved?.preview?.text);
       return;
     }
@@ -523,10 +533,18 @@ export function installAutoCorrect(options: AutoCorrectInstallOptions): AutoCorr
     if ((event.key === 'Enter' || event.key === 'Tab') && !event.shiftKey && !event.altKey && pending) {
       const entry = pending;
       resetTyped();
-      // אחרי שה-Enter/Tab עצמו עבר: קריאות המנוע ממתינות לשקט בכל מקרה.
-      setTimeout(() => void settlePending(entry).catch((error) => {
-        console.warn('[otzaria-word] תיקון אוטומטי: ההחלפה אחרי סוף השורה נכשלה', error);
-      }), AUTOCORRECT_DEBOUNCE_MS);
+      const doc = getDoc();
+      if (!doc) return;
+      const job = { entry, token: evalToken, doc, expectedInput: true };
+      settlement = job;
+      // This uses the same timer and generation as normal evaluation: any subsequent
+      // edit, undo, navigation, reset or disposal cancels it, including an in-flight read.
+      timer = setTimeout(() => {
+        timer = undefined;
+        void settlePending(job).catch((error) => {
+          console.warn('[otzaria-word] תיקון אוטומטי: ההחלפה אחרי סוף השורה נכשלה', error);
+        }).finally(() => { if (settlement === job) settlement = null; });
+      }, AUTOCORRECT_DEBOUNCE_MS);
       return;
     }
 
@@ -559,8 +577,19 @@ export function installAutoCorrect(options: AutoCorrectInstallOptions): AutoCorr
    * מובטח במשטח ההקלדה של המנוע, ולכן היעדרו נחשב הקלדה — והספירה (`typed`)
    * היא ההגנה האמיתית, לא הסוג.
    */
+  function isSettlementInput(event: Event): boolean {
+    const input = event as InputEvent;
+    return !!settlement?.expectedInput && (input.inputType === 'insertParagraph' || input.inputType === 'insertLineBreak' ||
+      (input.inputType === 'insertText' && input.data === '\t'));
+  }
+
   function onInput(event: Event): void {
     const type = (event as InputEvent).inputType;
+    // Enter's own structural input is expected; every other input invalidates the job.
+    if (settlement && isSettlementInput(event)) {
+      settlement.expectedInput = false;
+      return;
+    }
     if (type && /^(history|insertFromPaste|insertFromDrop|insertFromYank)/.test(type)) {
       resetTyped();
       return;

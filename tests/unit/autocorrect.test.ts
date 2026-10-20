@@ -12,6 +12,7 @@ import {
   DEFAULT_AUTOCORRECT,
   DEFAULT_REPLACEMENTS,
   isImmediatePattern,
+  planAutoCorrectWithPending,
   isSelfFeedingEntry,
   mergeEntries,
   normalizeAutoCorrect,
@@ -106,6 +107,17 @@ describe('טבלת ההחלפות — רצפי סימנים שהמשתמש מג�
     expect(ended('א--')).toBe('א:');
     expect(ended('מה==')).toBe('מה?');
     expect(ended('http:/')).toBe('http:/');
+  });
+
+  it('אותה סריקה מחזירה רק את סיומת הסמל הממתינה, ושומרת את התיקונים הרגילים', () => {
+    const options = { ...BASE, ...ONLY({ replaceAsYouType: true, replacements: KEYS }) };
+    const result = planAutoCorrectWithPending('רש/י--', options);
+    expect(result.fixes).toEqual(planAutoCorrect('רש/י--', options));
+    expect(result.pending).toEqual({ start: 4, end: 6, original: '--', replacement: ':', rule: 'table' });
+    expect(planAutoCorrectWithPending('http://x/--', options).pending).toBeNull();
+    expect(planAutoCorrectWithPending('plain prose', options).pending).toBeNull();
+    expect(planAutoCorrectWithPending('א--', { ...options, enabled: false }).pending).toBeNull();
+    expect(planAutoCorrectWithPending('א--', options, { ended: true }).pending).toBeNull();
   });
 
   it('דפוס בלי המשך אפשרי אינו ממתין', () => {

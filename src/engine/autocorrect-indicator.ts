@@ -176,7 +176,7 @@ export interface IndicatorCallbacks {
   /** „שליטה באפשרויות”. חסר = הפריט אינו מוצג. */
   openOptions?: () => void;
   /** עריכה פוסלת קריאות באוויר; שינוי הקשר מאפס גם את רצף ההקלדה. */
-  invalidate?: (resetTyping: boolean) => void;
+  invalidate?: (resetTyping: boolean, event?: Event) => void;
 }
 
 export interface IndicatorHandle {
@@ -425,14 +425,14 @@ export function createAutoCorrectIndicator(
     callbacks.invalidate?.(true);
     clear();
   };
-  const onEdit = (): void => {
-    callbacks.invalidate?.(false);
+  const onEdit = (event: Event): void => {
+    callbacks.invalidate?.(false, event);
     clear();
   };
   const onKeyDown = (event: KeyboardEvent): void => {
     const target = event.target as Node | null;
     if (target && container.contains(target) &&
-      (event.key.length === 1 || ['Backspace', 'Delete', 'Enter', 'Tab'].includes(event.key))) onEdit();
+      (event.key.length === 1 || ['Backspace', 'Delete', 'Enter', 'Tab'].includes(event.key))) onEdit(event);
     else { closeMenu(); hideChip(); }
   };
   const onBlur = (): void => {

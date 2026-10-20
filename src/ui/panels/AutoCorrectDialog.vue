@@ -342,7 +342,7 @@ const timingHint = computed(() => {
     (entry) => entry.from.length > from.length && entry.from.startsWith(from) && isImmediatePattern(entry.from),
   );
   return longer
-    ? `יוחלף בתו שאחריו, או ב-Enter, כי „${LRI}${longer.from}${PDI}” מתחיל בו. Ctrl+Z מיד אחרי ההחלפה מחזיר את מה שהוקלד.`
+    ? `יוחלף בתו שאחריו, כי „${LRI}${longer.from}${PDI}” מתחיל בו. Ctrl+Z מיד אחרי ההחלפה מחזיר את מה שהוקלד.`
     : 'יוחלף מיד כשיוקלד, גם בתוך מילה. Ctrl+Z מיד אחרי ההחלפה מחזיר את מה שהוקלד.';
 });
 

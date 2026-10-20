@@ -4,7 +4,8 @@
  *
  * מה נמדד: ההחלפה מיידית גם בתוך מילה; קצב אנושי וקצב מהיר נותנים אותה תוצאה;
  * דפוס קצר שהוא תחילתו של דפוס ארוך (`--` מול `-->`) ממתין לתו הבא ואינו תלוי
- * בקצב, ו-Enter בסוף השורה מחליף אותו; Ctrl+Z מחזיר את המקור בצעד אחד; כתובת
+ * בקצב. אחרי עצירה קצרה Enter מחליף אותו; Enter מהיר שומר את המקור ללא ניחוש,
+ * ו-Enter שמבוטל אינו גורר החלפה מאוחרת. Ctrl+Z מחזיר את המקור בצעד אחד; כתובת
  * אינה נפגעת; ההחלפה יורשת את עיצוב הריצה.
  *
  * `QA_SHOTS=<תיקייה>` שומר צילום של הדיאלוג.
@@ -137,6 +138,25 @@ try {
   ).then(JSON.parse);
   check('-- ← : כש-Enter סיים את השורה', texts.includes('ואלו הן:') ? 'ואלו הן:' : JSON.stringify(texts.slice(-3)), 'ואלו הן:');
   check('אחרי ההחלפה הסמן נשאר בשורה החדשה', await read(), 'א');
+
+  // Cancellation is required even when the real engine's asynchronous range API is used.
+  await app.type('undo--', 5);
+  await app.sleep(700);
+  await app.press('Enter', 'Enter', 13);
+  await undo();
+  await app.sleep(900);
+  check('Enter ואז Ctrl+Z אינם משאירים החלפה מאוחרת', await read(), 'אundo--');
+
+  // End-of-line settlement deliberately requires a previously verified suffix.
+  // Fast Enter has no such anchor; preserving the typed source is the safe fallback.
+  await newPara();
+  await app.type('fast--', 5);
+  await app.press('Enter', 'Enter', 13);
+  await app.sleep(700);
+  const fastTexts = await app.js(
+    "Array.from(document.querySelectorAll('.superdoc-fragment[data-source-node-id]')).map(f => f.textContent)",
+  );
+  check('Enter מהיר שומר טקסט ללא עוגן מאומת', fastTexts.includes('fast--') ? 'fast--' : JSON.stringify(fastTexts), 'fast--');
 
   // 6. עיצוב הריצה עובר להחלפה.
   await newPara();

@@ -470,6 +470,7 @@ function tableFixes(
   tokens: readonly Token[],
   entries: readonly AutoCorrectEntry[],
   ended = false,
+  waiting: AutoCorrectFix[] = [],
 ): AutoCorrectFix[] {
   const fixes: AutoCorrectFix[] = [];
   const { symbols, exact, folded, hasPhrases } = compileTable(entries);
@@ -477,7 +478,10 @@ function tableFixes(
   // חוקי סמל: מופע שלם בכל מקום, הארוך ראשון.
   for (let index = 0; index < text.length; ) {
     const hit = symbols.find((entry) => text.startsWith(entry.from, index));
-    if (hit && (insideAddress(text, index) || (!ended && mayStillGrow(text, index, hit, symbols)))) {
+    if (hit && insideAddress(text, index)) {
+      index += 1;
+    } else if (hit && !ended && mayStillGrow(text, index, hit, symbols)) {
+      waiting.push({ start: index, end: index + hit.from.length, original: hit.from, replacement: hit.to, rule: 'table' });
       index += 1;
     } else if (hit) {
       fixes.push({
@@ -677,12 +681,22 @@ export function planAutoCorrect(
   options: AutoCorrectOptions,
   context: AutoCorrectContext = {},
 ): AutoCorrectFix[] {
-  if (!options.enabled || text.length === 0) return [];
+  return planAutoCorrectWithPending(text, options, context).fixes;
+}
+
+/** The installer also needs the deferred suffix; derive it during the same bounded planning pass. */
+export function planAutoCorrectWithPending(
+  text: string,
+  options: AutoCorrectOptions,
+  context: AutoCorrectContext = {},
+): { fixes: AutoCorrectFix[]; pending: AutoCorrectFix | null } {
+  if (!options.enabled || text.length === 0) return { fixes: [], pending: null };
 
   const tokens = tokenize(text, context.startsInsideToken);
   const candidates: AutoCorrectFix[] = [];
 
-  if (options.replaceAsYouType) candidates.push(...tableFixes(text, tokens, options.replacements, context.ended));
+  const waiting: AutoCorrectFix[] = [];
+  if (options.replaceAsYouType) candidates.push(...tableFixes(text, tokens, options.replacements, context.ended, waiting));
   if (options.dashes || options.spacedHyphen) {
     candidates.push(...dashFixes(text, options.spacedHyphen).filter((fix) => options.dashes || fix.rule === 'spaced-hyphen'));
   }
@@ -700,5 +714,9 @@ export function planAutoCorrect(
     if (!overlaps) chosen.push(candidate);
   }
 
-  return chosen.sort((a, b) => b.start - a.start);
+  const pending = waiting.find((candidate) =>
+    candidate.original !== candidate.replacement &&
+    !chosen.some((fix) => candidate.start < fix.end && fix.start < candidate.end),
+  ) ?? null;
+  return { fixes: chosen.sort((a, b) => b.start - a.start), pending };
 }

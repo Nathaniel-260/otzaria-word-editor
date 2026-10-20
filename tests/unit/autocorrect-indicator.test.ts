@@ -13,7 +13,7 @@ describe('סימון התיקון האוטומטי', () => {
       handle.show([entry]);
       container.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true }));
       expect(handle.active).toBe(false);
-      expect(invalidate).toHaveBeenLastCalledWith(false);
+      expect(invalidate).toHaveBeenLastCalledWith(false, expect.any(Event));
       handle.show([entry]);
       container.dispatchEvent(new Event('input', { bubbles: true }));
       expect(handle.active).toBe(false);
