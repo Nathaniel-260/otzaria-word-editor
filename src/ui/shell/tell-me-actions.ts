@@ -36,6 +36,7 @@ export type TellMeCustomAction =
   | 'export-pdf'
   | 'export-otzaria'
   | 'about'
+  | 'report-bug'
   | 'exit-app'
   | 'toggle-book-completion'
   | 'clipboard-copy'
@@ -194,6 +195,15 @@ export const TELL_ME_ACTIONS: readonly TellMeAction[] = [
     keywords: ['אודות', 'גרסה', 'מידע', 'about'],
     icon: 'info',
     customAction: 'about',
+  },
+  {
+    id: 'help-report-bug',
+    title: 'דיווח על באג',
+    category: 'עזרה',
+    description: 'פתיחת דיווח על תקלה במאגר התוסף ב-GitHub',
+    keywords: ['באג', 'תקלה', 'דיווח', 'שגיאה', 'bug', 'issue'],
+    icon: 'bug',
+    customAction: 'report-bug',
   },
 
   // --- לוח (Clipboard) ---

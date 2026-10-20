@@ -11,6 +11,7 @@ import App from './App.vue';
 import { installBundledFonts } from './styles/fonts';
 import { onThemeChanged, resolveBoot } from './host/otzaria-client';
 import { setHostAppVersion } from './host/host-capabilities';
+import { installRecentErrors } from './host/recent-errors';
 import { splashFail, splashStage, SPLASH_STAGES } from './host/splash';
 import { applyTheme } from './host/theme';
 import { setMenuLocale } from './ui/ribbon/i18n';
@@ -32,6 +33,9 @@ function domReady(): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  // ראשון, כדי שגם כשל באתחול יגיע ל„דיווח על באג” — host/recent-errors.ts.
+  installRecentErrors();
+
   // התקנת גופנים ארוזים ראשונה
   installBundledFonts();
 

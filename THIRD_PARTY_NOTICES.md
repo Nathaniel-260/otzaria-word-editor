@@ -222,6 +222,7 @@
 | `chevronLeft` | גלילת גלריית הסגנונות | `chevron_left` |
 | `chevronRight` | גלילת גלריית הסגנונות | `chevron_right` |
 | `keyboard` | ניהול קיצורים | `keyboard` |
+| `bug` | דיווח על באג | `bug` |
 
 - מקור: <https://github.com/microsoft/fluentui-system-icons>
 - חבילה: `@fluentui/svg-icons@1.1.338` ב־npm, וריאנט `*_20_regular`
@@ -278,7 +279,7 @@ MDL2 היא הספרייה של Office UI Fabric שיצאה משימוש, System
   ואף אחד מהם אינו עדכון של דף — הסימן צריך להיות רענון גנרי. `arrow_sync`,
   המועמד השני, יוצא 93.5% לגובה ונחתך.
 
-> **83 מתוך 89 האייקונים** ב־`icons.ts` הם Fluent System Icons, וזו אינה
+> **84 מתוך 90 האייקונים** ב־`icons.ts` הם Fluent System Icons, וזו אינה
 > הצהרת כוונות: `npm run check:icons` מוריד את `@fluentui/svg-icons@1.1.338`
 > מ־npm ומשווה כל `d=` בקובץ מול הגליף המקורי — byte-for-byte — וגם מאמת שהטבלה
 > למעלה נוקבת בשם הגליף הנכון. השער נכשל על סטייה, על אייקון מצויר בבית שאינו
