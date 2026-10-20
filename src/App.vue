@@ -426,6 +426,7 @@ import {
   openOtzariaLink,
   openSearchTab,
   registerSendToDocumentItem,
+  registerEditBookItem,
   handleSendToDocument,
   takePendingContextMenuClicks,
   type SendToDocumentEvent,
@@ -437,6 +438,12 @@ import {
   type PageOpenedEvent,
   type ReceivedFile,
 } from './host/received-file';
+import {
+  EDIT_BOOK_ITEM_ID,
+  readEditBookClick,
+  takePendingToolbarClicks,
+  type EditBookEvent,
+} from './host/edit-book';
 import {
   fallbackStyleGallery,
   observeStyleGallery,
@@ -1785,6 +1792,8 @@ let openingAttempt: LoadAttempt | null = null;
 let tabClosePending = false;
 /** קובץ שהתקבל נשאר בפתיחה עד שהבייטים שלו נכתבו לשחזור. */
 let receivedFileOpening = false;
+/** פתירת ספר מהקורא מחזיקה את אותו שער כמו פתיחת המסמך עצמו. */
+let editBookResolving = false;
 
 /**
  * האם אסור להתחיל פתיחה או להחליף טאב כרגע.
@@ -1795,11 +1804,13 @@ let receivedFileOpening = false;
  */
 function isOpenBusy(): boolean {
   return isOpening.value || pendingTabLoad || (openingAttempt !== null && !openingAttempt.cancelled) ||
-    tabClosePending || isExiting.value || receivedFileOpening;
+    tabClosePending || isExiting.value || receivedFileOpening || editBookResolving;
 }
 let contextMenuListener: (() => void) | null = null;
 /** מבטל את ההאזנה לקובץ שתוסף אחר שולח. ראו `registerReceivedFiles`. */
 let pageOpenedListener: (() => void) | null = null;
+/** מבטל את ההאזנה ל„ערוך בוורד לאוצריא”. ראו `registerEditBook`. */
+let toolbarClickListener: (() => void) | null = null;
 /** מבטל את ההאזנה ליציאה ממסך מלא שלא באה מאיתנו. */
 let fullscreenListener: (() => void) | null = null;
 
@@ -2601,6 +2612,8 @@ async function applyNewDocumentPaperSize(superdoc: SuperDoc): Promise<void> {
 
 /** מה שאינו נגזר מהקובץ עצמו — המסלולים של „חזרה למה שהיה”. */
 interface OpenOptions {
+  /** הנחיית פתיחה, בעדיפות נמוכה מהתראות מאקרו ותיקוני המסמך. */
+  openedNotice?: string;
   /**
    * בייטים לפתוח **במקום** ה-URL של הקובץ: טיוטת השחזור. המסמך שנפתח כך
    * מסומן מיד כלא-שמור, כי זה בדיוק מה שהוא — עבודה שאינה בדיסק.
@@ -3209,12 +3222,13 @@ async function openDocumentInto(
      לא בביטול, ולא בקובץ. ראו COMPLEX_SCRIPT_BOLD_NOTICE. */
   const readOnlyNotice =
     file && file.access !== 'readwrite'
-      ? `${title.value} — פתוח לקריאה; „שמור” יבקש מקום חדש`
+      ? options.openedNotice ?? `${title.value} — פתוח לקריאה; „שמור” יבקש מקום חדש`
       : null;
   if (vba.autoRun.length > 0 && vba.status) setStatus(vba.status);
   else if (preflightNotice) setStatus(preflightNotice);
   else if (readOnlyNotice) setStatus(readOnlyNotice);
   else if (vba.status) setStatus(vba.status);
+  else if (options.openedNotice) setStatus(options.openedNotice);
 
   save?.reset(file && file.access === 'readwrite' ? { token: file.token, name: file.name } : null);
 
@@ -5705,6 +5719,98 @@ function registerReceivedFiles(): void {
   }
 }
 
+/**
+ * יעד הכתיבה הוא זהות הקובץ גם אחרי פתיחה ידנית או שחזור הפעלה. ה-host
+ * מחזיר אותו token לאותו קובץ; מפתח הספר לבדו אינו מזהה טאבים ממסלולים אחרים.
+ * טאב רדום/שטרם נטען מחזיק את היעד בזוכר, עד שקואורדינטור השמירה ייטען.
+ */
+function findWritableFileTab(token: string): DocumentSessionId | null {
+  for (const session of sessions.values()) {
+    if (session.save.snapshot.targetToken === token) return session.id;
+    if (session.pendingRestore) {
+      const file = activeEntry(session.keeper.state)?.document;
+      if (file?.writable && file.token === token) return session.id;
+    }
+  }
+  return null;
+}
+
+/**
+ * פותחת את ספר ה-Word שהיה מוצג בקורא. ראו host/edit-book.ts.
+ *
+ * אותו מסלול כמו ענף „הספרייה” של „פתח מסמך” (`openLibraryBook`), ומחוץ
+ * לדיאלוג: ממתינה לסוף שחזור ההפעלה ולשקט, כמו קובץ מתוסף אחר.
+ */
+async function openEditBook(event: EditBookEvent): Promise<void> {
+  const request = readEditBookClick(event);
+  if (request.kind === 'ignore') return;
+  if (request.kind === 'rejected') {
+    setStatus(request.message, true);
+    return;
+  }
+
+  const { book } = request;
+  await untilOpenIdle();
+
+  // לפני ה-await, כדי שפתיחה/סגירה/מעבר טאב ידניים לא יתחילו בתוך סבב ה-IPC.
+  editBookResolving = true;
+  let result: SourceResult<UserFile>;
+  try {
+    result = await openLibraryBook(book);
+  } finally {
+    editBookResolving = false;
+  }
+  if (!result.ok) {
+    setStatus(result.message, true);
+    return;
+  }
+
+  // רק אחרי שה-host פתר את זהות הקובץ: גם טאב שנפתח מ„אחרונים”, מבורר
+  // הקבצים או בהפעלה קודמת יכול כבר להחזיק את העבודה העדכנית על אותו קובץ.
+  const existing = findWritableFileTab(result.value.token);
+  if (existing) {
+    onDocumentTabSelect(existing);
+    return;
+  }
+
+  ensureOpenTargetTab();
+  const writable = result.value.access === 'readwrite';
+  const opened = await openDocument(result.value, {
+    openedNotice: writable
+      ? `„${book.title}” נפתח לעריכה — „שמור” כותב לקובץ עצמו`
+      : `„${book.title}” הוא ספר של הספרייה — „שמור” ישמור עותק במקום אחר`,
+  });
+  if (!opened) setStatus(`„${book.title}” לא נפתח`, true);
+}
+
+function queueEditBook(event: EditBookEvent): void {
+  if (event?.itemId !== EDIT_BOOK_ITEM_ID) return;
+  receivedFiles = receivedFiles
+    .then(() => openEditBook(event))
+    .catch((error: unknown) => {
+      console.warn('[otzaria-word] „ערוך בוורד לאוצריא” נכשל', error);
+      setStatus('הספר לא נפתח', true);
+    });
+}
+
+/**
+ * „ערוך בוורד לאוצריא” בסרגל הקורא — אותו סדר בדיוק כמו `registerReceivedFiles`.
+ * הפקד מוצהר במניפסט; הרישום מ-JS הוא הגיבוי (ראו `EDIT_BOOK_ITEM`).
+ */
+function registerEditBook(): void {
+  if (!isAvailable()) return;
+
+  try {
+    void registerEditBookItem().then((outcome) => {
+      if (!outcome.ok) console.warn('[otzaria-word]', outcome.message);
+    });
+    toolbarClickListener = on('reader.toolbar_item_clicked', (event) => queueEditBook(event));
+    for (const pending of takePendingToolbarClicks()) queueEditBook(pending);
+  } catch (error) {
+    console.warn('[otzaria-word] ההאזנה ל„ערוך בוורד לאוצריא” נכשלה', error);
+  }
+}
+
 onMounted(async () => {
   /**
    * המנייה של גופני המכונה — ראשונה, ובלי `await`, ובשני שלבים.
@@ -5762,6 +5868,7 @@ onMounted(async () => {
   // נבדק בזמן הלחיצה, לא עכשיו.
   registerSendToDocument();
   registerReceivedFiles();
+  registerEditBook();
 
   shortcuts = createShortcutDispatcher({
     runCommand: (id, payload) => void runShortcutCommand(id, payload),
@@ -5968,6 +6075,8 @@ onUnmounted(() => {
   contextMenuListener = null;
   pageOpenedListener?.();
   pageOpenedListener = null;
+  toolbarClickListener?.();
+  toolbarClickListener = null;
   fullscreenListener?.();
   fullscreenListener = null;
   // מעטפת שנפרקת בזמן מסך מלא הייתה משאירה את החלון מורחב בלי מי שיצא ממנו.
