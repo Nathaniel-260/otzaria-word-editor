@@ -106,7 +106,18 @@ try {
 
   /* 1 — פתיחה */
   await app.tab('תצוגה');
+  if (!(await app.exists('.doc-ruler__page'))) await app.click('סרגל', { after: 400 });
+  const rulerAligned = async () => JSON.parse(await app.js(`JSON.stringify((() => {
+    const ruler = document.querySelector('.doc-ruler__page')?.getBoundingClientRect();
+    const page = document.querySelector('.superdoc-page')?.getBoundingClientRect();
+    return { left: ruler && page ? Math.abs(ruler.left - page.left) : null, width: ruler && page ? Math.abs(ruler.width - page.width) : null };
+  })())`));
+  const rulerBefore = await rulerAligned();
   const opened = await app.click('חלונית ניווט', { after: 1500 });
+  const rulerAfter = await rulerAligned();
+  [rulerBefore, rulerAfter].every((r) => r.left !== null && r.left < 1 && r.width < 1)
+    ? report.pass('הסרגל נשאר מיושר לעמוד בפתיחת החלונית', JSON.stringify({ rulerBefore, rulerAfter }))
+    : report.fail('יישור הסרגל', JSON.stringify({ rulerBefore, rulerAfter }));
   if (!opened) report.fail('הכפתור', '„חלונית ניווט” לא נמצא בלשונית „תצוגה”');
   const first = await waitFor(app, (items) => items.length >= 3);
   log('פריטים:', JSON.stringify(first));
@@ -237,7 +248,12 @@ try {
     : report.fail('הפתיחה לא נשמרה', JSON.stringify(calls.map((c) => c.method).slice(-20)));
 
   /* סגירה */
-  await app.clickSel('.nav-pane .nav-close', 0, { after: 600 });
+  await app.js(`document.querySelector('.nav-pane .nav-close').focus(); true`);
+  await app.press('Enter', 'Enter', 13);
+  await app.sleep(600);
+  (await app.js(`!!document.activeElement?.closest('.editor-stack')`))
+    ? report.pass('סגירת החלונית במקלדת מחזירה מיקוד למסמך', '')
+    : report.fail('מיקוד אחרי סגירה', await app.js(`document.activeElement?.outerHTML.slice(0, 200)`));
   (await app.exists('.nav-pane'))
     ? report.fail('סגירה', 'החלונית עדיין פתוחה')
     : report.pass('כפתור הסגירה סוגר את החלונית', '');

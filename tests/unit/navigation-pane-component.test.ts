@@ -53,7 +53,7 @@ describe('navigation pane interaction and async safety', () => {
   it('announces a partial empty outline and never claims there are no headings in the document', async () => {
     const h = host(Array.from({ length: 25001 }, (_, i) => ({ nodeId: `b${i}`, text: `text${i}`, headingLevel: i === 25000 ? 1 : 0 })));
     const w = pane(h); await flushPromises();
-    expect(w.get('[role=status]').text()).toContain('25,000');
+    expect(w.get('[role=status]').text()).toContain('ניווט חלקי');
     expect(w.get('.nav-empty').text()).toBe('לא נמצאו כותרות בחלק המסמך שנקרא.');
     expect(h.list).toHaveBeenCalledTimes(51);
   });
