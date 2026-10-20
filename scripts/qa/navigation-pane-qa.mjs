@@ -249,7 +249,8 @@ try {
 
   /* סגירה */
   await app.js(`document.querySelector('.nav-pane .nav-close').focus(); true`);
-  await app.press('Enter', 'Enter', 13);
+  // Native button activation needs the Enter character phase, not only a raw key.
+  await app.press('Enter', 'Enter', 13, 0, '\r');
   await app.sleep(600);
   (await app.js(`!!document.activeElement?.closest('.editor-stack')`))
     ? report.pass('סגירת החלונית במקלדת מחזירה מיקוד למסמך', '')
