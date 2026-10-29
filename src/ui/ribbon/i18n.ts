@@ -52,11 +52,42 @@ const locale = ref<MenuLocale>('he');
  * וכשל אתחול) משאירים עברית — שפת המקור של התוסף.
  */
 export function setMenuLocale(language: string | null | undefined): void {
+  const w: EnglishModeWindow | undefined = typeof window !== 'undefined' ? window : undefined;
+  if (w) {
+    // English mode (public/assets/english-mode.js) needs the host language to
+    // fall back to, and its saved choice overrides the host language.
+    w.__otzariaHostLang = language;
+    language = w.__otzariaLangOverride || language;
+  }
+  applyLocale(language);
+  w?.__otzariaApplyUiLanguage?.();
+}
+
+function applyLocale(language: string | null | undefined): void {
   const code = (language ?? '').toLowerCase().split(/[-_]/)[0];
   locale.value = code === 'en' ? 'en' : 'he';
   if (typeof document !== 'undefined') {
     document.documentElement.setAttribute(MENU_LOCALE_ATTRIBUTE, locale.value);
   }
+}
+
+/**
+ * Globals shared with public/assets/english-mode.js — a classic script that
+ * loads before the bundle and adds a title-bar language toggle plus live
+ * translation of the rest of the UI.
+ */
+interface EnglishModeWindow extends Window {
+  __otzariaHostLang?: string | null;
+  __otzariaLangOverride?: string | null;
+  __otzariaApplyUiLanguage?: () => void;
+  __otzariaMenuLocale?: { setRaw(language: string): void };
+}
+
+if (typeof window !== 'undefined') {
+  // Lets english-mode.js switch the ribbon locale when the user toggles.
+  (window as EnglishModeWindow).__otzariaMenuLocale = {
+    setRaw: (language: string) => applyLocale(language),
+  };
 }
 
 /** השפה שנקבעה. נקראת ממי שאינו תבנית — ראו `engine/hf-chrome.ts`. */
