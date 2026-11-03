@@ -493,6 +493,12 @@
     <!-- תגית המודול נדרשת לשרת הפיתוח של Vite. ה-build מחליף אותה — ואת
          תגית ה-workers שהוא מזריק לצדה — בטוען אחד שמושך את שניהם אחרי
          הצביעה הראשונה. ראו deferredEntry ב-vite.config.ts. -->
+
+    <!-- English interface mode: language toggle + live UI translation.
+         In <body>, not <head>, so it doesn't block painting the splash screen,
+         and before the entry loader, so window.__otzariaLangOverride is set by
+         the time setMenuLocale() runs. See public/assets/english-mode.js. -->
+    <script src="./assets/english-mode.js"></script>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
